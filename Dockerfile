@@ -33,6 +33,11 @@ COPY db/migrations db/migrations
 
 FROM node:${NODE_VERSION}-slim
 ARG ORRERY_VERSION=dev
+LABEL org.opencontainers.image.title="Orrery" \
+      org.opencontainers.image.description="Self-hosted project management for teams of humans and AI agents." \
+      org.opencontainers.image.vendor="Forge Orbit" \
+      org.opencontainers.image.source="https://github.com/forge-orbit/orrery" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 ENV NODE_ENV=production \
     ORRERY_VERSION=${ORRERY_VERSION} \
     PORT=8080 \

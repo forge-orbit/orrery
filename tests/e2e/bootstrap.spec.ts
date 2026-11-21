@@ -27,10 +27,16 @@ async function fillSetupForm(page: Page, secret: string) {
 async function signIn(page: Page) {
   await page.goto("/signin");
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  await expect(
+    page.locator("footer.access-footer").getByRole("link", { name: "Forge Orbit" }),
+  ).toHaveAttribute("href", "https://github.com/forge-orbit");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByText(`Signed in as ${email}.`)).toBeVisible();
+  await expect(
+    page.locator(".app-sidebar footer.sidebar-footer").getByRole("link", { name: "Forge Orbit" }),
+  ).toHaveAttribute("href", "https://github.com/forge-orbit");
 
   for (const cookie of await page.context().cookies()) {
     await recordSecret(cookie.value);

@@ -156,7 +156,12 @@ function RootLayout() {
           </Stack>
         </aside>
         <Stack className="access-content">
-          <Outlet />
+          <div className="access-main">
+            <Outlet />
+          </div>
+          <footer className="access-footer">
+            <ForgeOrbitAttribution />
+          </footer>
         </Stack>
       </Stack>
     );
@@ -505,6 +510,24 @@ function SidebarFooter({
         </Stack>
       )}
       {showAppearance && <AppearancePicker />}
+      <ForgeOrbitAttribution className="sidebar-attribution" />
     </footer>
+  );
+}
+
+function ForgeOrbitAttribution({ className }: { className?: string }) {
+  return (
+    <p className={className ? `forge-orbit-attribution ${className}` : "forge-orbit-attribution"}>
+      Made by{" "}
+      <AstryxLink
+        href="https://github.com/forge-orbit"
+        target="_blank"
+        rel="noopener noreferrer"
+        color="inherit"
+        hasUnderline
+      >
+        Forge Orbit
+      </AstryxLink>
+    </p>
   );
 }
