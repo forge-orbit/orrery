@@ -285,8 +285,13 @@ test("a Contribute key runs the full issue and knowledge cycle over MCP and REST
     expect(field(await restEdited.json(), "title")).toBe("Edited over REST");
     const restClosed = await rest.patch(`/api/issues/${restIssueId}`, { status: "done" });
     expect(restClosed.status).toBe(200);
-    const restReopened = await rest.patch(`/api/issues/${restIssueId}`, { status: "todo" });
-    expect(restReopened.status).toBe(200);
+    const restAfterClose = await rest.patch(`/api/issues/${restIssueId}`, { status: "todo" });
+    expect(restAfterClose.status).toBe(409);
+    expect(await restAfterClose.json()).toMatchObject({ code: "session_required" });
+    const restReopened = await api.patch(`/api/issues/${restIssueId}`, {
+      data: { status: "todo" },
+    });
+    expect(restReopened.status()).toBe(200);
     expect(field(await restReopened.json(), "closedAt")).toBeNull();
     const restComment = await rest.post(`/api/issues/${restIssueId}/comments`, {
       body: "REST comment",
