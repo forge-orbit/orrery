@@ -949,7 +949,7 @@ function CommentForm({
 
   return (
     <form className="comment-composer" onSubmit={(event) => void onSubmit(event)}>
-      <Stack gap={2} hAlign="start">
+      <Stack gap={2}>
         <IssueMentionTextArea
           label="Comment"
           id="issue-comment"
@@ -957,19 +957,21 @@ function CommentForm({
           placeholder="Write a comment… Type # to reference an issue"
           value={body}
           onChange={setBody}
-          rows={3}
+          rows={4}
           required
           issues={issues}
         />
         {error !== undefined && <Banner status="error" role="alert" title={error} />}
-        <Button
-          type="submit"
-          size="sm"
-          isDisabled={submitting}
-          isLoading={submitting}
-          label="Add comment"
-          variant="primary"
-        />
+        <div className="comment-composer-actions">
+          <Button
+            type="submit"
+            size="sm"
+            isDisabled={submitting}
+            isLoading={submitting}
+            label="Add comment"
+            variant="primary"
+          />
+        </div>
       </Stack>
     </form>
   );

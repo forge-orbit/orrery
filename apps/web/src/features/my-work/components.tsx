@@ -112,12 +112,12 @@ function MyWorkSection({
   return (
     <Section className="page-section" data-my-work-section={section} padding={3}>
       <Stack gap={2}>
-        <Stack direction="horizontal" gap={1.5} vAlign="center">
+        <div className="section-heading-row">
           <Heading level={2} color="inherit">
             {title}
           </Heading>
           <Badge label={count} />
-        </Stack>
+        </div>
         {children}
       </Stack>
     </Section>

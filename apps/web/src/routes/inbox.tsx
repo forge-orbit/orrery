@@ -118,23 +118,21 @@ function QuestionList({
   emptyDescription: string;
 }) {
   return (
-    <section className="inbox-section">
+    <Section className="page-section inbox-section" padding={3}>
       <Stack gap={2}>
-        <Stack direction="horizontal" gap={1.5} vAlign="center">
+        <div className="section-heading-row">
           <Heading level={2} color="inherit">
             {title}
           </Heading>
           <Badge label={questions.length} />
-        </Stack>
+        </div>
         {questions.length === 0 ? (
-          <Section className="page-section" padding={3}>
-            <EmptyState
-              title={emptyTitle}
-              description={emptyDescription}
-              isCompact
-              headingLevel={3}
-            />
-          </Section>
+          <EmptyState
+            title={emptyTitle}
+            description={emptyDescription}
+            isCompact
+            headingLevel={3}
+          />
         ) : (
           <ul className="question-list">
             {questions.map((question) => (
@@ -143,7 +141,7 @@ function QuestionList({
           </ul>
         )}
       </Stack>
-    </section>
+    </Section>
   );
 }
 
