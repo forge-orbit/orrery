@@ -47,6 +47,7 @@ Want to write or change a page? See [Writing the docs](./writing-docs.md).
 - [Board, agents panel, inbox, and My work](./design/board-and-inbox.md)
 - [Orrery web UI](./design/web-ui.md)
 - [Release polish (notifications, webhooks, docs)](./design/release-polish.md)
+- [Post-MVP product direction and non-goals](./design/post-mvp-direction.md)
 - [Harness compatibility proof](./design/harness-compatibility-proof.md)
 - [Bootstrap and instance settings](./adr/0001-bootstrap-and-instance-settings.md)
 - [Personal and shared workspaces](./adr/0002-personal-and-shared-workspaces.md)
