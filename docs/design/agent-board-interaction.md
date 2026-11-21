@@ -1,6 +1,6 @@
 # Agent board interaction
 
-> **Status: planned.** This document captures proposed adjustments to M3 ([#4](https://github.com/forge-orbit/orrery/issues/4)), M4 ([#5](https://github.com/forge-orbit/orrery/issues/5)), and M5 ([#6](https://github.com/forge-orbit/orrery/issues/6)) after comparing Orrery's pull-based MCP architecture with Plane's push-based agent model. None of the new behavior described here is implemented yet.
+> **Status: partially implemented (MVP complete).** Sections 1–3 and 5 shipped across M2–M4 and M6 ([#3](https://github.com/forge-orbit/orrery/issues/3), [#4](https://github.com/forge-orbit/orrery/issues/4), [#5](https://github.com/forge-orbit/orrery/issues/5), [#7](https://github.com/forge-orbit/orrery/issues/7)). Section 4 (the M5 Obsidian-like vault link index) was dropped when [M5 (#6)](https://github.com/forge-orbit/orrery/issues/6) was closed as not planned; lightweight doc↔issue linking is tracked post-MVP in [#140](https://github.com/forge-orbit/orrery/issues/140).
 
 ## Context
 
@@ -47,14 +47,14 @@ Today, `list_ready_work` returns open issues without an active session that are 
 - Keep the atomic claim lease authoritative: assignment never replaces a claim, and two sessions still cannot claim the same issue.
 - **Strict claim policy (agreed):** an agent may claim an issue only if it is unassigned or assigned to that agent. Claims on issues assigned to a human or to another registered agent are rejected until reassigned.
 
-## 4. Structured backlink index for the Vault
+## 4. Structured backlink index for the Vault *(dropped with M5 #6 → post-MVP #140)*
 
 Plane maintains a dedicated link/mention log (`PageLog`) for forward links, backlinks, and issue references so graph and backlink lookups are indexed SQL queries rather than full-text scans.
 
-**Planned change (M5 #6):**
+**Decision (superseded):**
 
-- When a knowledge entry (vault doc) is created or updated, parse its `[[wikilinks]]` and issue references into a normalized Postgres link table (`knowledge_links`) within the same transaction.
-- Use this index for instant backlink lists on docs, "linked docs" panels on issues, and broken-link detection, without adding an external search or graph database.
+- [M5 (#6)](https://github.com/forge-orbit/orrery/issues/6) (the Obsidian-like vault with `[[wikilinks]]` and folder paths) was dropped as not planned.
+- Lightweight explicit doc↔issue linking on top of existing `knowledge_entries` (without Obsidian `[[wikilinks]]` or vault syntax) is tracked as a post-MVP proposal in [#140](https://github.com/forge-orbit/orrery/issues/140).
 
 ## 5. Agent-ready queue primitives (blocking, ordering, links)
 
@@ -74,6 +74,7 @@ Three small data-model primitives from Plane directly improve autonomous agent e
 
 - [#4 — M3: Agent API and sessions](https://github.com/forge-orbit/orrery/issues/4)
 - [#5 — M4: Board, agents panel and needs-input inbox](https://github.com/forge-orbit/orrery/issues/5)
-- [#6 — M5: Shared vault](https://github.com/forge-orbit/orrery/issues/6)
+- [#6 — M5: Shared vault (closed, not planned)](https://github.com/forge-orbit/orrery/issues/6)
+- [#140 — Post-MVP agent-memory upgrades for project knowledge](https://github.com/forge-orbit/orrery/issues/140)
 - [#15 — Agent-customizable UI and rich content](https://github.com/forge-orbit/orrery/issues/15)
 - Delivery slices: [#82](https://github.com/forge-orbit/orrery/issues/82) (human stop signal), [#83](https://github.com/forge-orbit/orrery/issues/83) (ephemeral session activities & sidecar), [#84](https://github.com/forge-orbit/orrery/issues/84) (agent assignment & board/agents panel), [#86](https://github.com/forge-orbit/orrery/issues/86) (blocking dependencies in ready work), [#87](https://github.com/forge-orbit/orrery/issues/87) (structured issue links), [#88](https://github.com/forge-orbit/orrery/issues/88) (priority & `sortOrder` ordering)
