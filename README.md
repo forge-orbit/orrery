@@ -19,11 +19,13 @@
 </p>
 
 <p align="center">
+  <a href="#features">Features</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="docs/guides/install.md">Guides</a> ·
   <a href="#how-it-works">How It Works</a> ·
   <a href="#mcp-tools">MCP Tools</a> ·
-  <a href="#connect-claude-code--codex">Connect Claude Code / Codex</a> ·
+  <a href="#connect-claude-code--codex">Connect Agents</a> ·
+  <a href="#webhooks--notifications">Webhooks</a> ·
   <a href="#roadmap">Roadmap</a> ·
   <a href="#contributing">Contributing</a>
 </p>
@@ -45,8 +47,8 @@ agent can sit silent for hours waiting for an answer.
 Orrery puts Humans and Agents on one board and gives them a protocol for working together:
 
 - **Pull-based MCP + REST.** Agents run on teammates' machines and pull work over HTTP with a
-  workspace-scoped API key. No webhooks, no inbound ports, no orchestration daemon — it works
-  behind NAT.
+  workspace-scoped API key. No inbound agent webhooks, no open ports on developer laptops, no
+  orchestration daemon — it works behind NAT.
 - **Atomic five-minute Claim leases.** `claim_issue` reserves an issue for one Work session; a
   laptop that crashes simply releases the Claim when the lease expires. No two agents duplicate an
   issue.
@@ -55,14 +57,45 @@ Orrery puts Humans and Agents on one board and gives them a protocol for working
   opens a Needs-input question with a proposed fallback; after one hour the project's policy either
   pauses the issue for a Human or applies the authorized fallback.
 - **Security and correctness by construction.** API keys are scoped to one Workspace and capped by
-  the Human owner's live permissions, every change carries an actor in the audit trail, and 30+
-  state-machine invariants are formally verified with `formal-verify-orrery`.
+  the Human owner's live permissions, every change carries an actor in the audit trail, and 36
+  state-machine models are formally verified with `formal-verify-orrery`.
 
 Orrery **tracks** agents; it does not run them. Agents keep working wherever your team already uses
 them and connect over [MCP](https://modelcontextprotocol.io).
 
 > An **orrery** is a model of the solar system that shows every planet on its own orbit, moving in
 > one system. Here the planets are your issues, your people and your agents.
+
+## Features
+
+- **Board, Issues & Project Knowledge.** Six-column Kanban board (`Backlog`, `Todo`, `In progress`,
+  `Review`, `Done`, `Cancelled`) with drag-and-drop, instant search, status/assignee/priority/label
+  filters, blocker indicators, and a sidecar session preview drawer. Issues carry `KEY-N`
+  identifiers, priority levels, color-coded project labels (with preset swatches and live preview),
+  one-level subtasks with close-guard warnings, acyclic `blocked_by` dependencies, structured
+  PR/commit/doc links, GitHub-flavored Markdown with `#issue` auto-linking and Light/Dark Mermaid
+  diagrams, structured project knowledge, and human-only Trash with 30-day restore.
+- **Agents, Runs & Harness Telemetry.** Register agents with workspace-scoped API keys (expiry,
+  rotation, revocation), monitor live active work sessions and raise stop signals, and inspect
+  structured Run histories with recognized harness brand logos (Claude Code, Codex, OpenAI, Cursor,
+  OpenCode, Gemini, Grok, GitHub Copilot, Windsurf, Cline), model-change tracking, child worker
+  trees, cumulative token/cost telemetry, and an ephemeral sidecar activity inspector (`key_value`,
+  `table`, `checklist`, `test_results`, and JSON blocks).
+- **Cross-Workspace Focus.** **My work** (`/my-work`) pulls active sessions, review handoffs, and
+  assigned issues across every workspace; the **Needs-input Inbox** (`/inbox`) surfaces blocked
+  agent questions with one-hour fallback policies; and **Notifications** (`/notifications` plus a
+  live sidebar unread badge) track review handoffs, questions, mentions, and lease/deadline events.
+- **Workspace-Scoped Outgoing Webhooks.** Owner-managed webhooks with project/event filtering,
+  transactional Postgres outbox retries, HMAC-SHA256 signing, a default-deny DNS-pinned SSRF guard,
+  auto-disable circuit breaking, and a live-polling delivery log drawer with one-click test events.
+- **Multi-Workspace Identity, Access & Audit.** Personal and Shared workspaces, delegated
+  permissions via a slide-out Permissions drawer, per-project `read` / `contribute` / `manage`
+  grants, project transfers between workspaces, email invitations with delivery tracking, full
+  installation/workspace/project audit history, ownership recovery, and encrypted-at-rest SMTP
+  settings (`ORRERY_ENCRYPTION_KEY`).
+- **Responsive Astryx UI.** Built on the Astryx Design System (`@astryxdesign/core`) with Light,
+  Dark, and System themes, accessible dialogs and drawers, and mobile-responsive layouts with
+  horizontal-scrolling data tables.
 
 ## Quick Start
 
@@ -243,6 +276,33 @@ For full setup details, manual script wiring, privacy guarantees, and the verifi
 - [Claude Code run reporting](docs/guides/claude-code-runs.md)
 - [Codex CLI run reporting](docs/guides/codex-run-reporting.md)
 
+## Webhooks & Notifications
+
+Orrery keeps both humans and external integrations in sync as work moves across the board:
+
+- **In-app notifications & proactive sweeper.** A background sweeper resolves expired Claims and
+  one-hour Needs-input deadlines without waiting for a read, surfacing updates in `/notifications`
+  and the live sidebar unread badge.
+- **Workspace-scoped outgoing webhooks.** Workspace owners can register up to 20 webhook endpoints
+  subscribed to any combination of Orrery's 31 project activity events (or all events) across all or
+  selected projects. Deliveries are enqueued in a transactional Postgres outbox, retried with
+  exponential backoff across up to 5 attempts, protected by a default-deny DNS-pinned SSRF guard
+  (IPv4 & IPv6), and automatically disabled after 10 consecutive delivery failures.
+
+Every webhook request is signed with the endpoint's one-time `whsec_` secret (encrypted at rest and
+rotatable from the UI) and carries four headers:
+
+| Header | Value |
+| --- | --- |
+| `X-Orrery-Delivery` | Unique delivery ID |
+| `X-Orrery-Event` | Activity event name (e.g. `issue_review_handoff`) or `webhook.test` |
+| `X-Orrery-Timestamp` | Unix timestamp (seconds) |
+| `X-Orrery-Signature-256` | `sha256=<hex>` HMAC-SHA256 of `${timestamp}.${rawBody}` using the `whsec_` secret |
+
+See [ADR-0007](docs/adr/0007-outgoing-webhooks-outbox-and-security.md) and
+[Release polish design](docs/design/release-polish.md) for payload structure, SSRF rules, and
+delivery guarantees.
+
 ## Architecture & Reliability
 
 - **Postgres constraints are the source of truth.** The Drizzle schema and generated migrations
@@ -250,13 +310,16 @@ For full setup details, manual script wiring, privacy guarantees, and the verifi
   six-state workflow in the database, not just in application code.
 - **RFC 9457 Problem Details.** Errors are `application/problem+json` with a stable `code`, built
   through one platform helper; successes return the resource itself.
-- **Generated contracts.** OpenAPI 3.1 (`contract/openapi.json`) and MCP tool JSON Schemas are
-  generated from Zod schemas in `packages/contract/`; a mounted route missing from the contract
-  fails CI.
-- **Formal verification.** `formal-verify-orrery` exhaustively checks 30+ state-machine invariants
-  across claims, leases, invitations, API keys, runs, inbox questions and ownership transfers.
+- **Generated contracts.** OpenAPI 3.1 (`contract/openapi.json` — 123 REST operations across 100
+  endpoints) and MCP tool JSON Schemas (`contract/mcp-tools.json` — 39 tools) are generated from Zod
+  schemas in `packages/contract/`; a mounted route missing from the contract fails CI.
+- **Formal verification & black-box E2E.** `formal-verify-orrery` exhaustively checks 36
+  state-machine models (`M1`–`M35`) across claims, leases, invitations, API keys, runs, inbox
+  questions, ownership transfers, sweeper notifications, and outgoing webhooks, complemented by 110+
+  Playwright and Vitest E2E tests run against the production Docker image in CI.
 - **Stack.** TypeScript on Node 26 · Hono with `@hono/zod-openapi` · Drizzle ORM on PostgreSQL 18 ·
-  React, Vite, TanStack Router and TanStack Query · Model Context Protocol HTTP server.
+  React, Vite, TanStack Router, TanStack Query and the Astryx Design System (`@astryxdesign/core`) ·
+  Model Context Protocol HTTP server.
 
 ## Roadmap
 
