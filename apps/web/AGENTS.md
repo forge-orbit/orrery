@@ -7,6 +7,14 @@ Use the component reference that ships with the pinned CLI. Preserve native form
 and route behavior when adopting Astryx controls. Edit `src/themes/orrery/orreryTheme.ts` to
 change theme tokens and rebuild the generated theme.
 
+- Zero `className=`, `style={`, raw layout/text/list HTML tags, or literal `<svg>` JSX in
+  `apps/web/src/{lib,routes,features}` (enforced by `src/astryx-purity.test.ts` and
+  `pnpm astryx doctor --built`).
+- Pass string values to `data-*` attributes on Astryx components (`data-foo=""` or
+  `data-count={String(n)}`), never bare boolean `data-foo`.
+- Pass rendered `<Icon icon="..." />` elements (not bare string `icon="..."`) to `Button` and
+  `IconButton` `icon` props.
+
 <!-- ASTRYX:START -->
 Astryx v0.7.16 · 174 components
 CLI: run every command as `pnpm exec astryx <cmd>` (shown below as `astryx ...`).
