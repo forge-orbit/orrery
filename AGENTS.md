@@ -48,6 +48,7 @@ Use these. Don't add an alternative; the lint bans the common ones (`.oxlintrc.j
 | MCP | `@modelcontextprotocol/server` (server), `@modelcontextprotocol/client` (e2e). Tool contracts in `packages/contract/src/mcp-tools.ts`. | |
 | Logging | `platform/log.ts` (JSON lines). `console` is a lint error in `apps/server/src/`. | pino, winston |
 | Web app | React, Vite, TanStack Router (file-based; `routeTree.gen.ts` is generated, don't edit it) | React Router |
+| Web UI | `@astryxdesign/core`: inspect components with `pnpm --filter @orrery/web exec astryx search <query>` and `astryx component <Name> --dense` before writing JSX. See [docs/design/web-ui.md](docs/design/web-ui.md) for page layouts and theme builds. | other UI kits |
 | Web data | TanStack Query with `fetch`. No `useEffect` (lint error): load data with a query, derive values during render, react to events in handlers. | axios, SWR, fetching in `useEffect` |
 | Tests | Vitest in `apps/`, `packages/` and `tests/`; Testcontainers for Postgres. `node:test` only in root `scripts/`. | Jest, Mocha |
 | Browser tests | Playwright (`@playwright/test`), only in `tests/e2e/*.spec.ts`, against a running server like the other e2e tests | Cypress, Puppeteer, Selenium |
