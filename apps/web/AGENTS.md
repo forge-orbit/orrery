@@ -1,8 +1,7 @@
 # AGENTS
 
 Read the [Orrery web UI design](../../docs/design/web-ui.md) before changing web layouts or
-colors. Run Astryx commands from the repository root with
-`pnpm --filter @orrery/web exec astryx <cmd>`.
+colors. Run Astryx commands from the repository root with `pnpm astryx <cmd>`.
 
 Use the component reference that ships with the pinned CLI. Preserve native form constraints
 and route behavior when adopting Astryx controls. Edit `src/themes/orrery/orreryTheme.ts` to

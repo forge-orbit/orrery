@@ -39,13 +39,13 @@ setting and updates when it changes. The browser saves an explicit choice on tha
 The Orrery theme extends Astryx Neutral. The installed Astryx CLI supplies the component and
 theme references for the version used by the web app. Read the relevant reference before
 adopting a control. For example, from the repository root run
-`pnpm --filter @orrery/web exec astryx component TextInput`. Use Astryx for controls and shared
+`pnpm astryx component TextInput`. Use Astryx for controls and shared
 surfaces. Keep native form submission and validation, and use the shared link for client-side
 navigation.
 
 Change palette and type tokens in
 [`orreryTheme.ts`](../../apps/web/src/themes/orrery/orreryTheme.ts), then run
-`pnpm --filter @orrery/web exec astryx theme build src/themes/orrery/orreryTheme.ts`.
+`pnpm astryx theme build src/themes/orrery/orreryTheme.ts`.
 The generated app module selects the built theme. Its CSS, the Astryx reset and component
 styles, and the packaged font files ship with the web app.
 Use [Astryx's theme guide](https://astryx.atmeta.com/docs/theme) to change how the app loads themes.

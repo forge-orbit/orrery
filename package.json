@@ -4,6 +4,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
+    "astryx": "pnpm --filter @orrery/web run astryx",
     "dev": "pnpm --parallel --filter @orrery/server --filter @orrery/web dev",
     "build": "pnpm --filter @orrery/web build",
     "gen": "pnpm --filter @orrery/server gen",
