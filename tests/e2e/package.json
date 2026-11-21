@@ -1,6 +1,7 @@
 {
   "name": "@orrery/e2e",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p .",

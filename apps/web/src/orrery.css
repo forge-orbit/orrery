@@ -234,6 +234,28 @@
   gap: 0.65rem;
 }
 
+.forge-orbit-attribution {
+  margin: 0;
+  color: var(--orrery-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.forge-orbit-attribution a {
+  color: inherit;
+  font-weight: 500;
+}
+
+.forge-orbit-attribution a:hover {
+  color: var(--orrery-text);
+}
+
+.sidebar-attribution {
+  padding-inline: 0.45rem;
+  color: var(--sidebar-muted);
+  font-size: 0.72rem;
+}
+
 .sidebar-account-row {
   display: flex;
   align-items: center;
@@ -1098,13 +1120,25 @@
 
 .access-content {
   display: grid;
-  align-items: center;
-  padding: clamp(1.5rem, 5vw, 5rem) var(--gutter);
+  grid-template-rows: 1fr auto;
+  gap: 1.5rem;
+  min-block-size: 100%;
+  padding: clamp(1.5rem, 5vw, 5rem) var(--gutter) 1.5rem;
 }
 
 .access-content > * {
   inline-size: min(100%, 29rem);
   margin-inline: auto;
+}
+
+.access-main {
+  align-self: center;
+}
+
+.access-footer {
+  padding-block-start: 0.85rem;
+  border-block-start: 1px solid var(--orrery-border);
+  text-align: center;
 }
 
 .access-content h1 {

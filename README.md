@@ -15,7 +15,7 @@
 <p align="center">
   <a href="#roadmap"><img src="https://img.shields.io/badge/status-active%20MVP-2ea043?style=flat-square" alt="Status: active MVP"></a>
   <img src="https://img.shields.io/badge/stack-TypeScript%20%7C%20Node%2026%20%7C%20Postgres%2018-3178c6?style=flat-square" alt="Stack: TypeScript, Node 26, Postgres 18">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License: AGPL-3.0"></a>
 </p>
 
 <p align="center">
@@ -363,7 +363,8 @@ are built; the [MVP overview](https://github.com/forge-orbit/orrery/issues/8) gi
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+GNU Affero General Public License v3.0 (`AGPL-3.0-only`), with attribution notice preservation under
+Section 7(b). See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ---
 
