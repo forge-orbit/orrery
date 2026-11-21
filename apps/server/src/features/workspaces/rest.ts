@@ -222,7 +222,7 @@ const previewWorkspaceInvitation = createRoute({
   path: "/api/workspace-invitations/preview",
   summary: "The workspace and address a workspace invitation link offers",
   description:
-    "A read-only preview of a single-use invitation token. It never consumes the token and changes nothing. It returns the workspace, invited address, inviter, deadline, and the actual offered grants, including every project and level. Invalid, expired, used, or failed-delivery links answer the same Problem. An offer whose project left the workspace answers 409 invitation_scope_invalid without returning project metadata.",
+    "A read-only preview of a single-use invitation token. It never consumes the token and changes nothing. It returns the workspace, invited address, inviter, whether an account already exists for that address, deadline, and the actual offered grants, including every project and level. Invalid, expired, used, or failed-delivery links answer the same Problem. An offer whose project left the workspace answers 409 invitation_scope_invalid without returning project metadata.",
   request: { query: previewQuery },
   responses: {
     200: {

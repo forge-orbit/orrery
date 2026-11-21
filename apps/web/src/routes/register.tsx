@@ -170,15 +170,16 @@ function RegisterPage() {
           />
         </Stack>
       </form>
-      <Stack paddingBlockStart={2}>
+      <div className="invitation-decline">
         <Button
           type="button"
           onClick={() => setConfirmDeclineOpen(true)}
           isDisabled={submitting || declining}
           label="Decline invitation"
-          variant="secondary"
+          variant="ghost"
+          size="sm"
         />
-      </Stack>
+      </div>
 
       <AlertDialog
         isOpen={confirmDeclineOpen}
