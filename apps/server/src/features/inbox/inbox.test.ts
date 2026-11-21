@@ -28,6 +28,7 @@ import { createHistoryService } from "../history/index.ts";
 import { createProjectsFeature, projectAccessAtLeast, ProjectsError } from "../projects/index.ts";
 import {
   createSessionsFeature,
+  releaseIssueWorkSessions,
   SessionsError,
   type SessionsService,
 } from "../work-sessions/index.ts";
@@ -77,6 +78,7 @@ beforeAll(async () => {
       if (gate === undefined) throw new Error("gate not wired");
       return gate(tx, agentId, workspaceId, issueId);
     },
+    releaseIssueWorkSessions,
     evaluateQuestionDeadline: (tx, issueId) => {
       if (deadlineEvaluate === undefined) throw new Error("deadline seam not wired");
       return deadlineEvaluate(tx, issueId);
@@ -1215,5 +1217,129 @@ describe("fallback deadline and late answers against real Postgres", () => {
     expect((await sessions.readyWork(await humanActor(f), f.projectId)).map((i) => i.id)).toContain(
       issue.id,
     );
+  });
+
+  it("releases an active claim when a human moves an issue to done so stop('review') cannot reopen it", async () => {
+    const f = await bootstrap();
+    const issue = await newIssue(f, "Human closes claimed work");
+    const runId = await newRun(f);
+    await claim(f, issue.id, runId);
+
+    const closed = await projectsService.updateIssue(await humanActor(f), issue.id, {
+      status: "done",
+    });
+    expect(closed.status).toBe("done");
+    expect(closed.closedAt).not.toBeNull();
+    expect(await activeSessions(issue.id)).toBe(0);
+
+    expect(
+      errorKindOf(
+        await refused(sessions.stop({ kind: "agent", identity: f.identity }, issue.id, "review")),
+      ),
+    ).toBe("session_required");
+    const after = await projectsService.getIssue(await humanActor(f), issue.id);
+    expect(after.status).toBe("done");
+    expect(after.closedAt).not.toBeNull();
+  });
+
+  it("ends an agent's active claim as completed when the agent closes the issue via updateIssue", async () => {
+    const f = await bootstrap();
+    const issue = await newIssue(f, "Agent closes via patch");
+    const runId = await newRun(f);
+    await claim(f, issue.id, runId);
+
+    const closed = await projectsService.updateIssue(
+      { kind: "agent", identity: f.identity },
+      issue.id,
+      { status: "done" },
+    );
+    expect(closed.status).toBe("done");
+    expect(await activeSessions(issue.id)).toBe(0);
+    expect(
+      (await sessions.getSession({ kind: "agent", identity: f.identity }, issue.id)).status,
+    ).toBe("completed");
+  });
+
+  it("refuses stop('done') and stop('review') while a question is open, while still allowing release", async () => {
+    const f = await bootstrap();
+    const issue = await newIssue(f, "Blocked by open question");
+    const runId = await newRun(f);
+    await claim(f, issue.id, runId);
+    await ask(f, issue.id, runId);
+
+    const agent = { kind: "agent" as const, identity: f.identity };
+    expect(errorKindOf(await refused(sessions.stop(agent, issue.id, "done")))).toBe(
+      "issue_needs_input",
+    );
+    expect(errorKindOf(await refused(sessions.stop(agent, issue.id, "review")))).toBe(
+      "issue_needs_input",
+    );
+    expect(await activeSessions(issue.id)).toBe(1);
+    expect((await projectsService.getIssue(await humanActor(f), issue.id)).status).toBe(
+      "in_progress",
+    );
+
+    const released = await sessions.stop(agent, issue.id, "released");
+    expect(released.status).toBe("released");
+    expect(await activeSessions(issue.id)).toBe(0);
+    expect((await projectsService.getIssue(await humanActor(f), issue.id)).status).toBe("todo");
+    expect(await isNeedsInput(issue.id)).toBe(true);
+  });
+
+  it("refuses moving an issue to review or closing it via updateIssue while a question is open or paused, until answered or fallback authorized", async () => {
+    const f = await bootstrap();
+    const issue = await newIssue(f, "Needs answer before close");
+    const runId = await newRun(f);
+    await claim(f, issue.id, runId);
+    const question = await ask(f, issue.id, runId);
+    const human = await humanActor(f);
+
+    for (const status of ["review", "done", "cancelled"] as const) {
+      expect(
+        errorKindOf(await refused(projectsService.updateIssue(human, issue.id, { status }))),
+      ).toBe("issue_needs_input");
+    }
+    // Non-status edits remain allowed while waiting on input
+    const renamed = await projectsService.updateIssue(human, issue.id, {
+      title: "Clarified title",
+    });
+    expect(renamed.title).toBe("Clarified title");
+
+    // Moving back to todo releases the active claim while keeping the question open
+    const movedToTodo = await projectsService.updateIssue(human, issue.id, { status: "todo" });
+    expect(movedToTodo.status).toBe("todo");
+    expect(movedToTodo.needsInput).toBe(true);
+    expect(await activeSessions(issue.id)).toBe(0);
+
+    // Still refused to close while paused/open question remains unanswered
+    expect(
+      errorKindOf(await refused(projectsService.updateIssue(human, issue.id, { status: "done" }))),
+    ).toBe("issue_needs_input");
+
+    // Answering unblocks closing
+    await inbox.answer(human, question.id, "Use v2");
+    const closed = await projectsService.updateIssue(human, issue.id, { status: "done" });
+    expect(closed.status).toBe("done");
+    expect(closed.needsInput).toBe(false);
+
+    // Under fallback_allowed, a past-due question resolves in-tx and unblocks closing/handoff
+    await projectsService.setProjectFallbackPolicy(human.account, f.projectId, {
+      fallbackPolicy: "fallback_allowed",
+    });
+    const fallbackIssue = await newIssue(f, "Fallback unblocks completion");
+    await claim(f, fallbackIssue.id, runId);
+    const fallbackQ = await ask(f, fallbackIssue.id, runId);
+    await setDeadline(fallbackQ.id, "statement_timestamp() - interval '1 second'");
+
+    const handedOff = await sessions.stop(
+      { kind: "agent", identity: f.identity },
+      fallbackIssue.id,
+      "review",
+    );
+    expect(handedOff.status).toBe("completed");
+    const reviewed = await projectsService.getIssue(human, fallbackIssue.id);
+    expect(reviewed.status).toBe("review");
+    expect(reviewed.needsInput).toBe(false);
+    expect((await questionOf(fallbackQ.id))?.status).toBe("fallback_used");
   });
 });

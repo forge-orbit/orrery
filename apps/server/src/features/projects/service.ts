@@ -93,6 +93,7 @@ export type ProjectsErrorKind =
   | "subtask_depth_exceeded"
   | "agents_cannot_delete_issues"
   | "issue_active_session_exists"
+  | "issue_needs_input"
   | "issue_purged";
 
 const messages = {
@@ -124,6 +125,8 @@ const messages = {
   agents_cannot_delete_issues: "Agents cannot delete issues; only a human can.",
   issue_active_session_exists:
     "This issue has an active work session; stop or release it before deleting the issue.",
+  issue_needs_input:
+    "This issue has an unanswered question; answer it before moving the issue to review or closing it.",
   issue_purged: "This issue's trash window has ended and it can no longer be restored.",
 } as const satisfies Record<ProjectsErrorKind, string>;
 
@@ -1510,10 +1513,17 @@ export type WorkSessionGate = (
 
 export type IssueSessionGate = (tx: DbTransaction, issueId: string) => Promise<boolean>;
 
+export type ReleaseIssueWorkSessions = (
+  tx: DbTransaction,
+  issueId: string,
+  liveOutcome?: "released" | "completed",
+) => Promise<void>;
+
 export interface ProjectsDeps {
   db: PostgresJsDatabase;
   sessionGate: WorkSessionGate;
   issueSessionGate?: IssueSessionGate;
+  releaseIssueWorkSessions?: ReleaseIssueWorkSessions | undefined;
 
   evaluateQuestionDeadline?: ((tx: DbTransaction, issueId: string) => Promise<void>) | undefined;
   onActivity?: EnqueueWebhookActivity | undefined;
@@ -1667,6 +1677,7 @@ export function createProjectsService({
   db,
   sessionGate,
   issueSessionGate = async () => false,
+  releaseIssueWorkSessions = async () => {},
   evaluateQuestionDeadline,
   onActivity = async () => {},
 }: ProjectsDeps): ProjectsService {
@@ -2516,6 +2527,27 @@ export function createProjectsService({
           throw new ProjectsError("issue_not_found");
         }
 
+        let currentStatus = current.status;
+        let currentNeedsInput = current.needsInput;
+        let currentClosedAt = current.closedAt;
+        if (input.status !== undefined && evaluateQuestionDeadline !== undefined) {
+          await evaluateQuestionDeadline(tx, issueId);
+          const [fresh] = await tx
+            .select({
+              status: issues.status,
+              needsInput: issues.needsInput,
+              closedAt: issues.closedAt,
+            })
+            .from(issues)
+            .where(eq(issues.id, issueId))
+            .limit(1);
+          if (fresh !== undefined) {
+            currentStatus = fresh.status;
+            currentNeedsInput = fresh.needsInput;
+            currentClosedAt = fresh.closedAt;
+          }
+        }
+
         if (
           actor.kind === "agent" &&
           !(await sessionGate(tx, actor.identity.agentId, actor.identity.workspaceId, issueId))
@@ -2524,7 +2556,7 @@ export function createProjectsService({
         }
         const title = input.title ?? current.title;
         const body = input.body ?? current.body;
-        const status = input.status ?? current.status;
+        const status = input.status ?? currentStatus;
         const priority = input.priority ?? current.priority;
         const sortOrder = input.sortOrder ?? current.sortOrder;
 
@@ -2534,11 +2566,23 @@ export function createProjectsService({
           input.assignee === undefined ? current.assigneeId : (input.assignee?.id ?? null);
         const titleChanged = title !== current.title;
         const bodyChanged = body !== current.body;
-        const statusChanged = status !== current.status;
+        const statusChanged = status !== currentStatus;
         const priorityChanged = priority !== current.priority;
         const orderChanged = sortOrder !== current.sortOrder;
         const assigneeChanged =
           assigneeType !== current.assigneeType || assigneeId !== current.assigneeId;
+
+        const terminalNow = isTerminalIssueStatus(status);
+        const wasTerminal = isTerminalIssueStatus(currentStatus);
+
+        if (
+          statusChanged &&
+          currentNeedsInput &&
+          (status === IssueStatus.enum.review || terminalNow)
+        ) {
+          throw new ProjectsError("issue_needs_input");
+        }
+
         if (
           !titleChanged &&
           !bodyChanged &&
@@ -2548,15 +2592,20 @@ export function createProjectsService({
           !assigneeChanged &&
           !parentChanged
         ) {
-          return toIssue(current, await loadIssueLabels(tx, issueId));
+          return toIssue(
+            {
+              ...current,
+              status: currentStatus,
+              needsInput: currentNeedsInput,
+              closedAt: currentClosedAt,
+            },
+            await loadIssueLabels(tx, issueId),
+          );
         }
-
-        const terminalNow = isTerminalIssueStatus(status);
-        const wasTerminal = isTerminalIssueStatus(current.status);
 
         const closedAt = terminalNow
           ? wasTerminal
-            ? current.closedAt
+            ? currentClosedAt
             : sql`statement_timestamp()`
           : null;
         const [updated] = await tx
@@ -2582,6 +2631,14 @@ export function createProjectsService({
             closedAt: issues.closedAt,
           });
         if (updated === undefined) throw new ProjectsError("issue_not_found");
+
+        if (statusChanged && status !== IssueStatus.enum.in_progress) {
+          await releaseIssueWorkSessions(
+            tx,
+            issueId,
+            actor.kind === "agent" && terminalNow ? "completed" : "released",
+          );
+        }
 
         const workflowMove = statusChanged && !terminalNow && !wasTerminal;
         if (titleChanged || bodyChanged || priorityChanged || assigneeChanged || workflowMove) {
@@ -2621,7 +2678,7 @@ export function createProjectsService({
           status: IssueStatus.parse(status),
           priority,
           sortOrder,
-          needsInput: current.needsInput,
+          needsInput: currentNeedsInput,
           assignee: assigneeChanged
             ? input.assignee === null
               ? null

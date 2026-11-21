@@ -417,6 +417,44 @@ export async function releaseMemberWorkSessions(
   for (const issueId of issueIds) await revertIssueToTodo(tx, issueId);
 }
 
+export async function releaseIssueWorkSessions(
+  tx: DbTransaction,
+  issueId: string,
+  liveOutcome: "released" | "completed" = WorkSessionStatus.enum.released,
+): Promise<void> {
+  workSessionMachine.assertTransition("active", WorkSessionStatus.enum.expired);
+  await tx
+    .update(workSessions)
+    .set({
+      status: WorkSessionStatus.enum.expired,
+      endedAt: sql`statement_timestamp()`,
+      updatedAt: sql`statement_timestamp()`,
+    })
+    .where(
+      and(
+        eq(workSessions.issueId, issueId),
+        eq(workSessions.status, WorkSessionStatus.enum.active),
+        lte(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+      ),
+    );
+
+  workSessionMachine.assertTransition("active", liveOutcome);
+  await tx
+    .update(workSessions)
+    .set({
+      status: liveOutcome,
+      endedAt: sql`statement_timestamp()`,
+      updatedAt: sql`statement_timestamp()`,
+    })
+    .where(
+      and(
+        eq(workSessions.issueId, issueId),
+        eq(workSessions.status, WorkSessionStatus.enum.active),
+        gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+      ),
+    );
+}
+
 async function lockIssue(tx: DbTransaction, issueId: string) {
   const [row] = await tx
     .select({
@@ -982,6 +1020,16 @@ export function createSessionsService({
         outcome === "released" ? null : outcome === "done" ? "done" : "review";
       const nextStatus = workSessionMachine.assertTransition("active", sessionOutcome);
       return withLiveSession(actor, issueId, sessionId, async (tx, session, issue) => {
+        if (issueOutcome !== null) {
+          const [fresh] = await tx
+            .select({ status: issues.status, needsInput: issues.needsInput })
+            .from(issues)
+            .where(eq(issues.id, issue.id))
+            .limit(1);
+          if (fresh?.needsInput ?? false) throw new SessionsError("issue_needs_input");
+          if (fresh?.status !== "in_progress") throw new SessionsError("issue_blocked");
+        }
+
         const [updated] = await tx
           .update(workSessions)
           .set({
