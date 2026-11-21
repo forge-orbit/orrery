@@ -1,4 +1,5 @@
 import { Banner } from "@astryxdesign/core/Banner";
+import { Stack } from "@astryxdesign/core/Stack";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { HistoryList, installationHistoryQuery } from "../features/history/index.ts";
@@ -16,7 +17,7 @@ function InstallationHistoryPage() {
   const { data: events } = useSuspenseQuery(installationHistoryQuery);
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="home" to="/">
@@ -38,6 +39,6 @@ function InstallationHistoryPage() {
           emptyMessage="No installation access events have been recorded yet."
         />
       )}
-    </main>
+    </Stack>
   );
 }

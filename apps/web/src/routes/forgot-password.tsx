@@ -1,6 +1,7 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { createFileRoute } from "@tanstack/react-router";
@@ -37,7 +38,7 @@ function ForgotPasswordPage() {
   }
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <Heading level={1} color="inherit">
         Reset your password
       </Heading>
@@ -71,19 +72,13 @@ function ForgotPasswordPage() {
         </Stack>
       </form>
       <Text as="p" display="block" type="supporting">
-        <Link to="/signin" className="back-link-inline">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path
-              d="M12.5 8h-9M7 4.5 3.5 8 7 11.5"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          Back to sign in
+        <Link to="/signin">
+          <Stack as="span" direction="horizontal" gap={1} vAlign="center">
+            <Icon icon="chevronLeft" size="xsm" aria-hidden="true" />
+            Back to sign in
+          </Stack>
         </Link>
       </Text>
-    </main>
+    </Stack>
   );
 }

@@ -1,3 +1,4 @@
+import { Stack } from "@astryxdesign/core/Stack";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { HistoryList, projectHistoryQuery } from "../features/history/index.ts";
@@ -20,7 +21,7 @@ function ProjectHistoryPage() {
   const { data: events } = useSuspenseQuery(projectHistoryQuery(projectId));
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="project" to="/projects/$projectId" params={{ projectId }}>
@@ -34,6 +35,6 @@ function ProjectHistoryPage() {
         events={events}
         emptyMessage="No activity or access changes have been recorded in this project."
       />
-    </main>
+    </Stack>
   );
 }

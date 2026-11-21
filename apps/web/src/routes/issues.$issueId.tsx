@@ -269,7 +269,7 @@ function IssuePage() {
   }
 
   return (
-    <main className="issue-page">
+    <Stack as="main" gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="project" to="/projects/$projectId" params={{ projectId: issue.projectId }}>
@@ -282,7 +282,6 @@ function IssuePage() {
             key="identifier"
             type="inherit"
             color="inherit"
-            className="issue-key"
             data-issue-identifier={issue.identifier}
           >
             {issue.identifier}
@@ -342,7 +341,7 @@ function IssuePage() {
                   variant="destructive"
                   label="Move to Trash"
                   isDisabled={activeSession !== undefined || trashing}
-                  data-trash-button
+                  data-trash-button=""
                   onClick={() => setConfirmTrashOpen(true)}
                 />
               </>
@@ -371,7 +370,7 @@ function IssuePage() {
         <Banner
           status="warning"
           role="status"
-          data-open-subtask-warning
+          data-open-subtask-warning=""
           title={`This issue still has ${openSubtaskCount} open ${openSubtaskCount === 1 ? "subtask" : "subtasks"}`}
           description="Close it anyway?"
           endContent={
@@ -400,17 +399,17 @@ function IssuePage() {
       {canContribute && activeSession !== undefined && (
         <Banner
           status="info"
-          data-trash-blocked
+          data-trash-blocked=""
           title="An active work session holds this issue"
           description="End the session before moving this issue to trash."
         />
       )}
 
-      <Stack className="issue-layout">
-        <Stack className="issue-primary">
-          <Section className="page-section issue-description-card" padding={3}>
+      <Stack gap={5}>
+        <Stack gap={4}>
+          <Section padding={3}>
             <Stack gap={2}>
-              <Stack direction="horizontal" className="section-toolbar">
+              <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
                 <Heading level={2} color="inherit">
                   Description
                 </Heading>
@@ -429,7 +428,7 @@ function IssuePage() {
                   No description yet.
                 </Text>
               ) : (
-                <Stack data-issue-body className="issue-description-body">
+                <Stack data-issue-body="">
                   <Markdown issueRefs={projectIssues}>{issue.body}</Markdown>
                 </Stack>
               )}
@@ -447,7 +446,7 @@ function IssuePage() {
             canContribute={canContribute}
           />
 
-          <Section className="page-section" padding={3}>
+          <Section padding={3}>
             <Stack gap={2}>
               <Heading level={2} color="inherit">
                 Links
@@ -457,10 +456,20 @@ function IssuePage() {
                   No links attached.
                 </Text>
               ) : (
-                <ul className="row-list">
+                <Stack as="ul">
                   {issue.links.map((link) => (
-                    <li key={link.id} className="row-item" data-link-id={link.id}>
-                      <Stack direction="horizontal" className="row-item-main">
+                    <Stack
+                      as="li"
+                      key={link.id}
+                      data-link-id={link.id}
+                      direction="horizontal"
+                      gap={1}
+                      wrap="wrap"
+                      justify="between"
+                      vAlign="center"
+                      padding={2}
+                    >
+                      <Stack direction="horizontal" gap={1} wrap="wrap" vAlign="center">
                         <Token
                           label={LINK_KIND_LABELS[link.kind]}
                           color="gray"
@@ -471,7 +480,7 @@ function IssuePage() {
                           {link.title}
                         </AstryxLink>
                       </Stack>
-                      <Stack direction="horizontal" className="row-item-meta">
+                      <Stack direction="horizontal" gap={1} wrap="wrap" vAlign="center">
                         <Text type="supporting" color="secondary">
                           {link.createdBy.displayName}
                         </Text>
@@ -483,9 +492,9 @@ function IssuePage() {
                           />
                         )}
                       </Stack>
-                    </li>
+                    </Stack>
                   ))}
-                </ul>
+                </Stack>
               )}
               {canContribute && (
                 <Collapsible
@@ -504,7 +513,7 @@ function IssuePage() {
             </Stack>
           </Section>
 
-          <Section className="page-section" padding={3}>
+          <Section padding={3}>
             <Stack gap={3}>
               <Heading level={2} color="inherit">
                 Comments ({comments.length})
@@ -514,10 +523,16 @@ function IssuePage() {
                   No comments yet.
                 </Text>
               ) : (
-                <ul className="comment-list">
+                <Stack as="ul" gap={2}>
                   {comments.map((comment) => (
-                    <li key={comment.id} className="comment-card" data-comment-id={comment.id}>
-                      <Stack direction="horizontal" className="comment-header">
+                    <Stack as="li" key={comment.id} data-comment-id={comment.id} padding={3}>
+                      <Stack
+                        direction="horizontal"
+                        gap={1}
+                        wrap="wrap"
+                        justify="between"
+                        vAlign="center"
+                      >
                         <strong>{comment.author.displayName}</strong>
                         <time
                           dateTime={comment.createdAt}
@@ -526,12 +541,12 @@ function IssuePage() {
                           {formatCompactDateTime(comment.createdAt)}
                         </time>
                       </Stack>
-                      <Stack data-comment-body className="comment-body">
+                      <Stack data-comment-body="">
                         <Markdown issueRefs={projectIssues}>{comment.body}</Markdown>
                       </Stack>
-                    </li>
+                    </Stack>
                   ))}
-                </ul>
+                </Stack>
               )}
               {canContribute && (
                 <CommentForm
@@ -544,14 +559,14 @@ function IssuePage() {
           </Section>
         </Stack>
 
-        <aside className="issue-inspector">
-          <Section className="issue-properties-panel" padding={3} aria-label="Issue properties">
+        <Stack as="aside" gap={4}>
+          <Section padding={3} aria-label="Issue properties">
             <Stack gap={3}>
-              <Heading level={2} color="inherit" className="issue-properties-heading">
+              <Heading level={2} color="inherit">
                 Properties
               </Heading>
 
-              <Stack className="issue-prop-group">
+              <Stack paddingBlockStart={2}>
                 {canContribute ? (
                   <Selector
                     label="Status"
@@ -579,7 +594,7 @@ function IssuePage() {
                 )}
               </Stack>
 
-              <Stack className="issue-prop-group">
+              <Stack paddingBlockStart={2}>
                 <AssigneeControl
                   issue={issue}
                   candidates={candidates}
@@ -587,7 +602,7 @@ function IssuePage() {
                 />
               </Stack>
 
-              <Stack className="issue-prop-group">
+              <Stack paddingBlockStart={2}>
                 {canContribute ? (
                   <IssuePriorityControls
                     issue={issue}
@@ -605,7 +620,7 @@ function IssuePage() {
                 )}
               </Stack>
 
-              <Stack className="issue-prop-group">
+              <Stack paddingBlockStart={2}>
                 <IssueLabels issue={issue} labels={projectLabels} canContribute={canContribute} />
               </Stack>
             </Stack>
@@ -624,7 +639,7 @@ function IssuePage() {
             initialOpen={inspector}
             initialSessionId={inspectorSession}
           />
-        </aside>
+        </Stack>
       </Stack>
 
       {canContribute && (
@@ -685,7 +700,7 @@ function IssuePage() {
           />
         </>
       )}
-    </main>
+    </Stack>
   );
 }
 
@@ -759,7 +774,7 @@ function Blockers({
   );
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={2}>
         <Heading level={2} color="inherit">
           Dependencies
@@ -775,23 +790,25 @@ function Blockers({
                 <Heading level={3} color="inherit">
                   Blocked by
                 </Heading>
-                <ul className="row-list">
+                <Stack as="ul">
                   {blockedBy.map((blocker) => (
-                    <li
+                    <Stack
+                      as="li"
                       key={blocker.id}
-                      className="row-item"
                       data-blocker-id={blocker.id}
                       data-blocker-status={blocker.status}
+                      direction="horizontal"
+                      gap={1}
+                      wrap="wrap"
+                      justify="between"
+                      vAlign="center"
+                      padding={2}
                     >
-                      <Stack direction="horizontal" className="row-item-main">
-                        <Text as="span" className="issue-key">
+                      <Stack direction="horizontal" gap={1} wrap="wrap" vAlign="center">
+                        <Text as="span" type="supporting" color="secondary">
                           {blocker.identifier}
                         </Text>
-                        <Link
-                          to="/issues/$issueId"
-                          params={{ issueId: blocker.id }}
-                          className="row-item-title"
-                        >
+                        <Link to="/issues/$issueId" params={{ issueId: blocker.id }}>
                           {blocker.title}
                         </Link>
                         <Token
@@ -813,9 +830,9 @@ function Blockers({
                           variant="destructive"
                         />
                       )}
-                    </li>
+                    </Stack>
                   ))}
-                </ul>
+                </Stack>
               </Stack>
             )}
             {blocking.length > 0 && (
@@ -823,18 +840,24 @@ function Blockers({
                 <Heading level={3} color="inherit">
                   Blocking
                 </Heading>
-                <ul className="row-list">
+                <Stack as="ul">
                   {blocking.map((dependant) => (
-                    <li key={dependant.id} className="row-item" data-dependant-id={dependant.id}>
-                      <Stack direction="horizontal" className="row-item-main">
-                        <Text as="span" className="issue-key">
+                    <Stack
+                      as="li"
+                      key={dependant.id}
+                      data-dependant-id={dependant.id}
+                      direction="horizontal"
+                      gap={1}
+                      wrap="wrap"
+                      justify="between"
+                      vAlign="center"
+                      padding={2}
+                    >
+                      <Stack direction="horizontal" gap={1} wrap="wrap" vAlign="center">
+                        <Text as="span" type="supporting" color="secondary">
                           {dependant.identifier}
                         </Text>
-                        <Link
-                          to="/issues/$issueId"
-                          params={{ issueId: dependant.id }}
-                          className="row-item-title"
-                        >
+                        <Link to="/issues/$issueId" params={{ issueId: dependant.id }}>
                           {dependant.title}
                         </Link>
                         <Token
@@ -843,9 +866,9 @@ function Blockers({
                           size="sm"
                         />
                       </Stack>
-                    </li>
+                    </Stack>
                   ))}
-                </ul>
+                </Stack>
               </Stack>
             )}
           </Stack>
@@ -948,7 +971,7 @@ function CommentForm({
   }
 
   return (
-    <form className="comment-composer" onSubmit={(event) => void onSubmit(event)}>
+    <form onSubmit={(event) => void onSubmit(event)}>
       <Stack gap={2}>
         <IssueMentionTextArea
           label="Comment"
@@ -962,7 +985,7 @@ function CommentForm({
           issues={issues}
         />
         {error !== undefined && <Banner status="error" role="alert" title={error} />}
-        <div className="comment-composer-actions">
+        <Stack direction="horizontal" align="center">
           <Button
             type="submit"
             size="sm"
@@ -971,7 +994,7 @@ function CommentForm({
             label="Add comment"
             variant="primary"
           />
-        </div>
+        </Stack>
       </Stack>
     </form>
   );
@@ -1008,7 +1031,7 @@ function LinkForm({ issueId, projectId }: { issueId: string; projectId: string }
   }
 
   return (
-    <form className="form-stack" onSubmit={(event) => void onSubmit(event)}>
+    <form onSubmit={(event) => void onSubmit(event)}>
       <Stack gap={2} hAlign="start">
         <TextField
           label="URL"

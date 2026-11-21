@@ -31,7 +31,7 @@ const currency = new Intl.NumberFormat(undefined, {
 
 export function MyWorkSections({ work }: { work: MyWorkResponse }) {
   return (
-    <Stack className="section-stack" gap={3}>
+    <Stack gap={3}>
       <MyWorkSection
         title="Assigned to me"
         section="assigned-issues"
@@ -110,14 +110,14 @@ function MyWorkSection({
   children: ReactNode;
 }) {
   return (
-    <Section className="page-section" data-my-work-section={section} padding={3}>
+    <Section data-my-work-section={section} padding={3}>
       <Stack gap={2}>
-        <div className="section-heading-row">
+        <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
           <Heading level={2} color="inherit">
             {title}
           </Heading>
           <Badge label={count} />
-        </div>
+        </Stack>
         {children}
       </Stack>
     </Section>
@@ -134,7 +134,7 @@ function AssignedIssueRow({ issue }: { issue: MyWorkAssignedIssue }) {
       label={
         <Link ref={linkRef} to="/issues/$issueId" params={{ issueId: issue.id }}>
           <Stack as="span" direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-            <Text as="span" className="issue-key" type="inherit" color="inherit">
+            <Text as="span" type="code" color="inherit">
               {issue.identifier}
             </Text>{" "}
             <Text as="span" type="body" weight="semibold" color="primary">
@@ -181,7 +181,7 @@ function ActiveSessionRow({ session }: { session: MyWorkActiveSession }) {
           search={{ inspector: true, session: session.sessionId }}
         >
           <Stack as="span" direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-            <Text as="span" className="issue-key" type="inherit" color="inherit">
+            <Text as="span" type="code" color="inherit">
               {session.issueIdentifier}
             </Text>{" "}
             <Text as="span" type="body" weight="semibold" color="primary">
@@ -256,7 +256,7 @@ export function MyWorkErrorState({ error, onRetry }: { error: unknown; onRetry?:
   const problem = error instanceof ApiProblemError ? error.problem : undefined;
 
   return (
-    <main data-my-work-error>
+    <Stack as="main" gap={5} data-my-work-error="">
       <Heading level={1} color="inherit">
         My work
       </Heading>
@@ -277,6 +277,6 @@ export function MyWorkErrorState({ error, onRetry }: { error: unknown; onRetry?:
           )
         }
       />
-    </main>
+    </Stack>
   );
 }

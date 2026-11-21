@@ -14,27 +14,6 @@ export interface PageHeaderProps {
   actions?: ReactNode;
 }
 
-function BackArrowIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-      className="back-arrow-icon"
-    >
-      <path
-        d="M12.5 8h-9M7 4.5 3.5 8 7 11.5"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 export function PageHeader({
   breadcrumbs,
   title,
@@ -44,10 +23,17 @@ export function PageHeader({
   actions,
 }: PageHeaderProps) {
   return (
-    <header className="page-header">
+    <Stack as="header" gap={2}>
       {breadcrumbs !== undefined && breadcrumbs.length > 0 && (
-        <nav className="page-breadcrumbs" aria-label="Breadcrumb">
-          {breadcrumbs.length === 1 && <BackArrowIcon />}
+        <Stack
+          as="nav"
+          direction="horizontal"
+          gap={1.5}
+          align="center"
+          wrap="wrap"
+          aria-label="Breadcrumb"
+        >
+          {breadcrumbs.length === 1 && <Icon icon="chevronLeft" size="xsm" />}
           {breadcrumbs.map((crumb, index) => (
             // oxlint-disable-next-line react/no-array-index-key -- static ordered breadcrumb segments
             <Fragment key={index}>
@@ -55,29 +41,33 @@ export function PageHeader({
               {crumb}
             </Fragment>
           ))}
-        </nav>
+        </Stack>
       )}
-      <Stack direction="horizontal" className="page-header-row">
-        <Stack className="page-header-main">
-          <Stack direction="horizontal" className="page-header-title-row">
+      <Stack direction="horizontal" justify="between" align="center" gap={2} wrap="wrap">
+        <Stack gap={0.5}>
+          <Stack direction="horizontal" gap={0.5} align="center" wrap="wrap">
             <Heading level={1} color="inherit">
               {title}
             </Heading>
-            {badge !== undefined && <span className="meta-pill">{badge}</span>}
+            {badge !== undefined && (
+              <Text as="span" type="code" color="secondary">
+                {badge}
+              </Text>
+            )}
             {statusToken}
           </Stack>
           {subtitle !== undefined && (
-            <Text as="p" display="block" type="supporting" className="page-header-subtitle">
+            <Text as="p" display="block" type="supporting">
               {subtitle}
             </Text>
           )}
         </Stack>
         {actions !== undefined && (
-          <Stack direction="horizontal" className="page-header-actions">
+          <Stack direction="horizontal" gap={1} align="center" wrap="wrap">
             {actions}
           </Stack>
         )}
       </Stack>
-    </header>
+    </Stack>
   );
 }

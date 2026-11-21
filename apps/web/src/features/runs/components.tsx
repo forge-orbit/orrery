@@ -78,13 +78,13 @@ function formatActivityCounts(run: RunDetail): string {
 function ModelHistory({ changes }: { changes: readonly RunModelChange[] }) {
   if (changes.length === 0) {
     return (
-      <Text as="p" display="block" type="supporting" data-model-history-empty>
+      <Text as="p" display="block" type="supporting" data-model-history-empty="">
         No model changes reported.
       </Text>
     );
   }
   return (
-    <Table aria-label="Model changes" data-model-history>
+    <Table aria-label="Model changes" data-model-history="">
       <TableHeader>
         <TableRow>
           <TableHeaderCell>From</TableHeaderCell>
@@ -94,7 +94,7 @@ function ModelHistory({ changes }: { changes: readonly RunModelChange[] }) {
       </TableHeader>
       <TableBody>
         {changes.map((change) => (
-          <TableRow key={change.id} data-model-change>
+          <TableRow key={change.id} data-model-change="">
             <TableCell>
               <code>{change.fromModel ?? "unknown"}</code>
             </TableCell>
@@ -119,13 +119,13 @@ function ModelHistory({ changes }: { changes: readonly RunModelChange[] }) {
 function ChildWorkers({ workers }: { workers: readonly RunChild[] }) {
   if (workers.length === 0) {
     return (
-      <Text as="p" display="block" type="supporting" data-children-empty>
+      <Text as="p" display="block" type="supporting" data-children-empty="">
         No child workers reported.
       </Text>
     );
   }
   return (
-    <Table aria-label="Child workers" data-children>
+    <Table aria-label="Child workers" data-children="">
       <TableHeader>
         <TableRow>
           <TableHeaderCell>Worker</TableHeaderCell>
@@ -188,7 +188,7 @@ function RunDetailDrawer({ run, onClose }: { run: RunDetail; onClose: () => void
       }
     >
       <LayoutContent>
-        <Stack gap={4} data-run-detail-drawer>
+        <Stack gap={4} data-run-detail-drawer="">
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
             <Token
               size="sm"
@@ -281,7 +281,7 @@ export function RunsSection({ workspaceId }: { workspaceId: string }) {
 
   if (runs.length === 0) {
     return (
-      <Stack className="empty-panel" data-runs-section>
+      <Stack paddingInline={5} paddingBlock={8} data-runs-section="">
         <EmptyState
           title="No runs reported yet"
           description="Agent conversations connected over MCP or local hooks will appear here."
@@ -296,9 +296,9 @@ export function RunsSection({ workspaceId }: { workspaceId: string }) {
   const selectedRun = runs.find((run) => run.id === selectedId) ?? null;
 
   return (
-    <Section className="page-section" padding={3} data-runs-section>
+    <Section padding={3} data-runs-section="">
       <Stack gap={3}>
-        <Stack direction="horizontal" className="section-toolbar" gap={2} wrap="wrap">
+        <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
             <Heading level={2} color="inherit">
               Runs
@@ -363,10 +363,10 @@ export function RunsSection({ workspaceId }: { workspaceId: string }) {
                 >
                   <TableCell>
                     <Stack gap={0}>
-                      <Text type="label" color="primary" data-agent-name>
+                      <Text type="label" color="primary" data-agent-name="">
                         {run.agentName}
                       </Text>
-                      <Text type="supporting" data-run-label>
+                      <Text type="supporting" data-run-label="">
                         <code title={run.id}>{run.id.slice(0, 8)}</code>
                       </Text>
                     </Stack>

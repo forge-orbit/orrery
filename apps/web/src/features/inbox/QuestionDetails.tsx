@@ -23,8 +23,8 @@ export function QuestionDetails({ question }: { question: Question }) {
   const status = statusMeta[question.status];
 
   return (
-    <Stack className="question-details" gap={2}>
-      <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap" className="question-meta">
+    <Stack gap={2}>
+      <Stack direction="horizontal" gap={1.5} vAlign="center" justify="between" wrap="wrap">
         <Token
           label={status.label}
           color={status.color}
@@ -44,24 +44,24 @@ export function QuestionDetails({ question }: { question: Question }) {
         display="block"
         type="body"
         color="primary"
-        className="question-text"
-        data-question-text
+        weight="semibold"
+        data-question-text=""
       >
         {question.question}
       </Text>
-      <dl className="question-outcome">
+      <dl>
         <dt>{question.authorizedFallback === null ? "Proposed fallback" : "Fallback used"}</dt>
         <dd>{question.authorizedFallback ?? question.proposedFallback}</dd>
         {question.answer !== null && (
           <>
             <dt>Answer</dt>
-            <dd data-question-answer>{question.answer}</dd>
+            <dd data-question-answer="">{question.answer}</dd>
           </>
         )}
         {question.followUp !== null && (
           <>
             <dt>Follow-up</dt>
-            <dd data-question-follow-up>{question.followUp}</dd>
+            <dd data-question-follow-up="">{question.followUp}</dd>
           </>
         )}
       </dl>

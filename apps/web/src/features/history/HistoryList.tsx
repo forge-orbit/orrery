@@ -130,14 +130,14 @@ export function HistoryList({
 
   if (events.length === 0) {
     return (
-      <Stack className="empty-panel">
+      <Stack paddingInline={5} paddingBlock={8}>
         <EmptyState title={emptyMessage} headingLevel={2} />
       </Stack>
     );
   }
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3}>
         {kinds.length > 1 && (
           <Stack direction="horizontal" hAlign="between" vAlign="center" wrap="wrap" gap={2}>

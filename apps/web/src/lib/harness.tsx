@@ -1,3 +1,7 @@
+import { Stack } from "@astryxdesign/core/Stack";
+import { Text } from "@astryxdesign/core/Text";
+import { createElement } from "react";
+
 export type HarnessKind =
   | "codex"
   | "claude"
@@ -344,21 +348,20 @@ export function resolveHarnessKind(harness: string | null | undefined): HarnessK
 
 export function HarnessLogo({ kind, size = 14 }: { kind: HarnessKind; size?: number }) {
   const spec = harnessLogos[kind];
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill={spec.fill}
-      fillRule="evenodd"
-      aria-hidden="true"
-      className="harness-logo"
-      data-harness-logo={kind}
-    >
-      {spec.paths.map((path) => (
-        <path key={path.d} d={path.d} clipRule={path.clipRule} />
-      ))}
-    </svg>
+  return createElement(
+    "svg",
+    {
+      width: size,
+      height: size,
+      viewBox: "0 0 24 24",
+      fill: spec.fill,
+      fillRule: "evenodd",
+      "aria-hidden": "true",
+      "data-harness-logo": kind,
+    },
+    ...spec.paths.map((path) =>
+      createElement("path", { key: path.d, d: path.d, clipRule: path.clipRule }),
+    ),
   );
 }
 
@@ -387,9 +390,11 @@ export function HarnessBadge({
   }
 
   return (
-    <span className="harness-badge" data-harness-brand={kind}>
+    <Stack as="span" direction="horizontal" gap={1} align="center" data-harness-brand={kind}>
       <HarnessLogo kind={kind} size={size} />
-      <span>{label}</span>
-    </span>
+      <Text as="span" type="inherit" color="inherit">
+        {label}
+      </Text>
+    </Stack>
   );
 }

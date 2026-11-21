@@ -160,7 +160,7 @@ function WorkspacePage() {
       : tab;
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="workspaces" to="/">
@@ -269,42 +269,42 @@ function WorkspacePage() {
       </TabList>
 
       {activeTab === "projects" && (
-        <section id="panel-projects" role="tabpanel" className="tab-panel">
+        <Stack as="section" id="panel-projects" role="tabpanel" gap={4} paddingBlockStart={4}>
           <Projects
             workspaceId={workspace.id}
             canCreate={canCreate}
             onCreateClick={() => setCreateProjectOpen(true)}
           />
-        </section>
+        </Stack>
       )}
 
       {activeTab === "agents" && (
-        <section id="panel-agents" role="tabpanel" className="tab-panel">
+        <Stack as="section" id="panel-agents" role="tabpanel" gap={4} paddingBlockStart={4}>
           <AgentsSection workspaceId={workspace.id} isOwner={workspace.isOwner} />
-        </section>
+        </Stack>
       )}
 
       {activeTab === "runs" && (
-        <section id="panel-runs" role="tabpanel" className="tab-panel">
+        <Stack as="section" id="panel-runs" role="tabpanel" gap={4} paddingBlockStart={4}>
           <RunsSection workspaceId={workspace.id} />
-        </section>
+        </Stack>
       )}
 
       {activeTab === "members" && showMembersTab && (
-        <section id="panel-members" role="tabpanel" className="tab-panel">
+        <Stack as="section" id="panel-members" role="tabpanel" gap={4} paddingBlockStart={4}>
           <Stack gap={3}>
             {mayManageMembers(workspace) && (
               <WorkspaceMembers workspaceId={workspace.id} workspace={workspace} />
             )}
             {mayInvite(workspace) && <WorkspaceInvitations workspaceId={workspace.id} />}
           </Stack>
-        </section>
+        </Stack>
       )}
 
       {activeTab === "webhooks" && showWebhooksTab && (
-        <section id="panel-webhooks" role="tabpanel" className="tab-panel">
+        <Stack as="section" id="panel-webhooks" role="tabpanel" gap={4} paddingBlockStart={4}>
           <WebhooksSection workspaceId={workspace.id} projects={projects} />
-        </section>
+        </Stack>
       )}
 
       <Drawer
@@ -358,7 +358,7 @@ function WorkspacePage() {
           </Layout>
         </Drawer>
       )}
-    </main>
+    </Stack>
   );
 }
 
@@ -375,7 +375,7 @@ function Projects({
 
   if (projects.length === 0) {
     return (
-      <Stack className="empty-panel">
+      <Stack paddingInline={5} paddingBlock={8}>
         <EmptyState
           title="No projects yet"
           description={
@@ -396,24 +396,27 @@ function Projects({
   }
 
   return (
-    <ul className="entity-grid">
+    <Stack as="ul" direction="horizontal" gap={2} wrap="wrap">
       {projects.map((project) => (
-        <li key={project.id} data-project-id={project.id} className="entity-card">
-          <Stack direction="horizontal" className="entity-card-top">
+        <Stack as="li" key={project.id} data-project-id={project.id} padding={3} gap={2}>
+          <Stack direction="horizontal" gap={2} justify="between" align="center">
             <Link
               to="/projects/$projectId"
               params={{ projectId: project.id }}
-              className="entity-card-title"
+              weight="semibold"
+              color="primary"
             >
               {project.name}
             </Link>
-            <span className="issue-key">{project.key}</span>
+            <Text as="span" type="supporting" color="secondary">
+              {project.key}
+            </Text>
           </Stack>
-          <Stack direction="horizontal" className="entity-card-meta">
+          <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
             <Text type="supporting" data-project-access-level={project.accessLevel}>
               {project.accessLevel}
             </Text>
-            <Stack direction="horizontal" className="page-header-actions">
+            <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
               <Link to="/board/$projectId" params={{ projectId: project.id }}>
                 Board
               </Link>
@@ -422,9 +425,9 @@ function Projects({
               </Link>
             </Stack>
           </Stack>
-        </li>
+        </Stack>
       ))}
-    </ul>
+    </Stack>
   );
 }
 
@@ -580,7 +583,7 @@ function WorkspaceMembers({
   }
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3}>
         <Heading level={2} color="inherit">
           Members

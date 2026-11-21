@@ -58,7 +58,7 @@ function SmtpSettingsPage() {
   const configured = settings !== null && settings.host !== null;
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="home" to="/">
@@ -101,7 +101,7 @@ function SmtpSettingsPage() {
           />
         </>
       )}
-    </main>
+    </Stack>
   );
 }
 
@@ -151,7 +151,7 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
   }
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3}>
         <Stack gap={1}>
           <Heading level={2} color="inherit">
@@ -322,7 +322,7 @@ function TestAndVerification({
   }
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3} hAlign="start">
         <Stack gap={1}>
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">

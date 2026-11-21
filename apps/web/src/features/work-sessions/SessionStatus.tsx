@@ -31,7 +31,7 @@ export function SessionStatus({
   const status = stopping ? "stopping" : session.status;
 
   return (
-    <Card className="session-status" padding={3} data-session-id={session.id}>
+    <Card padding={3} data-session-id={session.id}>
       <Stack gap={2}>
         <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
           <Text type="supporting" weight="semibold" color="secondary">
@@ -117,7 +117,7 @@ function StopAgentForm({
 
   return (
     <>
-      <form className="stop-agent-form" onSubmit={onSubmit}>
+      <form onSubmit={onSubmit}>
         <Stack gap={2} hAlign="start">
           <TextField
             label="Reason (optional)"

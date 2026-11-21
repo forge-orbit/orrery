@@ -93,7 +93,7 @@ export function InvitationList({
     const empty = <EmptyState title={emptyMessage} isCompact headingLevel={3} />;
     if (embedded) return empty;
     return (
-      <Section className="page-section" padding={3}>
+      <Section padding={3}>
         <Stack gap={2}>
           <Heading level={3} color="inherit">
             Invitation history
@@ -309,9 +309,5 @@ export function InvitationList({
 
   if (embedded) return content;
 
-  return (
-    <Section className="page-section" padding={3}>
-      {content}
-    </Section>
-  );
+  return <Section padding={3}>{content}</Section>;
 }

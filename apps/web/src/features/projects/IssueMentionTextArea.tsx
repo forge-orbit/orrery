@@ -1,3 +1,5 @@
+import { Stack } from "@astryxdesign/core/Stack";
+import { Text } from "@astryxdesign/core/Text";
 import type { Issue } from "@orrery/contract";
 import { useState } from "react";
 import { TextAreaField } from "../../lib/fields.tsx";
@@ -65,8 +67,7 @@ export function IssueMentionTextArea({
   }
 
   return (
-    <div
-      className="mention-field-wrap"
+    <Stack
       onKeyDown={(event) => {
         if (matches.length === 0) return;
         if (event.key === "ArrowDown") {
@@ -107,28 +108,26 @@ export function IssueMentionTextArea({
             : {})}
       />
       {matches.length > 0 && (
-        <ul className="mention-popover" role="listbox" aria-label="Reference an issue">
+        <Stack as="ul" role="listbox" aria-label="Reference an issue">
           {matches.map((candidate, index) => (
-            <li
+            <Stack
+              as="li"
               key={candidate.id}
               role="option"
               aria-selected={index === activeIndex}
-              className={
-                index === activeIndex ? "mention-option mention-option-active" : "mention-option"
-              }
               onMouseEnter={() => setSelectedIndex(index)}
               onMouseDown={(event) => {
                 event.preventDefault();
                 insertMention(candidate);
               }}
             >
-              <span className="issue-key">{candidate.identifier}</span>
-              <span className="mention-option-title">{candidate.title}</span>
-              <span className="meta-pill">{issueStatusLabels[candidate.status]}</span>
-            </li>
+              <Text as="span">{candidate.identifier}</Text>
+              <Text as="span">{candidate.title}</Text>
+              <Text as="span">{issueStatusLabels[candidate.status]}</Text>
+            </Stack>
           ))}
-        </ul>
+        </Stack>
       )}
-    </div>
+    </Stack>
   );
 }

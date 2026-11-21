@@ -67,7 +67,7 @@ function SignInPage() {
   }
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <Heading level={1} color="inherit">
         Sign in
       </Heading>
@@ -111,6 +111,6 @@ function SignInPage() {
       <Text as="p" display="block" type="supporting">
         <Link to="/forgot-password">Forgot your password?</Link>
       </Text>
-    </main>
+    </Stack>
   );
 }

@@ -44,13 +44,13 @@ export const Route = createFileRoute("/")({
   },
   component: Home,
   errorComponent: () => (
-    <main>
+    <Stack as="main" gap={5}>
       <Banner
         status="error"
         title="Server: unreachable"
         description="Could not reach the Orrery server. Check your connection and try reloading."
       />
-    </main>
+    </Stack>
   ),
 });
 
@@ -63,7 +63,7 @@ function Home() {
   if (!session.signedIn) return null;
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader
         title="Workspaces"
         subtitle={`Signed in as ${session.email}.`}
@@ -79,19 +79,20 @@ function Home() {
       />
 
       <Section variant="transparent" padding={0}>
-        <Stack direction="horizontal" className="section-toolbar">
+        <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
           <Heading level={2} color="inherit">
             Your workspaces
           </Heading>
         </Stack>
-        <ul className="entity-grid">
+        <Stack as="ul" direction="horizontal" gap={2} wrap="wrap">
           {workspaces.map((workspace) => (
-            <li key={workspace.id} data-workspace-id={workspace.id} className="entity-card">
-              <Stack direction="horizontal" className="entity-card-top">
+            <Stack as="li" key={workspace.id} data-workspace-id={workspace.id} padding={3} gap={2}>
+              <Stack direction="horizontal" gap={2} justify="between" align="center">
                 <Link
                   to="/workspaces/$workspaceId"
                   params={{ workspaceId: workspace.id }}
-                  className="entity-card-title"
+                  weight="semibold"
+                  color="primary"
                 >
                   {workspace.name}
                 </Link>
@@ -109,7 +110,7 @@ function Home() {
                   size="sm"
                 />
               </Stack>
-              <Stack direction="horizontal" className="entity-card-meta">
+              <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
                 <Text type="supporting">
                   {workspace.kind === "personal" ? "Private workspace" : "Shared team workspace"}
                 </Text>
@@ -117,9 +118,9 @@ function Home() {
                   Open
                 </Link>
               </Stack>
-            </li>
+            </Stack>
           ))}
-        </ul>
+        </Stack>
       </Section>
 
       <InstallationInvitations />
@@ -146,7 +147,7 @@ function Home() {
           </LayoutContent>
         </Layout>
       </Drawer>
-    </main>
+    </Stack>
   );
 }
 
@@ -257,13 +258,13 @@ function InstallationInvitations() {
   }
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3}>
-        <Stack direction="horizontal" className="section-toolbar">
+        <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
           <Heading level={2} color="inherit">
             Installation administration
           </Heading>
-          <Stack direction="horizontal" className="page-header-actions">
+          <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
             <Button
               type="button"
               label="Invite person"

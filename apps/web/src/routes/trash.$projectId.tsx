@@ -82,7 +82,7 @@ function ProjectTrashPage() {
   }
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="project" to="/projects/$projectId" params={{ projectId }}>
@@ -97,7 +97,7 @@ function ProjectTrashPage() {
         <Banner status="error" role="alert" title="Could not restore issue" description={error} />
       )}
       {!canManage ? (
-        <Stack className="empty-panel">
+        <Stack padding={4}>
           <EmptyState
             title="Manager access required"
             description="Only a project manager can view and restore trashed issues."
@@ -125,7 +125,7 @@ function ProjectTrashPage() {
           }
         />
       ) : trashed.length === 0 ? (
-        <Stack className="empty-panel">
+        <Stack padding={4}>
           <EmptyState
             title="No issues in the trash"
             description="Issues moved to trash will appear here for 30 days."
@@ -133,7 +133,7 @@ function ProjectTrashPage() {
           />
         </Stack>
       ) : (
-        <Section className="page-section" padding={3}>
+        <Section padding={3}>
           <Table aria-label="Trashed issues">
             <TableHeader>
               <TableRow>
@@ -153,7 +153,7 @@ function ProjectTrashPage() {
                   data-trashed-identifier={issue.identifier}
                 >
                   <TableCell>
-                    <Text as="span" className="issue-key">
+                    <Text as="span" type="supporting" color="secondary">
                       {issue.identifier}
                     </Text>
                   </TableCell>
@@ -183,7 +183,7 @@ function ProjectTrashPage() {
                       size="sm"
                       isDisabled={restoringId !== undefined}
                       isLoading={restoringId === issue.id}
-                      data-restore-button
+                      data-restore-button=""
                       onClick={() => void onRestore(issue.id, issue.identifier)}
                     />
                   </TableCell>
@@ -193,6 +193,6 @@ function ProjectTrashPage() {
           </Table>
         </Section>
       )}
-    </main>
+    </Stack>
   );
 }

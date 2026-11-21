@@ -1,6 +1,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Selector } from "@astryxdesign/core/Selector";
+import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { type Issue, type IssueDetail, type ProjectLabel } from "@orrery/contract";
@@ -72,8 +73,8 @@ export function IssueLabels({
   }
 
   return (
-    <div className="issue-labels-block">
-      <Heading level={3} color="inherit" className="issue-prop-label">
+    <Stack>
+      <Heading level={3} color="inherit">
         Labels
       </Heading>
       {issue.labels.length === 0 ? (
@@ -81,9 +82,9 @@ export function IssueLabels({
           No labels
         </Text>
       ) : (
-        <ul className="issue-label-chips">
+        <Stack as="ul">
           {issue.labels.map((label) => (
-            <li key={label.id} className="issue-label-chip-item" data-issue-label-id={label.id}>
+            <Stack as="li" key={label.id} data-issue-label-id={label.id}>
               <LabelPill label={label} />
               {canContribute && (
                 <Button
@@ -95,12 +96,12 @@ export function IssueLabels({
                   onClick={() => void onDetach(label.id)}
                 />
               )}
-            </li>
+            </Stack>
           ))}
-        </ul>
+        </Stack>
       )}
       {canContribute && available.length > 0 && (
-        <div className="issue-label-attach">
+        <Stack>
           <Selector
             label="Attach label"
             id="issue-attach-label"
@@ -118,13 +119,13 @@ export function IssueLabels({
             isDisabled={saving || selected === ""}
             onClick={() => void onAttach()}
           />
-        </div>
+        </Stack>
       )}
       {error !== undefined && (
         <Text as="p" display="block" type="supporting" role="alert">
           {error}
         </Text>
       )}
-    </div>
+    </Stack>
   );
 }

@@ -1,3 +1,4 @@
+import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
@@ -20,12 +21,12 @@ export const Route = createFileRoute("/my-work")({
 
 function MyWorkLoadingState() {
   return (
-    <main data-my-work-loading>
+    <Stack as="main" gap={5} data-my-work-loading="">
       <PageHeader title="My work" />
       <Text as="p" display="block" type="supporting" role="status">
         Loading your work…
       </Text>
-    </main>
+    </Stack>
   );
 }
 
@@ -39,12 +40,12 @@ function MyWorkPage() {
   }
 
   return (
-    <main data-my-work-page>
+    <Stack as="main" gap={5} data-my-work-page="">
       <PageHeader
         title="My work"
         subtitle="Your assignments, live agent sessions, and questions across all your workspaces."
       />
       <MyWorkSections work={work.data} />
-    </main>
+    </Stack>
   );
 }

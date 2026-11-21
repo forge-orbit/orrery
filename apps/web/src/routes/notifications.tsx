@@ -33,10 +33,10 @@ export const Route = createFileRoute("/notifications")({
     context.queryClient.ensureInfiniteQueryData(notificationsPageQuery(deps.unreadOnly)),
   component: NotificationsPage,
   errorComponent: ({ error }) => (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader title="Notifications" />
       <NotificationsErrorState error={error} />
-    </main>
+    </Stack>
   ),
 });
 
@@ -93,20 +93,14 @@ function NotificationsPage() {
   const notifications = feed.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
-    <main data-notifications-page>
+    <Stack as="main" gap={5} data-notifications-page="">
       <PageHeader
         title="Notifications"
         subtitle="Handoffs, questions needing input, and expired work sessions across your projects."
         badge={unreadCount > 0 ? `${unreadCount} unread` : undefined}
         actions={
           <Stack direction="horizontal" gap={2} wrap="wrap">
-            <Stack
-              as="nav"
-              direction="horizontal"
-              gap={1}
-              className="notification-filters"
-              aria-label="Filter notifications"
-            >
+            <Stack as="nav" direction="horizontal" gap={1} aria-label="Filter notifications">
               <Link
                 to="/notifications"
                 search={{ unreadOnly: true }}
@@ -138,7 +132,7 @@ function NotificationsPage() {
       ) : feed.isError && feed.data === undefined ? (
         <NotificationsErrorState error={feed.error} onRetry={() => void feed.refetch()} />
       ) : (
-        <Section className="page-section" padding={3}>
+        <Section padding={3}>
           {notifications.length === 0 ? (
             <NotificationsEmptyState
               unreadOnly={unreadOnly}
@@ -178,6 +172,6 @@ function NotificationsPage() {
           )}
         </Section>
       )}
-    </main>
+    </Stack>
   );
 }

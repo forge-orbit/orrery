@@ -10,9 +10,9 @@ test("updates display name from /account, switches light mode sidebar, and signs
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
   await page.getByLabel("Password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.locator(".app-sidebar")).toBeVisible();
+  await expect(page.locator("[data-app-sidebar]")).toBeVisible();
 
-  await page.locator(".app-sidebar .sidebar-account-link").click();
+  await page.locator("[data-app-sidebar] [data-sidebar-account-link]").click();
   await expect(page).toHaveURL(/\/account$/);
   await expect(page.getByRole("heading", { level: 1, name: "Account" })).toBeVisible();
 
@@ -23,15 +23,20 @@ test("updates display name from /account, switches light mode sidebar, and signs
     page.getByRole("region", { name: "Notifications" }).getByText("Profile saved."),
   ).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Admin Operator" })).toBeVisible();
-  await expect(page.locator(".app-sidebar .sidebar-account-name")).toHaveText("Admin Operator");
+  await expect(page.locator("[data-app-sidebar] [data-sidebar-account-name]")).toHaveText(
+    "Admin Operator",
+  );
 
   await page.getByLabel("Display name").fill("");
   await page.getByRole("button", { name: "Save profile" }).click();
   await expect(page.locator("#content").getByText("Profile saved.")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Account" })).toBeVisible();
 
-  await page.locator(".app-sidebar").getByRole("radio", { name: "Light" }).click();
-  await expect(page.locator(".app-sidebar")).not.toHaveCSS("background-color", "rgb(26, 26, 28)");
+  await page.locator("[data-app-sidebar]").getByRole("radio", { name: "Light" }).click();
+  await expect(page.locator("[data-app-sidebar]")).not.toHaveCSS(
+    "background-color",
+    "rgb(26, 26, 28)",
+  );
 
   await page.getByRole("button", { name: "Sign out" }).first().click();
   await expect(page).toHaveURL(/\/signin/);

@@ -192,18 +192,29 @@ function BoardPage() {
   }
 
   return (
-    <main className="board-page">
-      <header className="board-header">
-        <nav className="board-breadcrumbs" aria-label="Project location">
-          <Link to="/workspaces/$workspaceId" params={{ workspaceId: workspace.id }}>
+    <Stack as="main" width="100%">
+      <Stack as="header" direction="vertical" gap={2}>
+        <Stack
+          as="nav"
+          direction="horizontal"
+          gap={0.5}
+          vAlign="center"
+          wrap="wrap"
+          aria-label="Project location"
+        >
+          <Link
+            to="/workspaces/$workspaceId"
+            params={{ workspaceId: workspace.id }}
+            color="secondary"
+          >
             {workspace.name}
           </Link>
           <Icon icon="chevronRight" size="xsm" />
-          <Link to="/projects/$projectId" params={{ projectId }}>
+          <Link to="/projects/$projectId" params={{ projectId }} color="secondary">
             {project.name}
           </Link>
-        </nav>
-        <Stack direction="horizontal" className="board-heading">
+        </Stack>
+        <Stack direction="horizontal" gap={1} vAlign="center" justify="between" wrap="wrap">
           <Heading level={1} color="inherit">
             Board
           </Heading>
@@ -215,10 +226,18 @@ function BoardPage() {
             />
           )}
         </Stack>
-        <Stack direction="horizontal" className="board-toolbar">
+        <Stack
+          direction="horizontal"
+          gap={1}
+          vAlign="center"
+          justify="between"
+          wrap="wrap"
+          paddingBlock={1}
+        >
           <Stack
             direction="horizontal"
-            className="board-filters"
+            gap={0.5}
+            wrap="wrap"
             role="group"
             aria-label="Filter issues"
           >
@@ -228,9 +247,8 @@ function BoardPage() {
                 label={`${label} (${count})`}
                 isPressed={filter === id}
                 size="sm"
-                className="board-filter"
                 data-board-filter={id}
-                data-board-ready-count={id === "ready" ? count : undefined}
+                data-board-ready-count={id === "ready" ? String(count) : undefined}
                 onPressedChange={(pressed) => setFilter(pressed ? id : "all")}
               >
                 {label} <Badge label={count} />
@@ -239,7 +257,8 @@ function BoardPage() {
           </Stack>
           <Stack
             direction="horizontal"
-            className="board-filters"
+            gap={0.5}
+            wrap="wrap"
             role="group"
             aria-label="Narrow issues"
           >
@@ -311,19 +330,12 @@ function BoardPage() {
             )}
           </Stack>
           {sessionsByIssue.size > 0 && (
-            <Text
-              as="p"
-              display="block"
-              type="inherit"
-              color="inherit"
-              className="board-live"
-              data-active-sessions
-            >
+            <Text as="p" display="block" type="supporting" data-active-sessions="">
               {sessionsByIssue.size} active {sessionsByIssue.size === 1 ? "session" : "sessions"}
             </Text>
           )}
         </Stack>
-      </header>
+      </Stack>
 
       {createdIssue !== undefined && (
         <Banner
@@ -346,7 +358,7 @@ function BoardPage() {
         <Banner
           status="error"
           role="alert"
-          data-board-move-error
+          data-board-move-error=""
           title="Could not move issue"
           description={moveError}
         />
@@ -356,7 +368,7 @@ function BoardPage() {
         <Banner
           status="warning"
           role="alert"
-          data-board-open-subtask-warning
+          data-board-open-subtask-warning=""
           title={`${pendingClose.issue.identifier} still has ${pendingClose.openSubtaskCount} open ${pendingClose.openSubtaskCount === 1 ? "subtask" : "subtasks"}`}
           description={`Move to ${issueStatusLabels[pendingClose.status]} anyway?`}
           endContent={
@@ -384,7 +396,7 @@ function BoardPage() {
       )}
 
       {issues.length === 0 ? (
-        <Stack className="board-empty-state">
+        <Stack align="center" justify="center" minHeight="18rem" width="100%">
           <EmptyState
             title="No issues yet"
             description="Create an issue to start tracking work across columns."
@@ -420,7 +432,7 @@ function BoardPage() {
             />
           )}
           <Stack
-            data-board
+            data-board=""
             direction="horizontal"
             tabIndex={0}
             role="region"
@@ -430,12 +442,16 @@ function BoardPage() {
               const lane = columns[status] ?? [];
               const isDropTarget = dragOverStatus === status;
               return (
-                <section
+                <Stack
+                  as="section"
                   key={status}
                   data-board-column={issueStatusLabels[status]}
                   data-board-status={status}
                   data-drag-over={isDropTarget ? "true" : undefined}
-                  className="board-column"
+                  direction="vertical"
+                  padding={1}
+                  gap={0.5}
+                  minHeight="clamp(17rem, 50svh, 29rem)"
                   onDragOver={(event) => {
                     if (!canContribute || moving) return;
                     event.preventDefault();
@@ -464,7 +480,7 @@ function BoardPage() {
                   <Heading level={2} color="inherit">
                     {issueStatusLabels[status]} <Badge label={lane.length} />
                   </Heading>
-                  <ul>
+                  <Stack as="ul" gap={0.5}>
                     {lane.map((issue) => {
                       const subtasks = subtasksOf(issues, issue.id);
                       return (
@@ -489,8 +505,8 @@ function BoardPage() {
                         />
                       );
                     })}
-                  </ul>
-                </section>
+                  </Stack>
+                </Stack>
               );
             })}
           </Stack>
@@ -558,7 +574,7 @@ function BoardPage() {
           </LayoutContent>
         </Layout>
       </Drawer>
-    </main>
+    </Stack>
   );
 }
 
@@ -600,7 +616,8 @@ function BoardCard({
   const assigneeType = assignee === null ? "none" : assignee.agentId != null ? "agent" : "human";
 
   return (
-    <li
+    <Stack
+      as="li"
       data-board-issue-id={issue.id}
       data-ready={String(ready)}
       data-assignee-type={assigneeType}
@@ -615,23 +632,22 @@ function BoardCard({
       onDragEnd={onDragEnd}
     >
       <Card
-        className="board-card"
         data-needs-input={issue.needsInput ? "true" : "false"}
         data-agent-working={state === "active" ? "true" : undefined}
         data-draggable={canMove ? "true" : undefined}
         data-dragging={dragging ? "true" : undefined}
-        data-subtask-count={subtaskCount}
-        data-completed-subtask-count={doneCount}
+        data-subtask-count={String(subtaskCount)}
+        data-completed-subtask-count={String(doneCount)}
         padding={3}
       >
-        <Link className="board-card-title" to="/issues/$issueId" params={{ issueId: issue.id }}>
-          <Text type="inherit" color="inherit" className="board-card-heading">
-            <Text
-              type="inherit"
-              color="inherit"
-              className="issue-key"
-              data-issue-identifier={issue.identifier}
-            >
+        <Link
+          to="/issues/$issueId"
+          params={{ issueId: issue.id }}
+          weight="semibold"
+          display="block"
+        >
+          <Text type="inherit" color="inherit" display="block" weight="semibold">
+            <Text type="code" color="secondary" data-issue-identifier={issue.identifier}>
               {issue.identifier}
             </Text>
             {issue.title}
@@ -642,7 +658,7 @@ function BoardCard({
           state !== undefined ||
           blockers.length > 0 ||
           subtaskCount > 0) && (
-          <Stack direction="horizontal" className="board-card-meta">
+          <Stack direction="horizontal" gap={0.5} vAlign="center" wrap="wrap">
             {issue.priority !== "none" && <PriorityBadge priority={issue.priority} />}
             {state !== undefined && (
               <Text type="inherit" color="inherit" data-session-state={state}>
@@ -658,7 +674,7 @@ function BoardCard({
               />
             )}
             {assignee !== null && (
-              <Text type="inherit" color="inherit" className="board-assignee">
+              <Stack as="span" direction="horizontal" gap={0.5} vAlign="center">
                 <Avatar
                   name={assignee.displayName}
                   shape={assigneeType === "agent" ? "rounded" : "circle"}
@@ -668,17 +684,17 @@ function BoardCard({
                 <Text type="inherit" color="inherit">
                   {assignee.displayName}
                 </Text>
-              </Text>
+              </Stack>
             )}
             {subtaskCount > 0 && (
-              <Text type="inherit" color="inherit" className="board-card-subtasks">
+              <Text type="supporting" color="secondary">
                 Subtasks {doneCount}/{subtaskCount}
               </Text>
             )}
           </Stack>
         )}
         {issue.labels.length > 0 && (
-          <Stack direction="horizontal" className="board-card-labels">
+          <Stack direction="horizontal" gap={0.5} wrap="wrap">
             {issue.labels.map((label) => (
               <LabelPill key={label.id} label={label} />
             ))}
@@ -700,21 +716,20 @@ function BoardCard({
           />
         )}
         {(issue.needsInput || session !== undefined) && (
-          <Stack direction="horizontal" className="board-card-actions">
+          <Stack
+            direction="horizontal"
+            gap={0.5}
+            vAlign="center"
+            wrap="wrap"
+            paddingBlockStart={0.5}
+          >
             {issue.needsInput && (
-              <Link
-                className="board-card-action"
-                to="/inbox"
-                search={{ issue: issue.id }}
-                color="accent"
-                hasUnderline
-              >
+              <Link to="/inbox" search={{ issue: issue.id }} color="accent" hasUnderline>
                 View question
               </Link>
             )}
             {session !== undefined && (
               <Button
-                className="board-card-action"
                 label="Inspect session"
                 variant="ghost"
                 size="sm"
@@ -724,6 +739,6 @@ function BoardCard({
           </Stack>
         )}
       </Card>
-    </li>
+    </Stack>
   );
 }

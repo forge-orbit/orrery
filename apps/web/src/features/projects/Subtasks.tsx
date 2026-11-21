@@ -69,7 +69,7 @@ export function Subtasks({
   const isSubtask = issue.parentIssueId !== null;
 
   return (
-    <Section className="page-section" padding={3} data-subtasks-section>
+    <Section padding={3} data-subtasks-section="">
       <Stack gap={2}>
         {isSubtask && (
           <Heading level={2} color="inherit">
@@ -91,7 +91,7 @@ export function Subtasks({
           )
         ) : (
           <>
-            <Stack direction="horizontal" className="section-toolbar">
+            <Stack direction="horizontal">
               <Heading level={2} color="inherit">
                 Subtasks
               </Heading>
@@ -99,8 +99,8 @@ export function Subtasks({
                 label={`${completed} of ${subtasks.length} complete`}
                 color={subtasks.length > 0 && completed === subtasks.length ? "green" : "gray"}
                 size="sm"
-                data-subtask-count={subtasks.length}
-                data-completed-subtask-count={completed}
+                data-subtask-count={String(subtasks.length)}
+                data-completed-subtask-count={String(completed)}
               />
             </Stack>
             {subtasks.length === 0 ? (
@@ -108,23 +108,17 @@ export function Subtasks({
                 No subtasks yet.
               </Text>
             ) : (
-              <ul className="row-list">
+              <Stack as="ul">
                 {subtasks.map((subtask) => (
-                  <li
+                  <Stack
+                    as="li"
                     key={subtask.id}
-                    className="row-item"
                     data-subtask-id={subtask.id}
                     data-subtask-status={subtask.status}
                   >
-                    <Stack direction="horizontal" className="row-item-main">
-                      <Text as="span" className="issue-key">
-                        {subtask.identifier}
-                      </Text>
-                      <Link
-                        to="/issues/$issueId"
-                        params={{ issueId: subtask.id }}
-                        className="row-item-title"
-                      >
+                    <Stack direction="horizontal">
+                      <Text as="span">{subtask.identifier}</Text>
+                      <Link to="/issues/$issueId" params={{ issueId: subtask.id }}>
                         {subtask.title}
                       </Link>
                     </Stack>
@@ -141,12 +135,12 @@ export function Subtasks({
                       }
                       size="sm"
                     />
-                  </li>
+                  </Stack>
                 ))}
-              </ul>
+              </Stack>
             )}
             {canContribute && (
-              <form className="issue-inline-form" onSubmit={(event) => void onCreate(event)}>
+              <form onSubmit={(event) => void onCreate(event)}>
                 <TextField
                   label="Subtask name"
                   id="new-subtask-title"
