@@ -1344,11 +1344,17 @@ export function createWorkspacesService({
       if (offered.some((grant) => grant.projectName === null)) {
         throw new WorkspacesError("invitation_scope_invalid");
       }
+      const [existingAccount] = await db
+        .select({ id: humans.id })
+        .from(humans)
+        .where(eq(humans.email, row.email))
+        .limit(1);
       return {
         workspaceId: row.workspaceId,
         workspaceName: row.workspaceName,
         email: row.email,
         invitedByEmail: row.invitedByEmail,
+        accountExists: existingAccount !== undefined,
         grants: [
           {
             kind: "workspace_membership" as const,

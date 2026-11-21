@@ -124,6 +124,7 @@ export const WorkspaceInvitationPreview = z
     workspaceName: z.string(),
     email: Email,
     invitedByEmail: Email,
+    accountExists: z.boolean(),
     grants: z.array(InvitationGrant),
     expiresAt: z.iso.datetime(),
   })

@@ -992,8 +992,19 @@
   display: grid;
   gap: 0.85rem;
   align-items: start;
-  justify-items: start;
+  justify-items: stretch;
   margin-block: 0.85rem 1.35rem;
+}
+
+.app-content form > :is(button, .astryx-button),
+.astryx-drawer form > :is(button, .astryx-button) {
+  justify-self: start;
+}
+
+.app-content form fieldset,
+.astryx-drawer form fieldset {
+  inline-size: 100%;
+  box-sizing: border-box;
 }
 
 .app-content form:last-child,
@@ -1186,6 +1197,202 @@
   display: grid;
   gap: 0.65rem;
   margin-block: 1.375rem;
+}
+
+.invitation-main {
+  display: grid;
+  gap: 1.35rem;
+}
+
+.invitation-header {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.invitation-header h1 {
+  margin: 0;
+}
+
+.invitation-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--orrery-muted);
+  font: 500 0.7rem / 1 var(--orrery-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.invitation-workspace-badge {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 1.2rem;
+  block-size: 1.2rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--orrery-accent) 18%, var(--orrery-surface));
+  color: var(--orrery-accent);
+  font: 600 0.6875rem / 1 var(--orrery-mono);
+}
+
+.invitation-lead {
+  margin: 0;
+  color: var(--orrery-muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.invitation-lead strong {
+  color: var(--orrery-text);
+  font-weight: 600;
+}
+
+.invitation-summary {
+  display: grid;
+  border: 1px solid var(--orrery-border);
+  border-radius: var(--orrery-panel-radius);
+  background: var(--orrery-surface);
+  overflow: hidden;
+}
+
+.invitation-summary-row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  align-items: baseline;
+  padding: 0.8rem 1rem;
+  border-block-end: 1px solid var(--orrery-border);
+}
+
+.invitation-summary-label {
+  color: var(--orrery-muted);
+  font: 500 0.6875rem / 1.4 var(--orrery-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.invitation-summary-value {
+  display: grid;
+  gap: 0.2rem;
+  min-inline-size: 0;
+}
+
+.invitation-summary-primary {
+  margin: 0;
+  color: var(--orrery-text);
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.invitation-summary-note {
+  margin: 0;
+  color: var(--orrery-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.invitation-grant-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.invitation-grant-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.55rem;
+  border: 1px solid var(--orrery-border);
+  border-radius: 999px;
+  background: var(--orrery-recessed);
+  color: var(--orrery-text);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.invitation-summary-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 1rem;
+  background: var(--orrery-recessed);
+  color: var(--orrery-muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.invitation-summary-footer svg {
+  flex-shrink: 0;
+}
+
+.access-content form.invitation-form {
+  display: grid;
+  gap: 0.9rem;
+  margin-block: 0;
+}
+
+.invitation-form-heading {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.invitation-form-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.invitation-form-heading p,
+.invitation-note {
+  margin: 0;
+}
+
+.invitation-actions {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.invitation-primary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 100%;
+  min-block-size: 2.75rem;
+  padding: 0.6rem 1rem;
+  border-radius: var(--orrery-radius);
+  background: var(--orrery-accent);
+  color: var(--orrery-ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: filter 120ms ease;
+}
+
+.invitation-primary-link:hover {
+  color: var(--orrery-ink);
+  filter: brightness(1.06);
+}
+
+.invitation-primary-link .astryx-text {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.invitation-decline,
+.invitation-secondary-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (max-width: 30rem) {
+  .invitation-summary-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .access-content :is(.astryx-text-input, button[type="submit"]) {

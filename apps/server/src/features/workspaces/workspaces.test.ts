@@ -632,6 +632,7 @@ describe("workspaces", () => {
       workspaceName: "Rocket Team",
       email: "member@example.com",
       invitedByEmail: EMAIL,
+      accountExists: true,
       grants: [
         {
           kind: "workspace_membership",
@@ -739,6 +740,7 @@ describe("workspaces", () => {
       workspaceName: "Rocket Team",
       email: "new.member@example.com",
       invitedByEmail: EMAIL,
+      accountExists: false,
       grants: [
         {
           kind: "workspace_membership",
