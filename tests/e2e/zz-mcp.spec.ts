@@ -231,10 +231,16 @@ test("a Contribute key runs the full issue and knowledge cycle over MCP and REST
 
     const closed = await call(client, "update_issue", { issueId, status: "done" });
     expect(field(closed.data.issue, "status")).toBe("done");
-    const reopened = await call(client, "update_issue", { issueId, status: "todo" });
-    expect(field(reopened.data.issue, "status")).toBe("todo");
-    expect(field(reopened.data.issue, "closedAt")).toBeNull();
-    expect(field(reopened.data.issue, "updatedBy")).toMatchObject({ agentId });
+    expect(field(closed.data.issue, "updatedBy")).toMatchObject({ agentId });
+    const afterClose = await call(client, "update_issue", { issueId, status: "todo" });
+    expect(afterClose.isError).toBe(true);
+    expect(afterClose.data).toMatchObject({ code: "session_required" });
+
+    const reopenedRes = await api.patch(`/api/issues/${issueId}`, { data: { status: "todo" } });
+    expect(reopenedRes.status()).toBe(200);
+    const reopenedIssue = asRecord(await reopenedRes.json());
+    expect(field(reopenedIssue, "status")).toBe("todo");
+    expect(field(reopenedIssue, "closedAt")).toBeNull();
 
     const entry = await call(client, "create_knowledge", { projectId, title: "Agent note" });
     const entryId = requiredText(field(entry.data.entry, "id"), "the knowledge id");
