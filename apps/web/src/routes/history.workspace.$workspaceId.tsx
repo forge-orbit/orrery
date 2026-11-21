@@ -1,3 +1,4 @@
+import { Stack } from "@astryxdesign/core/Stack";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { HistoryList, workspaceHistoryQuery } from "../features/history/index.ts";
@@ -21,7 +22,7 @@ function WorkspaceHistoryPage() {
   const { data: events } = useSuspenseQuery(workspaceHistoryQuery(workspaceId));
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="workspace" to="/workspaces/$workspaceId" params={{ workspaceId }}>
@@ -35,6 +36,6 @@ function WorkspaceHistoryPage() {
         events={events}
         emptyMessage="No access changes have been recorded in this workspace."
       />
-    </main>
+    </Stack>
   );
 }

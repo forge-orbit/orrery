@@ -3,6 +3,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import {
@@ -15,13 +16,14 @@ import {
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
+import { Token } from "@astryxdesign/core/Token";
 import type { ProjectLabel } from "@orrery/contract";
 import { useQueryClient } from "@tanstack/react-query";
-import type { CSSProperties, FormEvent } from "react";
+import type { FormEvent } from "react";
 import { useState } from "react";
 import { TextField } from "../../lib/fields.tsx";
 import { createProjectLabel, deleteProjectLabel, updateProjectLabel } from "./commands.ts";
-import { LabelPill } from "./LabelPill.tsx";
+import { LabelPill, tokenColorForHex } from "./LabelPill.tsx";
 import { issuesQuery, projectActivityQuery, projectLabelsQuery } from "./queries.ts";
 
 const PRESET_COLORS = [
@@ -42,40 +44,10 @@ const VALID_HEX = /^#[0-9a-fA-F]{6}$/;
 const messageOf = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
 
-type SwatchStyle = CSSProperties & { "--swatch-color": string };
-
 function nextPresetColor(current: string): string {
   const index = PRESET_COLORS.findIndex((p) => p.hex.toLowerCase() === current.toLowerCase());
   const next = PRESET_COLORS[(index + 1) % PRESET_COLORS.length];
   return next?.hex ?? "#3b74d6";
-}
-
-function SwatchCheckIcon() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-      <path
-        d="M2.5 6.2 5 8.7 9.5 3.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function ShuffleIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M2 5h2.4c1 0 1.9.5 2.4 1.3l2.4 3.4c.5.8 1.4 1.3 2.4 1.3H14m0 0-2-2m2 2-2 2M2 11h2.4c1 0 1.9-.5 2.4-1.3l.7-1m2.1-3c.5-.5 1.2-.7 2-.7H14m0 0-2-2m2 2-2 2"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 function ColorSwatches({
@@ -88,37 +60,37 @@ function ColorSwatches({
   groupLabel: string;
 }) {
   return (
-    <div className="label-swatch-bar">
-      <span className="label-swatch-caption">Presets</span>
-      <div className="label-swatch-list" role="group" aria-label={groupLabel}>
+    <Stack direction="horizontal" gap={1.5} align="center">
+      <Text type="supporting" color="secondary">
+        Presets
+      </Text>
+      <Stack direction="horizontal" gap={1} role="group" aria-label={groupLabel}>
         {PRESET_COLORS.map((preset) => {
           const active = value.toLowerCase() === preset.hex.toLowerCase();
-          const style: SwatchStyle = { "--swatch-color": preset.hex };
           return (
-            <button
+            <Button
               key={preset.hex}
               type="button"
-              className="label-swatch"
-              style={style}
-              data-active={active ? "true" : undefined}
+              variant={active ? "primary" : "secondary"}
+              size="sm"
+              label={preset.name}
+              icon={active ? <Icon icon="check" /> : undefined}
               aria-label={`${preset.name} (${preset.hex})`}
               aria-pressed={active}
               onClick={() => onSelect(preset.hex)}
-            >
-              {active && <SwatchCheckIcon />}
-            </button>
+            />
           );
         })}
-      </div>
+      </Stack>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         label="Next color"
-        icon={<ShuffleIcon />}
+        icon={<Icon icon="arrowsUpDown" />}
         onClick={() => onSelect(nextPresetColor(value))}
       />
-    </div>
+    </Stack>
   );
 }
 
@@ -133,9 +105,8 @@ function ColorInputField({
   value: string;
   onChange: (hex: string) => void;
 }) {
-  const pickerHex = VALID_HEX.test(value) ? value : "#3b74d6";
   return (
-    <div className="label-color-field">
+    <Stack>
       <TextField
         label={label}
         id={id}
@@ -146,35 +117,24 @@ function ColorInputField({
         width="100%"
         required
       />
-      <label className="label-native-picker" title="Pick a custom color">
-        <input
-          type="color"
-          value={pickerHex}
-          aria-label="Pick a custom color"
-          onChange={(event) => onChange(event.currentTarget.value)}
-        />
-        <span
-          className="label-native-picker-chip"
-          style={{ "--swatch-color": pickerHex } as SwatchStyle}
-          aria-hidden="true"
-        />
-      </label>
-    </div>
+    </Stack>
   );
 }
 
 function LabelPreview({ name, color }: { name: string; color: string }) {
   const validHex = VALID_HEX.test(color) ? color : "#64748b";
-  const style: CSSProperties & { "--label-color": string } = { "--label-color": validHex };
   return (
-    <div className="label-preview-well">
-      <Text type="supporting" color="secondary" className="label-preview-caption">
+    <Stack direction="horizontal" gap={1.5} align="center">
+      <Text type="supporting" color="secondary">
         Preview
       </Text>
-      <Text as="span" type="supporting" className="label-pill" style={style} data-label-preview>
-        {name.trim() === "" ? "Label name" : name.trim()}
-      </Text>
-    </div>
+      <Token
+        label={name.trim() === "" ? "Label name" : name.trim()}
+        color={tokenColorForHex(validHex)}
+        size="sm"
+        data-label-preview=""
+      />
+    </Stack>
   );
 }
 
@@ -263,21 +223,21 @@ export function ProjectLabels({
   return (
     <Stack gap={3}>
       {canContribute && (
-        <Section className="page-section label-composer-section" padding={3}>
-          <form className="label-composer-form" onSubmit={(event) => void onCreate(event)}>
-            <div className="label-composer-header">
-              <div className="label-composer-heading">
+        <Section padding={3}>
+          <form onSubmit={(event) => void onCreate(event)}>
+            <Stack>
+              <Stack>
                 <Heading level={2} color="inherit">
                   Create label
                 </Heading>
                 <Text type="supporting" color="secondary">
                   Categorize issues across the board and issue lists.
                 </Text>
-              </div>
+              </Stack>
               <LabelPreview name={name} color={color} />
-            </div>
+            </Stack>
 
-            <div className="label-composer-grid">
+            <Stack>
               <TextField
                 label="New label name"
                 id="new-label-name"
@@ -295,7 +255,7 @@ export function ProjectLabels({
                 value={color}
                 onChange={setColor}
               />
-              <div className="label-composer-submit">
+              <Stack>
                 <Button
                   type="submit"
                   label="Create label"
@@ -303,24 +263,24 @@ export function ProjectLabels({
                   isDisabled={saving}
                   isLoading={saving}
                 />
-              </div>
-            </div>
+              </Stack>
+            </Stack>
 
             <ColorSwatches value={color} onSelect={setColor} groupLabel="Color swatches" />
           </form>
         </Section>
       )}
 
-      <Section className="page-section" padding={3}>
+      <Section padding={3}>
         <Stack gap={3}>
-          <div className="label-list-header">
+          <Stack>
             <Heading level={2} color="inherit">
               Labels
             </Heading>
             <Text type="supporting" color="secondary">
               {labels.length === 1 ? "1 label" : `${labels.length} labels`}
             </Text>
-          </div>
+          </Stack>
           {error !== undefined && (
             <Banner status="error" role="alert" title="Label update failed" description={error} />
           )}
@@ -345,14 +305,11 @@ export function ProjectLabels({
                   <TableRow key={label.id} data-project-label-id={label.id}>
                     {editingId === label.id ? (
                       <TableCell colSpan={canContribute ? 3 : 2}>
-                        <form
-                          className="label-edit-form"
-                          onSubmit={(event) => void onUpdate(event, label)}
-                        >
-                          <div className="label-composer-header">
+                        <form onSubmit={(event) => void onUpdate(event, label)}>
+                          <Stack>
                             <LabelPreview name={editName} color={editColor} />
-                          </div>
-                          <div className="label-composer-grid">
+                          </Stack>
+                          <Stack>
                             <TextField
                               label="Label name"
                               id={`label-name-${label.id}`}
@@ -369,7 +326,7 @@ export function ProjectLabels({
                               value={editColor}
                               onChange={setEditColor}
                             />
-                            <Stack direction="horizontal" gap={1} className="label-composer-submit">
+                            <Stack direction="horizontal" gap={1}>
                               <Button
                                 type="submit"
                                 label="Save label"
@@ -387,7 +344,7 @@ export function ProjectLabels({
                                 onClick={() => setEditingId(undefined)}
                               />
                             </Stack>
-                          </div>
+                          </Stack>
                           <ColorSwatches
                             value={editColor}
                             onSelect={setEditColor}
@@ -401,14 +358,7 @@ export function ProjectLabels({
                           <LabelPill label={label} />
                         </TableCell>
                         <TableCell>
-                          <span className="label-color-cell">
-                            <span
-                              className="label-color-dot"
-                              style={{ "--swatch-color": label.color } as SwatchStyle}
-                              aria-hidden="true"
-                            />
-                            <code>{label.color}</code>
-                          </span>
+                          <code>{label.color}</code>
                         </TableCell>
                         {canContribute && (
                           <TableCell>

@@ -42,7 +42,7 @@ function ResetPasswordPage() {
 
   if (token === "") {
     return (
-      <main>
+      <Stack as="main" gap={5}>
         <Heading level={1} color="inherit">
           Choose a new password
         </Heading>
@@ -54,12 +54,12 @@ function ResetPasswordPage() {
         <Text as="p" display="block" type="supporting">
           <Link to="/forgot-password">Request a reset link</Link>
         </Text>
-      </main>
+      </Stack>
     );
   }
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <Heading level={1} color="inherit">
         Choose a new password
       </Heading>
@@ -99,6 +99,6 @@ function ResetPasswordPage() {
           </Stack>
         </form>
       )}
-    </main>
+    </Stack>
   );
 }

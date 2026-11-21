@@ -33,16 +33,16 @@ function AccountPage() {
 
   if (isPending) {
     return (
-      <main>
+      <Stack as="main" gap={5}>
         <Text as="p" display="block" type="supporting" role="status">
           Loading account…
         </Text>
-      </main>
+      </Stack>
     );
   }
   if (isError || !session.signedIn) {
     return (
-      <main>
+      <Stack as="main" gap={5}>
         <PageHeader title="Account" />
         <Banner
           status="error"
@@ -58,12 +58,12 @@ function AccountPage() {
             />
           }
         />
-      </main>
+      </Stack>
     );
   }
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="home" to="/">
@@ -87,7 +87,7 @@ function AccountPage() {
       <PasswordSection />
       <PreferencesSection />
       <SessionSection />
-    </main>
+    </Stack>
   );
 }
 
@@ -116,7 +116,7 @@ function ProfileSection({ initialDisplayName }: { initialDisplayName: string | n
   }
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3}>
         <Stack gap={1}>
           <Heading level={2} color="inherit">
@@ -201,7 +201,7 @@ function PasswordSection() {
   const errorMessage = clientError ?? (mutation.isError ? mutation.error.message : null);
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3}>
         <Stack gap={1}>
           <Heading level={2} color="inherit">
@@ -270,7 +270,7 @@ function PasswordSection() {
 
 function PreferencesSection() {
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3} hAlign="start">
         <Stack gap={1}>
           <Heading level={2} color="inherit">
@@ -305,7 +305,7 @@ function SessionSection() {
   });
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3} hAlign="start">
         <Stack gap={1}>
           <Heading level={2} color="inherit">

@@ -1,3 +1,4 @@
+import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -34,34 +35,6 @@ export function PriorityBadge({ priority }: { priority: IssuePriority }) {
       color={PRIORITY_COLORS[priority]}
       size="sm"
     />
-  );
-}
-
-function MoveUpIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M8 12.5V3.5M4.5 7 8 3.5 11.5 7"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function MoveDownIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M8 3.5v9M4.5 9 8 12.5 11.5 9"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 
@@ -137,15 +110,7 @@ export function IssuePriorityControls({
   }
 
   return (
-    <Stack
-      direction="horizontal"
-      gap={1}
-      vAlign="center"
-      className={
-        compact ? "issue-order-controls issue-order-controls-compact" : "issue-order-controls"
-      }
-      data-issue-order-controls={issue.id}
-    >
+    <Stack direction="horizontal" gap={1} vAlign="center" data-issue-order-controls={issue.id}>
       <Selector
         label="Priority"
         isLabelHidden={compact}
@@ -165,7 +130,7 @@ export function IssuePriorityControls({
         }))}
       />
       {showReorder && (
-        <Stack direction="horizontal" gap={0.5} className="issue-order-arrows">
+        <Stack direction="horizontal" gap={0.5}>
           <IconButton
             type="button"
             size="sm"
@@ -173,7 +138,7 @@ export function IssuePriorityControls({
             isDisabled={saving || !canMoveUp}
             onClick={() => move("up")}
             label="Move up"
-            icon={<MoveUpIcon />}
+            icon={<Icon icon="arrowUp" />}
           />
           <IconButton
             type="button"
@@ -182,7 +147,7 @@ export function IssuePriorityControls({
             isDisabled={saving || !canMoveDown}
             onClick={() => move("down")}
             label="Move down"
-            icon={<MoveDownIcon />}
+            icon={<Icon icon="arrowDown" />}
           />
         </Stack>
       )}

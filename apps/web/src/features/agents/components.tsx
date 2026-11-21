@@ -2,6 +2,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Code } from "@astryxdesign/core/Code";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -205,19 +206,19 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
   }
 
   return (
-    <Stack className="section-stack" gap={3}>
+    <Stack gap={3}>
       {secret !== undefined && (
-        <Section className="page-section" padding={3}>
-          <Stack role="status" data-agent-secret gap={2}>
+        <Section padding={3}>
+          <Stack role="status" data-agent-secret="" gap={2}>
             <Banner
               status="warning"
               title="Copy this API key now"
               description="It is shown once and cannot be recovered later."
               collapsible={false}
             />
-            <Stack direction="horizontal" className="secret-reveal-row" gap={2} wrap="wrap">
-              <code className="secret-reveal-code">{secret}</code>
-              <Stack direction="horizontal" className="page-header-actions" gap={2}>
+            <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+              <Code>{secret}</Code>
+              <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
                 <Button
                   type="button"
                   size="sm"
@@ -253,9 +254,9 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
         />
       )}
 
-      <Section className="page-section" padding={3}>
+      <Section padding={3}>
         <Stack gap={3}>
-          <Stack direction="horizontal" className="section-toolbar" gap={2} wrap="wrap">
+          <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
             <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
               <Heading level={2} color="inherit">
                 Registered agents
@@ -386,9 +387,9 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
         </Stack>
       </Section>
 
-      <Section className="page-section" padding={3}>
+      <Section padding={3}>
         <Stack gap={3}>
-          <Stack direction="horizontal" className="section-toolbar" gap={2} wrap="wrap">
+          <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
             <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
               <Heading level={2} color="inherit">
                 Keys in this workspace
@@ -486,12 +487,9 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                       </TableCell>
                       <TableCell>
                         {key.keyHint !== null ? (
-                          <code className="agent-key-hint" data-agent-key-hint>
-                            {key.keyHint}
-                          </code>
+                          <Code data-agent-key-hint="">{key.keyHint}</Code>
                         ) : (
                           <code
-                            className="agent-key-hint"
                             data-agent-key-hint-legacy
                             title="Issued before key previews were stored (only the SHA-256 hash exists). Rotate or issue a new key to show its prefix preview."
                           >
@@ -573,9 +571,9 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
         </Stack>
       </Section>
 
-      <Section className="page-section" padding={3}>
+      <Section padding={3}>
         <Stack gap={3}>
-          <Stack direction="horizontal" className="section-toolbar" gap={2} wrap="wrap">
+          <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
             <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
               <Heading level={2} color="inherit">
                 Active work sessions
@@ -735,7 +733,7 @@ function ActiveSessions({
                   <Text type="supporting" data-session-model={run?.model ?? "unknown"}>
                     model: {run?.model ?? "unknown"}
                   </Text>
-                  <Text type="supporting" data-subagent-count={run?.children.length ?? 0}>
+                  <Text type="supporting" data-subagent-count={String(run?.children.length ?? 0)}>
                     subagents: {run?.children.length ?? 0}
                   </Text>
                 </Stack>
@@ -775,7 +773,7 @@ function ActiveSessions({
                   to="/issues/$issueId"
                   params={{ issueId: session.issueId }}
                   search={{ inspector: true, session: session.id }}
-                  data-sidecar-link
+                  data-sidecar-link=""
                 >
                   Sidecar
                 </Link>

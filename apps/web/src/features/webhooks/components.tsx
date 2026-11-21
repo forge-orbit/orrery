@@ -2,6 +2,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Code } from "@astryxdesign/core/Code";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -329,10 +330,10 @@ export function WebhooksSection({
   }
 
   return (
-    <Stack className="section-stack" gap={3}>
+    <Stack gap={3}>
       {revealedSecret !== undefined && (
-        <Section className="page-section" padding={3}>
-          <Stack role="status" data-webhook-secret-banner gap={2}>
+        <Section padding={3}>
+          <Stack role="status" data-webhook-secret-banner="" gap={2}>
             <Banner
               status="warning"
               title={
@@ -343,11 +344,9 @@ export function WebhooksSection({
               description={`Shown once for ${revealedSecret.url}. It cannot be recovered later; use it to verify X-Orrery-Signature-256.`}
               collapsible={false}
             />
-            <Stack direction="horizontal" className="secret-reveal-row" gap={2} wrap="wrap">
-              <code className="secret-reveal-code" data-webhook-secret>
-                {revealedSecret.secret}
-              </code>
-              <Stack direction="horizontal" className="page-header-actions" gap={2}>
+            <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+              <Code data-webhook-secret="">{revealedSecret.secret}</Code>
+              <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
                 <Button
                   type="button"
                   size="sm"
@@ -397,9 +396,9 @@ export function WebhooksSection({
         />
       )}
 
-      <Section className="page-section" padding={3}>
+      <Section padding={3}>
         <Stack gap={3}>
-          <Stack direction="horizontal" className="section-toolbar" gap={2} wrap="wrap">
+          <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
             <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
               <Heading level={2} color="inherit">
                 Outgoing webhooks
@@ -489,7 +488,7 @@ export function WebhooksSection({
                             label={
                               hook.enabled ? "Active" : autoDisabled ? "Auto-disabled" : "Disabled"
                             }
-                            data-webhook-status
+                            data-webhook-status=""
                           />
                           {hook.consecutiveFailures > 0 && (
                             <Text type="supporting">
@@ -944,7 +943,7 @@ function WebhookDeliveriesDrawer({
       }
     >
       <LayoutContent>
-        <Stack gap={3} data-webhook-deliveries>
+        <Stack gap={3} data-webhook-deliveries="">
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
             <Button
               type="button"

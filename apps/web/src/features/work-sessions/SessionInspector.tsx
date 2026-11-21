@@ -34,19 +34,19 @@ type BlockRenderer = (block: ActivityDetailBlockV1) => ReactNode;
 const blockRenderers: Record<BlockType, BlockRenderer> = {
   key_value: (block) =>
     block.type === "key_value" ? (
-      <dl className="activity-key-value" data-activity-block-kind="key_value">
+      <Stack as="dl" data-activity-block-kind="key_value" gap={0.5}>
         {block.items.map((item, index) => (
           <Fragment key={`${item.key}-${index}`}>
             <dt>{item.key}</dt>
             <dd>{item.value}</dd>
           </Fragment>
         ))}
-      </dl>
+      </Stack>
     ) : null,
   table: (block) =>
     block.type === "table" ? (
-      <Stack className="markdown-table-wrap">
-        <Table className="activity-table" data-activity-block-kind="table">
+      <Stack width="100%" maxWidth="100%" isScrollable>
+        <Table data-activity-block-kind="table">
           <TableHeader>
             <TableRow>
               {block.columns.map((column, index) => (
@@ -68,19 +68,19 @@ const blockRenderers: Record<BlockType, BlockRenderer> = {
     ) : null,
   checklist: (block) =>
     block.type === "checklist" ? (
-      <ul className="activity-checklist" data-activity-block-kind="checklist">
+      <Stack as="ul" data-activity-block-kind="checklist" gap={0.5}>
         {block.items.map((item, index) => (
-          <li key={`${item.label}-${index}`} data-checked={String(item.checked)}>
+          <Stack as="li" key={`${item.label}-${index}`} data-checked={String(item.checked)}>
             <Text type="inherit" color="inherit">
               {item.checked ? "✓" : "○"} {item.label}
             </Text>
-          </li>
+          </Stack>
         ))}
-      </ul>
+      </Stack>
     ) : null,
   test_results: (block) =>
     block.type === "test_results" ? (
-      <Stack gap={1} className="activity-test-results" data-activity-block-kind="test_results">
+      <Stack gap={1} data-activity-block-kind="test_results">
         <Stack direction="horizontal" gap={1} wrap="wrap">
           <Badge variant="success" label={`${block.passed} passed`} />
           <Badge
@@ -92,9 +92,9 @@ const blockRenderers: Record<BlockType, BlockRenderer> = {
           )}
         </Stack>
         {block.cases !== undefined && block.cases.length > 0 && (
-          <ul>
+          <Stack as="ul" gap={0.5}>
             {block.cases.map((testCase, index) => (
-              <li key={`${testCase.name}-${index}`} data-test-status={testCase.status}>
+              <Stack as="li" key={`${testCase.name}-${index}`} data-test-status={testCase.status}>
                 <Stack gap={0.5}>
                   <Text type="inherit" color="inherit">
                     {testCase.name} — {testCase.status}
@@ -105,9 +105,9 @@ const blockRenderers: Record<BlockType, BlockRenderer> = {
                     </Text>
                   )}
                 </Stack>
-              </li>
+              </Stack>
             ))}
-          </ul>
+          </Stack>
         )}
       </Stack>
     ) : null,
@@ -116,7 +116,7 @@ const blockRenderers: Record<BlockType, BlockRenderer> = {
 
 function JsonFallback({ detail }: { detail: unknown }) {
   return (
-    <Stack data-activity-block="json" className="activity-json">
+    <Stack data-activity-block="json">
       <Collapsible
         defaultIsOpen={false}
         trigger={
@@ -125,9 +125,7 @@ function JsonFallback({ detail }: { detail: unknown }) {
           </Text>
         }
       >
-        <pre className="activity-json-pre" data-activity-detail>
-          {JSON.stringify(detail, null, 2)}
-        </pre>
+        <pre data-activity-detail="">{JSON.stringify(detail, null, 2)}</pre>
       </Collapsible>
     </Stack>
   );
@@ -137,11 +135,7 @@ function renderDetail(detail: SessionActivityDetail | null): ReactNode {
   const parsed = ActivityDetailBlockV1.safeParse(detail?.block);
   if (parsed.success) {
     const block = parsed.data;
-    return (
-      <Stack data-activity-block={block.type} className="activity-block">
-        {blockRenderers[block.type](block)}
-      </Stack>
-    );
+    return <Stack data-activity-block={block.type}>{blockRenderers[block.type](block)}</Stack>;
   }
   return <JsonFallback detail={detail} />;
 }
@@ -181,13 +175,8 @@ export function SessionInspector({
   const [open, setOpen] = useState(initialOpen);
 
   return (
-    <Card
-      className="session-inspector"
-      padding={3}
-      data-session-inspector
-      aria-label="Session inspector"
-    >
-      <Stack className="inspector-heading" direction="horizontal" gap={2} wrap="wrap">
+    <Card padding={3} data-session-inspector="" aria-label="Session inspector">
+      <Stack direction="horizontal" gap={2} wrap="wrap" justify="start">
         <Heading level={2} color="inherit">
           Session inspector
         </Heading>
@@ -250,7 +239,7 @@ export function SessionInspectorDetails({
   const activityList = activities.data ?? [];
 
   return (
-    <Stack className="inspector-content">
+    <Stack paddingBlockStart={2}>
       {sessions.isPending && (
         <Text as="p" display="block" type="supporting" role="status">
           Loading work sessions…
@@ -276,31 +265,19 @@ export function SessionInspectorDetails({
               label: `${session.status} · ${formatDateTime(session.createdAt)}`,
             }))}
           />
-          <Stack
-            className="inspector-session-label"
-            direction="horizontal"
-            gap={1}
-            vAlign="center"
-            wrap="wrap"
-          >
+          <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
             <strong>{run?.agentName ?? "Agent work session"}</strong>
             <Text type="inherit" color="inherit" data-inspector-session-status={displayStatus}>
               {displayStatus}
             </Text>
           </Stack>
           {selected.progress !== "" && (
-            <Text
-              as="p"
-              display="block"
-              type="inherit"
-              color="inherit"
-              className="session-progress"
-            >
+            <Text as="p" display="block" type="supporting" color="secondary">
               {selected.progress}
             </Text>
           )}
           {pendingQuestion !== undefined && (
-            <Card padding={3} className="inspector-question">
+            <Card padding={3}>
               <QuestionDetails question={pendingQuestion} />
               {canContribute && (
                 <Link to="/inbox" search={{ issue: issueId }} color="accent" hasUnderline>
@@ -309,7 +286,7 @@ export function SessionInspectorDetails({
               )}
             </Card>
           )}
-          <dl className="session-facts">
+          <Stack as="dl" gap={0.5}>
             <dt>Harness</dt>
             <dd>
               <HarnessBadge harness={run?.harness} empty="Unknown" />
@@ -329,7 +306,7 @@ export function SessionInspectorDetails({
               outputTokens={selected.outputTokens}
               costUsdMicros={selected.costUsdMicros}
             />
-          </dl>
+          </Stack>
           <Heading level={3} color="inherit">
             Session activity
           </Heading>
@@ -346,9 +323,10 @@ export function SessionInspectorDetails({
               No activities recorded yet.
             </Text>
           ) : (
-            <ol data-activity-timeline>
+            <Stack as="ol" data-activity-timeline="">
               {activityList.map((activity) => (
-                <li
+                <Stack
+                  as="li"
                   key={activity.id}
                   data-activity-id={activity.id}
                   data-activity-kind={activity.kind}
@@ -360,11 +338,11 @@ export function SessionInspectorDetails({
                     {formatDateTime(activity.createdAt)}
                   </time>
                   <strong>{activity.kind}</strong>
-                  <Stack data-activity-summary>{activity.summary}</Stack>
+                  <Stack data-activity-summary="">{activity.summary}</Stack>
                   {activity.detail !== null && renderDetail(activity.detail)}
-                </li>
+                </Stack>
               ))}
-            </ol>
+            </Stack>
           )}
         </>
       )}

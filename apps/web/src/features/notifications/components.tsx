@@ -34,7 +34,6 @@ export function NotificationRow({
 
   return (
     <ListItem
-      className="notification-row"
       data-notification-id={notification.id}
       data-notification-kind={notification.kind}
       data-unread={unread ? "true" : "false"}
@@ -53,10 +52,9 @@ export function NotificationRow({
             <Token label={kind.label} color={kind.color} size="sm" data-notification-kind-label />{" "}
             <Text
               as="span"
-              className="issue-key"
-              type="inherit"
+              type="code"
               color={unread ? "primary" : "secondary"}
-              data-notification-identifier
+              data-notification-identifier=""
             >
               {notification.issue.identifier}
             </Text>{" "}

@@ -1,21 +1,53 @@
-import { Text } from "@astryxdesign/core/Text";
+import { Token } from "@astryxdesign/core/Token";
 import type { ProjectLabel } from "@orrery/contract";
-import type { CSSProperties } from "react";
 
-type LabelStyle = CSSProperties & { "--label-color": string };
+type TokenColor =
+  | "red"
+  | "pink"
+  | "orange"
+  | "yellow"
+  | "green"
+  | "teal"
+  | "cyan"
+  | "blue"
+  | "purple"
+  | "gray";
+
+export function tokenColorForHex(hex: string): TokenColor {
+  switch (hex.toLowerCase()) {
+    case "#d94848":
+      return "red";
+    case "#d6457d":
+      return "pink";
+    case "#e06c2b":
+      return "orange";
+    case "#c88a1e":
+      return "yellow";
+    case "#2f9e66":
+      return "green";
+    case "#1f8a8a":
+      return "teal";
+    case "#2884c8":
+      return "cyan";
+    case "#3b74d6":
+      return "blue";
+    case "#7c52d9":
+      return "purple";
+    case "#64748b":
+      return "gray";
+    default:
+      return "blue";
+  }
+}
 
 export function LabelPill({ label }: { label: ProjectLabel }) {
-  const style: LabelStyle = { "--label-color": label.color };
   return (
-    <Text
-      as="span"
-      type="supporting"
-      className="label-pill"
-      style={style}
+    <Token
+      label={label.name}
+      color={tokenColorForHex(label.color)}
+      size="sm"
       data-label-id={label.id}
       data-label-name={label.name}
-    >
-      {label.name}
-    </Text>
+    />
   );
 }

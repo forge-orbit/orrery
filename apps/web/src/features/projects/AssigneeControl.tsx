@@ -67,7 +67,7 @@ export function AssigneeControl({
   }
 
   return (
-    <Stack gap={1.5} className="assignee-control">
+    <Stack gap={1.5}>
       <Selector
         label="Assignee"
         id={`assignee-${issue.id}`}

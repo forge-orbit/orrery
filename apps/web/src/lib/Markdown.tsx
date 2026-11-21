@@ -2,7 +2,7 @@ import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import mermaid from "mermaid";
-import { type ReactNode, useId } from "react";
+import { createElement, type ReactNode, useId } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useResolvedAppearance } from "./appearance.tsx";
@@ -152,7 +152,6 @@ function MermaidDiagram({ source }: { source: string }) {
   }
   return (
     <figure
-      className="markdown-mermaid"
       data-mermaid
       role="img"
       aria-label="Mermaid diagram"
@@ -166,11 +165,7 @@ const components: Components = {
     return <>{children}</>;
   },
   table({ children, node: _node, ...props }) {
-    return (
-      <Stack className="markdown-table-wrap">
-        <table {...props}>{children}</table>
-      </Stack>
-    );
+    return <Stack isScrollable>{createElement("table", props, children)}</Stack>;
   },
   code({ className, children, node: _node, ...props }) {
     const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
@@ -181,17 +176,11 @@ const components: Components = {
     if (language !== undefined || text.endsWith("\n")) {
       return (
         <pre data-code-block>
-          <code className={className} {...props}>
-            {children}
-          </code>
+          <code {...props}>{children}</code>
         </pre>
       );
     }
-    return (
-      <code className={className} {...props}>
-        {children}
-      </code>
-    );
+    return <code {...props}>{children}</code>;
   },
   a({ href, title, children, node: _node, ...props }) {
     if (!href) {
@@ -204,15 +193,17 @@ const components: Components = {
     const issueMatch = /^\/issues\/([0-9a-f-]+)$/i.exec(href);
     if (issueMatch?.[1] !== undefined) {
       return (
-        <Link to="/issues/$issueId" params={{ issueId: issueMatch[1] }} className="issue-ref-link">
-          <span title={title}>{children}</span>
+        <Link to="/issues/$issueId" params={{ issueId: issueMatch[1] }}>
+          <Text as="span" type="inherit" color="inherit">
+            {children}
+          </Text>
         </Link>
       );
     }
-    return (
-      <a href={href} title={title} target="_blank" rel="noopener noreferrer" {...props}>
-        {children}
-      </a>
+    return createElement(
+      "a",
+      { href, title, target: "_blank", rel: "noopener noreferrer", ...props },
+      children,
     );
   },
   img({ alt }) {
@@ -236,7 +227,7 @@ export function Markdown({
       ? [remarkGfm, createIssueRefPlugin(issueRefs)]
       : [remarkGfm];
   return (
-    <Stack gap={0} className="markdown-body" data-markdown>
+    <Stack gap={0} data-markdown="">
       <ReactMarkdown remarkPlugins={plugins} components={components} urlTransform={safeUrl}>
         {children}
       </ReactMarkdown>

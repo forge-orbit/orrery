@@ -47,7 +47,7 @@ describe("HarnessBadge", () => {
     expect(html).toContain('data-harness-brand="codex"');
     expect(html).toContain('data-harness-logo="codex"');
     expect(html).toContain('aria-hidden="true"');
-    expect(html).toContain("<span>codex 0.171.0</span>");
+    expect(html).toContain(">codex 0.171.0</");
     expect(html).not.toContain("<title>");
   });
 
@@ -55,11 +55,11 @@ describe("HarnessBadge", () => {
     const claudeCode = renderToStaticMarkup(<HarnessBadge harness="claude-code" />);
     expect(claudeCode).toContain('data-harness-brand="claude"');
     expect(claudeCode).toContain('data-harness-logo="claude"');
-    expect(claudeCode).toContain("<span>claude-code</span>");
+    expect(claudeCode).toContain(">claude-code</");
 
     const claude = renderToStaticMarkup(<HarnessBadge harness="claude" />);
     expect(claude).toContain('data-harness-logo="claude"');
-    expect(claude).toContain("<span>claude</span>");
+    expect(claude).toContain(">claude</");
   });
 
   it("renders plain text with no logo for unknown or empty harnesses", () => {

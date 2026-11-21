@@ -1,4 +1,5 @@
 import { Heading } from "@astryxdesign/core/Heading";
+import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { Button } from "@astryxdesign/core/Button";
 import { useQueryClient } from "@tanstack/react-query";
@@ -45,7 +46,7 @@ function SetupPage() {
   }
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <Heading level={1} color="inherit">
         Set up Orrery
       </Heading>
@@ -103,6 +104,6 @@ function SetupPage() {
           isLoading={submitting}
         />
       </form>
-    </main>
+    </Stack>
   );
 }

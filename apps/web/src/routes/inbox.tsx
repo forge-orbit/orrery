@@ -43,7 +43,7 @@ export const Route = createFileRoute("/inbox")({
   },
   component: InboxPage,
   errorComponent: () => (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader title="Inbox" />
       <Banner
         container="section"
@@ -52,7 +52,7 @@ export const Route = createFileRoute("/inbox")({
         title="Could not load the inbox"
         description="Check your connection and try reloading."
       />
-    </main>
+    </Stack>
   ),
 });
 
@@ -65,7 +65,7 @@ function InboxPage() {
   const resolved = visible.filter((question) => !isPendingQuestion(question));
 
   return (
-    <main className="inbox-page">
+    <Stack as="main" gap={5} maxWidth="64rem">
       <PageHeader
         title="Inbox"
         badge={open.length > 0 ? `${open.length} pending` : undefined}
@@ -102,7 +102,7 @@ function InboxPage() {
         emptyTitle="No resolved questions"
         emptyDescription="Answered questions and fallback outcomes appear here for reference."
       />
-    </main>
+    </Stack>
   );
 }
 
@@ -118,14 +118,14 @@ function QuestionList({
   emptyDescription: string;
 }) {
   return (
-    <Section className="page-section inbox-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={2}>
-        <div className="section-heading-row">
+        <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
           <Heading level={2} color="inherit">
             {title}
           </Heading>
           <Badge label={questions.length} />
-        </div>
+        </Stack>
         {questions.length === 0 ? (
           <EmptyState
             title={emptyTitle}
@@ -134,11 +134,11 @@ function QuestionList({
             headingLevel={3}
           />
         ) : (
-          <ul className="question-list">
+          <Stack as="ul" gap={3}>
             {questions.map((question) => (
               <QuestionCard key={question.id} question={question} />
             ))}
-          </ul>
+          </Stack>
         )}
       </Stack>
     </Section>
@@ -153,23 +153,23 @@ function QuestionCard({ question }: { question: Question }) {
   const pending = isPendingQuestion(question);
 
   return (
-    <li className="question-list-item" data-question-id={question.id}>
-      <Card className="question-card" data-pending={pending ? "true" : "false"} padding={3}>
-        <Stack direction="horizontal" className="question-context">
+    <Stack as="li" data-question-id={question.id}>
+      <Card data-pending={pending ? "true" : "false"} padding={3}>
+        <Stack direction="horizontal" gap={1} justify="between" align="center" wrap="wrap">
           <Link
             to="/issues/$issueId"
             params={{ issueId: question.issueId }}
             search={{ inspector: true }}
           >
             {project !== undefined && issue !== undefined && (
-              <Text type="inherit" color="inherit" className="issue-key">
+              <Text type="code" color="inherit">
                 {project.key}-{issue.number}
               </Text>
             )}
             {issue?.title ?? "View issue"}
           </Link>
           {run !== undefined && (
-            <Text type="inherit" color="inherit" className="agent-byline">
+            <Text type="supporting" color="secondary">
               Asked by {run.agentName}
             </Text>
           )}
@@ -179,7 +179,7 @@ function QuestionCard({ question }: { question: Question }) {
           <AnswerForm question={question} />
         )}
       </Card>
-    </li>
+    </Stack>
   );
 }
 
@@ -219,11 +219,7 @@ function AnswerForm({ question }: { question: Question }) {
   }
 
   return (
-    <form
-      className="answer-form"
-      onSubmit={(event) => void onSubmit(event)}
-      aria-label="Answer agent question"
-    >
+    <form onSubmit={(event) => void onSubmit(event)} aria-label="Answer agent question">
       <IssueMentionTextArea
         label="Answer"
         id={`answer-${question.id}`}

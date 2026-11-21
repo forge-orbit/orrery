@@ -141,7 +141,7 @@ function ProjectPage() {
   const activeTab: ProjectTab = tab === "settings" && !canManage ? "issues" : tab;
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link
@@ -169,7 +169,7 @@ function ProjectPage() {
               to="/board/$projectId"
               params={{ projectId: project.id }}
               color="inherit"
-              data-board-link
+              data-board-link=""
             >
               Board
             </Link>
@@ -178,7 +178,7 @@ function ProjectPage() {
                 to="/trash/$projectId"
                 params={{ projectId: project.id }}
                 color="inherit"
-                data-trash-link
+                data-trash-link=""
               >
                 Trash
               </Link>
@@ -244,9 +244,9 @@ function ProjectPage() {
       </TabList>
 
       {activeTab === "issues" && (
-        <section id="panel-issues" role="tabpanel" className="tab-panel">
+        <section id="panel-issues" role="tabpanel">
           {issues.length === 0 ? (
-            <Stack className="empty-panel">
+            <Stack padding={4}>
               <EmptyState
                 title="No issues yet"
                 description="Create your first issue or open the Board to start staging work."
@@ -264,7 +264,7 @@ function ProjectPage() {
               />
             </Stack>
           ) : (
-            <Section className="page-section" padding={3}>
+            <Section padding={3}>
               <Table aria-label="Project issues">
                 <TableHeader>
                   <TableRow>
@@ -280,7 +280,8 @@ function ProjectPage() {
                       <TableCell>
                         <Text
                           as="span"
-                          className="issue-key"
+                          type="supporting"
+                          color="secondary"
                           data-issue-identifier={issue.identifier}
                         >
                           {issue.identifier}
@@ -288,11 +289,7 @@ function ProjectPage() {
                       </TableCell>
                       <TableCell>
                         <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-                          <Link
-                            to="/issues/$issueId"
-                            params={{ issueId: issue.id }}
-                            className="row-item-title"
-                          >
+                          <Link to="/issues/$issueId" params={{ issueId: issue.id }}>
                             {issue.title}
                           </Link>
                           {issue.labels.map((label) => (
@@ -330,10 +327,10 @@ function ProjectPage() {
       )}
 
       {activeTab === "knowledge" && (
-        <section id="panel-knowledge" role="tabpanel" className="tab-panel">
-          <Section className="page-section" padding={3}>
+        <section id="panel-knowledge" role="tabpanel">
+          <Section padding={3}>
             <Stack gap={3}>
-              <Stack direction="horizontal" className="section-toolbar">
+              <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
                 <Heading level={2} color="inherit">
                   Knowledge
                 </Heading>
@@ -376,11 +373,7 @@ function ProjectPage() {
                     {knowledge.map((entry) => (
                       <TableRow key={entry.id} data-knowledge-id={entry.id}>
                         <TableCell>
-                          <Link
-                            to="/knowledge/$entryId"
-                            params={{ entryId: entry.id }}
-                            className="row-item-title"
-                          >
+                          <Link to="/knowledge/$entryId" params={{ entryId: entry.id }}>
                             {entry.title}
                           </Link>
                         </TableCell>
@@ -410,19 +403,19 @@ function ProjectPage() {
       )}
 
       {activeTab === "labels" && (
-        <section id="panel-labels" role="tabpanel" className="tab-panel">
+        <section id="panel-labels" role="tabpanel">
           <ProjectLabels projectId={project.id} labels={labels} canContribute={canContribute} />
         </section>
       )}
 
       {activeTab === "activity" && (
-        <section id="panel-activity" role="tabpanel" className="tab-panel">
+        <section id="panel-activity" role="tabpanel">
           <Activity projectId={project.id} />
         </section>
       )}
 
       {activeTab === "settings" && canManage && (
-        <section id="panel-settings" role="tabpanel" className="tab-panel">
+        <section id="panel-settings" role="tabpanel">
           <Stack gap={3}>
             <ProjectSettings key={`${project.name}:${project.fallbackPolicy}`} project={project} />
             {project.workspaceKind === "shared" && <ProjectAccess projectId={project.id} />}
@@ -484,7 +477,7 @@ function ProjectPage() {
           </Layout>
         </Drawer>
       )}
-    </main>
+    </Stack>
   );
 }
 
@@ -537,7 +530,7 @@ function ProjectSettings({ project }: { project: Project }) {
   }
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={4}>
         <Stack gap={2}>
           <Heading level={2} color="inherit">
@@ -683,7 +676,7 @@ function ProjectAccess({ projectId }: { projectId: string }) {
   }
 
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Stack gap={3}>
         <Heading level={2} color="inherit">
           Project access
@@ -881,13 +874,13 @@ function Activity({ projectId }: { projectId: string }) {
   const { data: activity } = useSuspenseQuery(projectActivityQuery(projectId));
   if (activity.length === 0) {
     return (
-      <Stack className="empty-panel">
+      <Stack padding={4}>
         <EmptyState title="No activity yet" headingLevel={3} />
       </Stack>
     );
   }
   return (
-    <Section className="page-section" padding={3}>
+    <Section padding={3}>
       <Table aria-label="Project activity">
         <TableHeader>
           <TableRow>

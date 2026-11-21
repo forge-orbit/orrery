@@ -2,6 +2,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
@@ -39,24 +40,9 @@ export const Route = createFileRoute("/workspace-invitation")({
   errorComponent: ({ error }) => <InvitationLoadError error={error} />,
 });
 
-function ClockIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="8" r="5.8" stroke="currentColor" strokeWidth="1.35" />
-      <path
-        d="M8 4.8V8l2.2 1.4"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function InvalidInvitationLink() {
   return (
-    <main className="invitation-main">
+    <Stack as="main" gap={5}>
       <Stack gap={3}>
         <Heading level={1} color="inherit">
           Workspace invitation
@@ -70,7 +56,7 @@ function InvalidInvitationLink() {
           <Link to="/">Go to your workspaces</Link>
         </Text>
       </Stack>
-    </main>
+    </Stack>
   );
 }
 
@@ -79,7 +65,7 @@ function InvitationLoadError({ error }: { error: unknown }) {
   if (invalid) return <InvalidInvitationLink />;
   const stale = error instanceof ApiProblemError && error.code === "invitation_scope_invalid";
   return (
-    <main className="invitation-main">
+    <Stack as="main" gap={5}>
       <Stack gap={3}>
         <Heading level={1} color="inherit">
           Workspace invitation
@@ -97,7 +83,7 @@ function InvitationLoadError({ error }: { error: unknown }) {
           <Link to="/">Go to your workspaces</Link>
         </Text>
       </Stack>
-    </main>
+    </Stack>
   );
 }
 
@@ -105,7 +91,7 @@ function WorkspaceInvitationPage() {
   const { token } = Route.useSearch();
   if (token === "") {
     return (
-      <main className="invitation-main">
+      <Stack as="main" gap={5}>
         <Stack gap={3}>
           <Heading level={1} color="inherit">
             Workspace invitation
@@ -116,7 +102,7 @@ function WorkspaceInvitationPage() {
             title="This invitation link is incomplete. Ask for a fresh invitation."
           />
         </Stack>
-      </main>
+      </Stack>
     );
   }
   if (!WorkspaceInvitationToken.safeParse(token).success) {
@@ -127,21 +113,21 @@ function WorkspaceInvitationPage() {
 
 function InvitationHeader({ preview }: { preview: WorkspaceInvitationPreview }) {
   return (
-    <header className="invitation-header">
-      <span className="invitation-eyebrow">
-        <span className="invitation-workspace-badge" aria-hidden="true">
+    <Stack as="header" gap={2}>
+      <Text as="span" type="supporting" weight="medium">
+        <Text as="span" weight="semibold" aria-hidden="true">
           {preview.workspaceName.slice(0, 1).toUpperCase()}
-        </span>
+        </Text>
         Workspace invitation
-      </span>
+      </Text>
       <Heading level={1} color="inherit">
         Join {preview.workspaceName}
       </Heading>
-      <p className="invitation-lead">
+      <Text as="p" display="block" type="supporting">
         {preview.invitedByEmail} invited <strong>{preview.email}</strong> to{" "}
         <strong>{preview.workspaceName}</strong>.
-      </p>
-    </header>
+      </Text>
+    </Stack>
   );
 }
 
@@ -170,46 +156,40 @@ function Invitation({ token }: { token: string }) {
   if (!session.signedIn) {
     if (preview.accountExists) {
       return (
-        <main className="invitation-main">
+        <Stack as="main" gap={5}>
           <InvitationHeader preview={preview} />
           <InvitationScope preview={preview} />
-          <Text
-            as="p"
-            display="block"
-            type="supporting"
-            color="secondary"
-            className="invitation-note"
-          >
+          <Text as="p" display="block" type="supporting" color="secondary">
             Sign in with {preview.email} to join the workspace.
           </Text>
-          <div className="invitation-actions">
+          <Stack gap={2}>
             <Link
               to="/signin"
               search={{ next: `/workspace-invitation?token=${token}` }}
               color="inherit"
-              className="invitation-primary-link"
+              weight="semibold"
             >
               Sign in
             </Link>
             <DeclineInvitation token={token} />
-          </div>
-        </main>
+          </Stack>
+        </Stack>
       );
     }
 
     return (
-      <main className="invitation-main">
+      <Stack as="main" gap={5}>
         <InvitationHeader preview={preview} />
         <InvitationScope preview={preview} />
         <NewAccountForm token={token} />
         <DeclineInvitation token={token} />
-      </main>
+      </Stack>
     );
   }
 
   if (session.email !== preview.email) {
     return (
-      <main className="invitation-main">
+      <Stack as="main" gap={5}>
         <InvitationHeader preview={preview} />
         <InvitationScope preview={preview} />
         <Banner
@@ -217,7 +197,7 @@ function Invitation({ token }: { token: string }) {
           role="alert"
           title={`This invitation was sent to ${preview.email}, but you are signed in as ${session.email}. Sign in with the invited account to accept it.`}
         />
-        <div className="invitation-actions">
+        <Stack gap={2}>
           <Button
             type="button"
             variant="primary"
@@ -227,13 +207,13 @@ function Invitation({ token }: { token: string }) {
             isLoading={switchAccount.isPending}
             onClick={() => switchAccount.mutate()}
           />
-          <div className="invitation-secondary-action">
+          <Stack gap={2} align="center">
             <Link to="/" color="secondary">
               Go to your workspaces
             </Link>
-          </div>
-        </div>
-      </main>
+          </Stack>
+        </Stack>
+      </Stack>
     );
   }
 
@@ -243,47 +223,51 @@ function Invitation({ token }: { token: string }) {
 function InvitationScope({ preview }: { preview: WorkspaceInvitationPreview }) {
   const projects = preview.grants.filter((grant) => grant.kind === "project_access");
   return (
-    <section className="invitation-summary" aria-label="Invitation details">
-      <div className="invitation-summary-row">
-        <span className="invitation-summary-label">Access</span>
-        <div className="invitation-summary-value">
-          <p className="invitation-summary-primary">Offered access: workspace membership.</p>
-          <p className="invitation-summary-note">
+    <Stack as="section" gap={3} padding={3} aria-label="Invitation details">
+      <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+        <Text as="span" type="supporting" weight="medium">
+          Access
+        </Text>
+        <Stack gap={1}>
+          <Text as="p" display="block" weight="medium">
+            Offered access: workspace membership.
+          </Text>
+          <Text as="p" display="block" type="supporting">
             Workspace membership alone does not grant project access.
-          </p>
-        </div>
-      </div>
+          </Text>
+        </Stack>
+      </Stack>
 
-      <div className="invitation-summary-row">
-        <span className="invitation-summary-label">Projects</span>
+      <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+        <Text as="span" type="supporting" weight="medium">
+          Projects
+        </Text>
         {projects.length > 0 ? (
-          <ul className="invitation-grant-list" aria-label="Project access">
+          <Stack as="ul" direction="horizontal" gap={2} wrap="wrap" aria-label="Project access">
             {projects.map((grant) => (
-              <li
-                key={grant.projectId}
-                data-project-grant-id={grant.projectId}
-                className="invitation-grant-chip"
-              >
+              <Stack as="li" key={grant.projectId} data-project-grant-id={grant.projectId}>
                 {grant.projectName}: {grant.level}
-              </li>
+              </Stack>
             ))}
-          </ul>
+          </Stack>
         ) : (
-          <p className="invitation-summary-note">No projects included in this invitation.</p>
+          <Text as="p" display="block" type="supporting">
+            No projects included in this invitation.
+          </Text>
         )}
-      </div>
+      </Stack>
 
-      <div className="invitation-summary-footer">
-        <ClockIcon />
-        <span>
+      <Stack direction="horizontal" gap={2} vAlign="center" padding={3}>
+        <Icon icon="clock" size="xsm" aria-hidden="true" />
+        <Text as="span" type="supporting">
           This invitation expires{" "}
           <time dateTime={preview.expiresAt} title={formatFullDateTime(preview.expiresAt)}>
             {formatDateTime(preview.expiresAt)} ({relativeCountdown(preview.expiresAt)})
           </time>
           .
-        </span>
-      </div>
-    </section>
+        </Text>
+      </Stack>
+    </Stack>
   );
 }
 
@@ -324,7 +308,7 @@ function DeclineInvitation({ token }: { token: string }) {
   }
 
   return (
-    <div className="invitation-decline">
+    <Stack gap={2} align="center">
       <Button
         type="button"
         onClick={() => setConfirmOpen(true)}
@@ -344,7 +328,7 @@ function DeclineInvitation({ token }: { token: string }) {
         isActionLoading={submitting}
         onAction={() => void onDecline()}
       />
-    </div>
+    </Stack>
   );
 }
 
@@ -379,15 +363,15 @@ function AcceptInvitation({
   }
 
   return (
-    <main className="invitation-main">
+    <Stack as="main" gap={5}>
       <InvitationHeader preview={preview} />
       <InvitationScope preview={preview} />
-      <Text as="p" display="block" type="supporting" color="secondary" className="invitation-note">
+      <Text as="p" display="block" type="supporting" color="secondary">
         You are signed in as {preview.email}. Accepting adds this shared workspace to your own
         workspace list.
       </Text>
       {error !== undefined && <Banner status="error" role="alert" title={error} />}
-      <div className="invitation-actions">
+      <Stack gap={2}>
         <Button
           type="button"
           onClick={() => void onAccept()}
@@ -399,8 +383,8 @@ function AcceptInvitation({
           width="100%"
         />
         <DeclineInvitation token={token} />
-      </div>
-    </main>
+      </Stack>
+    </Stack>
   );
 }
 
@@ -459,15 +443,15 @@ function NewAccountForm({ token }: { token: string }) {
   }
 
   return (
-    <form className="invitation-form" onSubmit={(event) => void onSubmit(event)}>
-      <div className="invitation-form-heading">
+    <form onSubmit={(event) => void onSubmit(event)}>
+      <Stack gap={1}>
         <Heading level={2} color="inherit">
           Create your account
         </Heading>
         <Text as="p" display="block" type="supporting" color="secondary">
           Choose a password to create your account and join this workspace.
         </Text>
-      </div>
+      </Stack>
       <TextField
         label="Password"
         description="At least 8 characters."

@@ -1,4 +1,5 @@
 import { Heading } from "@astryxdesign/core/Heading";
+import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { Link } from "../../lib/Link.tsx";
 import { ApiProblemError } from "../../lib/api.ts";
@@ -20,7 +21,7 @@ export function ResourceLoadError({ resource, error }: { resource: Resource; err
 
   if (error instanceof ApiProblemError && error.status === 401) {
     return (
-      <main>
+      <Stack as="main">
         <Heading level={1} color="inherit">
           {title}
         </Heading>
@@ -30,13 +31,13 @@ export function ResourceLoadError({ resource, error }: { resource: Resource; err
         <Text as="p" display="block" type="inherit" color="inherit">
           <Link to="/signin">Sign in</Link>
         </Text>
-      </main>
+      </Stack>
     );
   }
 
   if (error instanceof ApiProblemError && error.status === 404) {
     return (
-      <main>
+      <Stack as="main">
         <Heading level={1} color="inherit">
           {title}
         </Heading>
@@ -46,13 +47,13 @@ export function ResourceLoadError({ resource, error }: { resource: Resource; err
         <Text as="p" display="block" type="inherit" color="inherit">
           <Link to="/">Go to your workspaces</Link>
         </Text>
-      </main>
+      </Stack>
     );
   }
 
   if (error instanceof ApiProblemError && error.status === 403) {
     return (
-      <main>
+      <Stack as="main">
         <Heading level={1} color="inherit">
           {title}
         </Heading>
@@ -62,18 +63,18 @@ export function ResourceLoadError({ resource, error }: { resource: Resource; err
         <Text as="p" display="block" type="inherit" color="inherit">
           <Link to="/">Go to your workspaces</Link>
         </Text>
-      </main>
+      </Stack>
     );
   }
 
   return (
-    <main>
+    <Stack as="main">
       <Heading level={1} color="inherit">
         {title}
       </Heading>
       <Text as="p" display="block" type="inherit" color="inherit" role="alert">
         Could not load this {noun}. Check your connection and try again.
       </Text>
-    </main>
+    </Stack>
   );
 }

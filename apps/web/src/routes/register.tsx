@@ -85,7 +85,7 @@ function RegisterPage() {
 
   if (createdEmail !== undefined) {
     return (
-      <main>
+      <Stack as="main" gap={5}>
         <Heading level={1} color="inherit">
           Accept your invitation
         </Heading>
@@ -97,13 +97,13 @@ function RegisterPage() {
         <Text as="p" display="block" type="supporting">
           <Link to="/signin">Sign in</Link> with the password you chose.
         </Text>
-      </main>
+      </Stack>
     );
   }
 
   if (declined) {
     return (
-      <main>
+      <Stack as="main" gap={5}>
         <Heading level={1} color="inherit">
           Accept your invitation
         </Heading>
@@ -115,13 +115,13 @@ function RegisterPage() {
         <Text as="p" display="block" type="supporting">
           <Link to="/">Go to Orrery</Link>
         </Text>
-      </main>
+      </Stack>
     );
   }
 
   if (token === "") {
     return (
-      <main>
+      <Stack as="main" gap={5}>
         <Heading level={1} color="inherit">
           Accept your invitation
         </Heading>
@@ -130,12 +130,12 @@ function RegisterPage() {
           role="alert"
           title="This invitation link is incomplete. Ask for a fresh invitation."
         />
-      </main>
+      </Stack>
     );
   }
 
   return (
-    <main>
+    <Stack as="main" gap={5}>
       <Heading level={1} color="inherit">
         Accept your invitation
       </Heading>
@@ -170,7 +170,7 @@ function RegisterPage() {
           />
         </Stack>
       </form>
-      <div className="invitation-decline">
+      <Stack gap={2} align="center">
         <Button
           type="button"
           onClick={() => setConfirmDeclineOpen(true)}
@@ -179,7 +179,7 @@ function RegisterPage() {
           variant="ghost"
           size="sm"
         />
-      </div>
+      </Stack>
 
       <AlertDialog
         isOpen={confirmDeclineOpen}
@@ -191,6 +191,6 @@ function RegisterPage() {
         isActionLoading={declining}
         onAction={() => void onDecline()}
       />
-    </main>
+    </Stack>
   );
 }
