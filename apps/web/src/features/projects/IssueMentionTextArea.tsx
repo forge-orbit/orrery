@@ -98,6 +98,7 @@ export function IssueMentionTextArea({
           setSelectedIndex(0);
         }}
         rows={rows}
+        width="100%"
         {...(required === true ? { required: true } : {})}
         {...(placeholder !== undefined
           ? { placeholder }
