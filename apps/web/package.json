@@ -4,6 +4,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
+    "astryx": "node node_modules/@astryxdesign/cli/clients/cli/bin/astryx.mjs",
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc -p .",
