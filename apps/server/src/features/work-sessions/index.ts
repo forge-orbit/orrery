@@ -13,7 +13,7 @@ import { createSessionsMcp } from "./mcp.ts";
 import { createSessionsRest, routes } from "./rest.ts";
 
 export { routes as sessionsRoutes };
-export { SessionsError } from "./service.ts";
+export { releaseIssueWorkSessions, SessionsError } from "./service.ts";
 export type { SessionsErrorKind, SessionsService } from "./service.ts";
 
 export type SessionsFeatureDeps = SessionsDeps & {

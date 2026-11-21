@@ -20,7 +20,11 @@ import { createSettingsFeature, settingsRoutes } from "./settings/index.ts";
 import { createSystemFeature, systemRoutes } from "./system/index.ts";
 import { createTransfersFeature, transfersRoutes } from "./transfers/index.ts";
 import { createWebhooksFeature, webhooksRoutes } from "./webhooks/index.ts";
-import { createSessionsFeature, sessionsRoutes } from "./work-sessions/index.ts";
+import {
+  createSessionsFeature,
+  releaseIssueWorkSessions,
+  sessionsRoutes,
+} from "./work-sessions/index.ts";
 import { createWorkspacesFeature, workspacesRoutes } from "./workspaces/index.ts";
 
 export function createFeatures(database: Database, config: Config, log: Logger): Feature[] {
@@ -88,6 +92,7 @@ export function createFeatures(database: Database, config: Config, log: Logger):
     agentAuthenticator,
     sessionGate: workSessionGate,
     issueSessionGate,
+    releaseIssueWorkSessions,
 
     evaluateQuestionDeadline: evaluateDeadline,
     onActivity: webhooks.enqueueForActivity,

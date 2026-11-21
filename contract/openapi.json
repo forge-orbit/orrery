@@ -8442,7 +8442,7 @@
             }
           },
           "409": {
-            "description": "The parent already has a parent or has subtasks of its own, or the agent holds no live work session for this issue",
+            "description": "The parent already has a parent or has subtasks of its own, the agent holds no live work session for this issue, or an unanswered question blocks moving the issue to review or closing it",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10857,7 +10857,7 @@
             }
           },
           "409": {
-            "description": "This agent holds no live session for this issue",
+            "description": "This agent holds no live session for this issue, the issue is waiting on human input, or the issue is no longer in progress",
             "content": {
               "application/problem+json": {
                 "schema": {

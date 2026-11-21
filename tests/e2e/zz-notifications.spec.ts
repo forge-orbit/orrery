@@ -130,6 +130,7 @@ test("notification creation, unread count, mark-read and mark-all-read", async (
     data: { issueId, runId, question: "Which endpoint?", proposedFallback: "Use v1" },
   });
   expect(asked.status()).toBe(201);
+  const questionId = idOf(await asked.json(), "question");
 
   await expect
     .poll(async () => (await feed(api)).unreadCount, { timeout: 15_000 })
@@ -137,6 +138,11 @@ test("notification creation, unread count, mark-read and mark-all-read", async (
   let current = await feed(api);
   expect(current.items.some((item) => item.kind === "needs_input")).toBe(true);
   const countAfterQuestion = current.unreadCount;
+
+  const answered = await api.post(`/api/questions/${questionId}/answer`, {
+    data: { answer: "Use v2" },
+  });
+  expect(answered.status()).toBe(200);
 
   const stop = await agentApi.post(`/api/issues/${issueId}/work-sessions/stop`, {
     headers: bearer,

@@ -154,14 +154,17 @@ test("sidebar badge, notification rows, mark-read, and mark-all-read", async ({ 
   ).toBe(201);
 
   const question = `Which endpoint should we use ${randomUUID()}?`;
+  const asked = await agentApi.post("/api/questions", {
+    headers,
+    data: { issueId, runId, question, proposedFallback: "Use v1" },
+  });
+  expect(asked.status()).toBe(201);
+  const questionId = idOf(await asked.json(), "question");
   expect(
     (
-      await agentApi.post("/api/questions", {
-        headers,
-        data: { issueId, runId, question, proposedFallback: "Use v1" },
-      })
+      await api.post(`/api/questions/${questionId}/answer`, { data: { answer: "Use v2" } })
     ).status(),
-  ).toBe(201);
+  ).toBe(200);
   expect(
     (
       await agentApi.post(`/api/issues/${issueId}/work-sessions/stop`, {

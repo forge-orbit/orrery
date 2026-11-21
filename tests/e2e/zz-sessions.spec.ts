@@ -166,8 +166,6 @@ test("fenced writes need a live session; reads, creation, comments and knowledge
     expect((await call(client, "update_issue", { issueId, title: "With a session" })).isError).toBe(
       false,
     );
-    expect((await call(client, "update_issue", { issueId, status: "done" })).isError).toBe(false);
-    expect((await call(client, "update_issue", { issueId, status: "todo" })).isError).toBe(false);
     expect((await call(client, "renew_claim", { issueId })).isError).toBe(false);
     const progress = await call(client, "report_progress", { issueId, summary: "Halfway" });
     expect(progress.isError).toBe(false);

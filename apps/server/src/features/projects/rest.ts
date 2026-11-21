@@ -373,7 +373,7 @@ const updateIssue = createRoute({
       "No issue with this id is accessible to the caller, or the assignee is unknown or inactive in the workspace",
     ),
     409: problem(
-      "The parent already has a parent or has subtasks of its own, or the agent holds no live work session for this issue",
+      "The parent already has a parent or has subtasks of its own, the agent holds no live work session for this issue, or an unanswered question blocks moving the issue to review or closing it",
     ),
   },
 });
@@ -896,6 +896,7 @@ const statusFor = {
   subtask_depth_exceeded: 409,
   agents_cannot_delete_issues: 403,
   issue_active_session_exists: 409,
+  issue_needs_input: 409,
   issue_purged: 409,
 } as const satisfies Record<ProjectsErrorKind, number>;
 
@@ -927,6 +928,7 @@ const issueWriteKinds = [
   ...issueReadKinds,
   "insufficient_project_access",
   "session_required",
+  "issue_needs_input",
   "assignee_not_found",
   "self_parent",
   "cross_project_parent",

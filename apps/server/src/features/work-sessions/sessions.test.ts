@@ -41,7 +41,12 @@ import { tokenHash } from "../../platform/tokens.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
 import { createAgentsFeature, type AgentAuthenticator } from "../agents/index.ts";
 import { createProjectsFeature, ProjectsError, type WorkSessionGate } from "../projects/index.ts";
-import { createSessionsFeature, SessionsError, type SessionsService } from "./index.ts";
+import {
+  createSessionsFeature,
+  releaseIssueWorkSessions,
+  SessionsError,
+  type SessionsService,
+} from "./index.ts";
 
 const SECRET = "correct horse battery staple staple";
 const ADMIN_EMAIL = "sessions-admin@example.com";
@@ -123,6 +128,7 @@ beforeAll(async () => {
       if (gate === undefined) throw new Error("work session gate is not wired");
       return gate(tx, agentId, workspaceId, issueId);
     },
+    releaseIssueWorkSessions,
   });
   let liveAuthenticator: AgentAuthenticator | undefined;
   const lateAuth: AgentAuthenticator = (request) => {
@@ -2559,5 +2565,63 @@ describe("cumulative session telemetry and v1 activity blocks (#96)", () => {
       outputTokens: 3,
       costUsdMicros: 42,
     });
+  });
+
+  it("returns 409 Problem Details on REST when stop or status update violates input or workflow guards", async () => {
+    const f = await bootstrap();
+    const identity = await identityFor(f.secret);
+    const issue = await humanIssue(f, "Guarded stop");
+    const runId = await newRun(identity);
+    await sessionsService.claim({ kind: "agent", identity }, { issueId: issue.id, runId });
+
+    await database.db.update(issues).set({ needsInput: true }).where(eq(issues.id, issue.id));
+
+    await expectProblem(
+      await postJson(
+        `/api/issues/${issue.id}/work-sessions/stop`,
+        { outcome: "review" },
+        undefined,
+        f.secret,
+      ),
+      409,
+      "issue_needs_input",
+    );
+    await expectProblem(
+      await postJson(
+        `/api/issues/${issue.id}/work-sessions/stop`,
+        { outcome: "done" },
+        undefined,
+        f.secret,
+      ),
+      409,
+      "issue_needs_input",
+    );
+    await expectProblem(
+      await app.request(`/api/issues/${issue.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie: f.cookie },
+        body: JSON.stringify({ status: "done" }),
+      }),
+      409,
+      "issue_needs_input",
+    );
+
+    // Defense-in-depth: even if status drifted out of in_progress while a session row stayed active,
+    // stop("review") refuses with 409 issue_blocked rather than overwriting the status.
+    await database.db
+      .update(issues)
+      .set({ needsInput: false, status: "done", closedAt: new Date() })
+      .where(eq(issues.id, issue.id));
+    await expectProblem(
+      await postJson(
+        `/api/issues/${issue.id}/work-sessions/stop`,
+        { outcome: "review" },
+        undefined,
+        f.secret,
+      ),
+      409,
+      "issue_blocked",
+    );
+    expect(await activeCount(issue.id)).toBe(1);
   });
 });

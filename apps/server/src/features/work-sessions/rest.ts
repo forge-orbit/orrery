@@ -142,7 +142,9 @@ const stop = createRoute({
     401: problem("An agent key is required, or the key is invalid or revoked"),
     403: problem("Contribute access is required to work on this issue"),
     404: problem("No such issue is in scope for this agent"),
-    409: problem("This agent holds no live session for this issue"),
+    409: problem(
+      "This agent holds no live session for this issue, the issue is waiting on human input, or the issue is no longer in progress",
+    ),
   },
 });
 
@@ -404,6 +406,7 @@ const writeKinds = [
   "insufficient_access",
   "session_required",
 ] as const;
+const stopKinds = [...writeKinds, "issue_needs_input", "issue_blocked"] as const;
 const stopRequestKinds = [
   "human_sign_in_required",
   "agents_cannot_request_stop",
@@ -514,7 +517,7 @@ export function createSessionsRest(
         200,
       );
     } catch (error) {
-      return failure(c, error, writeKinds);
+      return failure(c, error, stopKinds);
     }
   });
 

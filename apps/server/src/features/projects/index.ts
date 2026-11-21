@@ -16,7 +16,13 @@ import { createProjectsRest, routes } from "./rest.ts";
 export { routes as projectsRoutes };
 export { projectAccessAtLeast } from "./service.ts";
 export { ProjectsError } from "./service.ts";
-export type { IssueSessionGate, ProjectsErrorKind, WorkActor, WorkSessionGate } from "./service.ts";
+export type {
+  IssueSessionGate,
+  ProjectsErrorKind,
+  ReleaseIssueWorkSessions,
+  WorkActor,
+  WorkSessionGate,
+} from "./service.ts";
 
 export type ProjectsDepsWithAccounts = ProjectsDeps & {
   sessionReader: SessionReader;
