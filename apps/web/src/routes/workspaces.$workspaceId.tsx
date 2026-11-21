@@ -96,7 +96,12 @@ function changeableCapabilities(
   );
 }
 
-function mayRemove(workspace: Workspace, member: WorkspaceMember): boolean {
+function mayRemove(
+  workspace: Workspace,
+  member: WorkspaceMember,
+  ownEmail: string | undefined,
+): boolean {
+  if (member.email === ownEmail) return false;
   if (!workspace.isOwner && !workspace.canRemoveMembers) return false;
   return workspace.isOwner || (!member.isOwner && !member.canManageMemberPermissions);
 }
@@ -594,12 +599,12 @@ function WorkspaceMembers({
           </TableHeader>
           <TableBody>
             {members.map((member) => {
+              const isSelf = member.email === ownEmail;
               const editableCaps = changeableCapabilities(workspace, member, ownEmail);
               const grantedCaps = workspaceCapabilities.filter((capability) => member[capability]);
               const canAppoint = !member.isOwner && workspace.isOwner;
-              const canRemove = mayRemove(workspace, member);
+              const canRemove = mayRemove(workspace, member, ownEmail);
               const hasActions = editableCaps.length > 0 || canAppoint || canRemove;
-              const isSelf = member.email === ownEmail;
 
               return (
                 <TableRow key={member.humanId} data-member-id={member.humanId}>

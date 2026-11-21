@@ -1273,6 +1273,8 @@ test("a delegated member sees only the controls within their authority in the br
   await page.getByRole("tab", { name: "Members" }).click();
   await expect(page.getByRole("button", { name: "Invite member", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Invitation history" })).toBeVisible();
+  const selfRow = page.locator("[data-member-id]").filter({ hasText: memberEmail });
+  await expect(selfRow.getByRole("button", { name: "Remove member", exact: true })).toHaveCount(0);
   const peerRow = page.locator("[data-member-id]").filter({ hasText: otherEmail });
   await expect(peerRow.getByRole("button", { name: "Remove member", exact: true })).toBeVisible();
   await peerRow.getByRole("button", { name: "Permissions" }).click();
@@ -1292,6 +1294,14 @@ test("a delegated member sees only the controls within their authority in the br
     await adminPage.goto(`/workspaces/${workspaceId}`);
     await adminPage.getByRole("tab", { name: "Members" }).click();
     await expect(adminPage.getByRole("button", { name: "Make owner" }).first()).toBeVisible();
+    const adminSelfRow = adminPage.locator("[data-member-id]").filter({ hasText: ADMIN_EMAIL });
+    await expect(
+      adminSelfRow.getByRole("button", { name: "Remove member", exact: true }),
+    ).toHaveCount(0);
+    const adminPeerRow = adminPage.locator("[data-member-id]").filter({ hasText: otherEmail });
+    await expect(
+      adminPeerRow.getByRole("button", { name: "Remove member", exact: true }),
+    ).toBeVisible();
   } finally {
     for (const cookie of await adminBrowser.cookies()) await recordSecret(cookie.value);
     await adminBrowser.close();
