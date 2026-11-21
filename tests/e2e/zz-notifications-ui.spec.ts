@@ -204,7 +204,7 @@ test("sidebar badge, notification rows, mark-read, and mark-all-read", async ({ 
 
     const nav = notificationsNav(page);
     await expect(nav).toBeVisible();
-    expect(await badgeCount(page)).toBeGreaterThan(0);
+    await expect.poll(() => badgeCount(page)).toBeGreaterThan(0);
 
     await nav.click();
     await expect(page).toHaveURL(/\/notifications/);
