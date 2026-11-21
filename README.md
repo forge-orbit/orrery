@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="#roadmap"><img src="https://img.shields.io/badge/status-active%20MVP-2ea043?style=flat-square" alt="Status: active MVP"></a>
+  <a href="#roadmap"><img src="https://img.shields.io/badge/status-MVP%20complete-2ea043?style=flat-square" alt="Status: MVP complete"></a>
   <img src="https://img.shields.io/badge/stack-TypeScript%20%7C%20Node%2026%20%7C%20Postgres%2018-3178c6?style=flat-square" alt="Stack: TypeScript, Node 26, Postgres 18">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License: AGPL-3.0"></a>
 </p>
@@ -30,10 +30,9 @@
   <a href="#contributing">Contributing</a>
 </p>
 
-> **Status: active MVP.** M0–M4 and M6 (in-app notifications, workspace-scoped outgoing webhooks,
+> **Status: MVP complete.** M0–M4 and M6 (in-app notifications, workspace-scoped outgoing webhooks,
 > operator/agent guides, and GHCR GitHub Releases) are complete and runnable today from the
-> published image with `docker compose pull && docker compose up -d`. The
-> [Shared vault (M5, #6)](https://github.com/forge-orbit/orrery/issues/6) is planned next. See the
+> published image with `docker compose pull && docker compose up -d`. See the
 > [roadmap](#roadmap) and the [install guide](docs/guides/install.md).
 
 ---
@@ -230,9 +229,9 @@ The same operations are available over REST.
 | --- | --- |
 | `orrery_run_checkin` | Check in a Harness conversation by `runId` or `(harness, nativeSessionId)`; report model and harness version |
 
-> Vault MCP tools for the Markdown vault — search, `[[wikilinks]]` and backlinks — arrive with the
-> Shared vault in [M5 (#6)](https://github.com/forge-orbit/orrery/issues/6). Today's `*_knowledge`
-> tools cover structured project knowledge, not the Markdown vault.
+> Today's `*_knowledge` tools cover lightweight project-scoped Markdown knowledge. Post-MVP
+> agent-memory upgrades — Postgres full-text search (`search_knowledge`), doc↔issue linking, and
+> delete/trash — are proposed in [#140](https://github.com/forge-orbit/orrery/issues/140).
 
 ## Connect Claude Code / Codex
 
@@ -323,8 +322,9 @@ delivery guarantees.
 
 ## Roadmap
 
-Milestones are tracked as GitHub epics. M0–M4 and M6 are complete and live today; M5 (Shared vault)
-is planned next.
+Milestones are tracked as GitHub epics. The MVP (M0–M4 and M6) is complete and live today; the
+Obsidian-like Shared vault (M5, [#6](https://github.com/forge-orbit/orrery/issues/6)) was dropped
+as not planned to keep Orrery focused on agent-first project management.
 
 - [x] [#1](https://github.com/forge-orbit/orrery/issues/1) **M0 — Foundation.** Docker Compose, CI,
   first-run bootstrap, encrypted SMTP settings.
@@ -342,16 +342,20 @@ is planned next.
 - [x] [#5](https://github.com/forge-orbit/orrery/issues/5) **M4 — Board, agents panel & needs-input
   inbox.** Six-column board, labels/subtasks/trash, rich sidecar inspector, and the cross-workspace
   My work view (`GET /api/my-work`).
-- [ ] [#6](https://github.com/forge-orbit/orrery/issues/6) **M5 — Shared vault.** Obsidian-like
-  Markdown vault, `[[wikilinks]]`, backlinks, FTS.
+- [ ] ~~[#6](https://github.com/forge-orbit/orrery/issues/6) **M5 — Shared vault.**~~ *Dropped (not
+  planned) — replaced by lightweight post-MVP agent-memory upgrades in
+  [#140](https://github.com/forge-orbit/orrery/issues/140).*
 - [x] [#7](https://github.com/forge-orbit/orrery/issues/7) **M6 — Release polish.** Proactive expiry
   sweeper, in-app notifications (`/notifications` + unread badge), workspace-scoped outgoing
   webhooks with transactional outbox, HMAC-SHA256 signing & SSRF guard, operator/agent guides
   ([install](docs/guides/install.md), [backup/restore](docs/guides/backup-and-restore.md),
   [connect an agent](docs/guides/connect-agent.md)), and GHCR GitHub Releases.
 
-Looking further ahead: [#15](https://github.com/forge-orbit/orrery/issues/15) Agent-customizable UI —
-slots, panels, views and rich content.
+Looking further ahead (post-MVP proposals):
+[#140](https://github.com/forge-orbit/orrery/issues/140) agent-memory upgrades for project
+knowledge (FTS search, doc↔issue linking, delete/trash),
+[#15](https://github.com/forge-orbit/orrery/issues/15) agent-customizable UI (remaining rich blocks,
+slots, panels, views), and [#14](https://github.com/forge-orbit/orrery/issues/14) plugin system.
 
 ## Contributing
 
