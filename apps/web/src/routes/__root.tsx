@@ -2,7 +2,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
+import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -187,8 +187,10 @@ function RootLayout() {
         <AppearancePicker />
       </header>
       <aside className="app-sidebar">
-        <BrandHome />
-        <SidebarLinks />
+        <div className="sidebar-body">
+          <BrandHome />
+          <SidebarLinks />
+        </div>
         <SidebarFooter />
       </aside>
       <Drawer
@@ -201,11 +203,15 @@ function RootLayout() {
         <Layout
           height="fill"
           header={<DrawerHeader title="Orrery" onOpenChange={setMobileNavOpen} hasDivider />}
+          footer={
+            <LayoutFooter hasDivider className="mobile-drawer-footer">
+              <SidebarFooter onNavigate={() => setMobileNavOpen(false)} showAppearance={false} />
+            </LayoutFooter>
+          }
         >
           <LayoutContent>
             <Stack className="mobile-drawer-nav">
               <SidebarLinks onNavigate={() => setMobileNavOpen(false)} />
-              <SidebarFooter onNavigate={() => setMobileNavOpen(false)} showAppearance={false} />
             </Stack>
           </LayoutContent>
         </Layout>
@@ -523,6 +529,7 @@ function ForgeOrbitAttribution({ className }: { className?: string }) {
         href="https://github.com/forge-orbit"
         target="_blank"
         rel="noopener noreferrer"
+        type="inherit"
         color="inherit"
         hasUnderline
       >
