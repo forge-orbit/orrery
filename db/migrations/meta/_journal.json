@@ -309,6 +309,13 @@
       "when": 1795266457982,
       "tag": "0043_round_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795358865767,
+      "tag": "0044_opposite_wendigo",
+      "breakpoints": true
     }
   ]
 }

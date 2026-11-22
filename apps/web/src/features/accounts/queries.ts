@@ -8,7 +8,13 @@ export const setupStatusQuery = queryOptions({
 
 export type Session =
   | { signedIn: false }
-  | { signedIn: true; email: string; displayName: string | null; emailVerified: boolean };
+  | {
+      signedIn: true;
+      email: string;
+      displayName: string | null;
+      emailVerified: boolean;
+      avatarUrl: string | null;
+    };
 
 export const sessionQuery = queryOptions({
   queryKey: ["session"],
@@ -23,6 +29,7 @@ export const sessionQuery = queryOptions({
       email: account.email,
       displayName: account.displayName ?? null,
       emailVerified: account.emailVerified,
+      avatarUrl: account.avatarUrl,
     };
   },
 });

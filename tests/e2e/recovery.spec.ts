@@ -85,7 +85,11 @@ test("delivers a reset link only to a verified address, and GETting it changes n
     data: { token: invitationToken, password: INVITED_PASSWORD },
   });
   expect(registered.status()).toBe(200);
-  expect(await registered.json()).toEqual({ email: RECOVERED_EMAIL, emailVerified: true });
+  expect(await registered.json()).toEqual({
+    email: RECOVERED_EMAIL,
+    emailVerified: true,
+    avatarUrl: null,
+  });
 
   const requested = await api.post("/api/auth/password-reset/request", {
     data: { email: RECOVERED_EMAIL },

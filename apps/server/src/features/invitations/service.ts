@@ -211,7 +211,7 @@ export interface InvitationsService {
   registerInstallation(input: {
     token: string;
     password: string;
-  }): Promise<{ email: string; emailVerified: true }>;
+  }): Promise<{ email: string; emailVerified: true; avatarUrl: null }>;
 }
 
 export function createInvitationsService({
@@ -508,7 +508,7 @@ export function createInvitationsService({
         }
         return row.email;
       });
-      return { email, emailVerified: true as const };
+      return { email, emailVerified: true as const, avatarUrl: null };
     },
   };
 }

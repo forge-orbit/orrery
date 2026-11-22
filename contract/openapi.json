@@ -193,12 +193,23 @@
           },
           "emailVerified": {
             "type": "boolean"
+          },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
           }
         },
         "required": [
           "email",
-          "emailVerified"
+          "emailVerified",
+          "avatarUrl"
         ]
+      },
+      "AvatarUrl": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
       },
       "UpdateProfileRequest": {
         "type": "object",
@@ -247,6 +258,13 @@
           "currentPassword",
           "newPassword"
         ]
+      },
+      "AvatarUploadRequest": {
+        "type": "object",
+        "properties": {
+          "file": {}
+        },
+        "description": "A JPEG, PNG or WebP image of at most 5 MB."
       },
       "AccountStatus": {
         "type": "object",
@@ -4893,6 +4911,171 @@
           },
           "401": {
             "description": "No valid session or current password is incorrect",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/avatar": {
+      "put": {
+        "summary": "Upload or replace the signed-in human's profile photo",
+        "description": "Accepts a multipart JPEG, PNG or WebP file up to 5 MB. The server validates magic bytes, strips all metadata, center-crops to 256x256 WebP, and returns the updated account with a cache-busting avatarUrl.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AvatarUploadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated account, including the new avatarUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The upload is missing or is not a valid image",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account cannot change its photo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The file is larger than 5 MB",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file type is not supported",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/humans/{humanId}/avatar": {
+      "get": {
+        "summary": "Serve a human's profile photo to someone who shares a workspace with them",
+        "description": "Requires a browser session or an agent API key. The caller must be the human or share a workspace with them; everyone else gets the same 404 as a missing photo. A matching `?v=<objectId>` allows immutable caching, and `If-None-Match` returns 304.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "humanId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "v",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The 256x256 WebP avatar",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              }
+            }
+          },
+          "304": {
+            "description": "The avatar has not changed",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such visible avatar",
             "content": {
               "application/problem+json": {
                 "schema": {

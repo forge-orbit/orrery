@@ -45,6 +45,16 @@ export function postJson<T>(path: string, body: unknown, parse: (value: unknown)
   return sendJson("POST", path, body, parse);
 }
 
+export async function putForm<T>(
+  path: string,
+  body: FormData,
+  parse: (value: unknown) => T,
+): Promise<T> {
+  const res = await fetch(path, { method: "PUT", body });
+  if (!res.ok) return failure(res);
+  return parse(await res.json());
+}
+
 export function putJson<T>(path: string, body: unknown, parse: (value: unknown) => T): Promise<T> {
   return sendJson("PUT", path, body, parse);
 }

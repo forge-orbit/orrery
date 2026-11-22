@@ -31,6 +31,10 @@ const Env = z.object({
     .default("false")
     .transform((value) => value === "true"),
 
+  // Object storage is deployment-only configuration (ADR-0008). #170 adds `s3`.
+  ORRERY_STORAGE_DRIVER: z.enum(["local"]).default("local"),
+  ORRERY_DATA_DIR: z.string().min(1).default("data"),
+
   WEB_DIST: z.string().optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });

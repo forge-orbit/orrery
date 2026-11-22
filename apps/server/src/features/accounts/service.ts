@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import type { ScryptOptions } from "node:crypto";
-import { WorkspaceKind } from "@orrery/contract";
+import { avatarUrlFor, WorkspaceKind } from "@orrery/contract";
 import type {
   ChangePasswordRequest,
   LoginRequest,
@@ -131,7 +131,27 @@ export interface SessionAccount {
   displayName?: string | null;
   isSystemAdministrator: boolean;
   emailVerifiedAt: Date | null;
+  avatarUrl?: string | null;
 }
+
+export const sessionAccountFrom = (row: {
+  humanId: string;
+  email: string;
+  displayName?: string | null;
+  isSystemAdministrator: boolean;
+  emailVerifiedAt: Date | null;
+  avatarObjectId?: string | null;
+}): SessionAccount => ({
+  humanId: row.humanId,
+  email: row.email,
+  displayName: row.displayName ?? null,
+  isSystemAdministrator: row.isSystemAdministrator,
+  emailVerifiedAt: row.emailVerifiedAt,
+  avatarUrl:
+    row.avatarObjectId === null || row.avatarObjectId === undefined
+      ? null
+      : avatarUrlFor(row.humanId, row.avatarObjectId),
+});
 
 export interface SessionPolicy {
   maxAgeSeconds: number;
@@ -288,6 +308,7 @@ export function createAccountsService({
           displayName: humans.displayName,
           isSystemAdministrator: humans.isSystemAdministrator,
           emailVerifiedAt: humans.emailVerifiedAt,
+          avatarObjectId: humans.avatarObjectId,
         })
         .from(browserSessions)
         .innerJoin(humans, eq(humans.id, browserSessions.humanId))
@@ -300,7 +321,7 @@ export function createAccountsService({
           ),
         )
         .limit(1);
-      return row ?? null;
+      return row === undefined ? null : sessionAccountFrom(row);
     },
 
     async updateProfile(humanId: string, input: UpdateProfileRequest) {
@@ -314,11 +335,12 @@ export function createAccountsService({
           displayName: humans.displayName,
           isSystemAdministrator: humans.isSystemAdministrator,
           emailVerifiedAt: humans.emailVerifiedAt,
+          avatarObjectId: humans.avatarObjectId,
         });
       if (row === undefined) {
         throw new AccountsError("invalid_credentials");
       }
-      return row;
+      return sessionAccountFrom(row);
     },
 
     async changePassword(

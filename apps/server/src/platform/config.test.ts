@@ -22,6 +22,27 @@ describe("loadConfig: BOOTSTRAP_SECRET", () => {
   });
 });
 
+describe("loadConfig: object storage", () => {
+  it("defaults to the local driver under a data directory", () => {
+    const config = loadConfig(baseEnv);
+    expect(config.ORRERY_STORAGE_DRIVER).toBe("local");
+    expect(config.ORRERY_DATA_DIR).toBe("data");
+  });
+
+  it("reads the data directory and rejects a blank one", () => {
+    expect(loadConfig({ ...baseEnv, ORRERY_DATA_DIR: "/srv/orrery" }).ORRERY_DATA_DIR).toBe(
+      "/srv/orrery",
+    );
+    expect(() => loadConfig({ ...baseEnv, ORRERY_DATA_DIR: "" })).toThrow(/ORRERY_DATA_DIR/);
+  });
+
+  it("refuses an unknown storage driver", () => {
+    expect(() => loadConfig({ ...baseEnv, ORRERY_STORAGE_DRIVER: "s3" })).toThrow(
+      /ORRERY_STORAGE_DRIVER/,
+    );
+  });
+});
+
 describe("loadConfig: ORRERY_ENCRYPTION_KEY", () => {
   it("treats an unset, empty, or blank key as no key", () => {
     expect(loadConfig({ ...baseEnv }).ORRERY_ENCRYPTION_KEY).toBeUndefined();

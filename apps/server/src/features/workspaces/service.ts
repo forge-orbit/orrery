@@ -618,7 +618,7 @@ export interface WorkspacesService {
   registerThroughInvitation(input: {
     token: string;
     password: string;
-  }): Promise<{ email: string; emailVerified: true }>;
+  }): Promise<{ email: string; emailVerified: true; avatarUrl: null }>;
   appointOwner(
     account: SessionAccount | null,
     workspaceId: string,
@@ -1512,7 +1512,7 @@ export function createWorkspacesService({
         }
         return invitation.email;
       });
-      return { email, emailVerified: true as const };
+      return { email, emailVerified: true as const, avatarUrl: null };
     },
 
     async appointOwner(account, workspaceId, humanId) {

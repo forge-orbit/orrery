@@ -187,7 +187,11 @@ test("registers a new email into a workspace without a duplicate account", async
     data: { token, password: NEW_PASSWORD },
   });
   expect(registered.status()).toBe(200);
-  expect(await registered.json()).toEqual({ email: NEW_EMAIL, emailVerified: true });
+  expect(await registered.json()).toEqual({
+    email: NEW_EMAIL,
+    emailVerified: true,
+    avatarUrl: null,
+  });
 
   const newcomer = await request.newContext({ baseURL: baseUrl });
   try {
