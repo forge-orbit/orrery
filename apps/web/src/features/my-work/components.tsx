@@ -31,7 +31,7 @@ const currency = new Intl.NumberFormat(undefined, {
 
 export function MyWorkSections({ work }: { work: MyWorkResponse }) {
   return (
-    <Stack gap={3}>
+    <Stack gap={5}>
       <MyWorkSection
         title="Assigned to me"
         section="assigned-issues"
@@ -57,6 +57,7 @@ export function MyWorkSections({ work }: { work: MyWorkResponse }) {
         title="My active agent sessions"
         section="active-sessions"
         count={work.activeAgentSessions.length}
+        hasTopDivider
       >
         {work.activeAgentSessions.length === 0 ? (
           <EmptyState
@@ -78,6 +79,7 @@ export function MyWorkSections({ work }: { work: MyWorkResponse }) {
         title="Needs input"
         section="needs-input"
         count={work.needsInputQuestions.length}
+        hasTopDivider
       >
         {work.needsInputQuestions.length === 0 ? (
           <EmptyState
@@ -102,15 +104,23 @@ function MyWorkSection({
   title,
   section,
   count,
+  hasTopDivider = false,
   children,
 }: {
   title: string;
   section: string;
   count: number;
+  hasTopDivider?: boolean;
   children: ReactNode;
 }) {
   return (
-    <Section data-my-work-section={section} padding={4}>
+    <Section
+      data-my-work-section={section}
+      variant="transparent"
+      {...(hasTopDivider ? { dividers: ["top" as const] } : {})}
+      padding={0}
+      paddingBlockStart={hasTopDivider ? 5 : 0}
+    >
       <Stack gap={3}>
         <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
           <Heading level={2} color="inherit">

@@ -519,42 +519,48 @@ function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
       </SideNavSection>
 
       {workspaces.length > 0 && (
-        <SideNavSection title="Your workspaces">
-          {workspaces.map((workspace) => (
-            <SideNavItem
-              key={workspace.id}
-              label={workspace.name}
-              href={`/workspaces/${workspace.id}`}
-              icon={
-                workspace.kind === "personal" ? NavPersonalWorkspaceIcon : NavSharedWorkspaceIcon
-              }
-              isSelected={pathname === `/workspaces/${workspace.id}`}
-              size="sm"
-              {...clickProp}
-            />
-          ))}
-        </SideNavSection>
+        <>
+          <Divider />
+          <SideNavSection title="Your workspaces">
+            {workspaces.map((workspace) => (
+              <SideNavItem
+                key={workspace.id}
+                label={workspace.name}
+                href={`/workspaces/${workspace.id}`}
+                icon={
+                  workspace.kind === "personal" ? NavPersonalWorkspaceIcon : NavSharedWorkspaceIcon
+                }
+                isSelected={pathname === `/workspaces/${workspace.id}`}
+                size="sm"
+                {...clickProp}
+              />
+            ))}
+          </SideNavSection>
+        </>
       )}
 
       {isAdmin && (
-        <SideNavSection title="Admin">
-          <SideNavItem
-            label="SMTP settings"
-            href="/settings/smtp"
-            icon={NavMailIcon}
-            isSelected={pathname.startsWith("/settings/smtp")}
-            size="sm"
-            {...clickProp}
-          />
-          <SideNavItem
-            label="Installation history"
-            href="/history/installation"
-            icon="clock"
-            isSelected={pathname.startsWith("/history/installation")}
-            size="sm"
-            {...clickProp}
-          />
-        </SideNavSection>
+        <>
+          <Divider />
+          <SideNavSection title="Admin">
+            <SideNavItem
+              label="SMTP settings"
+              href="/settings/smtp"
+              icon={NavMailIcon}
+              isSelected={pathname.startsWith("/settings/smtp")}
+              size="sm"
+              {...clickProp}
+            />
+            <SideNavItem
+              label="Installation history"
+              href="/history/installation"
+              icon="clock"
+              isSelected={pathname.startsWith("/history/installation")}
+              size="sm"
+              {...clickProp}
+            />
+          </SideNavSection>
+        </>
       )}
     </Stack>
   );

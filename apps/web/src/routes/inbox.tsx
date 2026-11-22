@@ -95,6 +95,7 @@ function InboxPage() {
         questions={resolved}
         emptyTitle="No resolved questions"
         emptyDescription="Answered questions and fallback outcomes appear here for reference."
+        hasTopDivider
       />
     </Stack>
   );
@@ -105,14 +106,21 @@ function QuestionList({
   questions,
   emptyTitle,
   emptyDescription,
+  hasTopDivider = false,
 }: {
   title: string;
   questions: Question[];
   emptyTitle: string;
   emptyDescription: string;
+  hasTopDivider?: boolean;
 }) {
   return (
-    <Section variant="transparent" padding={0}>
+    <Section
+      variant="transparent"
+      {...(hasTopDivider ? { dividers: ["top" as const] } : {})}
+      padding={0}
+      paddingBlockStart={hasTopDivider ? 5 : 0}
+    >
       <Stack gap={3}>
         <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
           <Heading level={2} color="inherit">
