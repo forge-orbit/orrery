@@ -25,7 +25,7 @@ import { sessionQuery, signOut } from "../features/accounts/index.ts";
 import { installationInvitationsQuery } from "../features/invitations/index.ts";
 import { notificationUnreadCountQuery } from "../features/notifications/index.ts";
 import { workspacesQuery } from "../features/workspaces/index.ts";
-import { AppearancePicker, useResolvedAppearance } from "../lib/appearance.tsx";
+import { AppearancePicker, DarkThemeScope, useResolvedAppearance } from "../lib/appearance.tsx";
 import { Link, RouterAnchor } from "../lib/Link.tsx";
 
 export interface RouterContext {
@@ -205,14 +205,16 @@ function RootLayout() {
               <AppearancePicker forceDark />
             </Stack>
             <OrbitDiagram />
-            <Stack gap={2} maxWidth="25rem">
-              <Text as="p" display="block" type="display-2" color="inherit" textWrap="balance">
-                Projects for humans and agents.
-              </Text>
-              <Text as="p" display="block" type="body" color="inherit">
-                Track issues, share knowledge, and give agents direction when they need it.
-              </Text>
-            </Stack>
+            <DarkThemeScope>
+              <Stack gap={2} maxWidth="25rem">
+                <Text as="p" display="block" type="display-2" color="primary" textWrap="balance">
+                  Projects for humans and agents.
+                </Text>
+                <Text as="p" display="block" type="body" color="secondary">
+                  Track issues, share knowledge, and give agents direction when they need it.
+                </Text>
+              </Stack>
+            </DarkThemeScope>
           </Stack>
           <Stack data-access-content="">
             <Stack data-access-main="">
@@ -590,10 +592,7 @@ function SidebarFooter({
     <footer data-sidebar-footer="">
       <Stack gap={3} paddingBlockStart={2}>
         {showAppearance && (
-          <Stack direction="horizontal" justify="between" vAlign="center" gap={2}>
-            <Text as="span" type="supporting" color="secondary">
-              Theme
-            </Text>
+          <Stack direction="horizontal" hAlign="start">
             <AppearancePicker />
           </Stack>
         )}

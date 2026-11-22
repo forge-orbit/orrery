@@ -71,13 +71,6 @@ function InboxPage() {
         title="Inbox"
         badge={open.length > 0 ? `${open.length} pending` : undefined}
         subtitle="Questions from agents waiting for your direction."
-        actions={
-          issue !== undefined ? (
-            <Link to="/inbox" search={{}} color="accent" hasUnderline>
-              View all questions
-            </Link>
-          ) : undefined
-        }
       />
       {issue !== undefined && (
         <Banner

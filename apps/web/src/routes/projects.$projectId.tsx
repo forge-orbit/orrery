@@ -162,33 +162,32 @@ function ProjectPage() {
             key="workspace"
             to="/workspaces/$workspaceId"
             params={{ workspaceId: project.workspaceId }}
+            color="secondary"
+            weight="medium"
           >
             Back to workspace
           </Link>,
         ]}
         title={project.name}
         badge={project.key}
-        subtitle={
-          <>
-            Access:{" "}
-            <Text type="inherit" color="inherit" data-project-access-level={project.accessLevel}>
-              {project.accessLevel}
-            </Text>{" "}
-            · created by {project.createdBy.displayName}
-          </>
+        statusToken={
+          <Token
+            label={
+              project.accessLevel === "manage"
+                ? "Manager"
+                : project.accessLevel === "contribute"
+                  ? "Contributor"
+                  : "Read-only"
+            }
+            color={project.accessLevel === "read" ? "gray" : "blue"}
+            size="sm"
+            data-project-access-level={project.accessLevel}
+          />
         }
+        subtitle={`Created by ${project.createdBy.displayName}`}
         actions={
           <>
             <Stack direction="horizontal" gap={3} align="center" wrap="wrap">
-              <Link
-                to="/board/$projectId"
-                params={{ projectId: project.id }}
-                color="secondary"
-                weight="medium"
-                data-board-link=""
-              >
-                Board
-              </Link>
               {canManage && (
                 <Link
                   to="/trash/$projectId"
@@ -207,6 +206,18 @@ function ProjectPage() {
                 weight="medium"
               >
                 View history
+              </Link>
+              <Link
+                to="/board/$projectId"
+                params={{ projectId: project.id }}
+                color="accent"
+                weight="semibold"
+                data-board-link=""
+              >
+                <Stack as="span" direction="horizontal" gap={1} vAlign="center">
+                  <Icon icon="viewColumns" size="xsm" aria-hidden="true" />
+                  Board
+                </Stack>
               </Link>
             </Stack>
             {canContribute && (

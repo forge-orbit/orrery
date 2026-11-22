@@ -111,7 +111,8 @@ function NotificationsPage() {
                 to="/notifications"
                 search={{ unreadOnly: true }}
                 color={unreadOnly ? "accent" : "secondary"}
-                weight={unreadOnly ? "semibold" : "normal"}
+                weight={unreadOnly ? "semibold" : "medium"}
+                hasUnderline={unreadOnly}
                 aria-current={unreadOnly ? "page" : undefined}
               >
                 Unread
@@ -120,7 +121,8 @@ function NotificationsPage() {
                 to="/notifications"
                 search={{ unreadOnly: false }}
                 color={unreadOnly ? "secondary" : "accent"}
-                weight={unreadOnly ? "normal" : "semibold"}
+                weight={unreadOnly ? "medium" : "semibold"}
+                hasUnderline={!unreadOnly}
                 aria-current={unreadOnly ? undefined : "page"}
               >
                 All

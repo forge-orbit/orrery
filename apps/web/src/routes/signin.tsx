@@ -115,7 +115,9 @@ function SignInPage() {
         </FormLayout>
       </form>
       <Text as="p" display="block" type="supporting">
-        <Link to="/forgot-password">Forgot your password?</Link>
+        <Link to="/forgot-password" hasUnderline isStandalone>
+          Forgot your password?
+        </Link>
       </Text>
     </Stack>
   );
