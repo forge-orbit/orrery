@@ -622,6 +622,15 @@
     font-weight: 600;
   }
 
+  .astryx-table {
+    min-inline-size: 62rem;
+  }
+
+  .astryx-table-scroll-wrapper {
+    max-inline-size: 100%;
+    overflow-x: auto;
+  }
+
   .astryx-progress-bar-track {
     background-color: color-mix(in srgb, var(--orrery-recessed) 50%, var(--orrery-surface));
   }
