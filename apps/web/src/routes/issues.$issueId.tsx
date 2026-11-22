@@ -1,5 +1,4 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
-import { Avatar } from "@astryxdesign/core/Avatar";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
@@ -66,6 +65,7 @@ import {
   SessionStatus,
 } from "../features/work-sessions/index.ts";
 import { workspaceMembersQuery, workspaceQuery } from "../features/workspaces/index.ts";
+import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextField } from "../lib/fields.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
@@ -342,9 +342,9 @@ function IssuePage() {
                     size={14}
                   />
                 ) : (
-                  <Avatar
+                  <HumanAvatar
                     name={issue.assignee.displayName}
-                    shape="circle"
+                    avatarUrl={issue.assignee.avatarUrl}
                     size="xsm"
                     tooltip={false}
                   />
@@ -608,8 +608,9 @@ function IssuePage() {
                               vAlign="center"
                             >
                               <Stack direction="horizontal" gap={1.5} vAlign="center">
-                                <Avatar
+                                <HumanAvatar
                                   name={comment.author.displayName}
+                                  avatarUrl={comment.author.avatarUrl}
                                   size="xsm"
                                   tooltip={false}
                                 />

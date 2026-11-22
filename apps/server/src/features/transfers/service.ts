@@ -6,7 +6,12 @@ import type {
   TransferAuthorization,
   TransferPreview,
 } from "@orrery/contract";
-import { InvitationStatus, ProjectAccessEventType, WorkspaceKind } from "@orrery/contract";
+import {
+  avatarUrlFor,
+  InvitationStatus,
+  ProjectAccessEventType,
+  WorkspaceKind,
+} from "@orrery/contract";
 import { and, eq, gt, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
@@ -368,6 +373,7 @@ function toProject(
     createdAt: Date;
     creatorId: string;
     creatorEmail: string;
+    creatorAvatarObjectId: string | null;
     kind: Project["workspaceKind"];
     fallbackPolicy: Project["fallbackPolicy"];
   },
@@ -383,6 +389,10 @@ function toProject(
       humanId: row.creatorId,
       email: row.creatorEmail,
       displayName: row.creatorEmail,
+      avatarUrl:
+        row.creatorAvatarObjectId === null
+          ? null
+          : avatarUrlFor(row.creatorId, row.creatorAvatarObjectId),
     },
     workspaceKind: row.kind,
     accessLevel,
@@ -404,6 +414,7 @@ async function readProjectView(
       createdAt: projects.createdAt,
       creatorId: humans.id,
       creatorEmail: humans.email,
+      creatorAvatarObjectId: humans.avatarObjectId,
       kind: workspaces.kind,
       fallbackPolicy: projects.fallbackPolicy,
     })

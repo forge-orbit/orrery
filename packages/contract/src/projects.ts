@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AvatarUrl } from "./auth.ts";
 import { Email, Timestamp, WorkspaceKind } from "./common.ts";
 
 
@@ -136,6 +137,8 @@ export const Actor = z
     agentName: z.string().nullable().optional(),
     displayName: z.string(),
     deactivated: z.boolean().optional(),
+    /** The human's current profile photo; null for agents and humans without one. */
+    avatarUrl: AvatarUrl.nullable(),
   })
   .meta({ id: "Actor" });
 export type Actor = z.infer<typeof Actor>;

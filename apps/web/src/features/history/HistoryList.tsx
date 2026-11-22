@@ -14,6 +14,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import type { HistoryEvent } from "@orrery/contract";
 import { useState } from "react";
+import { HumanAvatar } from "../../lib/avatar.tsx";
 import { formatFullDateTime, relativeTime } from "../../lib/time.ts";
 
 const labels: Record<string, string> = {
@@ -184,15 +185,22 @@ export function HistoryList({
                   data-event-id={event.id}
                 >
                   <TableCell>
-                    <Stack gap={0.5}>
-                      <Text type="body" color="primary" data-event-description={description}>
-                        {description}
-                      </Text>
-                      {showSummary && (
-                        <Text type="supporting" color="secondary">
-                          “{event.summary}”
+                    <Stack direction="horizontal" gap={1.5} vAlign="center">
+                      <HumanAvatar
+                        name={event.actor.displayName}
+                        avatarUrl={event.actor.avatarUrl}
+                        size="sm"
+                      />
+                      <Stack gap={0.5}>
+                        <Text type="body" color="primary" data-event-description={description}>
+                          {description}
                         </Text>
-                      )}
+                        {showSummary && (
+                          <Text type="supporting" color="secondary">
+                            “{event.summary}”
+                          </Text>
+                        )}
+                      </Stack>
                     </Stack>
                   </TableCell>
                   <TableCell>

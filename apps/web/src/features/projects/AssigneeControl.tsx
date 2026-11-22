@@ -1,4 +1,3 @@
-import { Avatar } from "@astryxdesign/core/Avatar";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -7,6 +6,7 @@ import { useToast } from "@astryxdesign/core/Toast";
 import type { Assignee, Issue, IssueDetail } from "@orrery/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { HumanAvatar } from "../../lib/avatar.tsx";
 import { AgentAvatar } from "../../lib/harness.tsx";
 import { updateIssue } from "./commands.ts";
 import { issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
@@ -63,7 +63,12 @@ export function AssigneeControl({
         {issue.assignee.agentId !== undefined ? (
           <AgentAvatar name={issue.assignee.displayName} harness={activeHarness} size={16} />
         ) : (
-          <Avatar name={issue.assignee.displayName} shape="circle" size="xsm" tooltip={false} />
+          <HumanAvatar
+            name={issue.assignee.displayName}
+            avatarUrl={issue.assignee.avatarUrl}
+            size="xsm"
+            tooltip={false}
+          />
         )}
         <Text type="supporting" color="primary" weight="medium">
           {issue.assignee.displayName}

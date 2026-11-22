@@ -58,6 +58,7 @@ import {
   workspaceQuery,
   workspacesQuery,
 } from "../features/workspaces/index.ts";
+import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextField } from "../lib/fields.tsx";
 import { Link } from "../lib/Link.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
@@ -625,6 +626,7 @@ function WorkspaceMembers({
                 <TableRow key={member.humanId} data-member-id={member.humanId}>
                   <TableCell>
                     <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+                      <HumanAvatar name={member.email} avatarUrl={member.avatarUrl} size="sm" />
                       <Text type="body" weight="semibold" color="primary">
                         {member.email}
                       </Text>

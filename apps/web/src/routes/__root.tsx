@@ -1,4 +1,3 @@
-import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
 import { AppShell } from "@astryxdesign/core/AppShell";
 import { Card } from "@astryxdesign/core/Card";
@@ -27,6 +26,7 @@ import { installationInvitationsQuery } from "../features/invitations/index.ts";
 import { notificationUnreadCountQuery } from "../features/notifications/index.ts";
 import { workspacesQuery } from "../features/workspaces/index.ts";
 import { AppearancePicker, DarkThemeScope, useResolvedAppearance } from "../lib/appearance.tsx";
+import { HumanAvatar } from "../lib/avatar.tsx";
 import { Link, RouterAnchor } from "../lib/Link.tsx";
 
 export interface RouterContext {
@@ -610,10 +610,10 @@ function SidebarFooter({
               {...clickProp}
             >
               <Stack as="span" direction="horizontal" gap={2} align="center">
-                <Avatar
+                <HumanAvatar
                   name={session.displayName ?? session.email}
+                  avatarUrl={session.avatarUrl}
                   size="sm"
-                  shape="circle"
                   tooltip={false}
                 />
                 <Stack as="span" gap={0}>
