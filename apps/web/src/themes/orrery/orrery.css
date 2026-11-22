@@ -312,8 +312,8 @@
     --orrery-surface: light-dark(#ffffff, #181b22);
     --orrery-recessed: light-dark(#f7f6f3, #15171d);
     --orrery-muted: light-dark(#5c5f66, #9c9ea6);
-    --orrery-border: light-dark(#efede9, #22252e);
-    --orrery-control-border: light-dark(#d6d2c9, #363b48);
+    --orrery-border: light-dark(#dbd6cc, #303542);
+    --orrery-control-border: light-dark(#bdb7ab, #464c5c);
     --orrery-accent: light-dark(#c23c0e, #ff8f5c);
     --orrery-accent-hover: light-dark(#9e2e08, #ffaa82);
     --orrery-on-accent: light-dark(#ffffff, #14161b);
