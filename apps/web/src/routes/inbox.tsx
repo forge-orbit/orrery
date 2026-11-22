@@ -112,7 +112,7 @@ function QuestionList({
   emptyDescription: string;
 }) {
   return (
-    <Section padding={4}>
+    <Section variant="transparent" padding={0}>
       <Stack gap={3}>
         <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
           <Heading level={2} color="inherit">

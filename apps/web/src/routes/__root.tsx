@@ -233,7 +233,7 @@ function RootLayout() {
     <LinkProvider component={RouterAnchor}>
       <AppShell
         height="fill"
-        variant="wash"
+        variant="elevated"
         contentPadding={0}
         data-app-layout=""
         mobileNav={{ breakpoint: "md" }}
@@ -251,8 +251,8 @@ function RootLayout() {
           </SideNav>
         }
       >
-        <Layout contentWidth="74rem">
-          <Stack as="main" id="content" data-app-content="" padding={8}>
+        <Layout contentWidth="78rem">
+          <Stack as="main" id="content" data-app-content="" padding={6}>
             <Outlet />
           </Stack>
         </Layout>

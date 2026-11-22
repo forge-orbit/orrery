@@ -221,15 +221,15 @@ export const orreryTheme = {
     "--orrery-ink": "#14161b",
     "--orrery-cream": "#f6f3ec",
     "--orrery-orange": "#f2561d",
-    "--orrery-canvas": "light-dark(#faf8f4, #13151a)",
-    "--orrery-text": "light-dark(#14161b, #f6f3ec)",
-    "--orrery-surface": "light-dark(#ffffff, #20232b)",
-    "--orrery-recessed": "light-dark(#f3f0e8, #181a21)",
-    "--orrery-muted": "light-dark(#4e5057, #beb9b0)",
-    "--orrery-border": "light-dark(#ded8cc, #4d5260)",
-    "--orrery-control-border": "light-dark(#756e63, #8a8d9a)",
-    "--orrery-accent": "light-dark(#b5380c, #ff8f5c)",
-    "--orrery-accent-hover": "light-dark(#8f2a07, #ffaa82)",
+    "--orrery-canvas": "light-dark(#ffffff, #111318)",
+    "--orrery-text": "light-dark(#14161b, #f4f2ec)",
+    "--orrery-surface": "light-dark(#ffffff, #181b22)",
+    "--orrery-recessed": "light-dark(#f7f6f3, #15171d)",
+    "--orrery-muted": "light-dark(#5c5f66, #9c9ea6)",
+    "--orrery-border": "light-dark(#efede9, #22252e)",
+    "--orrery-control-border": "light-dark(#d6d2c9, #363b48)",
+    "--orrery-accent": "light-dark(#c23c0e, #ff8f5c)",
+    "--orrery-accent-hover": "light-dark(#9e2e08, #ffaa82)",
     "--orrery-on-accent": "light-dark(#ffffff, #14161b)",
     "--orrery-attention-text": "light-dark(#89330f, #ffc19f)",
     "--orrery-attention-fill": "light-dark(#fff0e4, #38271f)",
@@ -239,7 +239,7 @@ export const orreryTheme = {
     "--orrery-success": "light-dark(#295740, #aed9b8)",
     "--orrery-success-fill": "light-dark(#e8efe6, #23382c)",
     "--orrery-radius": "6px",
-    "--orrery-panel-radius": "10px",
+    "--orrery-panel-radius": "8px",
     "--orrery-sans": "Figtree, system-ui, sans-serif",
     "--orrery-serif": "Georgia, serif",
     "--orrery-mono": "ui-monospace, \"SFMono-Regular\", Consolas, monospace"
@@ -479,23 +479,28 @@ export const orreryTheme = {
         "borderRadius": "var(--orrery-panel-radius)",
         "borderWidth": "1px",
         "borderStyle": "solid",
-        "borderColor": "var(--color-border)"
+        "borderColor": "var(--color-border)",
+        "boxShadow": "0 1px 2px 0 color-mix(in srgb, var(--orrery-ink) 5%, transparent), 0 1px 3px 0 color-mix(in srgb, var(--orrery-ink) 3%, transparent)"
       }
     },
     "section": {
       "base": {
-        "padding": "var(--spacing-4)",
-        "borderRadius": "var(--orrery-panel-radius)"
+        "padding": "var(--spacing-4)"
       },
       "variant:section": {
+        "borderRadius": "var(--orrery-panel-radius)",
         "borderWidth": "1px",
         "borderStyle": "solid",
-        "borderColor": "var(--color-border)"
+        "borderColor": "var(--color-border)",
+        "boxShadow": "0 1px 2px 0 color-mix(in srgb, var(--orrery-ink) 4%, transparent)"
       },
       "variant:muted": {
-        "borderWidth": "1px",
-        "borderStyle": "solid",
-        "borderColor": "var(--color-border)"
+        "borderRadius": "var(--orrery-panel-radius)",
+        "borderWidth": "0",
+        "backgroundColor": "var(--orrery-recessed)"
+      },
+      "variant:transparent": {
+        "borderRadius": "0"
       }
     },
     "clickable-card": {
@@ -503,17 +508,18 @@ export const orreryTheme = {
         "borderRadius": "var(--orrery-panel-radius)",
         "borderWidth": "1px",
         "borderStyle": "solid",
-        "borderColor": "var(--color-border)"
+        "borderColor": "var(--color-border)",
+        "boxShadow": "0 1px 2px 0 color-mix(in srgb, var(--orrery-ink) 5%, transparent), 0 1px 3px 0 color-mix(in srgb, var(--orrery-ink) 3%, transparent)"
       }
     },
     "side-nav": {
       "base": {
-        "backgroundColor": "var(--color-background-surface)"
+        "backgroundColor": "var(--orrery-recessed)"
       }
     },
     "side-nav-item": {
       "selected": {
-        "backgroundColor": "color-mix(in srgb, var(--orrery-orange) 12%, transparent)",
+        "backgroundColor": "color-mix(in srgb, var(--orrery-orange) 11%, transparent)",
         "color": "var(--orrery-text)",
         "fontWeight": "600"
       }
@@ -525,13 +531,13 @@ export const orreryTheme = {
     },
     "app-shell-sidenav": {
       "base": {
-        "backgroundColor": "var(--orrery-surface)",
+        "backgroundColor": "var(--orrery-recessed)",
         "borderInlineEnd": "1px solid var(--orrery-border)"
       }
     },
     "app-shell-header": {
       "base": {
-        "backgroundColor": "var(--orrery-surface)",
+        "backgroundColor": "var(--orrery-canvas)",
         "borderBlockEnd": "1px solid var(--orrery-border)"
       }
     }
