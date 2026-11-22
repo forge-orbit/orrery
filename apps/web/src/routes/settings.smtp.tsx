@@ -319,6 +319,7 @@ function TestAndVerification({
         email: account.email,
         displayName: prev?.signedIn ? prev.displayName : null,
         emailVerified: account.emailVerified,
+        avatarUrl: account.avatarUrl,
       };
       queryClient.setQueryData(sessionQuery.queryKey, session);
       setToken("");

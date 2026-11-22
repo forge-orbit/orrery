@@ -235,6 +235,7 @@ export function createAccountsRest(service: AccountsService) {
         email: account.email,
         displayName: account.displayName ?? null,
         emailVerified: account.emailVerifiedAt !== null,
+        avatarUrl: account.avatarUrl ?? null,
       },
       200,
     );
@@ -252,6 +253,7 @@ export function createAccountsRest(service: AccountsService) {
           email: updated.email,
           displayName: updated.displayName ?? null,
           emailVerified: updated.emailVerifiedAt !== null,
+          avatarUrl: updated.avatarUrl ?? null,
         },
         200,
       );

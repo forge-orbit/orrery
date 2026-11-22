@@ -31,11 +31,18 @@ export type DisplayName = z.infer<typeof DisplayName>;
 
 
 
+export const AvatarUrl = z
+  .string()
+  .regex(/^\/api\/humans\/[^/]+\/avatar(\?v=[^/]+)?$/)
+  .meta({ id: "AvatarUrl" });
+export type AvatarUrl = z.infer<typeof AvatarUrl>;
+
 export const SessionResponse = z
   .object({
     email: Email,
     displayName: z.string().nullable().optional(),
     emailVerified: z.boolean(),
+    avatarUrl: AvatarUrl.nullable(),
   })
   .meta({ id: "SessionResponse" });
 export type SessionResponse = z.infer<typeof SessionResponse>;

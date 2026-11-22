@@ -350,7 +350,11 @@ async function ensureAdminVerified() {
     data: { token },
   });
   expect(verified.status()).toBe(200);
-  expect(await verified.json()).toEqual({ email: ADMIN_EMAIL, emailVerified: true });
+  expect(await verified.json()).toEqual({
+    email: ADMIN_EMAIL,
+    emailVerified: true,
+    avatarUrl: null,
+  });
 }
 
 async function verificationMessageText(): Promise<string | undefined> {

@@ -423,6 +423,7 @@ function NewAccountForm({ token }: { token: string }) {
         email: account.email,
         displayName: null,
         emailVerified: account.emailVerified,
+        avatarUrl: null,
       };
       queryClient.setQueryData(sessionQuery.queryKey, session);
       await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey });

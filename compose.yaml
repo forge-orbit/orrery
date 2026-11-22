@@ -19,12 +19,18 @@ services:
       ORRERY_ENCRYPTION_KEY: ${ORRERY_ENCRYPTION_KEY:-}
       # Default-deny SSRF: webhooks only reach public https URLs unless explicitly opted in.
       ORRERY_WEBHOOK_ALLOW_PRIVATE_URLS: ${ORRERY_WEBHOOK_ALLOW_PRIVATE_URLS:-false}
+      # Local object storage (ADR-0008): uploaded blobs live under this directory's
+      # objects/ subfolder, which is backed by the named `orrery-data` volume below.
+      ORRERY_STORAGE_DRIVER: ${ORRERY_STORAGE_DRIVER:-local}
+      ORRERY_DATA_DIR: /app/data
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # Lets an opted-in webhook reach a receiver listening on the host (used by the e2e suite).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "${ORRERY_PORT:-8080}:8080"
+    volumes:
+      - orrery-data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,5 +88,6 @@ services:
 
 volumes:
   pgdata:
+  orrery-data:
   caddy-data:
   caddy-config:

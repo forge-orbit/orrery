@@ -2,7 +2,9 @@ import type { Database, DbTransaction } from "../platform/db.ts";
 import type { Config } from "../platform/config.ts";
 import type { Feature } from "../platform/feature.ts";
 import type { Logger } from "../platform/log.ts";
+import { createObjectStore, type ObjectStore } from "../platform/storage.ts";
 import { createAccountsFeature, accountsRoutes } from "./accounts/index.ts";
+import { createAvatarsFeature, avatarsRoutes } from "./avatars/index.ts";
 import { createAgentsFeature, agentsRoutes, revokeMemberWorkspaceKeys } from "./agents/index.ts";
 import { createDeactivationFeature, deactivationRoutes } from "./deactivation/index.ts";
 import type { AgentAuthenticator } from "./agents/index.ts";
@@ -27,7 +29,12 @@ import {
 } from "./work-sessions/index.ts";
 import { createWorkspacesFeature, workspacesRoutes } from "./workspaces/index.ts";
 
-export function createFeatures(database: Database, config: Config, log: Logger): Feature[] {
+export function createFeatures(
+  database: Database,
+  config: Config,
+  log: Logger,
+  storage: ObjectStore = createObjectStore(config),
+): Feature[] {
   const accounts = createAccountsFeature({
     db: database.db,
     setupSecret: config.BOOTSTRAP_SECRET,
@@ -107,6 +114,13 @@ export function createFeatures(database: Database, config: Config, log: Logger):
   });
   authenticateAgent = agents.authenticator;
 
+  const avatars = createAvatarsFeature({
+    db: database.db,
+    store: storage,
+    sessionReader: accounts.sessionReader,
+    authenticate: agentAuthenticator,
+  });
+
   const notifications = createNotificationsFeature({
     db: database.db,
     sessionReader: accounts.sessionReader,
@@ -153,8 +167,9 @@ export function createFeatures(database: Database, config: Config, log: Logger):
   questionEvaluateDeadline = (tx, issueId) => inbox.evaluateDeadline(tx, issueId);
   dueQuestionIssueIds = () => inbox.findDueQuestionIssueIds();
   return [
-    createSystemFeature({ ping: database.ping }),
+    createSystemFeature({ ping: database.ping, checkStorage: () => storage.checkHealth() }),
     accounts,
+    avatars,
 
     createDeactivationFeature({ db: database.db, sessionReader: accounts.sessionReader }),
 
@@ -243,6 +258,7 @@ export function createFeatures(database: Database, config: Config, log: Logger):
 export const routes = [
   ...systemRoutes,
   ...accountsRoutes,
+  ...avatarsRoutes,
   ...deactivationRoutes,
   ...ownershipRoutes,
   ...agentsRoutes,

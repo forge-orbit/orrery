@@ -115,7 +115,7 @@ export interface SettingsService {
   verifyEmail(
     account: SessionAccount | null,
     input: { token: string },
-  ): Promise<{ email: string; emailVerified: true }>;
+  ): Promise<{ email: string; emailVerified: true; avatarUrl: string | null }>;
 
   deliver(mail: OutgoingMail): Promise<void>;
 }
@@ -368,7 +368,11 @@ export function createSettingsService({
         }
         await markEmailVerified(row.humanId, tx);
       });
-      return { email: account.email, emailVerified: true as const };
+      return {
+        email: account.email,
+        emailVerified: true as const,
+        avatarUrl: account.avatarUrl ?? null,
+      };
     },
 
     async deliver(mail) {

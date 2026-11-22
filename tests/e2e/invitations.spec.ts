@@ -104,7 +104,7 @@ test("the link's GET is inert; the POST registers; reuse fails", async () => {
     data: { token: inviteeToken, password: INVITEE_PASSWORD },
   });
   expect(res.status()).toBe(200);
-  expect(await res.json()).toEqual({ email: INVITEE_EMAIL, emailVerified: true });
+  expect(await res.json()).toEqual({ email: INVITEE_EMAIL, emailVerified: true, avatarUrl: null });
 
   const again = await api.post("/api/invitations/installation/registration", {
     data: { token: inviteeToken, password: INVITEE_PASSWORD },
@@ -123,6 +123,7 @@ test("the link's GET is inert; the POST registers; reuse fails", async () => {
       email: INVITEE_EMAIL,
       displayName: null,
       emailVerified: true,
+      avatarUrl: null,
     });
   } finally {
     await newcomer.dispose();

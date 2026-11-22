@@ -706,7 +706,7 @@ describe("invitations", () => {
         password: INVITEE_PASSWORD,
       });
       expect(ok.status).toBe(200);
-      expect(await ok.json()).toEqual({ email: INVITEE, emailVerified: true });
+      expect(await ok.json()).toEqual({ email: INVITEE, emailVerified: true, avatarUrl: null });
     });
 
     it("records requests without the invitation token", async () => {
@@ -754,6 +754,7 @@ describe("invitations", () => {
       expect(SessionResponse.parse(await res.json())).toEqual({
         email: INVITEE,
         emailVerified: true,
+        avatarUrl: null,
       });
 
       expect(await database.db.select().from(humans)).toHaveLength(humansBefore.length + 1);
@@ -791,6 +792,7 @@ describe("invitations", () => {
         email: INVITEE,
         displayName: null,
         emailVerified: true,
+        avatarUrl: null,
       });
     });
 
@@ -814,7 +816,7 @@ describe("invitations", () => {
         password: INVITEE_PASSWORD,
       });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ email: INVITEE, emailVerified: true });
+      expect(await res.json()).toEqual({ email: INVITEE, emailVerified: true, avatarUrl: null });
 
       const [human] = await database.db.select().from(humans).where(eq(humans.email, INVITEE));
       expect(human?.emailVerifiedAt).not.toBeNull();
@@ -925,7 +927,11 @@ describe("invitations", () => {
         password: INVITEE_PASSWORD,
       });
       expect(valid.status).toBe(200);
-      expect(await valid.json()).toEqual({ email: "still.valid@example.com", emailVerified: true });
+      expect(await valid.json()).toEqual({
+        email: "still.valid@example.com",
+        emailVerified: true,
+        avatarUrl: null,
+      });
     });
 
     it("refuses a short password without consuming the invitation", async () => {

@@ -762,6 +762,7 @@ describe("workspaces", () => {
     expect(await registered.json()).toEqual({
       email: "new.member@example.com",
       emailVerified: true,
+      avatarUrl: null,
     });
 
     const [human] = await database.db
