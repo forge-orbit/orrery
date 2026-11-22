@@ -1,5 +1,4 @@
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { Section } from "@astryxdesign/core/Section";
 import { Theme } from "@astryxdesign/core/theme";
 import { createContext, createElement, type ReactNode, use, useState } from "react";
 import { defaultThemeSlug, themes } from "../astryx-themes.ts";
@@ -125,15 +124,11 @@ export function AppearancePicker({ forceDark = false }: { forceDark?: boolean })
     </SegmentedControl>
   );
 
-  return (
-    <Section variant="transparent" padding={0}>
-      {forceDark ? (
-        <Theme theme={theme} mode="dark">
-          {control}
-        </Theme>
-      ) : (
-        control
-      )}
-    </Section>
+  return forceDark ? (
+    <Theme theme={theme} mode="dark">
+      {control}
+    </Theme>
+  ) : (
+    control
   );
 }
