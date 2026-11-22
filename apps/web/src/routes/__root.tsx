@@ -1,10 +1,12 @@
+import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
-import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
+import { AppShell } from "@astryxdesign/core/AppShell";
+import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
-import { Link as AstryxLink } from "@astryxdesign/core/Link";
+import { Layout } from "@astryxdesign/core/Layout";
+import { Link as AstryxLink, LinkProvider } from "@astryxdesign/core/Link";
+import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
@@ -12,10 +14,11 @@ import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   Outlet,
   createRootRouteWithContext,
+  useLocation,
   useMatches,
   useNavigate,
 } from "@tanstack/react-router";
-import { createElement, useState } from "react";
+import { createElement } from "react";
 import markDark from "../../../../assets/orrery-mark-dark.svg";
 import markLight from "../../../../assets/orrery-mark.svg";
 import { sessionQuery, signOut } from "../features/accounts/index.ts";
@@ -23,7 +26,7 @@ import { installationInvitationsQuery } from "../features/invitations/index.ts";
 import { notificationUnreadCountQuery } from "../features/notifications/index.ts";
 import { workspacesQuery } from "../features/workspaces/index.ts";
 import { AppearancePicker, useResolvedAppearance } from "../lib/appearance.tsx";
-import { Link } from "../lib/Link.tsx";
+import { Link, RouterAnchor } from "../lib/Link.tsx";
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -38,8 +41,8 @@ declare module "@tanstack/react-router" {
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
   notFoundComponent: () => (
-    <Stack as="main">
-      <Stack data-empty-panel="">
+    <Stack gap={5}>
+      <Stack data-empty-panel="" padding={6}>
         <EmptyState
           title="Page not found"
           description="Check the address or return to your workspaces."
@@ -151,107 +154,108 @@ function NavNotificationsIcon() {
   );
 }
 
+function NavPersonalWorkspaceIcon() {
+  return createElement(
+    "svg",
+    { width: 15, height: 15, viewBox: "0 0 16 16", fill: "none", "aria-hidden": true },
+    createElement("circle", { cx: 8, cy: 5.2, r: 2.5, stroke: "currentColor", strokeWidth: 1.35 }),
+    createElement("path", {
+      d: "M3.2 13.2a4.8 4.8 0 0 1 9.6 0",
+      stroke: "currentColor",
+      strokeWidth: 1.35,
+      strokeLinecap: "round",
+    }),
+  );
+}
+
+function NavSharedWorkspaceIcon() {
+  return createElement(
+    "svg",
+    { width: 15, height: 15, viewBox: "0 0 16 16", fill: "none", "aria-hidden": true },
+    createElement("rect", {
+      x: 2.5,
+      y: 2.5,
+      width: 11,
+      height: 11,
+      rx: 2,
+      stroke: "currentColor",
+      strokeWidth: 1.35,
+    }),
+    createElement("path", {
+      d: "M5.5 6h5M5.5 8.5h5M5.5 11h3",
+      stroke: "currentColor",
+      strokeWidth: 1.35,
+      strokeLinecap: "round",
+    }),
+  );
+}
+
 function RootLayout() {
   const accessPage = useMatches({
     select: (matches) => matches.some((match) => match.staticData.accessPage === true),
   });
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   if (accessPage) {
     return (
-      <Stack data-access-layout="">
-        <Stack as="aside" data-access-cover="">
-          <Stack
-            as="header"
-            direction="horizontal"
-            justify="between"
-            align="center"
-            data-access-toolbar=""
-          >
-            <BrandHome forceDark />
-            <AppearancePicker forceDark />
+      <LinkProvider component={RouterAnchor}>
+        <Stack data-access-layout="">
+          <Stack as="aside" justify="between" data-access-cover="">
+            <Stack as="header" direction="horizontal" justify="between" align="center" width="100%">
+              <BrandHome forceDark />
+              <AppearancePicker forceDark />
+            </Stack>
+            <OrbitDiagram />
+            <Stack gap={2} maxWidth="25rem">
+              <Text as="p" display="block" type="display-2" color="inherit" textWrap="balance">
+                Projects for humans and agents.
+              </Text>
+              <Text as="p" display="block" type="body" color="inherit">
+                Track issues, share knowledge, and give agents direction when they need it.
+              </Text>
+            </Stack>
           </Stack>
-          <OrbitDiagram />
-          <Stack data-access-cover-copy="">
-            <Text as="p" display="block" type="inherit" color="inherit">
-              Projects for humans and agents.
-            </Text>
-            <small>
-              Track issues, share knowledge, and give agents direction when they need it.
-            </small>
+          <Stack data-access-content="">
+            <Stack data-access-main="">
+              <Outlet />
+            </Stack>
+            <footer data-access-footer="">
+              <ForgeOrbitAttribution />
+            </footer>
           </Stack>
         </Stack>
-        <Stack data-access-content="">
-          <Stack data-access-main="">
-            <Outlet />
-          </Stack>
-          <footer data-access-footer="">
-            <ForgeOrbitAttribution />
-          </footer>
-        </Stack>
-      </Stack>
+      </LinkProvider>
     );
   }
 
   return (
-    <Stack data-app-layout="">
-      <AstryxLink href="#content" data-skip-link="">
-        Skip to content
-      </AstryxLink>
-      <Stack
-        as="header"
-        direction="horizontal"
-        justify="between"
-        align="center"
-        data-mobile-topbar=""
+    <LinkProvider component={RouterAnchor}>
+      <AppShell
+        height="fill"
+        variant="wash"
+        contentPadding={0}
+        data-app-layout=""
+        mobileNav={{ breakpoint: "md" }}
+        sideNav={
+          <SideNav
+            data-app-sidebar=""
+            header={
+              <Stack paddingInline={2} paddingBlock={1}>
+                <BrandHome />
+              </Stack>
+            }
+            footer={<SidebarFooter />}
+          >
+            <SidebarLinks />
+          </SideNav>
+        }
       >
-        <Stack direction="horizontal" data-mobile-topbar-left="">
-          <IconButton
-            type="button"
-            variant="ghost"
-            size="sm"
-            label="Open navigation"
-            icon={<Icon icon="menu" />}
-            onClick={() => setMobileNavOpen(true)}
-          />
-          <BrandHome />
-        </Stack>
-        <AppearancePicker />
-      </Stack>
-      <Stack as="aside" justify="between" data-app-sidebar="">
-        <Stack data-sidebar-body="">
-          <BrandHome />
-          <SidebarLinks />
-        </Stack>
-        <SidebarFooter />
-      </Stack>
-      <Drawer
-        isOpen={mobileNavOpen}
-        onOpenChange={setMobileNavOpen}
-        side="start"
-        width="17.5rem"
-        label="Navigation"
-      >
-        <Layout
-          height="fill"
-          header={<DrawerHeader title="Orrery" onOpenChange={setMobileNavOpen} hasDivider />}
-          footer={
-            <LayoutFooter hasDivider data-mobile-drawer-footer="">
-              <SidebarFooter onNavigate={() => setMobileNavOpen(false)} showAppearance={false} />
-            </LayoutFooter>
-          }
-        >
-          <LayoutContent>
-            <Stack data-mobile-drawer-nav="">
-              <SidebarLinks onNavigate={() => setMobileNavOpen(false)} />
-            </Stack>
-          </LayoutContent>
+        <Layout contentWidth="74rem">
+          <Stack id="content" data-app-content="" padding={8}>
+            <Outlet />
+          </Stack>
         </Layout>
-      </Drawer>
-      <Stack id="content" tabIndex={-1} data-app-content="">
-        <Outlet />
-      </Stack>
-    </Stack>
+      </AppShell>
+    </LinkProvider>
   );
 }
 
@@ -392,15 +396,17 @@ function OrbitDiagram() {
 function BrandHome({ forceDark = false }: { forceDark?: boolean }) {
   const appearance = useResolvedAppearance();
   return (
-    <Link to="/" color="inherit" data-brand-home="">
-      <Stack as="span" direction="horizontal" gap={1.5} align="center" data-brand-lockup="">
+    <Link to="/" color="inherit" weight="bold">
+      <Stack as="span" direction="horizontal" gap={1.5} align="center">
         <img
           src={forceDark || appearance === "dark" ? markDark : markLight}
           width="22"
           height="20"
           alt=""
         />
-        Orrery
+        <Text as="span" type="large" weight="bold" color="inherit">
+          Orrery
+        </Text>
       </Stack>
     </Link>
   );
@@ -444,6 +450,7 @@ function NavMailIcon() {
 }
 
 function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const pathname = useLocation({ select: (loc) => loc.pathname });
   const { data: session } = useQuery(sessionQuery);
   const { data: workspaces = [] } = useQuery({
     ...workspacesQuery,
@@ -462,118 +469,93 @@ function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <>
-      <Stack as="nav" data-app-nav="" aria-label="Main navigation">
-        <Link to="/" activeOptions={{ exact: true }} color="inherit" {...clickProp}>
-          <Stack direction="horizontal" align="center" gap={1} data-nav-item-inner="">
-            <NavWorkspacesIcon />
-            <Text as="span" data-nav-item-label="">
-              Workspaces
-            </Text>
-          </Stack>
-        </Link>
-        <Link to="/my-work" color="inherit" {...clickProp}>
-          <Stack direction="horizontal" align="center" gap={1} data-nav-item-inner="">
-            <NavMyWorkIcon />
-            <Text as="span" data-nav-item-label="">
-              My work
-            </Text>
-          </Stack>
-        </Link>
-        <Link to="/inbox" color="inherit" {...clickProp}>
-          <Stack direction="horizontal" align="center" gap={1} data-nav-item-inner="">
-            <NavInboxIcon />
-            <Text as="span" data-nav-item-label="">
-              Inbox
-            </Text>
-          </Stack>
-        </Link>
-        <Link
-          to="/notifications"
-          search={{ unreadOnly: false }}
-          activeOptions={{ includeSearch: false }}
-          aria-label={
-            unreadNotifications !== undefined && unreadNotifications > 0
-              ? `Notifications, ${unreadNotifications} unread`
-              : "Notifications"
-          }
-          color="inherit"
-          data-notifications-link=""
+      <SideNavSection title="Main navigation" isHeaderHidden>
+        <SideNavItem
+          label="Workspaces"
+          href="/"
+          icon={NavWorkspacesIcon}
+          isSelected={pathname === "/"}
+          size="sm"
           {...clickProp}
-        >
-          <Stack direction="horizontal" align="center" gap={1} data-nav-item-inner="">
-            <NavNotificationsIcon />
-            <Text as="span" data-nav-item-label="">
-              Notifications
-            </Text>
-            {unreadNotifications !== undefined && unreadNotifications > 0 && (
+        />
+        <SideNavItem
+          label="My work"
+          href="/my-work"
+          icon={NavMyWorkIcon}
+          isSelected={pathname.startsWith("/my-work")}
+          size="sm"
+          {...clickProp}
+        />
+        <SideNavItem
+          label="Inbox"
+          href="/inbox"
+          icon={NavInboxIcon}
+          isSelected={pathname.startsWith("/inbox")}
+          size="sm"
+          {...clickProp}
+        />
+        <SideNavItem
+          label="Notifications"
+          href="/notifications"
+          icon={NavNotificationsIcon}
+          isSelected={pathname.startsWith("/notifications")}
+          size="sm"
+          data-notifications-link=""
+          endContent={
+            unreadNotifications !== undefined && unreadNotifications > 0 ? (
               <Badge
                 label={unreadNotifications > 99 ? "99+" : unreadNotifications}
                 variant="orange"
               />
-            )}
-          </Stack>
-        </Link>
-      </Stack>
+            ) : undefined
+          }
+          {...clickProp}
+        />
+      </SideNavSection>
+
       {workspaces.length > 0 && (
-        <Stack as="nav" data-app-nav="" data-workspace-nav="" aria-label="Your workspaces">
-          <Text as="p" display="block" type="inherit" color="inherit">
-            Your workspaces
-          </Text>
-          {workspaces.map((workspace) => (
-            <Link
-              key={workspace.id}
-              to="/workspaces/$workspaceId"
-              params={{ workspaceId: workspace.id }}
-              color="inherit"
-              {...clickProp}
-            >
-              <Stack direction="horizontal" align="center" gap={1} data-nav-item-inner="">
-                <Stack
-                  as="span"
-                  width="1.25rem"
-                  height="1.25rem"
-                  justify="center"
-                  align="center"
-                  data-workspace-nav-dot=""
-                  aria-hidden="true"
-                >
-                  {workspace.name.slice(0, 1).toUpperCase()}
-                </Stack>
-                <Text as="span" data-nav-item-label="">
-                  {workspace.name}
-                </Text>
-              </Stack>
-            </Link>
-          ))}
-        </Stack>
+        <>
+          <Divider />
+          <SideNavSection title="Your workspaces">
+            {workspaces.map((workspace) => (
+              <SideNavItem
+                key={workspace.id}
+                label={workspace.name}
+                href={`/workspaces/${workspace.id}`}
+                icon={
+                  workspace.kind === "personal" ? NavPersonalWorkspaceIcon : NavSharedWorkspaceIcon
+                }
+                isSelected={pathname === `/workspaces/${workspace.id}`}
+                size="sm"
+                {...clickProp}
+              />
+            ))}
+          </SideNavSection>
+        </>
       )}
+
       {isAdmin && (
-        <Stack
-          as="nav"
-          data-app-nav=""
-          data-workspace-nav=""
-          aria-label="Installation administration"
-        >
-          <Text as="p" display="block" type="inherit" color="inherit">
-            Admin
-          </Text>
-          <Link to="/settings/smtp" color="inherit" {...clickProp}>
-            <Stack direction="horizontal" align="center" gap={1} data-nav-item-inner="">
-              <NavMailIcon />
-              <Text as="span" data-nav-item-label="">
-                SMTP settings
-              </Text>
-            </Stack>
-          </Link>
-          <Link to="/history/installation" color="inherit" {...clickProp}>
-            <Stack direction="horizontal" align="center" gap={1} data-nav-item-inner="">
-              <Icon icon="clock" size="sm" />
-              <Text as="span" data-nav-item-label="">
-                Installation history
-              </Text>
-            </Stack>
-          </Link>
-        </Stack>
+        <>
+          <Divider />
+          <SideNavSection title="Admin">
+            <SideNavItem
+              label="SMTP settings"
+              href="/settings/smtp"
+              icon={NavMailIcon}
+              isSelected={pathname.startsWith("/settings/smtp")}
+              size="sm"
+              {...clickProp}
+            />
+            <SideNavItem
+              label="Installation history"
+              href="/history/installation"
+              icon="clock"
+              isSelected={pathname.startsWith("/history/installation")}
+              size="sm"
+              {...clickProp}
+            />
+          </SideNavSection>
+        </>
       )}
     </>
   );
@@ -606,39 +588,62 @@ function SidebarFooter({
 
   return (
     <footer data-sidebar-footer="">
-      {session?.signedIn && (
-        <Stack direction="horizontal" vAlign="center" gap={1} data-sidebar-account-row="">
-          <Link to="/account" color="inherit" data-sidebar-account-link="" {...clickProp}>
-            <Stack data-sidebar-account-text="">
-              <Text
-                as="span"
-                type="body"
-                weight="semibold"
-                color="inherit"
-                data-sidebar-account-name=""
-              >
-                {session.displayName ?? session.email}
-              </Text>
-              {session.displayName !== null && (
-                <Text as="span" type="supporting" color="secondary" data-sidebar-account-email="">
-                  {session.email}
-                </Text>
-              )}
-            </Stack>
-          </Link>
-          <IconButton
-            type="button"
-            variant="ghost"
-            size="sm"
-            label="Sign out"
-            icon={<SignOutIcon />}
-            isDisabled={logout.isPending}
-            onClick={() => logout.mutate()}
-          />
-        </Stack>
-      )}
-      {showAppearance && <AppearancePicker />}
-      <Stack data-sidebar-attribution="">
+      <Stack gap={3} paddingBlockStart={2}>
+        {showAppearance && (
+          <Stack direction="horizontal" justify="between" vAlign="center" gap={2}>
+            <Text as="span" type="supporting" color="secondary">
+              Theme
+            </Text>
+            <AppearancePicker />
+          </Stack>
+        )}
+        {showAppearance && session?.signedIn && <Divider />}
+        {session?.signedIn && (
+          <Stack direction="horizontal" justify="between" vAlign="center" gap={1.5}>
+            <Link
+              to="/account"
+              color="inherit"
+              display="block"
+              data-sidebar-account-link=""
+              {...clickProp}
+            >
+              <Stack as="span" direction="horizontal" gap={2} align="center">
+                <Avatar
+                  name={session.displayName ?? session.email}
+                  size="sm"
+                  shape="circle"
+                  tooltip={false}
+                />
+                <Stack as="span" gap={0}>
+                  <Text
+                    as="span"
+                    type="body"
+                    weight="semibold"
+                    color="inherit"
+                    maxLines={1}
+                    data-sidebar-account-name=""
+                  >
+                    {session.displayName ?? session.email}
+                  </Text>
+                  {session.displayName !== null && (
+                    <Text as="span" type="supporting" color="secondary" maxLines={1}>
+                      {session.email}
+                    </Text>
+                  )}
+                </Stack>
+              </Stack>
+            </Link>
+            <IconButton
+              type="button"
+              variant="ghost"
+              size="sm"
+              label="Sign out"
+              icon={<SignOutIcon />}
+              isDisabled={logout.isPending}
+              onClick={() => logout.mutate()}
+            />
+          </Stack>
+        )}
         <ForgeOrbitAttribution />
       </Stack>
     </footer>
@@ -647,7 +652,13 @@ function SidebarFooter({
 
 function ForgeOrbitAttribution() {
   return (
-    <Text as="p" display="block" data-forge-orbit-attribution="">
+    <Text
+      as="p"
+      display="block"
+      type="supporting"
+      color="secondary"
+      data-forge-orbit-attribution=""
+    >
       Made by{" "}
       <AstryxLink
         href="https://github.com/forge-orbit"

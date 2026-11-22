@@ -1,10 +1,14 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
+import { Avatar } from "@astryxdesign/core/Avatar";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { Heading } from "@astryxdesign/core/Heading";
-import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { Layout, LayoutContent, LayoutPanel } from "@astryxdesign/core/Layout";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -55,6 +59,7 @@ import {
   TitleBodyForm,
   updateIssue,
 } from "../features/projects/index.ts";
+import { workspaceRunsQuery } from "../features/runs/index.ts";
 import {
   activeSessionsQuery,
   SessionInspector,
@@ -62,6 +67,7 @@ import {
 } from "../features/work-sessions/index.ts";
 import { workspaceMembersQuery, workspaceQuery } from "../features/workspaces/index.ts";
 import { TextField } from "../lib/fields.tsx";
+import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
 import { Markdown } from "../lib/Markdown.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
@@ -148,6 +154,7 @@ function IssuePage() {
   const [warnedCloseTarget, setWarnedCloseTarget] = useState<IssueStatus | null>(null);
   const [trashError, setTrashError] = useState<string>();
   const [trashing, setTrashing] = useState(false);
+  const isNarrow = useMediaQuery("(max-width: 62rem)");
 
   const candidates: AssigneeCandidate[] = [];
   const seenHumans = new Set<string>();
@@ -186,12 +193,17 @@ function IssuePage() {
   const { data: projectIssues } = useSuspenseQuery(issuesQuery(issue.projectId));
   const { data: projectLabels } = useSuspenseQuery(projectLabelsQuery(issue.projectId));
   const { data: sessions } = useSuspenseQuery(activeSessionsQuery(project.workspaceId));
+  const { data: runs = [] } = useQuery(workspaceRunsQuery(project.workspaceId));
   const canContribute = project.accessLevel !== "read";
   const subtasks = subtasksOf(projectIssues, issue.id);
   const openSubtaskCount = subtasks.length - completedSubtaskCount(subtasks);
   const activeSession = sessions.find(
     (session) => session.issueId === issue.id && session.status === "active",
   );
+  const activeRun =
+    activeSession === undefined
+      ? undefined
+      : runs.find((entry) => entry.id === activeSession.runId);
 
   const isClosed = issue.status === "done" || issue.status === "cancelled";
   const toggleNextStatus: IssueStatus = isClosed ? "todo" : "done";
@@ -269,7 +281,7 @@ function IssuePage() {
   }
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="project" to="/projects/$projectId" params={{ projectId: issue.projectId }}>
@@ -297,8 +309,55 @@ function IssuePage() {
           />
         }
         subtitle={
-          <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+          <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
             <PriorityBadge priority={issue.priority} />
+            {issue.assignee !== null && (
+              <Stack
+                as="span"
+                direction="horizontal"
+                gap={1}
+                vAlign="center"
+                data-issue-assignee=""
+              >
+                {issue.assignee.agentId !== undefined ? (
+                  <AgentAvatar
+                    name={issue.assignee.displayName}
+                    harness={
+                      activeSession?.agentId === issue.assignee.agentId
+                        ? activeRun?.harness
+                        : undefined
+                    }
+                    size={14}
+                  />
+                ) : (
+                  <Avatar
+                    name={issue.assignee.displayName}
+                    shape="circle"
+                    size="xsm"
+                    tooltip={false}
+                  />
+                )}
+                <Text type="supporting" color="primary" weight="medium">
+                  {issue.assignee.displayName}
+                </Text>
+              </Stack>
+            )}
+            {activeSession !== undefined &&
+              activeRun !== undefined &&
+              issue.assignee?.agentId !== activeSession.agentId && (
+                <Stack
+                  as="span"
+                  direction="horizontal"
+                  gap={1}
+                  vAlign="center"
+                  data-working-agent=""
+                >
+                  <AgentAvatar name={activeRun.agentName} harness={activeRun.harness} size={14} />
+                  <Text type="supporting" color="primary" weight="medium">
+                    {activeRun.agentName}
+                  </Text>
+                </Stack>
+              )}
             <Text type="supporting" color="secondary">
               Created by {issue.createdBy.displayName} · Updated{" "}
               <time dateTime={issue.updatedAt} title={formatFullDateTime(issue.updatedAt)}>
@@ -405,173 +464,196 @@ function IssuePage() {
         />
       )}
 
-      <Stack gap={5}>
-        <Stack gap={4}>
-          <Section padding={3}>
-            <Stack gap={2}>
-              <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
-                <Heading level={2} color="inherit">
-                  Description
-                </Heading>
-                {canContribute && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    label={issue.body === "" ? "Add description" : "Edit"}
-                    onClick={() => setEditOpen(true)}
-                  />
+      {(() => {
+        const mainColumn = (
+          <Stack gap={4}>
+            <Section padding={4}>
+              <Stack gap={3}>
+                <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+                  <Heading level={2} color="inherit">
+                    Description
+                  </Heading>
+                  {canContribute && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      label={issue.body === "" ? "Add description" : "Edit"}
+                      onClick={() => setEditOpen(true)}
+                    />
+                  )}
+                </Stack>
+                {issue.body === "" ? (
+                  <Text as="p" display="block" type="supporting" color="secondary">
+                    No description yet.
+                  </Text>
+                ) : (
+                  <Stack data-issue-body="">
+                    <Markdown issueRefs={projectIssues}>{issue.body}</Markdown>
+                  </Stack>
                 )}
               </Stack>
-              {issue.body === "" ? (
-                <Text as="p" display="block" type="supporting">
-                  No description yet.
-                </Text>
-              ) : (
-                <Stack data-issue-body="">
-                  <Markdown issueRefs={projectIssues}>{issue.body}</Markdown>
-                </Stack>
-              )}
-            </Stack>
-          </Section>
+            </Section>
 
-          <Subtasks issue={issue} issues={projectIssues} canContribute={canContribute} />
+            <Subtasks issue={issue} issues={projectIssues} canContribute={canContribute} />
 
-          <Blockers
-            issueId={issue.id}
-            projectId={issue.projectId}
-            blockedBy={blockedBy}
-            blocking={blocking}
-            candidates={projectIssues}
-            canContribute={canContribute}
-          />
+            <Blockers
+              issueId={issue.id}
+              projectId={issue.projectId}
+              blockedBy={blockedBy}
+              blocking={blocking}
+              candidates={projectIssues}
+              canContribute={canContribute}
+            />
 
-          <Section padding={3}>
-            <Stack gap={2}>
-              <Heading level={2} color="inherit">
-                Links
-              </Heading>
-              {issue.links.length === 0 ? (
-                <Text as="p" display="block" type="supporting">
-                  No links attached.
-                </Text>
-              ) : (
-                <Stack as="ul">
-                  {issue.links.map((link) => (
-                    <Stack
-                      as="li"
-                      key={link.id}
-                      data-link-id={link.id}
-                      direction="horizontal"
-                      gap={1}
-                      wrap="wrap"
-                      justify="between"
-                      vAlign="center"
-                      padding={2}
-                    >
-                      <Stack direction="horizontal" gap={1} wrap="wrap" vAlign="center">
-                        <Token
-                          label={LINK_KIND_LABELS[link.kind]}
-                          color="gray"
-                          size="sm"
-                          data-link-kind={link.kind}
-                        />
-                        <AstryxLink href={link.url} target="_blank" rel="noopener noreferrer">
-                          {link.title}
-                        </AstryxLink>
+            <Section padding={4}>
+              <Stack gap={3}>
+                <Heading level={2} color="inherit">
+                  Links
+                </Heading>
+                {issue.links.length === 0 ? (
+                  <Text as="p" display="block" type="supporting" color="secondary">
+                    No links attached.
+                  </Text>
+                ) : (
+                  <Stack as="ul" gap={2}>
+                    {issue.links.map((link) => (
+                      <Stack as="li" key={link.id} data-link-id={link.id}>
+                        <Card variant="muted" padding={2}>
+                          <Stack
+                            direction="horizontal"
+                            gap={2}
+                            wrap="wrap"
+                            justify="between"
+                            vAlign="center"
+                          >
+                            <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
+                              <Token
+                                label={LINK_KIND_LABELS[link.kind]}
+                                color="gray"
+                                size="sm"
+                                data-link-kind={link.kind}
+                              />
+                              <AstryxLink href={link.url} target="_blank" rel="noopener noreferrer">
+                                {link.title}
+                              </AstryxLink>
+                            </Stack>
+                            <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
+                              <Text type="supporting" color="secondary">
+                                {link.createdBy.displayName}
+                              </Text>
+                              {canContribute && (
+                                <LinkRemoveButton
+                                  issueId={issue.id}
+                                  projectId={issue.projectId}
+                                  link={link}
+                                />
+                              )}
+                            </Stack>
+                          </Stack>
+                        </Card>
                       </Stack>
-                      <Stack direction="horizontal" gap={1} wrap="wrap" vAlign="center">
-                        <Text type="supporting" color="secondary">
-                          {link.createdBy.displayName}
-                        </Text>
-                        {canContribute && (
-                          <LinkRemoveButton
-                            issueId={issue.id}
-                            projectId={issue.projectId}
-                            link={link}
-                          />
-                        )}
-                      </Stack>
-                    </Stack>
-                  ))}
-                </Stack>
-              )}
-              {canContribute && (
-                <Collapsible
-                  defaultIsOpen={false}
-                  trigger={
-                    <Text type="body" weight="semibold">
-                      Add link
-                    </Text>
-                  }
-                >
-                  <Stack paddingBlockStart={2}>
-                    <LinkForm issueId={issue.id} projectId={issue.projectId} />
+                    ))}
                   </Stack>
-                </Collapsible>
-              )}
-            </Stack>
-          </Section>
-
-          <Section padding={3}>
-            <Stack gap={3}>
-              <Heading level={2} color="inherit">
-                Comments ({comments.length})
-              </Heading>
-              {comments.length === 0 ? (
-                <Text as="p" display="block" type="supporting">
-                  No comments yet.
-                </Text>
-              ) : (
-                <Stack as="ul" gap={2}>
-                  {comments.map((comment) => (
-                    <Stack as="li" key={comment.id} data-comment-id={comment.id} padding={3}>
-                      <Stack
-                        direction="horizontal"
-                        gap={1}
-                        wrap="wrap"
-                        justify="between"
-                        vAlign="center"
-                      >
-                        <strong>{comment.author.displayName}</strong>
-                        <time
-                          dateTime={comment.createdAt}
-                          title={formatFullDateTime(comment.createdAt)}
-                        >
-                          {formatCompactDateTime(comment.createdAt)}
-                        </time>
-                      </Stack>
-                      <Stack data-comment-body="">
-                        <Markdown issueRefs={projectIssues}>{comment.body}</Markdown>
-                      </Stack>
+                )}
+                {canContribute && (
+                  <Collapsible
+                    defaultIsOpen={false}
+                    trigger={
+                      <Text type="body" weight="semibold">
+                        Add link
+                      </Text>
+                    }
+                  >
+                    <Stack paddingBlockStart={2}>
+                      <LinkForm issueId={issue.id} projectId={issue.projectId} />
                     </Stack>
-                  ))}
-                </Stack>
-              )}
-              {canContribute && (
-                <CommentForm
-                  issueId={issue.id}
-                  projectId={issue.projectId}
-                  issues={projectIssues}
-                />
-              )}
-            </Stack>
-          </Section>
-        </Stack>
+                  </Collapsible>
+                )}
+              </Stack>
+            </Section>
 
-        <Stack as="aside" gap={4}>
-          <Section padding={3} aria-label="Issue properties">
-            <Stack gap={3}>
-              <Heading level={2} color="inherit">
-                Properties
-              </Heading>
+            <Section padding={4}>
+              <Stack gap={3}>
+                <Heading level={2} color="inherit">
+                  Comments ({comments.length})
+                </Heading>
+                {comments.length === 0 ? (
+                  <Text as="p" display="block" type="supporting" color="secondary">
+                    No comments yet.
+                  </Text>
+                ) : (
+                  <Stack as="ul" gap={3}>
+                    {comments.map((comment) => (
+                      <Stack as="li" key={comment.id} data-comment-id={comment.id}>
+                        <Card variant="muted" padding={3}>
+                          <Stack gap={2}>
+                            <Stack
+                              direction="horizontal"
+                              gap={2}
+                              wrap="wrap"
+                              justify="between"
+                              vAlign="center"
+                            >
+                              <Stack direction="horizontal" gap={1.5} vAlign="center">
+                                <Avatar
+                                  name={comment.author.displayName}
+                                  size="xsm"
+                                  tooltip={false}
+                                />
+                                <Text type="body" weight="semibold" color="primary">
+                                  {comment.author.displayName}
+                                </Text>
+                              </Stack>
+                              <Text type="supporting" color="secondary">
+                                <time
+                                  dateTime={comment.createdAt}
+                                  title={formatFullDateTime(comment.createdAt)}
+                                >
+                                  {formatCompactDateTime(comment.createdAt)}
+                                </time>
+                              </Text>
+                            </Stack>
+                            <Stack data-comment-body="">
+                              <Markdown issueRefs={projectIssues}>{comment.body}</Markdown>
+                            </Stack>
+                          </Stack>
+                        </Card>
+                      </Stack>
+                    ))}
+                  </Stack>
+                )}
+                {canContribute && (
+                  <>
+                    <Divider />
+                    <CommentForm
+                      issueId={issue.id}
+                      projectId={issue.projectId}
+                      issues={projectIssues}
+                    />
+                  </>
+                )}
+              </Stack>
+            </Section>
+          </Stack>
+        );
 
-              <Stack paddingBlockStart={2}>
+        const inspectorColumn = (
+          <Stack gap={4}>
+            <Section padding={4} aria-label="Issue properties">
+              <Stack gap={3}>
+                <Heading level={2} color="inherit">
+                  Properties
+                </Heading>
+
+                <Divider />
+
                 {canContribute ? (
                   <Selector
                     label="Status"
                     id="issue-status-selector"
                     size="sm"
+                    width="100%"
                     value={issue.status}
                     isDisabled={statusSubmitting}
                     onChange={(value) => requestStatusChange(IssueStatus.parse(value))}
@@ -592,17 +674,19 @@ function IssuePage() {
                     />
                   </Stack>
                 )}
-              </Stack>
 
-              <Stack paddingBlockStart={2}>
                 <AssigneeControl
                   issue={issue}
                   candidates={candidates}
                   canContribute={canContribute}
+                  activeHarness={
+                    issue.assignee?.agentId !== undefined &&
+                    activeSession?.agentId === issue.assignee.agentId
+                      ? activeRun?.harness
+                      : undefined
+                  }
                 />
-              </Stack>
 
-              <Stack paddingBlockStart={2}>
                 {canContribute ? (
                   <IssuePriorityControls
                     issue={issue}
@@ -618,29 +702,55 @@ function IssuePage() {
                     <PriorityBadge priority={issue.priority} />
                   </Stack>
                 )}
-              </Stack>
 
-              <Stack paddingBlockStart={2}>
                 <IssueLabels issue={issue} labels={projectLabels} canContribute={canContribute} />
               </Stack>
+            </Section>
+
+            <SessionStatus
+              issueId={issue.id}
+              projectId={issue.projectId}
+              canContribute={canContribute}
+            />
+
+            <SessionInspector
+              key={`${issue.id}:${inspector ?? false}:${inspectorSession ?? ""}`}
+              issueId={issue.id}
+              canContribute={canContribute}
+              initialOpen={inspector}
+              initialSessionId={inspectorSession}
+            />
+          </Stack>
+        );
+
+        if (isNarrow) {
+          return (
+            <Stack gap={4}>
+              {inspectorColumn}
+              {mainColumn}
             </Stack>
-          </Section>
+          );
+        }
 
-          <SessionStatus
-            issueId={issue.id}
-            projectId={issue.projectId}
-            canContribute={canContribute}
+        return (
+          <Layout
+            height="auto"
+            padding={0}
+            content={<Stack paddingInlineEnd={4}>{mainColumn}</Stack>}
+            end={
+              <LayoutPanel
+                width={340}
+                padding={0}
+                isScrollable={false}
+                role="complementary"
+                label="Issue details"
+              >
+                {inspectorColumn}
+              </LayoutPanel>
+            }
           />
-
-          <SessionInspector
-            key={`${issue.id}:${inspector ?? false}:${inspectorSession ?? ""}`}
-            issueId={issue.id}
-            canContribute={canContribute}
-            initialOpen={inspector}
-            initialSessionId={inspectorSession}
-          />
-        </Stack>
-      </Stack>
+        );
+      })()}
 
       {canContribute && (
         <>
@@ -774,98 +884,99 @@ function Blockers({
   );
 
   return (
-    <Section padding={3}>
-      <Stack gap={2}>
+    <Section padding={4}>
+      <Stack gap={3}>
         <Heading level={2} color="inherit">
           Dependencies
         </Heading>
         {blockedBy.length === 0 && blocking.length === 0 ? (
-          <Text as="p" display="block" type="supporting">
+          <Text as="p" display="block" type="supporting" color="secondary">
             No dependencies linked.
           </Text>
         ) : (
-          <Stack gap={2}>
+          <Stack gap={3}>
             {blockedBy.length > 0 && (
-              <Stack gap={1}>
+              <Stack gap={1.5}>
                 <Heading level={3} color="inherit">
                   Blocked by
                 </Heading>
-                <Stack as="ul">
+                <Stack as="ul" gap={2}>
                   {blockedBy.map((blocker) => (
                     <Stack
                       as="li"
                       key={blocker.id}
                       data-blocker-id={blocker.id}
                       data-blocker-status={blocker.status}
-                      direction="horizontal"
-                      gap={1}
-                      wrap="wrap"
-                      justify="between"
-                      vAlign="center"
-                      padding={2}
                     >
-                      <Stack direction="horizontal" gap={1} wrap="wrap" vAlign="center">
-                        <Text as="span" type="supporting" color="secondary">
-                          {blocker.identifier}
-                        </Text>
-                        <Link to="/issues/$issueId" params={{ issueId: blocker.id }}>
-                          {blocker.title}
-                        </Link>
-                        <Token
-                          label={issueStatusLabels[blocker.status]}
-                          color={STATUS_COLORS[blocker.status]}
-                          size="sm"
-                        />
-                        {blocker.status !== "done" && blocker.status !== "cancelled" && (
-                          <Token label="Blocking" color="red" size="sm" />
-                        )}
-                      </Stack>
-                      {canContribute && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => setConfirmRemove(blocker)}
-                          isDisabled={submitting}
-                          label="Remove"
-                          variant="destructive"
-                        />
-                      )}
+                      <Card variant="muted" padding={2}>
+                        <Stack
+                          direction="horizontal"
+                          gap={2}
+                          wrap="wrap"
+                          justify="between"
+                          vAlign="center"
+                        >
+                          <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
+                            <Text as="span" type="code" color="secondary">
+                              {blocker.identifier}
+                            </Text>
+                            <Link to="/issues/$issueId" params={{ issueId: blocker.id }}>
+                              {blocker.title}
+                            </Link>
+                            <Token
+                              label={issueStatusLabels[blocker.status]}
+                              color={STATUS_COLORS[blocker.status]}
+                              size="sm"
+                            />
+                            {blocker.status !== "done" && blocker.status !== "cancelled" && (
+                              <Token label="Blocking" color="red" size="sm" />
+                            )}
+                          </Stack>
+                          {canContribute && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => setConfirmRemove(blocker)}
+                              isDisabled={submitting}
+                              label="Remove"
+                              variant="destructive"
+                            />
+                          )}
+                        </Stack>
+                      </Card>
                     </Stack>
                   ))}
                 </Stack>
               </Stack>
             )}
             {blocking.length > 0 && (
-              <Stack gap={1}>
+              <Stack gap={1.5}>
                 <Heading level={3} color="inherit">
                   Blocking
                 </Heading>
-                <Stack as="ul">
+                <Stack as="ul" gap={2}>
                   {blocking.map((dependant) => (
-                    <Stack
-                      as="li"
-                      key={dependant.id}
-                      data-dependant-id={dependant.id}
-                      direction="horizontal"
-                      gap={1}
-                      wrap="wrap"
-                      justify="between"
-                      vAlign="center"
-                      padding={2}
-                    >
-                      <Stack direction="horizontal" gap={1} wrap="wrap" vAlign="center">
-                        <Text as="span" type="supporting" color="secondary">
-                          {dependant.identifier}
-                        </Text>
-                        <Link to="/issues/$issueId" params={{ issueId: dependant.id }}>
-                          {dependant.title}
-                        </Link>
-                        <Token
-                          label={issueStatusLabels[dependant.status]}
-                          color={STATUS_COLORS[dependant.status]}
-                          size="sm"
-                        />
-                      </Stack>
+                    <Stack as="li" key={dependant.id} data-dependant-id={dependant.id}>
+                      <Card variant="muted" padding={2}>
+                        <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
+                          <Text as="span" type="code" color="secondary">
+                            {dependant.identifier}
+                          </Text>
+                          <Link
+                            to="/issues/$issueId"
+                            params={{ issueId: dependant.id }}
+                            color="primary"
+                            weight="medium"
+                          >
+                            {dependant.title}
+                          </Link>
+                          <Token
+                            label={issueStatusLabels[dependant.status]}
+                            color={STATUS_COLORS[dependant.status]}
+                            size="sm"
+                          />
+                        </Stack>
+                      </Card>
                     </Stack>
                   ))}
                 </Stack>

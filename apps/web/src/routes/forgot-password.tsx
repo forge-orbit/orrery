@@ -1,5 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -39,14 +40,16 @@ function ForgotPasswordPage() {
 
   return (
     <Stack as="main" gap={5}>
-      <Heading level={1} color="inherit">
-        Reset your password
-      </Heading>
-      <Text as="p" display="block" type="supporting">
-        Enter your email address. If it can be recovered, we will send a reset link.
-      </Text>
+      <Stack gap={1.5}>
+        <Heading level={1} color="inherit">
+          Reset your password
+        </Heading>
+        <Text as="p" display="block" type="supporting" color="secondary">
+          Enter your email address. If it can be recovered, we will send a reset link.
+        </Text>
+      </Stack>
       <form onSubmit={(event) => void onSubmit(event)}>
-        <Stack gap={3}>
+        <FormLayout>
           <TextField
             label="Email"
             id="forgot-email"
@@ -69,7 +72,7 @@ function ForgotPasswordPage() {
             isLoading={submitting}
             label="Send reset link"
           />
-        </Stack>
+        </FormLayout>
       </form>
       <Text as="p" display="block" type="supporting">
         <Link to="/signin">

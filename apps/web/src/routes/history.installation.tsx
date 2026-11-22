@@ -17,7 +17,7 @@ function InstallationHistoryPage() {
   const { data: events } = useSuspenseQuery(installationHistoryQuery);
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="home" to="/">

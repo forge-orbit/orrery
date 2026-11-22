@@ -71,7 +71,7 @@ async function feed(
 }
 
 function notificationsNav(page: Page) {
-  return page.locator("aside[data-app-sidebar] [data-notifications-link]");
+  return page.locator("[data-app-sidebar] [data-notifications-link]");
 }
 
 async function badgeCount(page: Page): Promise<number> {

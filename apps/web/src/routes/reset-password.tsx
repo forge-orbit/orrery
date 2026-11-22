@@ -1,5 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -72,7 +73,7 @@ function ResetPasswordPage() {
         </Stack>
       ) : (
         <form onSubmit={(event) => void onSubmit(event)}>
-          <Stack gap={3}>
+          <FormLayout>
             <TextField
               label="New password"
               description="At least 8 characters."
@@ -96,7 +97,7 @@ function ResetPasswordPage() {
               isLoading={submitting}
               label="Set new password"
             />
-          </Stack>
+          </FormLayout>
         </form>
       )}
     </Stack>

@@ -1,6 +1,7 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -60,11 +61,11 @@ function ColorSwatches({
   groupLabel: string;
 }) {
   return (
-    <Stack direction="horizontal" gap={1.5} align="center">
+    <Stack direction="horizontal" gap={2} align="center" wrap="wrap">
       <Text type="supporting" color="secondary">
         Presets
       </Text>
-      <Stack direction="horizontal" gap={1} role="group" aria-label={groupLabel}>
+      <Stack direction="horizontal" gap={1} wrap="wrap" role="group" aria-label={groupLabel}>
         {PRESET_COLORS.map((preset) => {
           const active = value.toLowerCase() === preset.hex.toLowerCase();
           return (
@@ -221,41 +222,41 @@ export function ProjectLabels({
   }
 
   return (
-    <Stack gap={3}>
+    <Stack gap={4}>
       {canContribute && (
-        <Section padding={3}>
+        <Section padding={4}>
           <form onSubmit={(event) => void onCreate(event)}>
-            <Stack>
-              <Stack>
-                <Heading level={2} color="inherit">
-                  Create label
-                </Heading>
-                <Text type="supporting" color="secondary">
-                  Categorize issues across the board and issue lists.
-                </Text>
+            <Stack gap={4}>
+              <Stack direction="horizontal" justify="between" vAlign="center" gap={2} wrap="wrap">
+                <Stack gap={0.5}>
+                  <Heading level={2} color="inherit">
+                    Create label
+                  </Heading>
+                  <Text type="supporting" color="secondary">
+                    Categorize issues across the board and issue lists.
+                  </Text>
+                </Stack>
+                <LabelPreview name={name} color={color} />
               </Stack>
-              <LabelPreview name={name} color={color} />
-            </Stack>
 
-            <Stack>
-              <TextField
-                label="New label name"
-                id="new-label-name"
-                htmlName="name"
-                value={name}
-                onChange={setName}
-                maxLength={50}
-                placeholder="e.g. Bug, Backend, UI"
-                width="100%"
-                required
-              />
-              <ColorInputField
-                id="new-label-color"
-                label="New label color"
-                value={color}
-                onChange={setColor}
-              />
-              <Stack>
+              <Stack direction="horizontal" gap={3} vAlign="end" wrap="wrap">
+                <TextField
+                  label="New label name"
+                  id="new-label-name"
+                  htmlName="name"
+                  value={name}
+                  onChange={setName}
+                  maxLength={50}
+                  placeholder="e.g. Bug, Backend, UI"
+                  width="min(100%, 20rem)"
+                  required
+                />
+                <ColorInputField
+                  id="new-label-color"
+                  label="New label color"
+                  value={color}
+                  onChange={setColor}
+                />
                 <Button
                   type="submit"
                   label="Create label"
@@ -264,16 +265,18 @@ export function ProjectLabels({
                   isLoading={saving}
                 />
               </Stack>
-            </Stack>
 
-            <ColorSwatches value={color} onSelect={setColor} groupLabel="Color swatches" />
+              <Divider />
+
+              <ColorSwatches value={color} onSelect={setColor} groupLabel="Color swatches" />
+            </Stack>
           </form>
         </Section>
       )}
 
-      <Section padding={3}>
+      <Section padding={4}>
         <Stack gap={3}>
-          <Stack>
+          <Stack direction="horizontal" justify="between" vAlign="center" gap={2} wrap="wrap">
             <Heading level={2} color="inherit">
               Labels
             </Heading>
@@ -306,50 +309,50 @@ export function ProjectLabels({
                     {editingId === label.id ? (
                       <TableCell colSpan={canContribute ? 3 : 2}>
                         <form onSubmit={(event) => void onUpdate(event, label)}>
-                          <Stack>
+                          <Stack gap={3} paddingBlock={2}>
                             <LabelPreview name={editName} color={editColor} />
-                          </Stack>
-                          <Stack>
-                            <TextField
-                              label="Label name"
-                              id={`label-name-${label.id}`}
-                              htmlName="name"
-                              value={editName}
-                              onChange={setEditName}
-                              maxLength={50}
-                              width="100%"
-                              required
-                            />
-                            <ColorInputField
-                              id={`label-color-${label.id}`}
-                              label="Label color"
-                              value={editColor}
-                              onChange={setEditColor}
-                            />
-                            <Stack direction="horizontal" gap={1}>
-                              <Button
-                                type="submit"
-                                label="Save label"
-                                variant="primary"
-                                size="sm"
-                                isDisabled={saving}
-                                isLoading={saving}
+                            <Stack direction="horizontal" gap={2} vAlign="end" wrap="wrap">
+                              <TextField
+                                label="Label name"
+                                id={`label-name-${label.id}`}
+                                htmlName="name"
+                                value={editName}
+                                onChange={setEditName}
+                                maxLength={50}
+                                width="min(100%, 18rem)"
+                                required
                               />
-                              <Button
-                                type="button"
-                                label="Cancel"
-                                variant="ghost"
-                                size="sm"
-                                isDisabled={saving}
-                                onClick={() => setEditingId(undefined)}
+                              <ColorInputField
+                                id={`label-color-${label.id}`}
+                                label="Label color"
+                                value={editColor}
+                                onChange={setEditColor}
                               />
+                              <Stack direction="horizontal" gap={1}>
+                                <Button
+                                  type="submit"
+                                  label="Save label"
+                                  variant="primary"
+                                  size="sm"
+                                  isDisabled={saving}
+                                  isLoading={saving}
+                                />
+                                <Button
+                                  type="button"
+                                  label="Cancel"
+                                  variant="ghost"
+                                  size="sm"
+                                  isDisabled={saving}
+                                  onClick={() => setEditingId(undefined)}
+                                />
+                              </Stack>
                             </Stack>
+                            <ColorSwatches
+                              value={editColor}
+                              onSelect={setEditColor}
+                              groupLabel="Edit color swatches"
+                            />
                           </Stack>
-                          <ColorSwatches
-                            value={editColor}
-                            onSelect={setEditColor}
-                            groupLabel="Edit color swatches"
-                          />
                         </form>
                       </TableCell>
                     ) : (

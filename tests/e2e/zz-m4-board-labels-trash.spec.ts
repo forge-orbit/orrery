@@ -139,7 +139,7 @@ test("board, badges, labels, subtasks, trash and restore work in the browser", a
   await page.getByRole("link", { name: "Back to project" }).click();
   await page.locator("[data-board-link]").click();
   await expect(page.locator("[data-board-column]")).toHaveCount(6);
-  await expect(page.locator('[data-board-status="backlog"] h2')).toContainText("Backlog");
+  await expect(page.getByRole("heading", { name: "Backlog", level: 4 })).toContainText("Backlog");
   expect(
     await page
       .locator("[data-board-status]")

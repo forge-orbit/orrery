@@ -1,5 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Section } from "@astryxdesign/core/Section";
@@ -58,7 +59,7 @@ function SmtpSettingsPage() {
   const configured = settings !== null && settings.host !== null;
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="home" to="/">
@@ -151,18 +152,18 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
   }
 
   return (
-    <Section padding={3}>
+    <Section padding={4}>
       <Stack gap={3}>
         <Stack gap={1}>
           <Heading level={2} color="inherit">
             SMTP configuration
           </Heading>
-          <Text as="p" display="block" type="supporting">
+          <Text as="p" display="block" type="supporting" color="secondary">
             Orrery uses this relay for invitations, password resets, and verification emails.
           </Text>
         </Stack>
         <form onSubmit={(event) => void onSubmit(event)}>
-          <Stack gap={3} hAlign="start">
+          <FormLayout>
             <TextField
               label="Host"
               id="smtp-host"
@@ -172,6 +173,7 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
               required
               maxLength={255}
               placeholder="smtp.example.com"
+              width="min(100%, 28rem)"
             />
 
             <NumberInput
@@ -183,6 +185,7 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
               onEntryErrorChange={(entry) => setInvalidPortEntry(entry !== null)}
               isIntegerOnly
               isRequired
+              width="min(100%, 14rem)"
             />
 
             <Selector
@@ -190,6 +193,7 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
               id="smtp-security"
               htmlName="security"
               value={security}
+              width="min(100%, 14rem)"
               onChange={(value) => {
                 const parsed = SmtpSecurity.safeParse(value);
                 if (parsed.success) setSecurity(parsed.data);
@@ -209,6 +213,7 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
               onChange={setFrom}
               required
               placeholder="orrery@example.com"
+              width="min(100%, 28rem)"
             />
 
             <TextField
@@ -218,6 +223,7 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
               value={username}
               onChange={setUsername}
               maxLength={255}
+              width="min(100%, 28rem)"
             />
 
             <TextField
@@ -229,6 +235,7 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
               onChange={setPassword}
               maxLength={1024}
               autoComplete="new-password"
+              width="min(100%, 28rem)"
             />
             {settings.hasPassword && (
               <Banner
@@ -249,14 +256,16 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
             {error !== undefined && (
               <Banner status="error" title="Could not save SMTP settings" description={error} />
             )}
-            <Button
-              type="submit"
-              isDisabled={saving}
-              isLoading={saving}
-              label="Save SMTP settings"
-              variant="primary"
-            />
-          </Stack>
+            <Stack hAlign="start">
+              <Button
+                type="submit"
+                isDisabled={saving}
+                isLoading={saving}
+                label="Save SMTP settings"
+                variant="primary"
+              />
+            </Stack>
+          </FormLayout>
         </form>
       </Stack>
     </Section>
@@ -322,7 +331,7 @@ function TestAndVerification({
   }
 
   return (
-    <Section padding={3}>
+    <Section padding={4}>
       <Stack gap={3} hAlign="start">
         <Stack gap={1}>
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
@@ -335,7 +344,7 @@ function TestAndVerification({
               size="sm"
             />
           </Stack>
-          <Text as="p" display="block" type="supporting">
+          <Text as="p" display="block" type="supporting" color="secondary">
             {emailVerified
               ? "Your email address is verified."
               : "Send a test email and paste the single-use token to verify your administrator email address."}

@@ -1,5 +1,7 @@
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Text } from "@astryxdesign/core/Text";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
+import { Stack } from "@astryxdesign/core/Stack";
 import type { Issue } from "@orrery/contract";
 import type { FormEvent } from "react";
 import { useState } from "react";
@@ -57,31 +59,38 @@ export function TitleBodyForm({
 
   return (
     <form onSubmit={(event) => void handleSubmit(event)}>
-      <TextField
-        label={titleLabel}
-        id={`${idPrefix}-title`}
-        htmlName="title"
-        value={title}
-        onChange={setTitle}
-        required
-        maxLength={200}
-      />
+      <FormLayout>
+        <TextField
+          label={titleLabel}
+          id={`${idPrefix}-title`}
+          htmlName="title"
+          value={title}
+          onChange={setTitle}
+          required
+          maxLength={200}
+          width="100%"
+        />
 
-      <IssueMentionTextArea
-        label={bodyLabel}
-        id={`${idPrefix}-body`}
-        htmlName="body"
-        value={body}
-        onChange={setBody}
-        rows={bodyRows}
-        {...(mentionIssues !== undefined ? { issues: mentionIssues } : {})}
-      />
-      {error !== undefined && (
-        <Text as="p" display="block" type="inherit" color="inherit" role="alert">
-          {error}
-        </Text>
-      )}
-      <Button type="submit" isDisabled={submitting} label={submitLabel} variant="primary" />
+        <IssueMentionTextArea
+          label={bodyLabel}
+          id={`${idPrefix}-body`}
+          htmlName="body"
+          value={body}
+          onChange={setBody}
+          rows={bodyRows}
+          {...(mentionIssues !== undefined ? { issues: mentionIssues } : {})}
+        />
+        {error !== undefined && <Banner status="error" role="alert" title={error} />}
+        <Stack direction="horizontal" hAlign="start">
+          <Button
+            type="submit"
+            isDisabled={submitting}
+            isLoading={submitting}
+            label={submitLabel}
+            variant="primary"
+          />
+        </Stack>
+      </FormLayout>
     </form>
   );
 }

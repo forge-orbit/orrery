@@ -21,7 +21,7 @@ export function ResourceLoadError({ resource, error }: { resource: Resource; err
 
   if (error instanceof ApiProblemError && error.status === 401) {
     return (
-      <Stack as="main">
+      <Stack gap={4}>
         <Heading level={1} color="inherit">
           {title}
         </Heading>
@@ -37,7 +37,7 @@ export function ResourceLoadError({ resource, error }: { resource: Resource; err
 
   if (error instanceof ApiProblemError && error.status === 404) {
     return (
-      <Stack as="main">
+      <Stack gap={4}>
         <Heading level={1} color="inherit">
           {title}
         </Heading>
@@ -53,7 +53,7 @@ export function ResourceLoadError({ resource, error }: { resource: Resource; err
 
   if (error instanceof ApiProblemError && error.status === 403) {
     return (
-      <Stack as="main">
+      <Stack gap={4}>
         <Heading level={1} color="inherit">
           {title}
         </Heading>
@@ -68,7 +68,7 @@ export function ResourceLoadError({ resource, error }: { resource: Resource; err
   }
 
   return (
-    <Stack as="main">
+    <Stack gap={4}>
       <Heading level={1} color="inherit">
         {title}
       </Heading>

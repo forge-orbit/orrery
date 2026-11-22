@@ -1,3 +1,8 @@
+import { Card } from "@astryxdesign/core/Card";
+import { Code } from "@astryxdesign/core/Code";
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
+import { Divider } from "@astryxdesign/core/Divider";
+import { Heading } from "@astryxdesign/core/Heading";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
@@ -161,13 +166,58 @@ function MermaidDiagram({ source }: { source: string }) {
 }
 
 const components: Components = {
+  h1({ children }) {
+    return (
+      <Heading level={2} color="inherit">
+        {children}
+      </Heading>
+    );
+  },
+  h2({ children }) {
+    return (
+      <Heading level={3} color="inherit">
+        {children}
+      </Heading>
+    );
+  },
+  h3({ children }) {
+    return (
+      <Heading level={4} color="inherit">
+        {children}
+      </Heading>
+    );
+  },
+  h4({ children }) {
+    return (
+      <Heading level={5} color="inherit">
+        {children}
+      </Heading>
+    );
+  },
+  p({ children }) {
+    return (
+      <Text as="p" display="block" type="body" color="inherit">
+        {children}
+      </Text>
+    );
+  },
+  blockquote({ children }) {
+    return (
+      <Card variant="muted" padding={3}>
+        <Stack gap={1.5}>{children}</Stack>
+      </Card>
+    );
+  },
+  hr() {
+    return <Divider />;
+  },
   pre({ children }: { children?: ReactNode }) {
     return <>{children}</>;
   },
   table({ children, node: _node, ...props }) {
     return <Stack isScrollable>{createElement("table", props, children)}</Stack>;
   },
-  code({ className, children, node: _node, ...props }) {
+  code({ className, children, node: _node }) {
     const language = /language-([\w-]+)/.exec(className ?? "")?.[1];
     const text = typeof children === "string" ? children : "";
     if (language === "mermaid") {
@@ -175,12 +225,17 @@ const components: Components = {
     }
     if (language !== undefined || text.endsWith("\n")) {
       return (
-        <pre data-code-block>
-          <code {...props}>{children}</code>
-        </pre>
+        <Stack data-code-block="">
+          <CodeBlock
+            code={text.replace(/\n$/, "")}
+            language={language ?? "plaintext"}
+            hasLanguageLabel={language !== undefined}
+            width="100%"
+          />
+        </Stack>
       );
     }
-    return <code {...props}>{children}</code>;
+    return <Code size="inherit">{children}</Code>;
   },
   a({ href, title, children, node: _node, ...props }) {
     if (!href) {
@@ -227,7 +282,7 @@ export function Markdown({
       ? [remarkGfm, createIssueRefPlugin(issueRefs)]
       : [remarkGfm];
   return (
-    <Stack gap={0} data-markdown="">
+    <Stack gap={2} data-markdown="">
       <ReactMarkdown remarkPlugins={plugins} components={components} urlTransform={safeUrl}>
         {children}
       </ReactMarkdown>

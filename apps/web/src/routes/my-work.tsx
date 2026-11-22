@@ -21,7 +21,7 @@ export const Route = createFileRoute("/my-work")({
 
 function MyWorkLoadingState() {
   return (
-    <Stack as="main" gap={5} data-my-work-loading="">
+    <Stack gap={5} data-my-work-loading="">
       <PageHeader title="My work" />
       <Text as="p" display="block" type="supporting" role="status">
         Loading your work…
@@ -40,7 +40,7 @@ function MyWorkPage() {
   }
 
   return (
-    <Stack as="main" gap={5} data-my-work-page="">
+    <Stack gap={5} data-my-work-page="">
       <PageHeader
         title="My work"
         subtitle="Your assignments, live agent sessions, and questions across all your workspaces."

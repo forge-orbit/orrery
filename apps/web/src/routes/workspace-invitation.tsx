@@ -1,8 +1,12 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
+import { Avatar } from "@astryxdesign/core/Avatar";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Divider } from "@astryxdesign/core/Divider";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
+import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
@@ -114,16 +118,16 @@ function WorkspaceInvitationPage() {
 function InvitationHeader({ preview }: { preview: WorkspaceInvitationPreview }) {
   return (
     <Stack as="header" gap={2}>
-      <Text as="span" type="supporting" weight="medium">
-        <Text as="span" weight="semibold" aria-hidden="true">
-          {preview.workspaceName.slice(0, 1).toUpperCase()}
+      <Stack direction="horizontal" gap={1.5} vAlign="center">
+        <Avatar name={preview.workspaceName} shape="rounded" size="sm" tooltip={false} />
+        <Text as="span" type="supporting" weight="semibold" color="secondary">
+          Workspace invitation
         </Text>
-        Workspace invitation
-      </Text>
+      </Stack>
       <Heading level={1} color="inherit">
         Join {preview.workspaceName}
       </Heading>
-      <Text as="p" display="block" type="supporting">
+      <Text as="p" display="block" type="supporting" color="secondary">
         {preview.invitedByEmail} invited <strong>{preview.email}</strong> to{" "}
         <strong>{preview.workspaceName}</strong>.
       </Text>
@@ -223,51 +227,55 @@ function Invitation({ token }: { token: string }) {
 function InvitationScope({ preview }: { preview: WorkspaceInvitationPreview }) {
   const projects = preview.grants.filter((grant) => grant.kind === "project_access");
   return (
-    <Stack as="section" gap={3} padding={3} aria-label="Invitation details">
-      <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-        <Text as="span" type="supporting" weight="medium">
-          Access
-        </Text>
+    <Section variant="muted" padding={4} aria-label="Invitation details">
+      <Stack gap={3}>
         <Stack gap={1}>
+          <Text as="span" type="supporting" weight="semibold" color="secondary">
+            Access
+          </Text>
           <Text as="p" display="block" weight="medium">
             Offered access: workspace membership.
           </Text>
-          <Text as="p" display="block" type="supporting">
+          <Text as="p" display="block" type="supporting" color="secondary">
             Workspace membership alone does not grant project access.
           </Text>
         </Stack>
-      </Stack>
 
-      <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-        <Text as="span" type="supporting" weight="medium">
-          Projects
-        </Text>
-        {projects.length > 0 ? (
-          <Stack as="ul" direction="horizontal" gap={2} wrap="wrap" aria-label="Project access">
-            {projects.map((grant) => (
-              <Stack as="li" key={grant.projectId} data-project-grant-id={grant.projectId}>
-                {grant.projectName}: {grant.level}
-              </Stack>
-            ))}
-          </Stack>
-        ) : (
-          <Text as="p" display="block" type="supporting">
-            No projects included in this invitation.
+        <Divider />
+
+        <Stack gap={1.5}>
+          <Text as="span" type="supporting" weight="semibold" color="secondary">
+            Projects
           </Text>
-        )}
-      </Stack>
+          {projects.length > 0 ? (
+            <Stack as="ul" direction="horizontal" gap={1.5} wrap="wrap" aria-label="Project access">
+              {projects.map((grant) => (
+                <Stack as="li" key={grant.projectId} data-project-grant-id={grant.projectId}>
+                  {grant.projectName}: {grant.level}
+                </Stack>
+              ))}
+            </Stack>
+          ) : (
+            <Text as="p" display="block" type="supporting" color="secondary">
+              No projects included in this invitation.
+            </Text>
+          )}
+        </Stack>
 
-      <Stack direction="horizontal" gap={2} vAlign="center" padding={3}>
-        <Icon icon="clock" size="xsm" aria-hidden="true" />
-        <Text as="span" type="supporting">
-          This invitation expires{" "}
-          <time dateTime={preview.expiresAt} title={formatFullDateTime(preview.expiresAt)}>
-            {formatDateTime(preview.expiresAt)} ({relativeCountdown(preview.expiresAt)})
-          </time>
-          .
-        </Text>
+        <Divider />
+
+        <Stack direction="horizontal" gap={1.5} vAlign="center">
+          <Icon icon="clock" size="xsm" color="secondary" aria-hidden="true" />
+          <Text as="span" type="supporting" color="secondary">
+            This invitation expires{" "}
+            <time dateTime={preview.expiresAt} title={formatFullDateTime(preview.expiresAt)}>
+              {formatDateTime(preview.expiresAt)} ({relativeCountdown(preview.expiresAt)})
+            </time>
+            .
+          </Text>
+        </Stack>
       </Stack>
-    </Stack>
+    </Section>
   );
 }
 
@@ -444,37 +452,39 @@ function NewAccountForm({ token }: { token: string }) {
 
   return (
     <form onSubmit={(event) => void onSubmit(event)}>
-      <Stack gap={1}>
-        <Heading level={2} color="inherit">
-          Create your account
-        </Heading>
-        <Text as="p" display="block" type="supporting" color="secondary">
-          Choose a password to create your account and join this workspace.
-        </Text>
-      </Stack>
-      <TextField
-        label="Password"
-        description="At least 8 characters."
-        id="workspace-invitation-password"
-        htmlName="password"
-        type="password"
-        value={password}
-        onChange={setPassword}
-        required
-        minLength={8}
-        autoComplete="new-password"
-        width="100%"
-      />
-      {error !== undefined && <Banner status="error" role="alert" title={error} />}
-      <Button
-        type="submit"
-        variant="primary"
-        size="lg"
-        width="100%"
-        isDisabled={submitting}
-        isLoading={submitting}
-        label="Create account and join"
-      />
+      <FormLayout>
+        <Stack gap={1}>
+          <Heading level={2} color="inherit">
+            Create your account
+          </Heading>
+          <Text as="p" display="block" type="supporting" color="secondary">
+            Choose a password to create your account and join this workspace.
+          </Text>
+        </Stack>
+        <TextField
+          label="Password"
+          description="At least 8 characters."
+          id="workspace-invitation-password"
+          htmlName="password"
+          type="password"
+          value={password}
+          onChange={setPassword}
+          required
+          minLength={8}
+          autoComplete="new-password"
+          width="100%"
+        />
+        {error !== undefined && <Banner status="error" role="alert" title={error} />}
+        <Button
+          type="submit"
+          variant="primary"
+          size="lg"
+          width="100%"
+          isDisabled={submitting}
+          isLoading={submitting}
+          label="Create account and join"
+        />
+      </FormLayout>
     </form>
   );
 }

@@ -21,7 +21,7 @@ function ProjectHistoryPage() {
   const { data: events } = useSuspenseQuery(projectHistoryQuery(projectId));
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="project" to="/projects/$projectId" params={{ projectId }}>

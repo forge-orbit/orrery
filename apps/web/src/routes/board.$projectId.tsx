@@ -3,19 +3,29 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
+import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
+import { StatusDot, type StatusDotVariant } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useToast } from "@astryxdesign/core/Toast";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
-import { type ActiveWorkSession, type Issue, IssuePriority, IssueStatus } from "@orrery/contract";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
+import {
+  type ActiveWorkSession,
+  type Issue,
+  IssuePriority,
+  IssueStatus,
+  type RunDetail,
+} from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -37,8 +47,10 @@ import {
   subtasksOf,
   updateIssue,
 } from "../features/projects/index.ts";
+import { workspaceRunsQuery } from "../features/runs/index.ts";
 import { activeSessionsQuery, SessionInspectorDetails } from "../features/work-sessions/index.ts";
 import { workspaceQuery } from "../features/workspaces/index.ts";
+import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
 
 export const Route = createFileRoute("/board/$projectId")({
@@ -69,6 +81,15 @@ const BOARD_COLUMNS: IssueStatus[] = [
   "cancelled",
 ];
 
+const COLUMN_STATUS_DOTS: Record<IssueStatus, StatusDotVariant> = {
+  backlog: "neutral",
+  todo: "neutral",
+  in_progress: "accent",
+  review: "warning",
+  done: "success",
+  cancelled: "neutral",
+};
+
 function BoardPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -78,7 +99,9 @@ function BoardPage() {
   const { data: issues } = useSuspenseQuery({ ...issuesQuery(projectId), refetchInterval: 4000 });
   const { data: labels } = useSuspenseQuery(projectLabelsQuery(projectId));
   const { data: sessions } = useSuspenseQuery(activeSessionsQuery(project.workspaceId));
+  const { data: runs = [] } = useQuery(workspaceRunsQuery(project.workspaceId));
   const { data: ready } = useSuspenseQuery({ ...readyWorkQuery(projectId), refetchInterval: 4000 });
+  const runsById = new Map(runs.map((run) => [run.id, run]));
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("all");
   const [priorityFilter, setPriorityFilter] = useState<IssuePriority | "all">("all");
@@ -192,12 +215,12 @@ function BoardPage() {
   }
 
   return (
-    <Stack as="main" width="100%">
-      <Stack as="header" direction="vertical" gap={2}>
+    <Stack width="100%" gap={4} data-board-page="">
+      <Stack as="header" direction="vertical" gap={3}>
         <Stack
           as="nav"
           direction="horizontal"
-          gap={0.5}
+          gap={1}
           vAlign="center"
           wrap="wrap"
           aria-label="Project location"
@@ -209,132 +232,140 @@ function BoardPage() {
           >
             {workspace.name}
           </Link>
-          <Icon icon="chevronRight" size="xsm" />
+          <Icon icon="chevronRight" size="xsm" color="secondary" />
           <Link to="/projects/$projectId" params={{ projectId }} color="secondary">
             {project.name}
           </Link>
         </Stack>
-        <Stack direction="horizontal" gap={1} vAlign="center" justify="between" wrap="wrap">
-          <Heading level={1} color="inherit">
-            Board
-          </Heading>
+        <Stack direction="horizontal" gap={2} vAlign="center" justify="between" wrap="wrap">
+          <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+            <Heading level={1} color="inherit">
+              Board
+            </Heading>
+            <Token label={project.key} color="gray" size="sm" />
+            {sessionsByIssue.size > 0 && (
+              <Token
+                label={`${sessionsByIssue.size} active ${sessionsByIssue.size === 1 ? "session" : "sessions"}`}
+                color="green"
+                size="sm"
+                data-active-sessions=""
+              />
+            )}
+          </Stack>
           {canContribute && (
             <Button
               label="New issue"
               variant="primary"
+              size="sm"
               onClick={() => showPanel({ kind: "new-issue" })}
             />
           )}
         </Stack>
-        <Stack
-          direction="horizontal"
-          gap={1}
-          vAlign="center"
-          justify="between"
-          wrap="wrap"
-          paddingBlock={1}
-        >
-          <Stack
-            direction="horizontal"
-            gap={0.5}
-            wrap="wrap"
-            role="group"
-            aria-label="Filter issues"
-          >
-            {filters.map(({ id, label, count }) => (
-              <ToggleButton
-                key={id}
-                label={`${label} (${count})`}
-                isPressed={filter === id}
+        <Section padding={3}>
+          <Stack direction="horizontal" gap={2} vAlign="center" justify="between" wrap="wrap">
+            <Stack
+              direction="horizontal"
+              gap={1}
+              wrap="wrap"
+              role="group"
+              aria-label="Filter issues"
+            >
+              {filters.map(({ id, label, count }) => (
+                <ToggleButton
+                  key={id}
+                  label={`${label} (${count})`}
+                  isPressed={filter === id}
+                  size="sm"
+                  data-board-filter={id}
+                  data-board-ready-count={id === "ready" ? String(count) : undefined}
+                  onPressedChange={(pressed) => setFilter(pressed ? id : "all")}
+                >
+                  {label} <Badge label={count} />
+                </ToggleButton>
+              ))}
+            </Stack>
+            <Stack
+              direction="horizontal"
+              gap={1.5}
+              vAlign="center"
+              wrap="wrap"
+              role="group"
+              aria-label="Narrow issues"
+            >
+              <TextInput
+                id="board-search"
+                label="Search issues"
+                isLabelHidden
                 size="sm"
-                data-board-filter={id}
-                data-board-ready-count={id === "ready" ? String(count) : undefined}
-                onPressedChange={(pressed) => setFilter(pressed ? id : "all")}
-              >
-                {label} <Badge label={count} />
-              </ToggleButton>
-            ))}
-          </Stack>
-          <Stack
-            direction="horizontal"
-            gap={0.5}
-            wrap="wrap"
-            role="group"
-            aria-label="Narrow issues"
-          >
-            <TextInput
-              id="board-search"
-              label="Search issues"
-              isLabelHidden
-              size="sm"
-              width="12rem"
-              placeholder="Search issues…"
-              value={searchQuery}
-              onChange={setSearchQuery}
-            />
-            <Selector
-              label="Assignee"
-              id="board-assignee-filter"
-              variant="secondary"
-              size="sm"
-              value={assigneeFilter}
-              onChange={(value) =>
-                setAssigneeFilter(
-                  value === "unassigned" || value === "human" || value === "agent" ? value : "all",
-                )
-              }
-              options={[
-                { value: "all", label: "Any assignee" },
-                { value: "unassigned", label: "Unassigned" },
-                { value: "human", label: "Human" },
-                { value: "agent", label: "Agent" },
-              ]}
-            />
-            <Selector
-              label="Priority"
-              id="board-priority-filter"
-              variant="secondary"
-              size="sm"
-              value={priorityFilter}
-              onChange={(value) =>
-                setPriorityFilter(value === "all" ? "all" : IssuePriority.parse(value))
-              }
-              options={[
-                { value: "all", label: "Any priority" },
-                ...IssuePriority.options.map((priority) => ({
-                  value: priority,
-                  label: PRIORITY_LABELS[priority],
-                })),
-              ]}
-            />
-            <Selector
-              label="Label"
-              id="board-label-filter"
-              variant="secondary"
-              size="sm"
-              value={labelFilter}
-              onChange={setLabelFilter}
-              options={[
-                { value: "all", label: "Any label" },
-                ...labels.map((label) => ({ value: label.id, label: label.name })),
-              ]}
-            />
-            {hasActiveFilter && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                label="Clear filters"
-                onClick={clearFilters}
+                width="13rem"
+                placeholder="Search issues…"
+                value={searchQuery}
+                onChange={setSearchQuery}
               />
-            )}
+              <Selector
+                label="Assignee"
+                isLabelHidden
+                id="board-assignee-filter"
+                variant="secondary"
+                size="sm"
+                value={assigneeFilter}
+                onChange={(value) =>
+                  setAssigneeFilter(
+                    value === "unassigned" || value === "human" || value === "agent"
+                      ? value
+                      : "all",
+                  )
+                }
+                options={[
+                  { value: "all", label: "Any assignee" },
+                  { value: "unassigned", label: "Unassigned" },
+                  { value: "human", label: "Human" },
+                  { value: "agent", label: "Agent" },
+                ]}
+              />
+              <Selector
+                label="Priority"
+                isLabelHidden
+                id="board-priority-filter"
+                variant="secondary"
+                size="sm"
+                value={priorityFilter}
+                onChange={(value) =>
+                  setPriorityFilter(value === "all" ? "all" : IssuePriority.parse(value))
+                }
+                options={[
+                  { value: "all", label: "Any priority" },
+                  ...IssuePriority.options.map((priority) => ({
+                    value: priority,
+                    label: PRIORITY_LABELS[priority],
+                  })),
+                ]}
+              />
+              <Selector
+                label="Label"
+                isLabelHidden
+                id="board-label-filter"
+                variant="secondary"
+                size="sm"
+                value={labelFilter}
+                onChange={setLabelFilter}
+                options={[
+                  { value: "all", label: "Any label" },
+                  ...labels.map((label) => ({ value: label.id, label: label.name })),
+                ]}
+              />
+              {hasActiveFilter && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  label="Clear filters"
+                  onClick={clearFilters}
+                />
+              )}
+            </Stack>
           </Stack>
-          {sessionsByIssue.size > 0 && (
-            <Text as="p" display="block" type="supporting" data-active-sessions="">
-              {sessionsByIssue.size} active {sessionsByIssue.size === 1 ? "session" : "sessions"}
-            </Text>
-          )}
-        </Stack>
+        </Section>
       </Stack>
 
       {createdIssue !== undefined && (
@@ -448,10 +479,6 @@ function BoardPage() {
                   data-board-column={issueStatusLabels[status]}
                   data-board-status={status}
                   data-drag-over={isDropTarget ? "true" : undefined}
-                  direction="vertical"
-                  padding={1}
-                  gap={0.5}
-                  minHeight="clamp(17rem, 50svh, 29rem)"
                   onDragOver={(event) => {
                     if (!canContribute || moving) return;
                     event.preventDefault();
@@ -477,35 +504,58 @@ function BoardPage() {
                     if (droppedIssue !== undefined) onMove(droppedIssue, status);
                   }}
                 >
-                  <Heading level={2} color="inherit">
-                    {issueStatusLabels[status]} <Badge label={lane.length} />
-                  </Heading>
-                  <Stack as="ul" gap={0.5}>
-                    {lane.map((issue) => {
-                      const subtasks = subtasksOf(issues, issue.id);
-                      return (
-                        <BoardCard
-                          key={issue.id}
-                          issue={issue}
-                          session={sessionsByIssue.get(issue.id)}
-                          ready={readyIds.has(issue.id)}
-                          subtaskCount={subtasks.length}
-                          completedSubtaskCount={completedSubtaskCount(subtasks)}
-                          canMove={canContribute && !moving}
-                          dragging={draggingIssueId === issue.id}
-                          onDragStart={() => setDraggingIssueId(issue.id)}
-                          onDragEnd={() => {
-                            setDraggingIssueId(undefined);
-                            setDragOverStatus(undefined);
-                          }}
-                          onMove={(next) => onMove(issue, next)}
-                          onInspect={(sessionId) =>
-                            showPanel({ kind: "session", issueId: issue.id, sessionId })
-                          }
-                        />
-                      );
-                    })}
-                  </Stack>
+                  <Section variant="muted" padding={2}>
+                    <Stack gap={2} minHeight="clamp(18rem, 54svh, 34rem)">
+                      <Stack
+                        direction="horizontal"
+                        justify="between"
+                        vAlign="center"
+                        gap={1.5}
+                        paddingInline={1}
+                        paddingBlock={1}
+                      >
+                        <Stack direction="horizontal" gap={1.5} vAlign="center">
+                          <StatusDot
+                            variant={COLUMN_STATUS_DOTS[status]}
+                            label={`${issueStatusLabels[status]} status`}
+                          />
+                          <Heading level={4} accessibilityLevel={2} color="inherit">
+                            {issueStatusLabels[status]}
+                          </Heading>
+                        </Stack>
+                        <Badge label={lane.length} />
+                      </Stack>
+                      <Divider />
+                      <Stack as="ul" gap={2}>
+                        {lane.map((issue) => {
+                          const subtasks = subtasksOf(issues, issue.id);
+                          const session = sessionsByIssue.get(issue.id);
+                          return (
+                            <BoardCard
+                              key={issue.id}
+                              issue={issue}
+                              session={session}
+                              run={session === undefined ? undefined : runsById.get(session.runId)}
+                              ready={readyIds.has(issue.id)}
+                              subtaskCount={subtasks.length}
+                              completedSubtaskCount={completedSubtaskCount(subtasks)}
+                              canMove={canContribute && !moving}
+                              dragging={draggingIssueId === issue.id}
+                              onDragStart={() => setDraggingIssueId(issue.id)}
+                              onDragEnd={() => {
+                                setDraggingIssueId(undefined);
+                                setDragOverStatus(undefined);
+                              }}
+                              onMove={(next) => onMove(issue, next)}
+                              onInspect={(sessionId) =>
+                                showPanel({ kind: "session", issueId: issue.id, sessionId })
+                              }
+                            />
+                          );
+                        })}
+                      </Stack>
+                    </Stack>
+                  </Section>
                 </Stack>
               );
             })}
@@ -581,6 +631,7 @@ function BoardPage() {
 function BoardCard({
   issue,
   session,
+  run,
   ready,
   subtaskCount,
   completedSubtaskCount: doneCount,
@@ -593,6 +644,7 @@ function BoardCard({
 }: {
   issue: Issue;
   session: ActiveWorkSession | undefined;
+  run: RunDetail | undefined;
   ready: boolean;
   subtaskCount: number;
   completedSubtaskCount: number;
@@ -640,104 +692,128 @@ function BoardCard({
         data-completed-subtask-count={String(doneCount)}
         padding={3}
       >
-        <Link
-          to="/issues/$issueId"
-          params={{ issueId: issue.id }}
-          weight="semibold"
-          display="block"
-        >
-          <Text type="inherit" color="inherit" display="block" weight="semibold">
-            <Text type="code" color="secondary" data-issue-identifier={issue.identifier}>
-              {issue.identifier}
-            </Text>
-            {issue.title}
-          </Text>
-        </Link>
-        {(issue.priority !== "none" ||
-          assignee !== null ||
-          state !== undefined ||
-          blockers.length > 0 ||
-          subtaskCount > 0) && (
-          <Stack direction="horizontal" gap={0.5} vAlign="center" wrap="wrap">
-            {issue.priority !== "none" && <PriorityBadge priority={issue.priority} />}
-            {state !== undefined && (
-              <Text type="inherit" color="inherit" data-session-state={state}>
-                {state === "needs-input" ? "Needs input" : state}
-              </Text>
-            )}
-            {blockers.length > 0 && (
-              <Token
-                label={`Blocked by ${blockers.length}`}
-                color="red"
-                size="sm"
-                data-blocked-by={blockers.map((blocker) => blocker.id).join(",")}
-              />
-            )}
-            {assignee !== null && (
-              <Stack as="span" direction="horizontal" gap={0.5} vAlign="center">
-                <Avatar
-                  name={assignee.displayName}
-                  shape={assigneeType === "agent" ? "rounded" : "circle"}
-                  size="xsm"
-                  tooltip={false}
-                />
-                <Text type="inherit" color="inherit">
-                  {assignee.displayName}
-                </Text>
-              </Stack>
-            )}
-            {subtaskCount > 0 && (
-              <Text type="supporting" color="secondary">
-                Subtasks {doneCount}/{subtaskCount}
-              </Text>
-            )}
-          </Stack>
-        )}
-        {issue.labels.length > 0 && (
-          <Stack direction="horizontal" gap={0.5} wrap="wrap">
-            {issue.labels.map((label) => (
-              <LabelPill key={label.id} label={label} />
-            ))}
-          </Stack>
-        )}
-        {canMove && (
-          <Selector
-            label={`Move ${issue.identifier}`}
-            id={`board-move-${issue.id}`}
-            isLabelHidden
-            variant="ghost"
-            size="sm"
-            value={issue.status}
-            onChange={(value) => onMove(IssueStatus.parse(value))}
-            options={BOARD_COLUMNS.map((status) => ({
-              value: status,
-              label: issueStatusLabels[status],
-            }))}
-          />
-        )}
-        {(issue.needsInput || session !== undefined) && (
-          <Stack
-            direction="horizontal"
-            gap={0.5}
-            vAlign="center"
-            wrap="wrap"
-            paddingBlockStart={0.5}
+        <Stack gap={2}>
+          <Link
+            to="/issues/$issueId"
+            params={{ issueId: issue.id }}
+            weight="semibold"
+            color="primary"
+            display="block"
           >
-            {issue.needsInput && (
-              <Link to="/inbox" search={{ issue: issue.id }} color="accent" hasUnderline>
-                View question
-              </Link>
-            )}
-            {session !== undefined && (
-              <Button
-                label="Inspect session"
-                variant="ghost"
-                size="sm"
-                onClick={() => onInspect(session.id)}
-              />
-            )}
-          </Stack>
-        )}
+            <Stack gap={0.5}>
+              <Text type="code" color="secondary" data-issue-identifier={issue.identifier}>
+                {issue.identifier}
+              </Text>
+              <Text type="body" color="primary" display="block" weight="semibold">
+                {issue.title}
+              </Text>
+            </Stack>
+          </Link>
+          {(issue.priority !== "none" ||
+            assignee !== null ||
+            state !== undefined ||
+            blockers.length > 0 ||
+            subtaskCount > 0) && (
+            <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+              {issue.priority !== "none" && <PriorityBadge priority={issue.priority} />}
+              {state !== undefined && (
+                <Token
+                  label={state === "needs-input" ? "Needs input" : state}
+                  color={
+                    state === "active"
+                      ? "green"
+                      : state === "needs-input" || state === "stopping"
+                        ? "orange"
+                        : "gray"
+                  }
+                  size="sm"
+                  data-session-state={state}
+                />
+              )}
+              {blockers.length > 0 && (
+                <Token
+                  label={`Blocked by ${blockers.length}`}
+                  color="red"
+                  size="sm"
+                  data-blocked-by={blockers.map((blocker) => blocker.id).join(",")}
+                />
+              )}
+              {assignee !== null && (
+                <Stack as="span" direction="horizontal" vAlign="center">
+                  {assigneeType === "agent" ? (
+                    <AgentAvatar
+                      name={assignee.displayName}
+                      harness={session?.agentId === assignee.agentId ? run?.harness : undefined}
+                      size={16}
+                    />
+                  ) : (
+                    <Avatar name={assignee.displayName} shape="circle" size="xsm" />
+                  )}
+                  <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
+                </Stack>
+              )}
+              {session !== undefined &&
+                run !== undefined &&
+                assignee?.agentId !== session.agentId && (
+                  <Stack as="span" direction="horizontal" vAlign="center" data-working-agent="">
+                    <AgentAvatar name={run.agentName} harness={run.harness} size={16} />
+                    <VisuallyHidden>{run.agentName}</VisuallyHidden>
+                  </Stack>
+                )}
+              {subtaskCount > 0 && (
+                <Text type="supporting" color="secondary">
+                  Subtasks {doneCount}/{subtaskCount}
+                </Text>
+              )}
+            </Stack>
+          )}
+          {issue.labels.length > 0 && (
+            <Stack direction="horizontal" gap={1} wrap="wrap">
+              {issue.labels.map((label) => (
+                <LabelPill key={label.id} label={label} />
+              ))}
+            </Stack>
+          )}
+          {(canMove || issue.needsInput || session !== undefined) && (
+            <>
+              <Divider />
+              <Stack gap={1.5}>
+                {canMove && (
+                  <Selector
+                    label={`Move ${issue.identifier}`}
+                    id={`board-move-${issue.id}`}
+                    isLabelHidden
+                    variant="ghost"
+                    size="sm"
+                    value={issue.status}
+                    onChange={(value) => onMove(IssueStatus.parse(value))}
+                    options={BOARD_COLUMNS.map((status) => ({
+                      value: status,
+                      label: issueStatusLabels[status],
+                    }))}
+                  />
+                )}
+                {(issue.needsInput || session !== undefined) && (
+                  <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+                    {issue.needsInput && (
+                      <Link to="/inbox" search={{ issue: issue.id }} color="accent" hasUnderline>
+                        View question
+                      </Link>
+                    )}
+                    {session !== undefined && (
+                      <Button
+                        label="Inspect session"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => onInspect(session.id)}
+                      />
+                    )}
+                  </Stack>
+                )}
+              </Stack>
+            </>
+          )}
+        </Stack>
       </Card>
     </Stack>
   );

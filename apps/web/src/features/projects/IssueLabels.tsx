@@ -1,5 +1,7 @@
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -73,25 +75,33 @@ export function IssueLabels({
   }
 
   return (
-    <Stack>
-      <Heading level={3} color="inherit">
+    <Stack gap={2}>
+      <Text type="supporting" weight="semibold" color="secondary">
         Labels
-      </Heading>
+      </Text>
       {issue.labels.length === 0 ? (
-        <Text as="p" display="block" type="supporting">
+        <Text as="p" display="block" type="supporting" color="secondary">
           No labels
         </Text>
       ) : (
-        <Stack as="ul">
+        <Stack as="ul" direction="horizontal" gap={1.5} wrap="wrap">
           {issue.labels.map((label) => (
-            <Stack as="li" key={label.id} data-issue-label-id={label.id}>
+            <Stack
+              as="li"
+              key={label.id}
+              data-issue-label-id={label.id}
+              direction="horizontal"
+              gap={0.5}
+              vAlign="center"
+            >
               <LabelPill label={label} />
               {canContribute && (
-                <Button
+                <IconButton
                   type="button"
                   label={`Remove ${label.name}`}
                   variant="ghost"
                   size="sm"
+                  icon={<Icon icon="close" size="xsm" />}
                   isDisabled={saving}
                   onClick={() => void onDetach(label.id)}
                 />
@@ -101,31 +111,30 @@ export function IssueLabels({
         </Stack>
       )}
       {canContribute && available.length > 0 && (
-        <Stack>
+        <Stack gap={2}>
           <Selector
             label="Attach label"
             id="issue-attach-label"
             size="sm"
+            width="100%"
             value={selected}
             onChange={setSelected}
             placeholder="Choose a label…"
             options={available.map((label) => ({ value: label.id, label: label.name }))}
           />
-          <Button
-            type="button"
-            label="Attach label"
-            variant="secondary"
-            size="sm"
-            isDisabled={saving || selected === ""}
-            onClick={() => void onAttach()}
-          />
+          <Stack hAlign="start">
+            <Button
+              type="button"
+              label="Attach label"
+              variant="secondary"
+              size="sm"
+              isDisabled={saving || selected === ""}
+              onClick={() => void onAttach()}
+            />
+          </Stack>
         </Stack>
       )}
-      {error !== undefined && (
-        <Text as="p" display="block" type="supporting" role="alert">
-          {error}
-        </Text>
-      )}
+      {error !== undefined && <Banner status="error" role="alert" title={error} />}
     </Stack>
   );
 }

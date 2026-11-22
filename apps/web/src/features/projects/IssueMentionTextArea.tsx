@@ -1,5 +1,7 @@
+import { Card } from "@astryxdesign/core/Card";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
+import { Token } from "@astryxdesign/core/Token";
 import type { Issue } from "@orrery/contract";
 import { useState } from "react";
 import { TextAreaField } from "../../lib/fields.tsx";
@@ -68,6 +70,7 @@ export function IssueMentionTextArea({
 
   return (
     <Stack
+      width="100%"
       onKeyDown={(event) => {
         if (matches.length === 0) return;
         if (event.key === "ArrowDown") {
@@ -108,25 +111,37 @@ export function IssueMentionTextArea({
             : {})}
       />
       {matches.length > 0 && (
-        <Stack as="ul" role="listbox" aria-label="Reference an issue">
-          {matches.map((candidate, index) => (
-            <Stack
-              as="li"
-              key={candidate.id}
-              role="option"
-              aria-selected={index === activeIndex}
-              onMouseEnter={() => setSelectedIndex(index)}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                insertMention(candidate);
-              }}
-            >
-              <Text as="span">{candidate.identifier}</Text>
-              <Text as="span">{candidate.title}</Text>
-              <Text as="span">{issueStatusLabels[candidate.status]}</Text>
-            </Stack>
-          ))}
-        </Stack>
+        <Card elevation="med" padding={1}>
+          <Stack as="ul" role="listbox" aria-label="Reference an issue" gap={0.5}>
+            {matches.map((candidate, index) => (
+              <Stack
+                as="li"
+                key={candidate.id}
+                role="option"
+                aria-selected={index === activeIndex}
+                onMouseEnter={() => setSelectedIndex(index)}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  insertMention(candidate);
+                }}
+              >
+                <Card variant={index === activeIndex ? "muted" : "transparent"} padding={2}>
+                  <Stack direction="horizontal" justify="between" vAlign="center" gap={2}>
+                    <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+                      <Text as="span" type="code" color="secondary">
+                        {candidate.identifier}
+                      </Text>
+                      <Text as="span" type="body" weight="medium" color="primary">
+                        {candidate.title}
+                      </Text>
+                    </Stack>
+                    <Token label={issueStatusLabels[candidate.status]} color="gray" size="sm" />
+                  </Stack>
+                </Card>
+              </Stack>
+            ))}
+          </Stack>
+        </Card>
       )}
     </Stack>
   );

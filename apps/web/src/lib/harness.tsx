@@ -1,3 +1,4 @@
+import { Avatar } from "@astryxdesign/core/Avatar";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { createElement } from "react";
@@ -346,7 +347,15 @@ export function resolveHarnessKind(harness: string | null | undefined): HarnessK
   return null;
 }
 
-export function HarnessLogo({ kind, size = 14 }: { kind: HarnessKind; size?: number }) {
+export function HarnessLogo({
+  kind,
+  size = 14,
+  title,
+}: {
+  kind: HarnessKind;
+  size?: number;
+  title?: string;
+}) {
   const spec = harnessLogos[kind];
   return createElement(
     "svg",
@@ -356,9 +365,11 @@ export function HarnessLogo({ kind, size = 14 }: { kind: HarnessKind; size?: num
       viewBox: "0 0 24 24",
       fill: spec.fill,
       fillRule: "evenodd",
-      "aria-hidden": "true",
+      "aria-hidden": title === undefined ? "true" : undefined,
+      role: title === undefined ? undefined : "img",
       "data-harness-logo": kind,
     },
+    title === undefined ? null : createElement("title", null, title),
     ...spec.paths.map((path) =>
       createElement("path", { key: path.d, d: path.d, clipRule: path.clipRule }),
     ),
@@ -397,4 +408,20 @@ export function HarnessBadge({
       </Text>
     </Stack>
   );
+}
+
+export function AgentAvatar({
+  name,
+  harness,
+  size = 16,
+}: {
+  name: string;
+  harness?: string | null | undefined;
+  size?: number;
+}) {
+  const kind = resolveHarnessKind(harness);
+  if (kind !== null) {
+    return <HarnessLogo kind={kind} size={size} title={name} />;
+  }
+  return <Avatar name={name} shape="rounded" size="xsm" />;
 }
