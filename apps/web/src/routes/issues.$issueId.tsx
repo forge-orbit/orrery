@@ -478,8 +478,8 @@ function IssuePage() {
 
       {(() => {
         const mainColumn = (
-          <Stack gap={4}>
-            <Section padding={4}>
+          <Stack gap={5}>
+            <Section variant="transparent" padding={0}>
               <Stack gap={3}>
                 <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
                   <Heading level={2} color="inherit">
@@ -518,7 +518,7 @@ function IssuePage() {
               canContribute={canContribute}
             />
 
-            <Section padding={4}>
+            <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
               <Stack gap={3}>
                 <Heading level={2} color="inherit">
                   Links
@@ -585,7 +585,7 @@ function IssuePage() {
               </Stack>
             </Section>
 
-            <Section padding={4}>
+            <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
               <Stack gap={3}>
                 <Heading level={2} color="inherit">
                   Comments ({comments.length})
@@ -652,7 +652,7 @@ function IssuePage() {
 
         const inspectorColumn = (
           <Stack gap={4}>
-            <Section padding={4} aria-label="Issue properties">
+            <Section variant="transparent" padding={0} aria-label="Issue properties">
               <Stack gap={3}>
                 <Heading level={2} color="inherit">
                   Properties
@@ -748,16 +748,18 @@ function IssuePage() {
           <Layout
             height="auto"
             padding={0}
-            content={<Stack paddingInlineEnd={4}>{mainColumn}</Stack>}
+            content={<Stack paddingInlineEnd={6}>{mainColumn}</Stack>}
             end={
               <LayoutPanel
-                width={340}
+                width={320}
                 padding={0}
                 isScrollable={false}
                 role="complementary"
                 label="Issue details"
               >
-                {inspectorColumn}
+                <Section variant="transparent" dividers={["start"]} padding={0}>
+                  <Stack paddingInlineStart={6}>{inspectorColumn}</Stack>
+                </Section>
               </LayoutPanel>
             }
           />
@@ -896,7 +898,7 @@ function Blockers({
   );
 
   return (
-    <Section padding={4}>
+    <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
       <Stack gap={3}>
         <Heading level={2} color="inherit">
           Dependencies

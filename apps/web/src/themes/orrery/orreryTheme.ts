@@ -8,15 +8,15 @@ export const orreryTheme = defineTheme({
     "--orrery-ink": "#14161b",
     "--orrery-cream": "#f6f3ec",
     "--orrery-orange": "#f2561d",
-    "--orrery-canvas": ["#faf8f4", "#13151a"],
-    "--orrery-text": ["#14161b", "#f6f3ec"],
-    "--orrery-surface": ["#ffffff", "#20232b"],
-    "--orrery-recessed": ["#f3f0e8", "#181a21"],
-    "--orrery-muted": ["#4e5057", "#beb9b0"],
-    "--orrery-border": ["#ded8cc", "#4d5260"],
-    "--orrery-control-border": ["#756e63", "#8a8d9a"],
-    "--orrery-accent": ["#b5380c", "#ff8f5c"],
-    "--orrery-accent-hover": ["#8f2a07", "#ffaa82"],
+    "--orrery-canvas": ["#ffffff", "#111318"],
+    "--orrery-text": ["#14161b", "#f4f2ec"],
+    "--orrery-surface": ["#ffffff", "#181b22"],
+    "--orrery-recessed": ["#f7f6f3", "#15171d"],
+    "--orrery-muted": ["#5c5f66", "#9c9ea6"],
+    "--orrery-border": ["#efede9", "#22252e"],
+    "--orrery-control-border": ["#d6d2c9", "#363b48"],
+    "--orrery-accent": ["#c23c0e", "#ff8f5c"],
+    "--orrery-accent-hover": ["#9e2e08", "#ffaa82"],
     "--orrery-on-accent": ["#ffffff", "#14161b"],
     "--orrery-attention-text": ["#89330f", "#ffc19f"],
     "--orrery-attention-fill": ["#fff0e4", "#38271f"],
@@ -26,7 +26,7 @@ export const orreryTheme = defineTheme({
     "--orrery-success": ["#295740", "#aed9b8"],
     "--orrery-success-fill": ["#e8efe6", "#23382c"],
     "--orrery-radius": "6px",
-    "--orrery-panel-radius": "10px",
+    "--orrery-panel-radius": "8px",
     "--orrery-sans": "Figtree, system-ui, sans-serif",
     "--orrery-serif": "Georgia, serif",
     "--orrery-mono": 'ui-monospace, "SFMono-Regular", Consolas, monospace',
@@ -78,6 +78,8 @@ export const orreryTheme = defineTheme({
         borderWidth: "1px",
         borderStyle: "solid",
         borderColor: "var(--color-border)",
+        boxShadow:
+          "0 1px 2px 0 color-mix(in srgb, var(--orrery-ink) 5%, transparent), 0 1px 3px 0 color-mix(in srgb, var(--orrery-ink) 3%, transparent)",
       },
     },
     "clickable-card": {
@@ -86,32 +88,38 @@ export const orreryTheme = defineTheme({
         borderWidth: "1px",
         borderStyle: "solid",
         borderColor: "var(--color-border)",
+        boxShadow:
+          "0 1px 2px 0 color-mix(in srgb, var(--orrery-ink) 5%, transparent), 0 1px 3px 0 color-mix(in srgb, var(--orrery-ink) 3%, transparent)",
       },
     },
     section: {
       base: {
-        borderRadius: "var(--orrery-panel-radius)",
         padding: "var(--spacing-4)",
       },
       "variant:section": {
+        borderRadius: "var(--orrery-panel-radius)",
         borderWidth: "1px",
         borderStyle: "solid",
         borderColor: "var(--color-border)",
+        boxShadow: "0 1px 2px 0 color-mix(in srgb, var(--orrery-ink) 4%, transparent)",
       },
       "variant:muted": {
-        borderWidth: "1px",
-        borderStyle: "solid",
-        borderColor: "var(--color-border)",
+        borderRadius: "var(--orrery-panel-radius)",
+        borderWidth: "0",
+        backgroundColor: "var(--orrery-recessed)",
+      },
+      "variant:transparent": {
+        borderRadius: "0",
       },
     },
     "side-nav": {
       base: {
-        backgroundColor: "var(--color-background-surface)",
+        backgroundColor: "var(--orrery-recessed)",
       },
     },
     "side-nav-item": {
       selected: {
-        backgroundColor: "color-mix(in srgb, var(--orrery-orange) 12%, transparent)",
+        backgroundColor: "color-mix(in srgb, var(--orrery-orange) 11%, transparent)",
         color: "var(--orrery-text)",
         fontWeight: "600",
       },
@@ -123,13 +131,13 @@ export const orreryTheme = defineTheme({
     },
     "app-shell-sidenav": {
       base: {
-        backgroundColor: "var(--orrery-surface)",
+        backgroundColor: "var(--orrery-recessed)",
         borderInlineEnd: "1px solid var(--orrery-border)",
       },
     },
     "app-shell-header": {
       base: {
-        backgroundColor: "var(--orrery-surface)",
+        backgroundColor: "var(--orrery-canvas)",
         borderBlockEnd: "1px solid var(--orrery-border)",
       },
     },

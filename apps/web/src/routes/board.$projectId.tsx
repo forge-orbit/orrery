@@ -261,7 +261,7 @@ function BoardPage() {
             />
           )}
         </Stack>
-        <Section padding={3}>
+        <Section variant="transparent" dividers={["top", "bottom"]} padding={0} paddingBlock={3}>
           <Stack direction="horizontal" gap={2} vAlign="center" justify="between" wrap="wrap">
             <Stack
               direction="horizontal"

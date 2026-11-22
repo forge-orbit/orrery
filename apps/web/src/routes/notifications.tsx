@@ -144,7 +144,7 @@ function NotificationsPage() {
       ) : feed.isError && feed.data === undefined ? (
         <NotificationsErrorState error={feed.error} onRetry={() => void feed.refetch()} />
       ) : (
-        <Section padding={4}>
+        <Section variant="transparent" padding={0}>
           {notifications.length === 0 ? (
             <NotificationsEmptyState
               unreadOnly={unreadOnly}

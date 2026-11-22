@@ -294,8 +294,8 @@ function ProjectPage() {
               />
             </Stack>
           ) : (
-            <Section padding={3}>
-              <Table aria-label="Project issues">
+            <Section variant="transparent" padding={0}>
+              <Table density="compact" hasHover dividers="rows" aria-label="Project issues">
                 <TableHeader>
                   <TableRow>
                     <TableHeaderCell>Key</TableHeaderCell>

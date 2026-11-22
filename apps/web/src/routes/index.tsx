@@ -81,7 +81,7 @@ function Home() {
         }
       />
 
-      <Section padding={4}>
+      <Section variant="transparent" padding={0}>
         <Stack gap={3}>
           <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
             <Heading level={2} color="inherit">
@@ -271,7 +271,7 @@ function InstallationInvitations() {
   }
 
   return (
-    <Section padding={3}>
+    <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={5}>
       <Stack gap={3}>
         <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
           <Heading level={2} color="inherit">
