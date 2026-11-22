@@ -1236,9 +1236,16 @@ def extract_code_facts() -> dict[str, Any]:
         and "lockIssue(tx" in q_answer_fn
         and ".for(" in q_answer_fn
     )
+    # #123 added optional notify/onActivity seams to evaluateDeadline, so answer() now calls
+    # it as evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity). Match the
+    # argument prefix inside answer() itself: the guard still requires the DB-time deadline
+    # to be evaluated for this issue on the answer path, not just anywhere in the service.
+    m20_answer_evaluates_deadline = bool(
+        re.search(r"evaluateDeadline\(tx,\s*issue\.id\s*,", q_answer_fn)
+    )
     m20_db_time = (
         "lte(questions.responseDeadlineAt, sql`statement_timestamp()`)" in q_eval_fn
-        and "evaluateDeadline(tx, issue.id)" in q_answer_fn
+        and m20_answer_evaluates_deadline
         and "statement_timestamp()" in q_answer_fn
         and "interval '1 hour'" in q_ask_fn
     )
@@ -1701,10 +1708,30 @@ def extract_code_facts() -> dict[str, Any]:
         and "evaluateQuestionDeadline?.(tx, issueId)" in m23_issue_fn
         and "evaluateQuestionDeadline: evaluateDeadline" in index_src
     )
+    # #1845778 added a lapsed-only cleanup inside the fallback branch: when no live claim
+    # exists it expires already-lapsed sessions and reverts the issue to todo. It never
+    # releases a checking-in claim, which is what this guard protects. A blanket "no
+    # workSessions update" no longer describes the code, so allow session writes only when
+    # they are gated by a DB-time live-claim check and every UPDATE is lapsed-lease only.
+    fallback_session_updates = m23_fallback_branch.split("update(workSessions")[1:]
+    m23_fallback_keeps_live_claim = (
+        'status: "released"' not in m23_fallback_branch
+        and (
+            not fallback_session_updates
+            or (
+                "const [liveClaim]" in m23_fallback_branch
+                and "gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`)" in m23_fallback_branch
+                and all(
+                    "lte(workSessions.leaseExpiresAt, sql`statement_timestamp()`)" in block
+                    for block in fallback_session_updates
+                )
+            )
+        )
+    )
     m23_branch = (
         'status: "fallback_used"' in m23_fallback_branch
         and "needsInput: false" in m23_fallback_branch
-        and "update(workSessions" not in m23_fallback_branch
+        and m23_fallback_keeps_live_claim
         and 'status: "released"' in m23_pause_branch
         and "needsInput: true" in m23_pause_branch
     )
@@ -2701,6 +2728,7 @@ def extract_code_facts() -> dict[str, Any]:
         "m20_statuses": m20_statuses,
         "m20_issue_lock": m20_issue_lock,
         "m20_db_time": m20_db_time,
+        "m20_answer_evaluates_deadline": m20_answer_evaluates_deadline,
         "m20_exact_once": m20_exact_once,
         "m20_release_pause": m20_release_pause,
         "m20_paused_unblock": m20_paused_unblock,
@@ -2790,6 +2818,7 @@ def extract_code_facts() -> dict[str, Any]:
         "m23_reacquire_deadline": m23_reacquire_deadline,
         "m23_freeze": m23_freeze,
         "m23_branch": m23_branch,
+        "m23_fallback_keeps_live_claim": m23_fallback_keeps_live_claim,
         "m23_db_time": m23_db_time,
         "m23_authorized_only": m23_authorized_only,
         "m23_follow_up": m23_follow_up,
