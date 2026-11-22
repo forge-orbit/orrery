@@ -250,7 +250,7 @@ function RootLayout() {
         }
       >
         <Layout contentWidth="74rem">
-          <Stack id="content" data-app-content="" padding={8}>
+          <Stack as="main" id="content" data-app-content="" padding={8}>
             <Outlet />
           </Stack>
         </Layout>

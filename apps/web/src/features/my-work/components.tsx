@@ -194,12 +194,13 @@ function ActiveSessionRow({ session }: { session: MyWorkActiveSession }) {
         <Stack as="span" gap={0.5}>
           <Stack as="span" direction="horizontal" gap={1} vAlign="center" wrap="wrap">
             <Text as="span" type="supporting" color="secondary">
-              {session.workspaceName} · {session.projectName} · {session.agentName} · Harness
+              {session.workspaceName} · {session.projectName} · {session.agentName} · Harness{" "}
             </Text>
             <Text as="span" type="supporting" color="secondary">
               <HarnessBadge harness={session.harness} empty="unknown" />
             </Text>
             <Text as="span" type="supporting" color="secondary">
+              {" "}
               · Model {session.model ?? "unknown"}
               {telemetry.length > 0 ? ` · ${telemetry.join(" · ")}` : ""}
             </Text>
