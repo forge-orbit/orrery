@@ -378,6 +378,27 @@ test("replaces the photo with a fresh cache-busted URL and no stale image", asyn
   await recordCookies(page);
 });
 
+test("removes the photo and returns to initials across surfaces", async ({ page }) => {
+  await signInUi(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await page.goto("/account");
+
+  await page.getByRole("button", { name: "Remove photo" }).click();
+  await expect.poll(async () => sessionAvatarUrl(page), { timeout: 15_000 }).toBeNull();
+
+  await expectInitials(page.locator("#content [data-avatar-state]").first());
+  await expectInitials(
+    page.locator("[data-app-sidebar] [data-sidebar-account-link] [data-avatar-state]"),
+  );
+
+  await page.goto(`/workspaces/${workspaceId}`);
+  await page.getByRole("tab", { name: /Members/ }).click();
+  await expectInitials(page.locator(`[data-member-id="${adminHumanId}"] [data-avatar-state]`));
+
+  await page.goto(`/board/${projectId}`);
+  await expectInitials(page.locator(`[data-board-issue-id="${issueId}"] [data-avatar-state]`));
+  await recordCookies(page);
+});
+
 async function recordCookies(page: Page) {
   for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
 }

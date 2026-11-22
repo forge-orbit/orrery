@@ -42,6 +42,8 @@ jobs:
             echo "::error::db/migrations/ does not match apps/server/src/db/schema.ts. Run 'pnpm db:generate' and commit the result. Don't write migrations by hand."
             exit 1
           fi
+      - name: Formal verification models pass
+        run: python3 .agents/skills/formal-verify-orrery/scripts/verify.py
 
   test:
     name: Unit and Postgres tests

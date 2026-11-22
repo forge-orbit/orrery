@@ -7,7 +7,7 @@ export { routes as accountsRoutes };
 export { createAccountsService, startupWarnings } from "./service.ts";
 export { accountByEmail, invalidateAccountSessions, setAccountPassword } from "./service.ts";
 export type { AccountsService, SessionPolicy, SessionAccount } from "./service.ts";
-export { createSessionReader, type SessionReader } from "./rest.ts";
+export { createSessionReader, toSessionResponse, type SessionReader } from "./rest.ts";
 
 export interface AccountsFeature extends Feature {
   sessionReader: SessionReader;

@@ -3,7 +3,7 @@ import { AvatarUploadRequest, SessionResponse } from "@orrery/contract";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
-import type { SessionAccount, SessionReader } from "../accounts/index.ts";
+import { toSessionResponse, type SessionAccount, type SessionReader } from "../accounts/index.ts";
 import {
   problemContent as problem,
   problemResponse,
@@ -131,12 +131,7 @@ const removeKinds = ["not_signed_in", "account_deactivated"] as const;
 const readKinds = ["not_signed_in", "avatar_not_found", "avatar_not_visible"] as const;
 
 function sessionBody(account: SessionAccount, avatarUrl: string | null) {
-  return {
-    email: account.email,
-    displayName: account.displayName ?? null,
-    emailVerified: account.emailVerifiedAt !== null,
-    avatarUrl,
-  };
+  return toSessionResponse(account, { avatarUrl });
 }
 
 export function createAvatarsRest(
