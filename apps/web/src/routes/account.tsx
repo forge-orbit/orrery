@@ -67,7 +67,7 @@ function AccountPage() {
     <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
-          <Link key="home" to="/">
+          <Link key="home" to="/" color="secondary" weight="medium">
             Workspaces
           </Link>,
           <Text key="account" as="span" type="inherit" color="inherit">

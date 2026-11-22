@@ -85,7 +85,13 @@ function ProjectTrashPage() {
     <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
-          <Link key="project" to="/projects/$projectId" params={{ projectId }}>
+          <Link
+            key="project"
+            to="/projects/$projectId"
+            params={{ projectId }}
+            color="secondary"
+            weight="medium"
+          >
             Back to project
           </Link>,
         ]}
