@@ -238,7 +238,7 @@ export function IssueMentionTextArea({
               vAlign="center"
               wrap="wrap"
               role="toolbar"
-              aria-label="Markdown formatting"
+              aria-label="Formatting"
             >
               <IconButton
                 type="button"
