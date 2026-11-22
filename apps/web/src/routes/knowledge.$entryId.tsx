@@ -46,7 +46,13 @@ function KnowledgePage() {
     <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
-          <Link key="project" to="/projects/$projectId" params={{ projectId: entry.projectId }}>
+          <Link
+            key="project"
+            to="/projects/$projectId"
+            params={{ projectId: entry.projectId }}
+            color="secondary"
+            weight="medium"
+          >
             Back to project
           </Link>,
         ]}
@@ -94,7 +100,7 @@ function KnowledgePage() {
           />
         </Section>
       ) : (
-        <Section padding={4}>
+        <Section variant="transparent" padding={0}>
           <Stack data-knowledge-body="">
             <Markdown issueRefs={projectIssues}>{entry.body}</Markdown>
           </Stack>

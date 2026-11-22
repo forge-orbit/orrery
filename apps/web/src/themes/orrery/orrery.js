@@ -218,19 +218,19 @@ export const orreryTheme = {
   },
   localTokens: {
     "--astryx-theme-neutral-color-status-fill-accent": "light-dark(#0074e2, #6d9cfe)",
-    "--orrery-ink": "#14161b",
+    "--orrery-ink": "#18181b",
     "--orrery-cream": "#f6f3ec",
     "--orrery-orange": "#f2561d",
     "--orrery-canvas": "light-dark(#ffffff, #111318)",
-    "--orrery-text": "light-dark(#14161b, #f4f2ec)",
-    "--orrery-surface": "light-dark(#ffffff, #181b22)",
-    "--orrery-recessed": "light-dark(#f7f6f3, #15171d)",
-    "--orrery-muted": "light-dark(#5c5f66, #9c9ea6)",
-    "--orrery-border": "light-dark(#dbd6cc, #303542)",
-    "--orrery-control-border": "light-dark(#bdb7ab, #464c5c)",
-    "--orrery-accent": "light-dark(#c23c0e, #ff8f5c)",
-    "--orrery-accent-hover": "light-dark(#9e2e08, #ffaa82)",
-    "--orrery-on-accent": "light-dark(#ffffff, #14161b)",
+    "--orrery-text": "light-dark(#18181b, #f4f4f5)",
+    "--orrery-surface": "light-dark(#ffffff, #181a20)",
+    "--orrery-recessed": "light-dark(#f8f9fa, #15171d)",
+    "--orrery-muted": "light-dark(#6b7280, #9ca3af)",
+    "--orrery-border": "light-dark(#e5e7eb, #262933)",
+    "--orrery-control-border": "light-dark(#d1d5db, #363a47)",
+    "--orrery-accent": "light-dark(#d94816, #ff8a56)",
+    "--orrery-accent-hover": "light-dark(#b8390e, #ffa47a)",
+    "--orrery-on-accent": "light-dark(#ffffff, #111318)",
     "--orrery-attention-text": "light-dark(#89330f, #ffc19f)",
     "--orrery-attention-fill": "light-dark(#fff0e4, #38271f)",
     "--orrery-attention-line": "light-dark(#c87141, #ad6b4f)",
@@ -518,8 +518,28 @@ export const orreryTheme = {
       }
     },
     "side-nav-item": {
+      "base": {
+        "borderRadius": "var(--orrery-radius)"
+      },
       "selected": {
-        "backgroundColor": "color-mix(in srgb, var(--orrery-orange) 11%, transparent)",
+        "backgroundColor": "color-mix(in srgb, var(--orrery-text) 7%, transparent)",
+        "color": "var(--orrery-text)",
+        "fontWeight": "600"
+      }
+    },
+    "token": {
+      "base": {
+        "borderRadius": "var(--orrery-radius)",
+        "borderWidth": "1px",
+        "borderStyle": "solid",
+        "borderColor": "color-mix(in srgb, currentColor 18%, transparent)"
+      }
+    },
+    "tab": {
+      "base": {
+        "borderRadius": "var(--orrery-radius)"
+      },
+      "selected": {
         "color": "var(--orrery-text)",
         "fontWeight": "600"
       }

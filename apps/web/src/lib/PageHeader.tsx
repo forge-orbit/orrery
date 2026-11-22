@@ -25,7 +25,7 @@ export function PageHeader({
   actions,
 }: PageHeaderProps) {
   return (
-    <Stack as="header" gap={3} data-page-header="">
+    <Stack as="header" gap={2} data-page-header="">
       {breadcrumbs !== undefined && breadcrumbs.length > 0 && (
         <Stack
           as="nav"
@@ -46,9 +46,9 @@ export function PageHeader({
         </Stack>
       )}
       <Stack direction="horizontal" justify="between" align="center" gap={3} wrap="wrap">
-        <Stack gap={1}>
+        <Stack gap={0.5}>
           <Stack direction="horizontal" gap={2} align="center" wrap="wrap">
-            <Heading level={1} color="inherit">
+            <Heading level={2} accessibilityLevel={1} color="inherit">
               {title}
             </Heading>
             {badge !== undefined &&

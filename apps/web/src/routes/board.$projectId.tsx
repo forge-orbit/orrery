@@ -239,7 +239,7 @@ function BoardPage() {
         </Stack>
         <Stack direction="horizontal" gap={2} vAlign="center" justify="between" wrap="wrap">
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-            <Heading level={1} color="inherit">
+            <Heading level={2} accessibilityLevel={1} color="inherit">
               Board
             </Heading>
             <Token label={project.key} color="gray" size="sm" />
@@ -504,7 +504,7 @@ function BoardPage() {
                     if (droppedIssue !== undefined) onMove(droppedIssue, status);
                   }}
                 >
-                  <Section variant="muted" padding={2}>
+                  <Section variant="transparent" padding={1}>
                     <Stack gap={2} minHeight="clamp(18rem, 54svh, 34rem)">
                       <Stack
                         direction="horizontal"
@@ -701,7 +701,7 @@ function BoardCard({
           <Link
             to="/issues/$issueId"
             params={{ issueId: issue.id }}
-            weight="semibold"
+            weight="medium"
             color="primary"
             display="block"
           >
@@ -709,7 +709,7 @@ function BoardCard({
               <Text type="code" color="secondary" data-issue-identifier={issue.identifier}>
                 {issue.identifier}
               </Text>
-              <Text type="body" color="primary" display="block" weight="semibold">
+              <Text type="body" color="primary" display="block" weight="medium" maxLines={2}>
                 {issue.title}
               </Text>
             </Stack>
@@ -718,8 +718,9 @@ function BoardCard({
             assignee !== null ||
             state !== undefined ||
             blockers.length > 0 ||
-            subtaskCount > 0) && (
-            <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+            subtaskCount > 0 ||
+            issue.labels.length > 0) && (
+            <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
               {issue.priority !== "none" && <PriorityBadge priority={issue.priority} />}
               {state !== undefined && (
                 <Token
@@ -743,6 +744,14 @@ function BoardCard({
                   data-blocked-by={blockers.map((blocker) => blocker.id).join(",")}
                 />
               )}
+              {issue.labels.map((label) => (
+                <LabelPill key={label.id} label={label} />
+              ))}
+              {subtaskCount > 0 && (
+                <Text type="supporting" color="secondary">
+                  Subtasks {doneCount}/{subtaskCount}
+                </Text>
+              )}
               {assignee !== null && (
                 <Stack as="span" direction="horizontal" vAlign="center">
                   {assigneeType === "agent" ? (
@@ -765,64 +774,49 @@ function BoardCard({
                     <VisuallyHidden>{run.agentName}</VisuallyHidden>
                   </Stack>
                 )}
-              {subtaskCount > 0 && (
-                <Text type="supporting" color="secondary">
-                  Subtasks {doneCount}/{subtaskCount}
-                </Text>
-              )}
-            </Stack>
-          )}
-          {issue.labels.length > 0 && (
-            <Stack direction="horizontal" gap={1} wrap="wrap">
-              {issue.labels.map((label) => (
-                <LabelPill key={label.id} label={label} />
-              ))}
             </Stack>
           )}
           {(canMove || issue.needsInput || session !== undefined) && (
-            <>
-              <Divider />
-              <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
-                {canMove && (
-                  <Selector
-                    label={`Move ${issue.identifier}`}
-                    id={`board-move-${issue.id}`}
-                    isLabelHidden
-                    variant="ghost"
-                    size="sm"
-                    value={issue.status}
-                    onChange={(value) => onMove(IssueStatus.parse(value))}
-                    options={BOARD_COLUMNS.map((status) => ({
-                      value: status,
-                      label: issueStatusLabels[status],
-                    }))}
-                  />
-                )}
-                {(issue.needsInput || session !== undefined) && (
-                  <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-                    {issue.needsInput && (
-                      <Link
-                        to="/inbox"
-                        search={{ issue: issue.id }}
-                        color="accent"
-                        weight="semibold"
-                        hasUnderline
-                      >
-                        View question
-                      </Link>
-                    )}
-                    {session !== undefined && (
-                      <Button
-                        label="Inspect session"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onInspect(session.id)}
-                      />
-                    )}
-                  </Stack>
-                )}
-              </Stack>
-            </>
+            <Stack direction="horizontal" gap={1.5} justify="between" vAlign="center" wrap="wrap">
+              {canMove && (
+                <Selector
+                  label={`Move ${issue.identifier}`}
+                  id={`board-move-${issue.id}`}
+                  isLabelHidden
+                  variant="ghost"
+                  size="sm"
+                  value={issue.status}
+                  onChange={(value) => onMove(IssueStatus.parse(value))}
+                  options={BOARD_COLUMNS.map((status) => ({
+                    value: status,
+                    label: issueStatusLabels[status],
+                  }))}
+                />
+              )}
+              {(issue.needsInput || session !== undefined) && (
+                <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+                  {issue.needsInput && (
+                    <Link
+                      to="/inbox"
+                      search={{ issue: issue.id }}
+                      color="accent"
+                      weight="semibold"
+                      hasUnderline
+                    >
+                      View question
+                    </Link>
+                  )}
+                  {session !== undefined && (
+                    <Button
+                      label="Inspect session"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onInspect(session.id)}
+                    />
+                  )}
+                </Stack>
+              )}
+            </Stack>
           )}
         </Stack>
       </Card>

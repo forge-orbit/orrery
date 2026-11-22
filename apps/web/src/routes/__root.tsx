@@ -1,6 +1,7 @@
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
 import { AppShell } from "@astryxdesign/core/AppShell";
+import { Card } from "@astryxdesign/core/Card";
 import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { IconButton } from "@astryxdesign/core/IconButton";
@@ -218,7 +219,9 @@ function RootLayout() {
           </Stack>
           <Stack data-access-content="">
             <Stack data-access-main="">
-              <Outlet />
+              <Card padding={6}>
+                <Outlet />
+              </Card>
             </Stack>
             <footer data-access-footer="">
               <ForgeOrbitAttribution />
@@ -470,7 +473,7 @@ function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
   const clickProp = onNavigate === undefined ? {} : { onClick: onNavigate };
 
   return (
-    <>
+    <Stack gap={3}>
       <SideNavSection title="Main navigation" isHeaderHidden>
         <SideNavItem
           label="Workspaces"
@@ -516,50 +519,44 @@ function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
       </SideNavSection>
 
       {workspaces.length > 0 && (
-        <>
-          <Divider />
-          <SideNavSection title="Your workspaces">
-            {workspaces.map((workspace) => (
-              <SideNavItem
-                key={workspace.id}
-                label={workspace.name}
-                href={`/workspaces/${workspace.id}`}
-                icon={
-                  workspace.kind === "personal" ? NavPersonalWorkspaceIcon : NavSharedWorkspaceIcon
-                }
-                isSelected={pathname === `/workspaces/${workspace.id}`}
-                size="sm"
-                {...clickProp}
-              />
-            ))}
-          </SideNavSection>
-        </>
+        <SideNavSection title="Your workspaces">
+          {workspaces.map((workspace) => (
+            <SideNavItem
+              key={workspace.id}
+              label={workspace.name}
+              href={`/workspaces/${workspace.id}`}
+              icon={
+                workspace.kind === "personal" ? NavPersonalWorkspaceIcon : NavSharedWorkspaceIcon
+              }
+              isSelected={pathname === `/workspaces/${workspace.id}`}
+              size="sm"
+              {...clickProp}
+            />
+          ))}
+        </SideNavSection>
       )}
 
       {isAdmin && (
-        <>
-          <Divider />
-          <SideNavSection title="Admin">
-            <SideNavItem
-              label="SMTP settings"
-              href="/settings/smtp"
-              icon={NavMailIcon}
-              isSelected={pathname.startsWith("/settings/smtp")}
-              size="sm"
-              {...clickProp}
-            />
-            <SideNavItem
-              label="Installation history"
-              href="/history/installation"
-              icon="clock"
-              isSelected={pathname.startsWith("/history/installation")}
-              size="sm"
-              {...clickProp}
-            />
-          </SideNavSection>
-        </>
+        <SideNavSection title="Admin">
+          <SideNavItem
+            label="SMTP settings"
+            href="/settings/smtp"
+            icon={NavMailIcon}
+            isSelected={pathname.startsWith("/settings/smtp")}
+            size="sm"
+            {...clickProp}
+          />
+          <SideNavItem
+            label="Installation history"
+            href="/history/installation"
+            icon="clock"
+            isSelected={pathname.startsWith("/history/installation")}
+            size="sm"
+            {...clickProp}
+          />
+        </SideNavSection>
       )}
-    </>
+    </Stack>
   );
 }
 
