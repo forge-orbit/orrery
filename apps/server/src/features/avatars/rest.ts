@@ -3,7 +3,7 @@ import { AvatarUploadRequest, SessionResponse } from "@orrery/contract";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
-import type { SessionReader } from "../accounts/index.ts";
+import type { SessionAccount, SessionReader } from "../accounts/index.ts";
 import {
   problemContent as problem,
   problemResponse,
@@ -41,6 +41,22 @@ const putAvatar = createRoute({
   },
 });
 
+const deleteAvatar = createRoute({
+  method: "delete",
+  path: "/api/account/avatar",
+  summary: "Remove the signed-in human's profile photo",
+  description:
+    "Clears the human's avatar in the same transaction that marks the old object deleted, returns the updated account with avatarUrl: null, and then best-effort removes the blob and its object row.",
+  responses: {
+    200: {
+      description: "The updated account, with no avatarUrl",
+      content: { "application/json": { schema: SessionResponse } },
+    },
+    401: problem("No valid session"),
+    403: problem("The account cannot change its photo"),
+  },
+});
+
 const avatarHeaders = z.object({
   ETag: z.string(),
   "Cache-Control": z.string(),
@@ -71,7 +87,7 @@ const getAvatar = createRoute({
   },
 });
 
-export const routes = [putAvatar, getAvatar];
+export const routes = [putAvatar, deleteAvatar, getAvatar];
 
 const statusFor = {
   not_signed_in: 401,
@@ -111,7 +127,17 @@ const uploadKinds = [
   "invalid_image",
   "payload_too_large",
 ] as const;
+const removeKinds = ["not_signed_in", "account_deactivated"] as const;
 const readKinds = ["not_signed_in", "avatar_not_found", "avatar_not_visible"] as const;
+
+function sessionBody(account: SessionAccount, avatarUrl: string | null) {
+  return {
+    email: account.email,
+    displayName: account.displayName ?? null,
+    emailVerified: account.emailVerifiedAt !== null,
+    avatarUrl,
+  };
+}
 
 export function createAvatarsRest(
   service: AvatarsService,
@@ -136,17 +162,19 @@ export function createAvatarsRest(
       const account = service.requireHuman(await sessionReader(c));
       const data = await service.readUpload(c.req.valid("form").file);
       const result = await service.upload(account.humanId, data);
-      return c.json(
-        {
-          email: account.email,
-          displayName: account?.displayName ?? null,
-          emailVerified: account?.emailVerifiedAt !== null,
-          avatarUrl: result.avatarUrl,
-        },
-        200,
-      );
+      return c.json(sessionBody(account, result.avatarUrl), 200);
     } catch (error) {
       return failure(c, error, uploadKinds);
+    }
+  });
+
+  app.openapi(deleteAvatar, async (c) => {
+    try {
+      const account = service.requireHuman(await sessionReader(c));
+      await service.remove(account.humanId);
+      return c.json(sessionBody(account, null), 200);
+    } catch (error) {
+      return failure(c, error, removeKinds);
     }
   });
 

@@ -14,10 +14,12 @@ import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import {
   changePassword,
+  removeAvatar,
   sessionQuery,
   signOut,
   updateProfile,
   uploadAvatar,
+  type Session,
 } from "../features/accounts/index.ts";
 import { AppearancePicker } from "../lib/appearance.tsx";
 import { TextField } from "../lib/fields.tsx";
@@ -127,12 +129,30 @@ function ProfileSection({
     },
   });
 
+  function applyAvatar(nextAvatarUrl: string | null) {
+    queryClient.setQueryData<Session>(sessionQuery.queryKey, (current) =>
+      current?.signedIn ? { ...current, avatarUrl: nextAvatarUrl } : current,
+    );
+  }
+
   const avatarMutation = useMutation({
     mutationFn: uploadAvatar,
-    onSuccess: async () => {
+    onSuccess: async (updated) => {
       setSelectedFile(null);
       setUploadError(null);
+      applyAvatar(updated.avatarUrl);
       toast({ body: "Profile photo updated." });
+      await queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey });
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: removeAvatar,
+    onSuccess: async (updated) => {
+      setSelectedFile(null);
+      setUploadError(null);
+      applyAvatar(updated.avatarUrl);
+      toast({ body: "Profile photo removed." });
       await queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey });
     },
   });
@@ -201,6 +221,25 @@ function ProfileSection({
               ? {}
               : { status: { type: "error" as const, message: uploadError } })}
           />
+          {avatarUrl !== null && (
+            <Stack gap={2} hAlign="start">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                label={removeMutation.isPending ? "Removing…" : "Remove photo"}
+                isLoading={removeMutation.isPending}
+                onClick={() => removeMutation.mutate()}
+              />
+              {removeMutation.isError && (
+                <Banner
+                  status="error"
+                  title="Could not remove photo"
+                  description={removeMutation.error.message}
+                />
+              )}
+            </Stack>
+          )}
         </Stack>
         <form onSubmit={onSubmit}>
           <FormLayout>

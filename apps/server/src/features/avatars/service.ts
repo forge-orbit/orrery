@@ -1,10 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { File } from "node:buffer";
 import { avatarUrlFor } from "@orrery/contract";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import sharp from "sharp";
-import { humans, storedObjects, workspaceMemberships } from "../../db/schema.ts";
+import {
+  accountRecoveryEvents,
+  humans,
+  storedObjects,
+  workspaceMemberships,
+} from "../../db/schema.ts";
 import type { ObjectStore } from "../../platform/storage.ts";
 import type { SessionAccount } from "../accounts/index.ts";
 
@@ -65,6 +70,8 @@ export interface AvatarsService {
   assertContentLength(contentLength: string | null): void;
   readUpload(file: unknown): Promise<Buffer>;
   upload(humanId: string, data: Buffer): Promise<AvatarResult>;
+  remove(humanId: string): Promise<void>;
+  sweepOrphans(): Promise<number>;
   read(
     actor: AvatarActor | null,
     humanId: string,
@@ -131,6 +138,36 @@ export function avatarKey(humanId: string, objectId: string): string {
   return `avatars/${humanId}/${objectId}.webp`;
 }
 
+type ObjectRow = { id: string; key: string };
+
+const isDeleted = sql`${storedObjects.status} = 'deleted'`;
+/** A `pending` row older than 15 minutes is assumed to belong to a crashed upload. */
+const isOrphan = sql`${isDeleted} or (${storedObjects.status} = 'pending' and ${storedObjects.createdAt} < statement_timestamp() - interval '15 minutes')`;
+
+/**
+ * Delete the blob first and only hard-delete its metadata row once the blob is
+ * gone. A failed backend delete leaves the row for the next sweep, so a transient
+ * storage error can never turn into a lost audit trail or an untracked blob.
+ */
+async function discardObject(
+  db: PostgresJsDatabase,
+  store: ObjectStore,
+  row: ObjectRow,
+  stillEligible: SQL,
+): Promise<boolean> {
+  try {
+    await store.delete(row.key);
+  } catch {
+    return false;
+  }
+  try {
+    await db.delete(storedObjects).where(and(eq(storedObjects.id, row.id), stillEligible));
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 function etagMatches(ifNoneMatch: string | undefined, etag: string): boolean {
   if (ifNoneMatch === undefined) return false;
   return ifNoneMatch
@@ -176,6 +213,7 @@ export function createAvatarsService({ db, store }: AvatarsDeps): AvatarsService
         sha256: normalized.sha256,
       });
 
+      const replaced: { row: ObjectRow | null } = { row: null };
       try {
         await store.put(key, normalized.data, "image/webp");
         await db.transaction(async (tx) => {
@@ -194,25 +232,72 @@ export function createAvatarsService({ db, store }: AvatarsDeps): AvatarsService
             .where(eq(storedObjects.id, objectId));
           await tx.update(humans).set({ avatarObjectId: objectId }).where(eq(humans.id, humanId));
           if (human.avatarObjectId !== null && human.avatarObjectId !== objectId) {
-            await tx
+            const [old] = await tx
               .update(storedObjects)
               .set({ status: "deleted", deletedAt: sql`now()` })
               .where(
                 and(eq(storedObjects.id, human.avatarObjectId), eq(storedObjects.status, "active")),
-              );
+              )
+              .returning({ id: storedObjects.id, key: storedObjects.key });
+            replaced.row = old ?? null;
           }
         });
       } catch (error) {
-        await store.delete(key).catch(() => {});
-        await db
+        // Claim the row before touching the blob. If the transaction actually
+        // committed and the error came from the connection afterwards, the row is
+        // `active` and this UPDATE matches nothing — the live blob must stay.
+        const pending = await db
           .update(storedObjects)
           .set({ status: "deleted", deletedAt: sql`now()` })
           .where(and(eq(storedObjects.id, objectId), eq(storedObjects.status, "pending")))
-          .catch(() => {});
+          .returning({ id: storedObjects.id, key: storedObjects.key })
+          .catch(() => []);
+        const claimed = pending[0];
+        if (claimed !== undefined) await discardObject(db, store, claimed, isDeleted);
         throw error;
       }
 
+      if (replaced.row !== null) await discardObject(db, store, replaced.row, isDeleted);
       return { objectId, avatarUrl: avatarUrlFor(humanId, objectId) };
+    },
+
+    async remove(humanId) {
+      const removed: { row: ObjectRow | null } = { row: null };
+      await db.transaction(async (tx) => {
+        const [human] = await tx
+          .select({ avatarObjectId: humans.avatarObjectId, deactivatedAt: humans.deactivatedAt })
+          .from(humans)
+          .where(eq(humans.id, humanId))
+          .for("update");
+        if (human === undefined || human.deactivatedAt !== null) {
+          throw new AvatarsError("account_deactivated");
+        }
+        if (human.avatarObjectId === null) return;
+
+        await tx.update(humans).set({ avatarObjectId: null }).where(eq(humans.id, humanId));
+        const [old] = await tx
+          .update(storedObjects)
+          .set({ status: "deleted", deletedAt: sql`now()` })
+          .where(
+            and(eq(storedObjects.id, human.avatarObjectId), eq(storedObjects.status, "active")),
+          )
+          .returning({ id: storedObjects.id, key: storedObjects.key });
+        removed.row = old ?? null;
+      });
+      if (removed.row !== null) await discardObject(db, store, removed.row, isDeleted);
+    },
+
+    async sweepOrphans() {
+      const rows = await db
+        .select({ id: storedObjects.id, key: storedObjects.key })
+        .from(storedObjects)
+        .where(isOrphan)
+        .orderBy(storedObjects.id);
+      let reclaimed = 0;
+      for (const row of rows) {
+        if (await discardObject(db, store, row, isOrphan)) reclaimed++;
+      }
+      return reclaimed;
     },
 
     async read(actor, humanId, version, ifNoneMatch) {
@@ -253,8 +338,37 @@ async function canReadAvatar(
   actor: AvatarActor,
   humanId: string,
 ): Promise<boolean> {
+  if (actor.kind === "human" && actor.humanId === humanId) return true;
+
+  const [target] = await db
+    .select({ deactivatedAt: humans.deactivatedAt })
+    .from(humans)
+    .where(eq(humans.id, humanId))
+    .limit(1);
+  if (target === undefined) return false;
+
+  // Deactivation suspends shared memberships and leaves them suspended after
+  // reactivation. Those historical memberships still identify past work, so they
+  // continue to authorise avatar reads for active members of the same workspace.
+  const historicalMembership =
+    target.deactivatedAt !== null ||
+    (
+      await db
+        .select({ id: accountRecoveryEvents.id })
+        .from(accountRecoveryEvents)
+        .where(
+          and(
+            eq(accountRecoveryEvents.humanId, humanId),
+            eq(accountRecoveryEvents.type, "account_deactivated"),
+          ),
+        )
+        .limit(1)
+    ).length > 0;
+
+  const targetConditions: SQL[] = [eq(workspaceMemberships.humanId, humanId)];
+  if (!historicalMembership) targetConditions.push(isNull(workspaceMemberships.suspendedAt));
+
   if (actor.kind === "human") {
-    if (actor.humanId === humanId) return true;
     const [shared] = await db
       .select({ id: workspaceMemberships.id })
       .from(workspaceMemberships)
@@ -267,12 +381,7 @@ async function canReadAvatar(
             db
               .select({ workspaceId: workspaceMemberships.workspaceId })
               .from(workspaceMemberships)
-              .where(
-                and(
-                  eq(workspaceMemberships.humanId, humanId),
-                  isNull(workspaceMemberships.suspendedAt),
-                ),
-              ),
+              .where(and(...targetConditions)),
           ),
         ),
       )
@@ -285,13 +394,7 @@ async function canReadAvatar(
   const [membership] = await db
     .select({ id: workspaceMemberships.id })
     .from(workspaceMemberships)
-    .where(
-      and(
-        eq(workspaceMemberships.humanId, humanId),
-        eq(workspaceMemberships.workspaceId, actor.workspaceId),
-        isNull(workspaceMemberships.suspendedAt),
-      ),
-    )
+    .where(and(...targetConditions, eq(workspaceMemberships.workspaceId, actor.workspaceId)))
     .limit(1);
   return membership !== undefined;
 }

@@ -1,6 +1,7 @@
 export {
   changePassword,
   createFirstAdministrator,
+  removeAvatar,
   signIn,
   signOut,
   updateProfile,

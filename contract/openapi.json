@@ -4998,6 +4998,42 @@
             }
           }
         }
+      },
+      "delete": {
+        "summary": "Remove the signed-in human's profile photo",
+        "description": "Clears the human's avatar in the same transaction that marks the old object deleted, returns the updated account with avatarUrl: null, and then best-effort removes the blob and its object row.",
+        "responses": {
+          "200": {
+            "description": "The updated account, with no avatarUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account cannot change its photo",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/humans/{humanId}/avatar": {

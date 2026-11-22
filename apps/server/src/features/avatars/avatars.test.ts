@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +22,8 @@ import { migrate } from "../../platform/migrate.ts";
 import { createLocalObjectStore, type ObjectStore } from "../../platform/storage.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
-import { createAvatarsFeature } from "./index.ts";
+import { createDeactivationFeature } from "../deactivation/index.ts";
+import { avatarKey, type AvatarsFeature, createAvatarsFeature } from "./index.ts";
 
 const PUBLIC_URL = "http://orrery.test";
 const SECRET = "correct horse battery staple staple";
@@ -67,6 +68,38 @@ function multipart(bytes: Uint8Array, filename: string, type: string) {
   return form;
 }
 
+/** A backend whose deletes fail, leaving the deleted row for the orphan sweep. */
+function failingDeleteStore(inner: ObjectStore): ObjectStore {
+  return {
+    ...inner,
+    async delete() {
+      throw new Error("injected blob delete failure");
+    },
+  };
+}
+
+/** A backend whose writes fail before any bytes are stored. */
+function failingPutStore(inner: ObjectStore, onPut?: (key: string) => void): ObjectStore {
+  return {
+    ...inner,
+    async put(key) {
+      onPut?.(key);
+      throw new Error("injected blob write failure");
+    },
+  };
+}
+
+/** A backend that runs a hook between reserving the row and writing the bytes. */
+function putHookStore(inner: ObjectStore, hook: (key: string) => Promise<void>): ObjectStore {
+  return {
+    ...inner,
+    async put(key, data, contentType) {
+      await hook(key);
+      return inner.put(key, data, contentType);
+    },
+  };
+}
+
 describe("avatars", () => {
   let pg: StartedPostgreSqlContainer;
   let database: Database;
@@ -74,6 +107,7 @@ describe("avatars", () => {
   let store: ObjectStore;
   let agentIdentity: AgentIdentity | null;
   let app: Hono;
+  let avatars: AvatarsFeature;
   let adminCookie: string;
   let adminId: string;
 
@@ -98,18 +132,48 @@ describe("avatars", () => {
     return id;
   }
 
+  async function sessionFor(humanId: string, token: string) {
+    await database.db.insert(browserSessions).values({
+      id: randomUUID(),
+      humanId,
+      tokenHash: tokenHash(token),
+      expiresAt: sql`now() + interval '1 day'`,
+    });
+    return `orrery_session=${token}`;
+  }
+
   async function humanWithSession(email: string, token: string) {
     const [row] = await database.db
       .insert(humans)
       .values({ id: randomUUID(), email, passwordHash: "scrypt$test" })
       .returning({ id: humans.id });
-    await database.db.insert(browserSessions).values({
-      id: randomUUID(),
-      humanId: row?.id ?? "",
-      tokenHash: tokenHash(token),
-      expiresAt: sql`now() + interval '1 day'`,
+    const humanId = row?.id ?? "";
+    return { id: humanId, cookie: await sessionFor(humanId, token) };
+  }
+
+  function install(storeOverride: ObjectStore = store, dbOverride: Database["db"] = database.db) {
+    const accounts = createAccountsFeature({
+      db: database.db,
+      setupSecret: SECRET,
+      publicUrl: PUBLIC_URL,
     });
-    return { id: row?.id ?? "", cookie: `orrery_session=${token}` };
+    avatars = createAvatarsFeature({
+      db: dbOverride,
+      store: storeOverride,
+      sessionReader: accounts.sessionReader,
+      authenticate: async (request: Request) =>
+        request.headers.get("authorization") === "Bearer valid-key" ? agentIdentity : null,
+      log: silentLogger,
+    });
+    app = createApp({
+      features: [
+        accounts,
+        avatars,
+        createDeactivationFeature({ db: database.db, sessionReader: accounts.sessionReader }),
+      ],
+      publicUrl: PUBLIC_URL,
+      log: silentLogger,
+    });
   }
 
   beforeAll(async () => {
@@ -128,25 +192,7 @@ describe("avatars", () => {
     dataDir = await mkdtemp(join(tmpdir(), "orrery-avatars-"));
     store = createLocalObjectStore(dataDir);
     agentIdentity = null;
-    const accounts = createAccountsFeature({
-      db: database.db,
-      setupSecret: SECRET,
-      publicUrl: PUBLIC_URL,
-    });
-    app = createApp({
-      features: [
-        accounts,
-        createAvatarsFeature({
-          db: database.db,
-          store,
-          sessionReader: accounts.sessionReader,
-          authenticate: async (request: Request) =>
-            request.headers.get("authorization") === "Bearer valid-key" ? agentIdentity : null,
-        }),
-      ],
-      publicUrl: PUBLIC_URL,
-      log: silentLogger,
-    });
+    install();
 
     const setup = await postJson(app, "/api/setup/admin", {
       secret: SECRET,
@@ -178,6 +224,7 @@ describe("avatars", () => {
     await rm(dataDir, { recursive: true, force: true });
     await database.db.transaction(async (tx) => {
       await tx.execute(sql`delete from stored_objects`);
+      await tx.execute(sql`delete from account_recovery_events`);
       await tx.execute(sql`delete from workspace_memberships`);
       await tx.execute(sql`delete from workspaces`);
       await tx.execute(sql`delete from browser_sessions`);
@@ -188,6 +235,9 @@ describe("avatars", () => {
 
   const upload = (form: FormData, session = adminCookie) =>
     app.request("/api/account/avatar", { method: "PUT", headers: { cookie: session }, body: form });
+
+  const removePhoto = (session = adminCookie) =>
+    app.request("/api/account/avatar", { method: "DELETE", headers: { cookie: session } });
 
   const fetchAvatar = (humanId: string, query = "", session = adminCookie) =>
     app.request(`/api/humans/${humanId}/avatar${query}`, { headers: { cookie: session } });
@@ -442,7 +492,7 @@ describe("avatars", () => {
     expect(await database.db.select().from(storedObjects)).toHaveLength(0);
   });
 
-  it("keeps one live avatar row when replacing a photo and changes the cache-busting id", async () => {
+  it("replaces a photo with a new cache-busting id and reclaims the old blob and row", async () => {
     const first = await upload(multipart(await image("jpeg"), "one.jpg", "image/jpeg"));
     const firstId = SessionResponse.parse(await first.json()).avatarUrl?.split("v=")[1] ?? "";
     const second = await upload(multipart(await image("png"), "two.png", "image/png"));
@@ -452,11 +502,353 @@ describe("avatars", () => {
     const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
     expect(human?.avatarObjectId).toBe(secondId);
     const rows = await database.db.select().from(storedObjects);
-    expect(rows).toHaveLength(2);
-    expect(rows.find((row) => row.id === firstId)).toMatchObject({ status: "deleted" });
-    expect(rows.find((row) => row.id === firstId)?.deletedAt).not.toBeNull();
-    expect(rows.find((row) => row.id === secondId)).toMatchObject({ status: "active" });
-    expect(rows.find((row) => row.id === secondId)?.deletedAt).toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: secondId, status: "active" });
+    expect(rows[0]?.deletedAt).toBeNull();
+    expect(await store.head(avatarKey(adminId, firstId))).toBeNull();
+    expect(await store.head(avatarKey(adminId, secondId))).not.toBeNull();
+    expect((await fetchAvatar(adminId, `?v=${secondId}`)).status).toBe(200);
+  });
+
+  it("removes the avatar with DELETE, returning avatarUrl null and reclaiming the blob", async () => {
+    const uploaded = await upload(multipart(await image("webp"), "photo.webp", "image/webp"));
+    const objectId = SessionResponse.parse(await uploaded.json()).avatarUrl?.split("v=")[1] ?? "";
+
+    const res = await removePhoto();
+    expect(res.status).toBe(200);
+    expect(SessionResponse.parse(await res.json())).toMatchObject({
+      email: EMAIL,
+      avatarUrl: null,
+    });
+
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+    expect(human?.avatarObjectId).toBeNull();
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+    expect(await store.head(avatarKey(adminId, objectId))).toBeNull();
+    expect((await fetchAvatar(adminId)).status).toBe(404);
+  });
+
+  it("makes DELETE idempotent when no photo is set", async () => {
+    const res = await removePhoto();
+    expect(res.status).toBe(200);
+    expect(SessionResponse.parse(await res.json()).avatarUrl).toBeNull();
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+  });
+
+  it("keeps a removed row deleted with deleted_at when the blob delete fails, then sweeps it", async () => {
+    const uploaded = await upload(multipart(await image("png"), "photo.png", "image/png"));
+    const objectId = SessionResponse.parse(await uploaded.json()).avatarUrl?.split("v=")[1] ?? "";
+
+    install(failingDeleteStore(store));
+    const res = await removePhoto();
+    expect(res.status).toBe(200);
+    expect(SessionResponse.parse(await res.json()).avatarUrl).toBeNull();
+
+    const [row] = await database.db.select().from(storedObjects);
+    expect(row).toMatchObject({ id: objectId, status: "deleted" });
+    expect(row?.deletedAt).not.toBeNull();
+    expect(await store.head(avatarKey(adminId, objectId))).not.toBeNull();
+
+    install(store);
+    expect(await avatars.sweepOrphans()).toBe(1);
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+    expect(await store.head(avatarKey(adminId, objectId))).toBeNull();
+  });
+
+  it("requires an active human session to remove a photo", async () => {
+    const uploaded = await upload(multipart(await image("png"), "photo.png", "image/png"));
+    const objectId = SessionResponse.parse(await uploaded.json()).avatarUrl?.split("v=")[1] ?? "";
+
+    const unauth = await removePhoto("");
+    expect(unauth.status).toBe(401);
+    expect(Problem.parse(await unauth.json()).code).toBe("not_signed_in");
+
+    await database.db
+      .update(humans)
+      .set({ deactivatedAt: new Date() })
+      .where(eq(humans.id, adminId));
+    const deactivated = await removePhoto();
+    expect(deactivated.status).toBe(401);
+
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+    expect(human?.avatarObjectId).toBe(objectId);
+    const [row] = await database.db.select().from(storedObjects);
+    expect(row).toMatchObject({ status: "active" });
+    expect(await store.head(avatarKey(adminId, objectId))).not.toBeNull();
+  });
+
+  it("marks the replaced row deleted when the immediate blob delete fails, then sweeps it", async () => {
+    const first = await upload(multipart(await image("jpeg"), "one.jpg", "image/jpeg"));
+    const firstId = SessionResponse.parse(await first.json()).avatarUrl?.split("v=")[1] ?? "";
+
+    install(failingDeleteStore(store));
+    const second = await upload(multipart(await image("png"), "two.png", "image/png"));
+    const secondId = SessionResponse.parse(await second.json()).avatarUrl?.split("v=")[1] ?? "";
+    expect(second.status).toBe(200);
+    expect(secondId).not.toBe(firstId);
+
+    const deleted = (await database.db.select().from(storedObjects)).find((r) => r.id === firstId);
+    expect(deleted).toMatchObject({ status: "deleted" });
+    expect(deleted?.deletedAt).not.toBeNull();
+    expect(await store.head(avatarKey(adminId, firstId))).not.toBeNull();
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+    expect(human?.avatarObjectId).toBe(secondId);
+
+    install(store);
+    expect(await avatars.sweepOrphans()).toBe(1);
+    expect(await store.head(avatarKey(adminId, firstId))).toBeNull();
+    const rows = await database.db.select().from(storedObjects);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe(secondId);
+  });
+
+  it("sweeps deleted rows and pending rows older than 15 minutes but keeps fresh pending rows", async () => {
+    const uploaded = await upload(multipart(await image("png"), "photo.png", "image/png"));
+    const firstId = SessionResponse.parse(await uploaded.json()).avatarUrl?.split("v=")[1] ?? "";
+    install(failingDeleteStore(store));
+    await removePhoto();
+    install(store);
+
+    const bytes = Buffer.from("pending-blob");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const expiredKey = `avatars/${adminId}/expired.webp`;
+    const freshKey = `avatars/${adminId}/fresh.webp`;
+    for (const key of [expiredKey, freshKey]) {
+      await store.put(key, bytes, "image/webp");
+      await database.db.insert(storedObjects).values({
+        id: randomUUID(),
+        key,
+        status: "pending",
+        contentType: "image/webp",
+        byteSize: bytes.byteLength,
+        sha256,
+      });
+    }
+    await database.db.execute(
+      sql`update stored_objects set created_at = statement_timestamp() - interval '16 minutes' where key = ${expiredKey}`,
+    );
+    await database.db.execute(
+      sql`update stored_objects set created_at = statement_timestamp() - interval '14 minutes' where key = ${freshKey}`,
+    );
+
+    expect(await avatars.sweepOrphans()).toBe(2);
+    expect(await avatars.sweepOrphans()).toBe(0);
+
+    expect(await store.head(avatarKey(adminId, firstId))).toBeNull();
+    expect(await store.head(expiredKey)).toBeNull();
+    expect(await store.head(freshKey)).not.toBeNull();
+    const rows = await database.db.select().from(storedObjects);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ key: freshKey, status: "pending" });
+  });
+
+  it("cleans up the blob and pending row when the blob write fails", async () => {
+    let reservedKey = "";
+    install(failingPutStore(store, (key) => (reservedKey = key)));
+    const res = await upload(multipart(await image("png"), "x.png", "image/png"));
+    expect(res.status).toBe(500);
+    expect(Problem.parse(await res.json()).code).toBe("internal_error");
+
+    expect(reservedKey).not.toBe("");
+    expect(await store.head(reservedKey)).toBeNull();
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+    expect(human?.avatarObjectId).toBeNull();
+
+    install(store);
+    expect(await avatars.sweepOrphans()).toBe(0);
+  });
+
+  it("rejects an upload deactivated mid-flight and cleans up the blob and pending row", async () => {
+    let reservedKey = "";
+    install(
+      putHookStore(store, async (key) => {
+        reservedKey = key;
+        await database.db
+          .update(humans)
+          .set({ deactivatedAt: sql`statement_timestamp()` })
+          .where(eq(humans.id, adminId));
+      }),
+    );
+    const res = await upload(multipart(await image("png"), "x.png", "image/png"));
+    expect(res.status).toBe(403);
+    expect(Problem.parse(await res.json()).code).toBe("account_deactivated");
+
+    expect(await store.head(reservedKey)).toBeNull();
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+    expect(human?.avatarObjectId).toBeNull();
+
+    install(store);
+    expect(await avatars.sweepOrphans()).toBe(0);
+  });
+
+  it("cleans up the blob and pending row when the promoting transaction fails", async () => {
+    let reservedKey = "";
+    install(
+      putHookStore(store, async (key) => {
+        reservedKey = key;
+      }),
+    );
+    await database.db.execute(sql`
+      create function avatars_fail_commit() returns trigger language plpgsql as $$
+      begin
+        raise exception 'injected commit failure';
+      end; $$;
+    `);
+    await database.db.execute(sql`
+      create trigger avatars_fail_commit_trigger before update on stored_objects
+      for each row when (new.status = 'active') execute function avatars_fail_commit();
+    `);
+    try {
+      const res = await upload(multipart(await image("png"), "x.png", "image/png"));
+      expect(res.status).toBe(500);
+      expect(Problem.parse(await res.json()).code).toBe("internal_error");
+
+      expect(await store.head(reservedKey)).toBeNull();
+      expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+      const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+      expect(human?.avatarObjectId).toBeNull();
+
+      expect(await avatars.sweepOrphans()).toBe(0);
+    } finally {
+      await database.db.execute(
+        sql`drop trigger if exists avatars_fail_commit_trigger on stored_objects`,
+      );
+      await database.db.execute(sql`drop function if exists avatars_fail_commit()`);
+    }
+  });
+
+  it("keeps a committed avatar live when the connection drops after the transaction", async () => {
+    const droppedConnectionDb = new Proxy(database.db, {
+      get(target, prop, receiver) {
+        if (prop === "transaction") {
+          return async (fn: never) => {
+            await database.db.transaction(fn);
+            throw new Error("simulated connection drop after commit");
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    install(store, droppedConnectionDb);
+
+    const res = await upload(multipart(await image("png"), "x.png", "image/png"));
+    expect(res.status).toBe(500);
+
+    const rows = await database.db.select().from(storedObjects);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "active" });
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+    expect(human?.avatarObjectId).toBe(rows[0]?.id);
+    expect(await store.head(avatarKey(adminId, rows[0]?.id ?? ""))).not.toBeNull();
+    expect((await fetchAvatar(adminId)).status).toBe(200);
+
+    install(store);
+    expect(await avatars.sweepOrphans()).toBe(0);
+    expect((await fetchAvatar(adminId)).status).toBe(200);
+  });
+
+  it("keeps a deactivated human's avatar visible on historical work and restores it on reactivation", async () => {
+    const member = await humanWithSession("member@example.com", "member-token");
+    await sharedWorkspaceWith([adminId, member.id], adminId);
+    const uploaded = await upload(
+      multipart(await image("png"), "member.png", "image/png"),
+      member.cookie,
+    );
+    const objectId = SessionResponse.parse(await uploaded.json()).avatarUrl?.split("v=")[1] ?? "";
+    const expectedUrl = `/api/humans/${member.id}/avatar?v=${objectId}`;
+    expect((await fetchAvatar(member.id, `?v=${objectId}`)).status).toBe(200);
+
+    const deactivated = await app.request(`/api/admin/accounts/${member.id}/deactivate`, {
+      method: "POST",
+      headers: { cookie: adminCookie },
+    });
+    expect(deactivated.status).toBe(200);
+
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, member.id));
+    expect(human?.avatarObjectId).toBe(objectId);
+    const [row] = await database.db
+      .select()
+      .from(storedObjects)
+      .where(eq(storedObjects.id, objectId));
+    expect(row).toMatchObject({ status: "active" });
+    expect(row?.deletedAt).toBeNull();
+    expect(await store.head(avatarKey(member.id, objectId))).not.toBeNull();
+
+    // Deactivation ends sessions; even a freshly issued session cannot change the photo.
+    const freshCookie = await sessionFor(member.id, "deactivated-token");
+    const blockedUpload = await upload(
+      multipart(await image("png"), "x.png", "image/png"),
+      freshCookie,
+    );
+    expect(blockedUpload.status).toBe(401);
+    expect((await removePhoto(freshCookie)).status).toBe(401);
+
+    const served = await fetchAvatar(member.id, `?v=${objectId}`, adminCookie);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+
+    const reactivated = await app.request(`/api/admin/accounts/${member.id}/reactivate`, {
+      method: "POST",
+      headers: { cookie: adminCookie },
+    });
+    expect(reactivated.status).toBe(200);
+    expect((await fetchAvatar(member.id, `?v=${objectId}`, adminCookie)).status).toBe(200);
+    const session = await app.request("/api/auth/session", { headers: { cookie: freshCookie } });
+    expect(session.status).toBe(200);
+    expect(SessionResponse.parse(await session.json()).avatarUrl).toBe(expectedUrl);
+    expect(await avatars.sweepOrphans()).toBe(0);
+  });
+
+  it("lets a workspace-scoped agent key read a deactivated member's avatar before and after reactivation", async () => {
+    const member = await humanWithSession("agent-member@example.com", "agent-member-token");
+    const outsider = await humanWithSession("agent-outsider@example.com", "agent-outsider-token");
+    const sharedId = await sharedWorkspaceWith([adminId, member.id], adminId);
+    agentIdentity = {
+      agentId: randomUUID(),
+      name: "deactivation-agent",
+      humanId: adminId,
+      keyId: randomUUID(),
+      workspaceId: sharedId,
+      validity: "90",
+      projects: [],
+    };
+    const bearer = { authorization: "Bearer valid-key" };
+    const readAsAgent = (humanId: string) =>
+      app.request(`/api/humans/${humanId}/avatar`, { headers: bearer });
+
+    const uploaded = await upload(
+      multipart(await image("png"), "member.png", "image/png"),
+      member.cookie,
+    );
+    expect(uploaded.status).toBe(200);
+    const before = await readAsAgent(member.id);
+    expect(before.status).toBe(200);
+    const etag = before.headers.get("etag");
+    expect(etag).toMatch(/^"[0-9a-f]{64}"$/);
+    expect((await readAsAgent(outsider.id)).status).toBe(404);
+
+    const deactivated = await app.request(`/api/admin/accounts/${member.id}/deactivate`, {
+      method: "POST",
+      headers: { cookie: adminCookie },
+    });
+    expect(deactivated.status).toBe(200);
+    const whileDeactivated = await readAsAgent(member.id);
+    expect(whileDeactivated.status).toBe(200);
+    expect(whileDeactivated.headers.get("etag")).toBe(etag);
+    expect((await readAsAgent(outsider.id)).status).toBe(404);
+
+    const reactivated = await app.request(`/api/admin/accounts/${member.id}/reactivate`, {
+      method: "POST",
+      headers: { cookie: adminCookie },
+    });
+    expect(reactivated.status).toBe(200);
+    const after = await readAsAgent(member.id);
+    expect(after.status).toBe(200);
+    expect(after.headers.get("etag")).toBe(etag);
+    expect(await database.db.select().from(storedObjects)).toHaveLength(1);
   });
 
   it("reports storage health through /readyz alongside Postgres", async () => {

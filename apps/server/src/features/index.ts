@@ -119,6 +119,7 @@ export function createFeatures(
     store: storage,
     sessionReader: accounts.sessionReader,
     authenticate: agentAuthenticator,
+    log,
   });
 
   const notifications = createNotificationsFeature({

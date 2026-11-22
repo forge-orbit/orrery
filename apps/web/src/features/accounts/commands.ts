@@ -11,7 +11,7 @@ import type {
   SetupAdminRequest,
   UpdateProfileRequest,
 } from "@orrery/contract";
-import { patchJson, post, postJson, putForm } from "../../lib/api.ts";
+import { deleteJson, patchJson, post, postJson, putForm } from "../../lib/api.ts";
 
 export function createFirstAdministrator(input: SetupAdminRequest): Promise<SetupAdminResponse> {
   return postJson("/api/setup/admin", input, (value) => SetupAdminResponse.parse(value));
@@ -33,6 +33,10 @@ export function uploadAvatar(file: File): Promise<SessionResponse> {
   const form = new FormData();
   form.set("file", file);
   return putForm("/api/account/avatar", form, (value) => SessionResponse.parse(value));
+}
+
+export function removeAvatar(): Promise<SessionResponse> {
+  return deleteJson("/api/account/avatar", (value) => SessionResponse.parse(value));
 }
 
 export function changePassword(input: ChangePasswordRequest): Promise<ChangePasswordResponse> {
