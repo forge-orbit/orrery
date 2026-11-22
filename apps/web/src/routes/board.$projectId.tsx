@@ -239,7 +239,7 @@ function BoardPage() {
         </Stack>
         <Stack direction="horizontal" gap={2} vAlign="center" justify="between" wrap="wrap">
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-            <Heading level={2} accessibilityLevel={1} color="inherit">
+            <Heading level={1} color="inherit">
               Board
             </Heading>
             <Token label={project.key} color="gray" size="sm" />

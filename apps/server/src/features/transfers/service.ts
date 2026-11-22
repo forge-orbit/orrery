@@ -622,7 +622,7 @@ async function acceptInTransaction(
       .limit(1);
     if (liveSession !== undefined) throw new TransfersError("active_work");
 
-    await tx
+    const expiredSessions = await tx
       .update(workSessions)
       .set({
         status: "expired",
@@ -635,7 +635,22 @@ async function acceptInTransaction(
           eq(workSessions.status, "active"),
           lte(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
         ),
-      );
+      )
+      .returning({ issueId: workSessions.issueId });
+    if (expiredSessions.length > 0) {
+      await tx
+        .update(issues)
+        .set({ status: "todo", updatedAt: sql`statement_timestamp()` })
+        .where(
+          and(
+            inArray(
+              issues.id,
+              expiredSessions.map((session) => session.issueId),
+            ),
+            eq(issues.status, "in_progress"),
+          ),
+        );
+    }
   }
 
   await tx.delete(projectAccessGrants).where(eq(projectAccessGrants.projectId, auth.projectId));

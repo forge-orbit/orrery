@@ -7,7 +7,7 @@ import {
   WorkspaceKind,
   type AccountStatus,
 } from "@orrery/contract";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DbTransaction } from "../../platform/db.ts";
 import {
@@ -286,6 +286,21 @@ export function createDeactivationService({ db }: DeactivationDeps): Deactivatio
             .where(inArray(issues.id, issueIds))
             .orderBy(issues.id)
             .for("update");
+          const claimIds = claims.map((claim) => claim.id);
+          await tx
+            .update(workSessions)
+            .set({
+              status: WorkSessionStatus.enum.expired,
+              endedAt: sql`statement_timestamp()`,
+              updatedAt: sql`statement_timestamp()`,
+            })
+            .where(
+              and(
+                eq(workSessions.status, WorkSessionStatus.enum.active),
+                lte(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+                inArray(workSessions.id, claimIds),
+              ),
+            );
           await tx
             .update(workSessions)
             .set({
@@ -296,10 +311,8 @@ export function createDeactivationService({ db }: DeactivationDeps): Deactivatio
             .where(
               and(
                 eq(workSessions.status, WorkSessionStatus.enum.active),
-                inArray(
-                  workSessions.id,
-                  claims.map((claim) => claim.id),
-                ),
+                gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+                inArray(workSessions.id, claimIds),
               ),
             );
 

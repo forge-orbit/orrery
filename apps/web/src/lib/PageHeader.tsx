@@ -48,7 +48,7 @@ export function PageHeader({
       <Stack direction="horizontal" justify="between" align="center" gap={3} wrap="wrap">
         <Stack gap={0.5}>
           <Stack direction="horizontal" gap={2} align="center" wrap="wrap">
-            <Heading level={2} accessibilityLevel={1} color="inherit">
+            <Heading level={1} color="inherit">
               {title}
             </Heading>
             {badge !== undefined &&
