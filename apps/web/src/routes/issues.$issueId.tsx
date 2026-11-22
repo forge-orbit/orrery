@@ -284,10 +284,22 @@ function IssuePage() {
     <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
-          <Link key="project" to="/projects/$projectId" params={{ projectId: issue.projectId }}>
+          <Link
+            key="project"
+            to="/projects/$projectId"
+            params={{ projectId: issue.projectId }}
+            color="secondary"
+            weight="medium"
+          >
             Back to project
           </Link>,
-          <Link key="board" to="/board/$projectId" params={{ projectId: issue.projectId }}>
+          <Link
+            key="board"
+            to="/board/$projectId"
+            params={{ projectId: issue.projectId }}
+            color="secondary"
+            weight="medium"
+          >
             Board
           </Link>,
           <Text
@@ -372,7 +384,7 @@ function IssuePage() {
             <Button
               type="button"
               size="sm"
-              variant="secondary"
+              variant="ghost"
               label="Copy link"
               onClick={() => void onCopyLink()}
             />
@@ -473,12 +485,12 @@ function IssuePage() {
                   <Heading level={2} color="inherit">
                     Description
                   </Heading>
-                  {canContribute && (
+                  {canContribute && issue.body === "" && (
                     <Button
                       type="button"
                       size="sm"
                       variant="ghost"
-                      label={issue.body === "" ? "Add description" : "Edit"}
+                      label="Add description"
                       onClick={() => setEditOpen(true)}
                     />
                   )}

@@ -95,6 +95,14 @@ export function useResolvedAppearance(): "light" | "dark" {
   return "light";
 }
 
+export function DarkThemeScope({ children }: { children: ReactNode }) {
+  return (
+    <Theme theme={theme} mode="dark">
+      {children}
+    </Theme>
+  );
+}
+
 export function AppearancePicker({ forceDark = false }: { forceDark?: boolean }) {
   const appearance = use(AppearanceContext);
   if (appearance === null) throw new Error("AppearancePicker requires AppearanceProvider.");

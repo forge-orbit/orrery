@@ -221,16 +221,16 @@ export const orreryTheme = {
     "--orrery-ink": "#14161b",
     "--orrery-cream": "#f6f3ec",
     "--orrery-orange": "#f2561d",
-    "--orrery-canvas": "light-dark(#ece6da, #15171c)",
+    "--orrery-canvas": "light-dark(#faf8f4, #13151a)",
     "--orrery-text": "light-dark(#14161b, #f6f3ec)",
-    "--orrery-surface": "light-dark(#fffdf8, #25272f)",
-    "--orrery-recessed": "light-dark(#e6dfd1, #1b1d25)",
-    "--orrery-muted": "light-dark(#595a5e, #b4b0a8)",
-    "--orrery-border": "light-dark(#d2c8b6, #40434d)",
-    "--orrery-control-border": "light-dark(#827b70, #82838e)",
-    "--orrery-accent": "light-dark(#a8360e, #ff996a)",
-    "--orrery-accent-hover": "light-dark(#862807, #ffb18c)",
-    "--orrery-on-accent": "light-dark(#fffdf8, #14161b)",
+    "--orrery-surface": "light-dark(#ffffff, #20232b)",
+    "--orrery-recessed": "light-dark(#f3f0e8, #181a21)",
+    "--orrery-muted": "light-dark(#4e5057, #beb9b0)",
+    "--orrery-border": "light-dark(#ded8cc, #4d5260)",
+    "--orrery-control-border": "light-dark(#756e63, #8a8d9a)",
+    "--orrery-accent": "light-dark(#b5380c, #ff8f5c)",
+    "--orrery-accent-hover": "light-dark(#8f2a07, #ffaa82)",
+    "--orrery-on-accent": "light-dark(#ffffff, #14161b)",
     "--orrery-attention-text": "light-dark(#89330f, #ffc19f)",
     "--orrery-attention-fill": "light-dark(#fff0e4, #38271f)",
     "--orrery-attention-line": "light-dark(#c87141, #ad6b4f)",
@@ -476,7 +476,10 @@ export const orreryTheme = {
     "card": {
       "base": {
         "padding": "var(--spacing-4)",
-        "borderRadius": "var(--orrery-panel-radius)"
+        "borderRadius": "var(--orrery-panel-radius)",
+        "borderWidth": "1px",
+        "borderStyle": "solid",
+        "borderColor": "var(--color-border)"
       }
     },
     "section": {
@@ -497,7 +500,10 @@ export const orreryTheme = {
     },
     "clickable-card": {
       "base": {
-        "borderRadius": "var(--orrery-panel-radius)"
+        "borderRadius": "var(--orrery-panel-radius)",
+        "borderWidth": "1px",
+        "borderStyle": "solid",
+        "borderColor": "var(--color-border)"
       }
     },
     "side-nav": {
@@ -507,7 +513,7 @@ export const orreryTheme = {
     },
     "side-nav-item": {
       "selected": {
-        "backgroundColor": "color-mix(in srgb, var(--orrery-text) 9%, transparent)",
+        "backgroundColor": "color-mix(in srgb, var(--orrery-orange) 12%, transparent)",
         "color": "var(--orrery-text)",
         "fontWeight": "600"
       }

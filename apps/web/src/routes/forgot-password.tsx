@@ -75,7 +75,7 @@ function ForgotPasswordPage() {
         </FormLayout>
       </form>
       <Text as="p" display="block" type="supporting">
-        <Link to="/signin">
+        <Link to="/signin" hasUnderline isStandalone>
           <Stack as="span" direction="horizontal" gap={1} vAlign="center">
             <Icon icon="chevronLeft" size="xsm" aria-hidden="true" />
             Back to sign in

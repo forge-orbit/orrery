@@ -167,7 +167,7 @@ function WorkspacePage() {
     <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
-          <Link key="workspaces" to="/">
+          <Link key="workspaces" to="/" color="secondary" weight="medium">
             Workspaces
           </Link>,
         ]}
@@ -183,7 +183,8 @@ function WorkspacePage() {
               <Link
                 to="/history/workspace/$workspaceId"
                 params={{ workspaceId: workspace.id }}
-                color="inherit"
+                color="secondary"
+                weight="medium"
               >
                 Access history
               </Link>

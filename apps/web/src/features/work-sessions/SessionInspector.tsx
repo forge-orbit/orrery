@@ -188,7 +188,7 @@ export function SessionInspector({
           </Heading>
           <Button
             label={open ? "Hide session inspector" : "Show session inspector"}
-            variant="secondary"
+            variant={open ? "ghost" : "secondary"}
             size="sm"
             aria-expanded={open}
             aria-controls={panelId}

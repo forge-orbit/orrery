@@ -602,14 +602,19 @@ function BoardPage() {
                 {inspected === undefined ? (
                   <Banner status="error" role="alert" title="This issue is no longer available." />
                 ) : (
-                  <>
-                    <Link
-                      to="/issues/$issueId"
-                      params={{ issueId: panel.issueId }}
-                      search={{ inspector: true, session: panel.sessionId }}
-                    >
-                      Open issue
-                    </Link>
+                  <Stack gap={3}>
+                    <Stack direction="horizontal" hAlign="start">
+                      <Link
+                        to="/issues/$issueId"
+                        params={{ issueId: panel.issueId }}
+                        search={{ inspector: true, session: panel.sessionId }}
+                        color="accent"
+                        weight="semibold"
+                        hasUnderline
+                      >
+                        Open issue
+                      </Link>
+                    </Stack>
                     <SessionInspectorDetails
                       key={panel.sessionId}
                       issueId={panel.issueId}
@@ -617,7 +622,7 @@ function BoardPage() {
                       open={panelOpen}
                       initialSessionId={panel.sessionId}
                     />
-                  </>
+                  </Stack>
                 )}
               </>
             )}
@@ -777,7 +782,7 @@ function BoardCard({
           {(canMove || issue.needsInput || session !== undefined) && (
             <>
               <Divider />
-              <Stack gap={1.5}>
+              <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
                 {canMove && (
                   <Selector
                     label={`Move ${issue.identifier}`}
@@ -796,14 +801,20 @@ function BoardCard({
                 {(issue.needsInput || session !== undefined) && (
                   <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
                     {issue.needsInput && (
-                      <Link to="/inbox" search={{ issue: issue.id }} color="accent" hasUnderline>
+                      <Link
+                        to="/inbox"
+                        search={{ issue: issue.id }}
+                        color="accent"
+                        weight="semibold"
+                        hasUnderline
+                      >
                         View question
                       </Link>
                     )}
                     {session !== undefined && (
                       <Button
                         label="Inspect session"
-                        variant="secondary"
+                        variant="ghost"
                         size="sm"
                         onClick={() => onInspect(session.id)}
                       />
