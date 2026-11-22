@@ -123,7 +123,7 @@ export function IssuePriorityControls({
         data-issue-priority-select={issue.id}
         size="sm"
         variant={compact ? "secondary" : "input"}
-        {...(compact ? {} : { width: "100%" })}
+        width={compact ? "7.5rem" : "100%"}
         value={issue.priority}
         isDisabled={saving}
         onChange={(value) => {

@@ -544,6 +544,17 @@ export const orreryTheme = {
         "fontWeight": "600"
       }
     },
+    "table": {
+      "base": {
+        "minInlineSize": "62rem"
+      }
+    },
+    "table-scroll-wrapper": {
+      "base": {
+        "maxInlineSize": "100%",
+        "overflowX": "auto"
+      }
+    },
     "progress-bar-track": {
       "base": {
         "backgroundColor": "color-mix(in srgb, var(--orrery-recessed) 50%, var(--orrery-surface))"
