@@ -155,7 +155,7 @@ function ProfileSection({
       setUploadError(null);
       applyAvatar(updated.avatarUrl);
       toast({ body: "Profile photo removed." });
-      await queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey });
+      await queryClient.invalidateQueries();
     },
   });
 
