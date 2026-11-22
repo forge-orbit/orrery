@@ -91,6 +91,18 @@ proxies to `orrery:8080`, and stores certificate state in the `caddy-data` and `
 volumes. Plain `docker compose up -d` does not start Caddy. If you already run a reverse proxy, skip
 this profile and point it at port 8080 instead.
 
+## S3-compatible object storage (`--profile storage`)
+
+By default uploaded blobs (profile photos) stay on the `orrery-data` volume and
+`docker compose up -d` runs only Orrery and Postgres. For RustFS or another S3 provider, set
+`ORRERY_STORAGE_DRIVER=s3` plus `ORRERY_S3_ENDPOINT`, `ORRERY_S3_BUCKET`, `ORRERY_S3_REGION`,
+`ORRERY_S3_ACCESS_KEY_ID`, `ORRERY_S3_SECRET_ACCESS_KEY` and `ORRERY_S3_FORCE_PATH_STYLE` in `.env`,
+then start with `docker compose --profile storage up -d` to run the included RustFS service (create
+the bucket once, as described in the guide). Missing variables or an unreachable bucket stop startup,
+and `/readyz` reports `503` if the bucket becomes unreachable later. See
+[Object storage: local disk and S3/RustFS](./object-storage.md) for the full variable reference,
+RustFS setup, and the `rclone sync` / `aws s3 sync` migration runbook.
+
 ## `ORRERY_WEBHOOK_ALLOW_PRIVATE_URLS`
 
 Outgoing webhooks (see [ADR-0007](../adr/0007-outgoing-webhooks-outbox-and-security.md)) are

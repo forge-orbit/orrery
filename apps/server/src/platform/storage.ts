@@ -1,6 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import type { Config } from "./config.ts";
 
 export interface StoredObject {
@@ -160,12 +168,182 @@ export function createLocalObjectStore(dataDir: string): ObjectStore {
   };
 }
 
+export interface S3StoreConfig {
+  endpoint: string;
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  forcePathStyle: boolean;
+}
+
+/**
+ * A missing key is a normal read miss; a missing bucket is a storage/configuration
+ * error and must propagate, so it is never folded into "not found".
+ */
+function isNotFound(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if ("name" in error && error.name === "NoSuchBucket") return false;
+  if ("name" in error && (error.name === "NoSuchKey" || error.name === "NotFound")) return true;
+  return (
+    "$metadata" in error &&
+    typeof error.$metadata === "object" &&
+    error.$metadata !== null &&
+    "httpStatusCode" in error.$metadata &&
+    error.$metadata.httpStatusCode === 404
+  );
+}
+
+/**
+ * S3-compatible adapter. The object key is used verbatim as the S3 key, so
+ * `<bucket>/<key>` mirrors local `<dataDir>/objects/<key>` byte for byte and an
+ * `aws s3 sync` / `rclone sync` copy needs no database changes. No sidecar or
+ * metadata files are written: the content type and checksums live in
+ * `stored_objects`, so a blob copied in by another backend stays readable.
+ */
+export function createS3ObjectStore(config: S3StoreConfig): ObjectStore {
+  const client = new S3Client({
+    endpoint: config.endpoint,
+    region: config.region,
+    forcePathStyle: config.forcePathStyle,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+  });
+
+  /**
+   * Some S3 providers answer a plain 404 for both a missing key and a missing
+   * bucket, so confirm the bucket before treating a 404 as a harmless miss.
+   */
+  async function isMissingKey(error: unknown): Promise<boolean> {
+    if (!isNotFound(error)) return false;
+    try {
+      await client.send(new HeadBucketCommand({ Bucket: config.bucket }));
+      return true;
+    } catch (bucketError) {
+      throw new Error(
+        `S3 bucket ${config.bucket} is unavailable at ${config.endpoint}: ${messageOf(bucketError)}`,
+        { cause: bucketError },
+      );
+    }
+  }
+
+  async function readObject(key: string): Promise<Buffer | null> {
+    assertObjectKey(key);
+    try {
+      const response = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: key }));
+      return response.Body === undefined
+        ? null
+        : Buffer.from(await response.Body.transformToByteArray());
+    } catch (error) {
+      if (await isMissingKey(error)) return null;
+      throw error;
+    }
+  }
+
+  return {
+    async put(key, data, contentType) {
+      assertObjectKey(key);
+      await client.send(
+        new PutObjectCommand({
+          Bucket: config.bucket,
+          Key: key,
+          Body: data,
+          ContentType: contentType,
+        }),
+      );
+      return {
+        key,
+        byteSize: data.byteLength,
+        sha256: createHash("sha256").update(data).digest("hex"),
+      };
+    },
+
+    async get(key) {
+      const data = await readObject(key);
+      return data === null ? null : { data };
+    },
+
+    // Read the bytes so the checksum comes from the object itself, never from
+    // metadata that an external `sync` would leave behind.
+    async head(key) {
+      const data = await readObject(key);
+      return data === null
+        ? null
+        : {
+            key,
+            byteSize: data.byteLength,
+            sha256: createHash("sha256").update(data).digest("hex"),
+          };
+    },
+
+    async delete(key) {
+      assertObjectKey(key);
+      // HEAD only: existence is all we need, and a missing key is a normal no-op.
+      try {
+        await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: key }));
+      } catch (error) {
+        if (await isMissingKey(error)) return false;
+        throw error;
+      }
+      await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+      return true;
+    },
+
+    async checkHealth() {
+      try {
+        await client.send(new HeadBucketCommand({ Bucket: config.bucket }));
+        return { ok: true };
+      } catch (error) {
+        return {
+          ok: false,
+          reason: `S3 bucket ${config.bucket} is unreachable at ${config.endpoint}: ${messageOf(error)}`,
+        };
+      }
+    },
+  };
+}
+
 export function createObjectStore(
-  config: Pick<Config, "ORRERY_STORAGE_DRIVER" | "ORRERY_DATA_DIR">,
+  config: Pick<
+    Config,
+    | "ORRERY_STORAGE_DRIVER"
+    | "ORRERY_DATA_DIR"
+    | "ORRERY_S3_ENDPOINT"
+    | "ORRERY_S3_BUCKET"
+    | "ORRERY_S3_REGION"
+    | "ORRERY_S3_ACCESS_KEY_ID"
+    | "ORRERY_S3_SECRET_ACCESS_KEY"
+    | "ORRERY_S3_FORCE_PATH_STYLE"
+  >,
 ): ObjectStore {
   switch (config.ORRERY_STORAGE_DRIVER) {
     case "local":
       return createLocalObjectStore(config.ORRERY_DATA_DIR);
+    case "s3": {
+      // loadConfig() enforces these; keep the factory safe for direct callers too.
+      const {
+        ORRERY_S3_ENDPOINT: endpoint,
+        ORRERY_S3_BUCKET: bucket,
+        ORRERY_S3_ACCESS_KEY_ID: accessKeyId,
+        ORRERY_S3_SECRET_ACCESS_KEY: secretAccessKey,
+      } = config;
+      if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) {
+        throw new Error(
+          "S3 storage requires ORRERY_S3_ENDPOINT, ORRERY_S3_BUCKET, " +
+            "ORRERY_S3_ACCESS_KEY_ID and ORRERY_S3_SECRET_ACCESS_KEY",
+        );
+      }
+      return createS3ObjectStore({
+        endpoint,
+        bucket,
+        region: config.ORRERY_S3_REGION,
+        accessKeyId,
+        secretAccessKey,
+        forcePathStyle: config.ORRERY_S3_FORCE_PATH_STYLE,
+      });
+    }
     default:
       throw new Error(`Unsupported object storage driver: ${String(config.ORRERY_STORAGE_DRIVER)}`);
   }

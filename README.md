@@ -129,7 +129,9 @@ HTTPS URL in their MCP config, since MCP only accepts requests for the host in `
 
 The full [install and upgrade guide](docs/guides/install.md) covers the environment variables,
 Caddy HTTPS, image tags and upgrades. Take a backup before upgrading using
-[Backup and restore](docs/guides/backup-and-restore.md).
+[Backup and restore](docs/guides/backup-and-restore.md); for larger installations,
+[Object storage](docs/guides/object-storage.md) explains the optional RustFS profile and how to
+migrate blobs between local disk and S3.
 
 ### Local development
 

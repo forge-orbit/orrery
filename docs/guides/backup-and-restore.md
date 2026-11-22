@@ -13,6 +13,11 @@ custom-format dump. Run them from the repository root, where `compose.yaml` and 
 > storage. Also note `POSTGRES_PASSWORD` and the current `ORRERY_VERSION` so the stack can be
 > rebuilt exactly.
 
+> **Blobs are not in the dump either.** With the default `local` driver, profile photos live in the
+> `orrery-data` volume under `objects/`; with `s3` they live in the bucket. Back those up separately
+> and keep them with the dump. See [Object storage](./object-storage.md#backing-up-blobs) for the
+> volume tar command and the local↔S3 migration runbook.
+
 ## Back up
 
 Stopping writers is not required for a consistent dump: `pg_dump` takes a consistent snapshot while

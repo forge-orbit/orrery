@@ -1,6 +1,6 @@
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createLocalObjectStore } from "./storage.ts";
 import { objectStoreContract } from "./storage.contract.ts";
@@ -15,10 +15,19 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-objectStoreContract(async () => ({
-  store: createLocalObjectStore(root),
-  root: join(root, "objects"),
-}));
+objectStoreContract(async () => {
+  const objects = join(root, "objects");
+  return {
+    store: createLocalObjectStore(root),
+    root: objects,
+    writeRaw: async (key, data) => {
+      const target = join(objects, key);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, data);
+    },
+    readRaw: async (key) => readFile(join(objects, key)),
+  };
+});
 
 describe("LocalObjectStore health", () => {
   it("fails health when the object root is not a directory", async () => {
