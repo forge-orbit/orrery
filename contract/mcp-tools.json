@@ -125,10 +125,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -136,6 +147,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "WorkspaceKind": {
           "type": "string",
@@ -282,10 +297,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -293,6 +319,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "WorkspaceKind": {
           "type": "string",
@@ -529,10 +559,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -540,6 +581,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -817,10 +862,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -828,6 +884,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -1208,10 +1268,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -1219,6 +1290,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -1583,10 +1658,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -1594,6 +1680,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -1778,10 +1868,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -1789,6 +1890,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -1921,10 +2026,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -1932,6 +2048,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -2062,10 +2182,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -2073,6 +2204,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -2320,10 +2455,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -2331,6 +2477,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -2607,10 +2757,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -2618,6 +2779,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -2786,10 +2951,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -2797,6 +2973,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -3050,10 +3230,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -3061,6 +3252,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -3337,10 +3532,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -3348,6 +3554,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -3520,10 +3730,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -3531,6 +3752,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -3641,10 +3866,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -3652,6 +3888,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -3808,10 +4048,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -3819,6 +4070,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -4021,10 +4276,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -4032,6 +4298,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -4154,10 +4424,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -4165,6 +4446,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -4281,10 +4566,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -4292,6 +4588,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -4423,10 +4723,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -4434,6 +4745,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -4564,10 +4879,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -4575,6 +4901,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         }
       }
     }
@@ -6547,10 +6877,21 @@
             },
             "deactivated": {
               "type": "boolean"
+            },
+            "avatarUrl": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AvatarUrl"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
-            "displayName"
+            "displayName",
+            "avatarUrl"
           ],
           "additionalProperties": false
         },
@@ -6558,6 +6899,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",

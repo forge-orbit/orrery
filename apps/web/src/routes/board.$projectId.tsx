@@ -1,4 +1,3 @@
-import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -50,6 +49,7 @@ import {
 import { workspaceRunsQuery } from "../features/runs/index.ts";
 import { activeSessionsQuery, SessionInspectorDetails } from "../features/work-sessions/index.ts";
 import { workspaceQuery } from "../features/workspaces/index.ts";
+import { HumanAvatar } from "../lib/avatar.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
 
@@ -761,7 +761,11 @@ function BoardCard({
                       size={16}
                     />
                   ) : (
-                    <Avatar name={assignee.displayName} shape="circle" size="xsm" />
+                    <HumanAvatar
+                      name={assignee.displayName}
+                      avatarUrl={assignee.avatarUrl}
+                      size="xsm"
+                    />
                   )}
                   <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
                 </Stack>

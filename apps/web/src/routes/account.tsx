@@ -1,4 +1,3 @@
-import { Avatar } from "@astryxdesign/core/Avatar";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { FileInput } from "@astryxdesign/core/FileInput";
@@ -20,6 +19,7 @@ import {
   uploadAvatar,
 } from "../features/accounts/index.ts";
 import { AppearancePicker } from "../lib/appearance.tsx";
+import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextField } from "../lib/fields.tsx";
 import { Link } from "../lib/Link.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
@@ -133,7 +133,9 @@ function ProfileSection({
       setSelectedFile(null);
       setUploadError(null);
       toast({ body: "Profile photo updated." });
-      await queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey });
+      // Every Human-bearing response now carries a new avatarUrl, so refresh all
+      // cached lists (members, issues, comments, activity, history) as well.
+      await queryClient.invalidateQueries();
     },
   });
 
@@ -177,8 +179,8 @@ function ProfileSection({
           </Text>
         </Stack>
         <Stack gap={3}>
-          <Avatar
-            {...(avatarUrl === null ? {} : { src: avatarUrl })}
+          <HumanAvatar
+            avatarUrl={avatarUrl}
             name={name}
             alt={`Profile photo for ${name}`}
             size={96}

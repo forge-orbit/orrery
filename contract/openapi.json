@@ -1230,6 +1230,9 @@
           "email": {
             "$ref": "#/components/schemas/Email"
           },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
+          },
           "isOwner": {
             "type": "boolean"
           },
@@ -1249,6 +1252,7 @@
         "required": [
           "humanId",
           "email",
+          "avatarUrl",
           "isOwner",
           "canCreateProjects",
           "canInviteMembers",
@@ -1526,10 +1530,14 @@
           },
           "deactivated": {
             "type": "boolean"
+          },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
           }
         },
         "required": [
-          "displayName"
+          "displayName",
+          "avatarUrl"
         ]
       },
       "FallbackPolicy": {
@@ -1800,10 +1808,14 @@
           },
           "deactivated": {
             "type": "boolean"
+          },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
           }
         },
         "required": [
-          "displayName"
+          "displayName",
+          "avatarUrl"
         ]
       },
       "FallbackPolicyOverride": {
