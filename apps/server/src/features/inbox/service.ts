@@ -365,6 +365,37 @@ const evaluateDeadline = async (
       .update(issues)
       .set({ needsInput: false, updatedAt: sql`statement_timestamp()` })
       .where(eq(issues.id, issueId));
+    const [liveClaim] = await tx
+      .select({ id: workSessions.id })
+      .from(workSessions)
+      .where(
+        and(
+          eq(workSessions.issueId, issueId),
+          eq(workSessions.status, "active"),
+          gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+        ),
+      )
+      .limit(1);
+    if (liveClaim === undefined) {
+      await tx
+        .update(workSessions)
+        .set({
+          status: "expired",
+          endedAt: sql`statement_timestamp()`,
+          updatedAt: sql`statement_timestamp()`,
+        })
+        .where(
+          and(
+            eq(workSessions.issueId, issueId),
+            eq(workSessions.status, "active"),
+            lte(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+          ),
+        );
+      await tx
+        .update(issues)
+        .set({ status: "todo", updatedAt: sql`statement_timestamp()` })
+        .where(and(eq(issues.id, issueId), eq(issues.status, "in_progress")));
+    }
     await recordActivity(
       tx,
       {

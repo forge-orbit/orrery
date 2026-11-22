@@ -2575,11 +2575,7 @@ export function createProjectsService({
         const terminalNow = isTerminalIssueStatus(status);
         const wasTerminal = isTerminalIssueStatus(currentStatus);
 
-        if (
-          statusChanged &&
-          currentNeedsInput &&
-          (status === IssueStatus.enum.review || terminalNow)
-        ) {
+        if (statusChanged && currentNeedsInput && status !== IssueStatus.enum.todo) {
           throw new ProjectsError("issue_needs_input");
         }
 
@@ -2633,11 +2629,9 @@ export function createProjectsService({
         if (updated === undefined) throw new ProjectsError("issue_not_found");
 
         if (statusChanged && status !== IssueStatus.enum.in_progress) {
-          await releaseIssueWorkSessions(
-            tx,
-            issueId,
-            actor.kind === "agent" && terminalNow ? "completed" : "released",
-          );
+          const completedByAgent =
+            actor.kind === "agent" && (terminalNow || status === IssueStatus.enum.review);
+          await releaseIssueWorkSessions(tx, issueId, completedByAgent ? "completed" : "released");
         }
 
         const workflowMove = statusChanged && !terminalNow && !wasTerminal;
