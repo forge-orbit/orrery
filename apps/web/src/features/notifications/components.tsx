@@ -3,6 +3,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Stack } from "@astryxdesign/core/Stack";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import type { Notification, NotificationKind } from "@orrery/contract";
@@ -39,6 +40,7 @@ export function NotificationRow({
       data-unread={unread ? "true" : "false"}
       itemKey={notification.id}
       interactiveRef={linkRef}
+      startContent={unread ? <StatusDot variant="accent" label="Unread notification" /> : undefined}
       label={
         <Link
           ref={linkRef}

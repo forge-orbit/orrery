@@ -1,3 +1,4 @@
+import { Avatar } from "@astryxdesign/core/Avatar";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -6,6 +7,7 @@ import { useToast } from "@astryxdesign/core/Toast";
 import type { Assignee, Issue, IssueDetail } from "@orrery/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { AgentAvatar } from "../../lib/harness.tsx";
 import { updateIssue } from "./commands.ts";
 import { issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
 
@@ -15,10 +17,12 @@ export function AssigneeControl({
   issue,
   candidates,
   canContribute,
+  activeHarness,
 }: {
   issue: Issue;
   candidates: readonly AssigneeCandidate[];
   canContribute: boolean;
+  activeHarness?: string | null | undefined;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -53,15 +57,31 @@ export function AssigneeControl({
     }
   }
 
+  const assigneeIdentity =
+    issue.assignee === null ? null : (
+      <Stack direction="horizontal" gap={1.5} vAlign="center">
+        {issue.assignee.agentId !== undefined ? (
+          <AgentAvatar name={issue.assignee.displayName} harness={activeHarness} size={16} />
+        ) : (
+          <Avatar name={issue.assignee.displayName} shape="circle" size="xsm" tooltip={false} />
+        )}
+        <Text type="supporting" color="primary" weight="medium">
+          {issue.assignee.displayName}
+        </Text>
+      </Stack>
+    );
+
   if (!canContribute) {
     return (
       <Stack gap={0.5}>
         <Text type="supporting" weight="semibold" color="secondary">
           Assignee
         </Text>
-        <Text type="body" color={issue.assignee === null ? "secondary" : "primary"}>
-          {currentLabel(issue)}
-        </Text>
+        {assigneeIdentity ?? (
+          <Text type="body" color="secondary">
+            Unassigned
+          </Text>
+        )}
       </Stack>
     );
   }
@@ -72,6 +92,7 @@ export function AssigneeControl({
         label="Assignee"
         id={`assignee-${issue.id}`}
         size="sm"
+        width="100%"
         value={value}
         isDisabled={saving}
         onChange={(nextValue) => void onChange(nextValue)}
@@ -83,6 +104,7 @@ export function AssigneeControl({
             : []),
         ]}
       />
+      {assigneeIdentity}
       {error !== undefined && <Banner status="error" role="alert" title={error} />}
     </Stack>
   );

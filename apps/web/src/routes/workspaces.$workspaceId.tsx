@@ -2,9 +2,13 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
+import { Grid } from "@astryxdesign/core/Grid";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
@@ -160,7 +164,7 @@ function WorkspacePage() {
       : tab;
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="workspaces" to="/">
@@ -269,7 +273,7 @@ function WorkspacePage() {
       </TabList>
 
       {activeTab === "projects" && (
-        <Stack as="section" id="panel-projects" role="tabpanel" gap={4} paddingBlockStart={4}>
+        <Stack as="section" id="panel-projects" role="tabpanel" gap={4}>
           <Projects
             workspaceId={workspace.id}
             canCreate={canCreate}
@@ -279,19 +283,19 @@ function WorkspacePage() {
       )}
 
       {activeTab === "agents" && (
-        <Stack as="section" id="panel-agents" role="tabpanel" gap={4} paddingBlockStart={4}>
+        <Stack as="section" id="panel-agents" role="tabpanel" gap={4}>
           <AgentsSection workspaceId={workspace.id} isOwner={workspace.isOwner} />
         </Stack>
       )}
 
       {activeTab === "runs" && (
-        <Stack as="section" id="panel-runs" role="tabpanel" gap={4} paddingBlockStart={4}>
+        <Stack as="section" id="panel-runs" role="tabpanel" gap={4}>
           <RunsSection workspaceId={workspace.id} />
         </Stack>
       )}
 
       {activeTab === "members" && showMembersTab && (
-        <Stack as="section" id="panel-members" role="tabpanel" gap={4} paddingBlockStart={4}>
+        <Stack as="section" id="panel-members" role="tabpanel" gap={4}>
           <Stack gap={3}>
             {mayManageMembers(workspace) && (
               <WorkspaceMembers workspaceId={workspace.id} workspace={workspace} />
@@ -302,7 +306,7 @@ function WorkspacePage() {
       )}
 
       {activeTab === "webhooks" && showWebhooksTab && (
-        <Stack as="section" id="panel-webhooks" role="tabpanel" gap={4} paddingBlockStart={4}>
+        <Stack as="section" id="panel-webhooks" role="tabpanel" gap={4}>
           <WebhooksSection workspaceId={workspace.id} projects={projects} />
         </Stack>
       )}
@@ -396,38 +400,43 @@ function Projects({
   }
 
   return (
-    <Stack as="ul" direction="horizontal" gap={2} wrap="wrap">
+    <Grid columns={{ minWidth: 300, max: 3 }} gap={3}>
       {projects.map((project) => (
-        <Stack as="li" key={project.id} data-project-id={project.id} padding={3} gap={2}>
-          <Stack direction="horizontal" gap={2} justify="between" align="center">
-            <Link
-              to="/projects/$projectId"
-              params={{ projectId: project.id }}
-              weight="semibold"
-              color="primary"
-            >
-              {project.name}
-            </Link>
-            <Text as="span" type="supporting" color="secondary">
-              {project.key}
-            </Text>
-          </Stack>
-          <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
-            <Text type="supporting" data-project-access-level={project.accessLevel}>
-              {project.accessLevel}
-            </Text>
-            <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
-              <Link to="/board/$projectId" params={{ projectId: project.id }}>
-                Board
+        <Card key={project.id} data-project-id={project.id} padding={4}>
+          <Stack gap={3}>
+            <Stack direction="horizontal" gap={2} justify="between" align="center">
+              <Link
+                to="/projects/$projectId"
+                params={{ projectId: project.id }}
+                weight="semibold"
+                color="primary"
+              >
+                {project.name}
               </Link>
-              <Link to="/projects/$projectId" params={{ projectId: project.id }}>
-                Issues
-              </Link>
+              <Token label={project.key} color="gray" size="sm" />
+            </Stack>
+            <Divider />
+            <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+              <Text
+                type="supporting"
+                color="secondary"
+                data-project-access-level={project.accessLevel}
+              >
+                Access: {project.accessLevel}
+              </Text>
+              <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
+                <Link to="/board/$projectId" params={{ projectId: project.id }} weight="medium">
+                  Board
+                </Link>
+                <Link to="/projects/$projectId" params={{ projectId: project.id }} weight="medium">
+                  Issues
+                </Link>
+              </Stack>
             </Stack>
           </Stack>
-        </Stack>
+        </Card>
       ))}
-    </Stack>
+    </Grid>
   );
 }
 
@@ -466,7 +475,7 @@ function CreateProjectForm({
 
   return (
     <form onSubmit={(event) => void onSubmit(event)}>
-      <Stack gap={3} hAlign="start">
+      <FormLayout>
         <TextField
           label="Project name"
           id="project-name"
@@ -479,14 +488,16 @@ function CreateProjectForm({
           width="100%"
         />
         {error !== undefined && <Banner status="error" role="alert" title={error} />}
-        <Button
-          type="submit"
-          isDisabled={submitting}
-          isLoading={submitting}
-          label="Create project"
-          variant="primary"
-        />
-      </Stack>
+        <Stack direction="horizontal" hAlign="start">
+          <Button
+            type="submit"
+            isDisabled={submitting}
+            isLoading={submitting}
+            label="Create project"
+            variant="primary"
+          />
+        </Stack>
+      </FormLayout>
     </form>
   );
 }

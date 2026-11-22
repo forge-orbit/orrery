@@ -33,7 +33,7 @@ export const Route = createFileRoute("/notifications")({
     context.queryClient.ensureInfiniteQueryData(notificationsPageQuery(deps.unreadOnly)),
   component: NotificationsPage,
   errorComponent: ({ error }) => (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader title="Notifications" />
       <NotificationsErrorState error={error} />
     </Stack>
@@ -93,17 +93,25 @@ function NotificationsPage() {
   const notifications = feed.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
-    <Stack as="main" gap={5} data-notifications-page="">
+    <Stack gap={5} data-notifications-page="">
       <PageHeader
         title="Notifications"
         subtitle="Handoffs, questions needing input, and expired work sessions across your projects."
         badge={unreadCount > 0 ? `${unreadCount} unread` : undefined}
         actions={
-          <Stack direction="horizontal" gap={2} wrap="wrap">
-            <Stack as="nav" direction="horizontal" gap={1} aria-label="Filter notifications">
+          <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+            <Stack
+              as="nav"
+              direction="horizontal"
+              gap={2}
+              align="center"
+              aria-label="Filter notifications"
+            >
               <Link
                 to="/notifications"
                 search={{ unreadOnly: true }}
+                color={unreadOnly ? "accent" : "secondary"}
+                weight={unreadOnly ? "semibold" : "normal"}
                 aria-current={unreadOnly ? "page" : undefined}
               >
                 Unread
@@ -111,6 +119,8 @@ function NotificationsPage() {
               <Link
                 to="/notifications"
                 search={{ unreadOnly: false }}
+                color={unreadOnly ? "secondary" : "accent"}
+                weight={unreadOnly ? "normal" : "semibold"}
                 aria-current={unreadOnly ? undefined : "page"}
               >
                 All
@@ -132,7 +142,7 @@ function NotificationsPage() {
       ) : feed.isError && feed.data === undefined ? (
         <NotificationsErrorState error={feed.error} onRetry={() => void feed.refetch()} />
       ) : (
-        <Section padding={3}>
+        <Section padding={4}>
           {notifications.length === 0 ? (
             <NotificationsEmptyState
               unreadOnly={unreadOnly}

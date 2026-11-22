@@ -1,7 +1,9 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
+import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -22,6 +24,7 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
+import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import {
   FallbackPolicy,
   ProjectAccessLevel,
@@ -57,7 +60,10 @@ import {
   TitleBodyForm,
   updateProject,
 } from "../features/projects/index.ts";
+import { workspaceRunsQuery } from "../features/runs/index.ts";
+import { activeSessionsQuery } from "../features/work-sessions/index.ts";
 import { TextField } from "../lib/fields.tsx";
+import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
 import { formatFullDateTime, relativeTime } from "../lib/time.ts";
@@ -133,6 +139,14 @@ function ProjectPage() {
   const { data: issues } = useSuspenseQuery(issuesQuery(project.id));
   const { data: labels } = useSuspenseQuery(projectLabelsQuery(project.id));
   const { data: knowledge } = useSuspenseQuery(knowledgeEntriesQuery(project.id));
+  const { data: sessions = [] } = useQuery(activeSessionsQuery(project.workspaceId));
+  const { data: runs = [] } = useQuery(workspaceRunsQuery(project.workspaceId));
+  const sessionsByIssue = new Map(
+    sessions
+      .filter((session) => session.projectId === project.id && session.status === "active")
+      .map((session) => [session.issueId, session]),
+  );
+  const runsById = new Map(runs.map((run) => [run.id, run]));
   const canContribute = project.accessLevel !== "read";
   const canManage = project.accessLevel === "manage";
   const [tab, setTab] = useState<ProjectTab>("issues");
@@ -141,7 +155,7 @@ function ProjectPage() {
   const activeTab: ProjectTab = tab === "settings" && !canManage ? "issues" : tab;
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link
@@ -165,31 +179,36 @@ function ProjectPage() {
         }
         actions={
           <>
-            <Link
-              to="/board/$projectId"
-              params={{ projectId: project.id }}
-              color="inherit"
-              data-board-link=""
-            >
-              Board
-            </Link>
-            {canManage && (
+            <Stack direction="horizontal" gap={3} align="center" wrap="wrap">
               <Link
-                to="/trash/$projectId"
+                to="/board/$projectId"
                 params={{ projectId: project.id }}
-                color="inherit"
-                data-trash-link=""
+                color="secondary"
+                weight="medium"
+                data-board-link=""
               >
-                Trash
+                Board
               </Link>
-            )}
-            <Link
-              to="/history/project/$projectId"
-              params={{ projectId: project.id }}
-              color="inherit"
-            >
-              View history
-            </Link>
+              {canManage && (
+                <Link
+                  to="/trash/$projectId"
+                  params={{ projectId: project.id }}
+                  color="secondary"
+                  weight="medium"
+                  data-trash-link=""
+                >
+                  Trash
+                </Link>
+              )}
+              <Link
+                to="/history/project/$projectId"
+                params={{ projectId: project.id }}
+                color="secondary"
+                weight="medium"
+              >
+                View history
+              </Link>
+            </Stack>
             {canContribute && (
               <Button
                 type="button"
@@ -271,54 +290,118 @@ function ProjectPage() {
                     <TableHeaderCell>Key</TableHeaderCell>
                     <TableHeaderCell>Issue</TableHeaderCell>
                     <TableHeaderCell>Status</TableHeaderCell>
+                    <TableHeaderCell>Assignee</TableHeaderCell>
                     <TableHeaderCell>Priority</TableHeaderCell>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {issues.map((issue) => (
-                    <TableRow key={issue.id} data-issue-id={issue.id}>
-                      <TableCell>
-                        <Text
-                          as="span"
-                          type="supporting"
-                          color="secondary"
-                          data-issue-identifier={issue.identifier}
-                        >
-                          {issue.identifier}
-                        </Text>
-                      </TableCell>
-                      <TableCell>
-                        <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-                          <Link to="/issues/$issueId" params={{ issueId: issue.id }}>
-                            {issue.title}
-                          </Link>
-                          {issue.labels.map((label) => (
-                            <LabelPill key={label.id} label={label} />
-                          ))}
-                        </Stack>
-                      </TableCell>
-                      <TableCell>
-                        <Token
-                          label={issueStatusLabels[issue.status]}
-                          color={statusTokenColors[issue.status]}
-                          size="sm"
-                          data-issue-status={issue.status}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {canContribute ? (
-                          <IssuePriorityControls
-                            issue={issue}
-                            issues={issues}
-                            projectId={project.id}
-                            compact
+                  {issues.map((issue) => {
+                    const session = sessionsByIssue.get(issue.id);
+                    const run = session === undefined ? undefined : runsById.get(session.runId);
+                    const assignee = issue.assignee;
+                    const showWorkingAgent =
+                      session !== undefined &&
+                      run !== undefined &&
+                      assignee?.agentId !== session.agentId;
+
+                    return (
+                      <TableRow key={issue.id} data-issue-id={issue.id}>
+                        <TableCell>
+                          <Text
+                            as="span"
+                            type="supporting"
+                            color="secondary"
+                            data-issue-identifier={issue.identifier}
+                          >
+                            {issue.identifier}
+                          </Text>
+                        </TableCell>
+                        <TableCell>
+                          <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+                            <Link
+                              to="/issues/$issueId"
+                              params={{ issueId: issue.id }}
+                              color="primary"
+                              weight="medium"
+                            >
+                              {issue.title}
+                            </Link>
+                            {issue.labels.map((label) => (
+                              <LabelPill key={label.id} label={label} />
+                            ))}
+                          </Stack>
+                        </TableCell>
+                        <TableCell>
+                          <Token
+                            label={issueStatusLabels[issue.status]}
+                            color={statusTokenColors[issue.status]}
+                            size="sm"
+                            data-issue-status={issue.status}
                           />
-                        ) : (
-                          <PriorityBadge priority={issue.priority} />
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell>
+                          {assignee === null && !showWorkingAgent ? (
+                            <Text as="span" type="supporting" color="secondary">
+                              —
+                            </Text>
+                          ) : (
+                            <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+                              {assignee !== null && (
+                                <Stack
+                                  as="span"
+                                  direction="horizontal"
+                                  vAlign="center"
+                                  data-issue-assignee=""
+                                >
+                                  {assignee.agentId !== undefined ? (
+                                    <AgentAvatar
+                                      name={assignee.displayName}
+                                      harness={
+                                        session?.agentId === assignee.agentId
+                                          ? run?.harness
+                                          : undefined
+                                      }
+                                      size={18}
+                                    />
+                                  ) : (
+                                    <Avatar name={assignee.displayName} shape="circle" size="xsm" />
+                                  )}
+                                  <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
+                                </Stack>
+                              )}
+                              {showWorkingAgent && (
+                                <Stack
+                                  as="span"
+                                  direction="horizontal"
+                                  vAlign="center"
+                                  data-working-agent=""
+                                >
+                                  <AgentAvatar
+                                    name={run.agentName}
+                                    harness={run.harness}
+                                    size={18}
+                                  />
+                                  <VisuallyHidden>{run.agentName}</VisuallyHidden>
+                                </Stack>
+                              )}
+                            </Stack>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {canContribute ? (
+                            <IssuePriorityControls
+                              issue={issue}
+                              issues={issues}
+                              projectId={project.id}
+                              compact
+                            />
+                          ) : (
+                            <PriorityBadge priority={issue.priority} />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </Section>
@@ -328,7 +411,7 @@ function ProjectPage() {
 
       {activeTab === "knowledge" && (
         <section id="panel-knowledge" role="tabpanel">
-          <Section padding={3}>
+          <Section padding={4}>
             <Stack gap={3}>
               <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
                 <Heading level={2} color="inherit">
@@ -530,9 +613,9 @@ function ProjectSettings({ project }: { project: Project }) {
   }
 
   return (
-    <Section padding={3}>
+    <Section padding={4}>
       <Stack gap={4}>
-        <Stack gap={2}>
+        <Stack gap={3}>
           <Heading level={2} color="inherit">
             Project settings
           </Heading>
@@ -566,6 +649,8 @@ function ProjectSettings({ project }: { project: Project }) {
             </Stack>
           </form>
         </Stack>
+
+        <Divider />
 
         <Stack gap={2} hAlign="start">
           <Heading level={3} color="inherit">
@@ -676,7 +761,7 @@ function ProjectAccess({ projectId }: { projectId: string }) {
   }
 
   return (
-    <Section padding={3}>
+    <Section padding={4}>
       <Stack gap={3}>
         <Heading level={2} color="inherit">
           Project access
@@ -763,8 +848,13 @@ function ProjectAccess({ projectId }: { projectId: string }) {
           </Table>
         )}
 
+        <Divider />
+
         <form onSubmit={(event) => void onGrant(event)}>
           <Stack gap={3} hAlign="start">
+            <Heading level={3} color="inherit">
+              Grant project access
+            </Heading>
             <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="end">
               <TextField
                 label="Email"

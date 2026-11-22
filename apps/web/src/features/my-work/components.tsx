@@ -110,9 +110,9 @@ function MyWorkSection({
   children: ReactNode;
 }) {
   return (
-    <Section data-my-work-section={section} padding={3}>
-      <Stack gap={2}>
-        <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
+    <Section data-my-work-section={section} padding={4}>
+      <Stack gap={3}>
+        <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
           <Heading level={2} color="inherit">
             {title}
           </Heading>
@@ -192,12 +192,19 @@ function ActiveSessionRow({ session }: { session: MyWorkActiveSession }) {
       }
       description={
         <Stack as="span" gap={0.5}>
-          <Text as="span" type="supporting" color="secondary">
-            {session.workspaceName} · {session.projectName} · {session.agentName} · Harness{" "}
-            <HarnessBadge harness={session.harness} empty="unknown" /> · Model{" "}
-            {session.model ?? "unknown"}
-            {telemetry.length > 0 ? ` · ${telemetry.join(" · ")}` : ""}
-          </Text>
+          <Stack as="span" direction="horizontal" gap={1} vAlign="center" wrap="wrap">
+            <Text as="span" type="supporting" color="secondary">
+              {session.workspaceName} · {session.projectName} · {session.agentName} · Harness{" "}
+            </Text>
+            <Text as="span" type="supporting" color="secondary">
+              <HarnessBadge harness={session.harness} empty="unknown" />
+            </Text>
+            <Text as="span" type="supporting" color="secondary">
+              {" "}
+              · Model {session.model ?? "unknown"}
+              {telemetry.length > 0 ? ` · ${telemetry.join(" · ")}` : ""}
+            </Text>
+          </Stack>
           {session.progress !== "" && (
             <Text as="span" type="supporting" color="secondary">
               {session.progress}
@@ -256,7 +263,7 @@ export function MyWorkErrorState({ error, onRetry }: { error: unknown; onRetry?:
   const problem = error instanceof ApiProblemError ? error.problem : undefined;
 
   return (
-    <Stack as="main" gap={5} data-my-work-error="">
+    <Stack gap={5} data-my-work-error="">
       <Heading level={1} color="inherit">
         My work
       </Heading>

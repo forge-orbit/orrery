@@ -43,7 +43,7 @@ function KnowledgePage() {
   const canContribute = project.accessLevel !== "read";
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="project" to="/projects/$projectId" params={{ projectId: entry.projectId }}>
@@ -74,7 +74,7 @@ function KnowledgePage() {
         }
       />
       {entry.body === "" ? (
-        <Section padding={3}>
+        <Section padding={4}>
           <EmptyState
             title="No content yet"
             description="Add architecture notes, runbooks, or project decisions in Markdown."
@@ -94,9 +94,11 @@ function KnowledgePage() {
           />
         </Section>
       ) : (
-        <Stack data-knowledge-body="">
-          <Markdown issueRefs={projectIssues}>{entry.body}</Markdown>
-        </Stack>
+        <Section padding={4}>
+          <Stack data-knowledge-body="">
+            <Markdown issueRefs={projectIssues}>{entry.body}</Markdown>
+          </Stack>
+        </Section>
       )}
       {canContribute && (
         <Drawer

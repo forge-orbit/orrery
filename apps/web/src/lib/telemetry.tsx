@@ -1,3 +1,4 @@
+import { MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 
@@ -23,22 +24,25 @@ export function TelemetryFacts({ inputTokens, outputTokens, costUsdMicros }: Tel
   return (
     <>
       {inputTokens !== null && (
-        <>
-          <dt>Input tokens</dt>
-          <dd data-telemetry-input-tokens>{number.format(inputTokens)}</dd>
-        </>
+        <MetadataListItem label="Input tokens">
+          <Text as="span" type="inherit" color="inherit" data-telemetry-input-tokens="">
+            {number.format(inputTokens)}
+          </Text>
+        </MetadataListItem>
       )}
       {outputTokens !== null && (
-        <>
-          <dt>Output tokens</dt>
-          <dd data-telemetry-output-tokens>{number.format(outputTokens)}</dd>
-        </>
+        <MetadataListItem label="Output tokens">
+          <Text as="span" type="inherit" color="inherit" data-telemetry-output-tokens="">
+            {number.format(outputTokens)}
+          </Text>
+        </MetadataListItem>
       )}
       {costUsdMicros !== null && (
-        <>
-          <dt>Reported cost</dt>
-          <dd data-telemetry-cost>{formatUsdMicros(costUsdMicros)}</dd>
-        </>
+        <MetadataListItem label="Reported cost">
+          <Text as="span" type="inherit" color="inherit" data-telemetry-cost="">
+            {formatUsdMicros(costUsdMicros)}
+          </Text>
+        </MetadataListItem>
       )}
     </>
   );

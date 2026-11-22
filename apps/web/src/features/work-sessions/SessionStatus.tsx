@@ -5,12 +5,15 @@ import { Card } from "@astryxdesign/core/Card";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
+import { Token } from "@astryxdesign/core/Token";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { TextField } from "../../lib/fields.tsx";
+import { AgentAvatar } from "../../lib/harness.tsx";
 import { formatDateTime, formatFullDateTime, relativeTime } from "../../lib/time.ts";
 import { projectActivityQuery } from "../projects/index.ts";
+import { workspaceRunsQuery } from "../runs/index.ts";
 import { requestStop } from "./commands.ts";
 import { sessionQuery, sessionsQuery } from "./queries.ts";
 
@@ -24,22 +27,35 @@ export function SessionStatus({
   canContribute: boolean;
 }) {
   const { data: session } = useQuery(sessionQuery(issueId));
+  const { data: runs = [] } = useQuery({
+    ...workspaceRunsQuery(session?.workspaceId ?? ""),
+    enabled: session !== null && session !== undefined,
+  });
 
   if (session === null || session === undefined) return null;
 
+  const run = runs.find((entry) => entry.id === session.runId);
   const stopping = session.status === "active" && session.stopRequested;
   const status = stopping ? "stopping" : session.status;
 
   return (
     <Card padding={3} data-session-id={session.id}>
       <Stack gap={2}>
-        <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-          <Text type="supporting" weight="semibold" color="secondary">
-            Work session
-          </Text>
-          <Text type="inherit" color="inherit" data-session-status={status}>
-            {status}
-          </Text>
+        <Stack direction="horizontal" gap={1.5} vAlign="center" justify="between" wrap="wrap">
+          <Stack direction="horizontal" gap={1.5} vAlign="center">
+            {run !== undefined && (
+              <AgentAvatar name={run.agentName} harness={run.harness} size={16} />
+            )}
+            <Text type="supporting" weight="semibold" color="primary">
+              {run?.agentName ?? "Work session"}
+            </Text>
+          </Stack>
+          <Token
+            label={status}
+            color={status === "active" ? "green" : status === "stopping" ? "orange" : "gray"}
+            size="sm"
+            data-session-status={status}
+          />
         </Stack>
         {session.stopRequested && session.stopRequestedAt !== null && (
           <Text

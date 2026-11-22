@@ -50,8 +50,8 @@ test("follows the system and saves an explicit appearance choice", async ({ page
   await page.goto("/setup");
   const picker = page.getByRole("radiogroup", { name: "Appearance" });
   const canvas = page.locator("body");
-  const darkCanvas = "rgb(26, 28, 34)";
-  const lightCanvas = "rgb(246, 243, 236)";
+  const darkCanvas = "rgb(21, 23, 28)";
+  const lightCanvas = "rgb(236, 230, 218)";
   await expect(picker.getByRole("radio", { name: "System" })).toBeChecked();
   await expect(canvas).toHaveCSS("background-color", darkCanvas);
 

@@ -2,6 +2,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Section } from "@astryxdesign/core/Section";
@@ -43,7 +44,7 @@ export const Route = createFileRoute("/inbox")({
   },
   component: InboxPage,
   errorComponent: () => (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader title="Inbox" />
       <Banner
         container="section"
@@ -65,7 +66,7 @@ function InboxPage() {
   const resolved = visible.filter((question) => !isPendingQuestion(question));
 
   return (
-    <Stack as="main" gap={5} maxWidth="64rem">
+    <Stack gap={5} maxWidth="64rem">
       <PageHeader
         title="Inbox"
         badge={open.length > 0 ? `${open.length} pending` : undefined}
@@ -118,9 +119,9 @@ function QuestionList({
   emptyDescription: string;
 }) {
   return (
-    <Section padding={3}>
-      <Stack gap={2}>
-        <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
+    <Section padding={4}>
+      <Stack gap={3}>
+        <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
           <Heading level={2} color="inherit">
             {title}
           </Heading>
@@ -154,30 +155,41 @@ function QuestionCard({ question }: { question: Question }) {
 
   return (
     <Stack as="li" data-question-id={question.id}>
-      <Card data-pending={pending ? "true" : "false"} padding={3}>
-        <Stack direction="horizontal" gap={1} justify="between" align="center" wrap="wrap">
-          <Link
-            to="/issues/$issueId"
-            params={{ issueId: question.issueId }}
-            search={{ inspector: true }}
-          >
-            {project !== undefined && issue !== undefined && (
-              <Text type="code" color="inherit">
-                {project.key}-{issue.number}
+      <Card data-pending={pending ? "true" : "false"} padding={4}>
+        <Stack gap={3}>
+          <Stack direction="horizontal" gap={2} justify="between" align="center" wrap="wrap">
+            <Link
+              to="/issues/$issueId"
+              params={{ issueId: question.issueId }}
+              search={{ inspector: true }}
+              weight="semibold"
+              color="primary"
+            >
+              <Stack as="span" direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+                {project !== undefined && issue !== undefined && (
+                  <Text as="span" type="code" color="secondary">
+                    {project.key}-{issue.number}
+                  </Text>
+                )}
+                <Text as="span" type="body" weight="semibold" color="primary">
+                  {issue?.title ?? "View issue"}
+                </Text>
+              </Stack>
+            </Link>
+            {run !== undefined && (
+              <Text type="supporting" color="secondary">
+                Asked by {run.agentName}
               </Text>
             )}
-            {issue?.title ?? "View issue"}
-          </Link>
-          {run !== undefined && (
-            <Text type="supporting" color="secondary">
-              Asked by {run.agentName}
-            </Text>
+          </Stack>
+          <QuestionDetails question={question} />
+          {pending && project !== undefined && project.accessLevel !== "read" && (
+            <>
+              <Divider />
+              <AnswerForm question={question} />
+            </>
           )}
         </Stack>
-        <QuestionDetails question={question} />
-        {pending && project !== undefined && project.accessLevel !== "read" && (
-          <AnswerForm question={question} />
-        )}
       </Card>
     </Stack>
   );
@@ -220,18 +232,22 @@ function AnswerForm({ question }: { question: Question }) {
 
   return (
     <form onSubmit={(event) => void onSubmit(event)} aria-label="Answer agent question">
-      <IssueMentionTextArea
-        label="Answer"
-        id={`answer-${question.id}`}
-        htmlName="answer"
-        value={answer}
-        onChange={setAnswer}
-        rows={3}
-        required
-        issues={projectIssues}
-      />
-      <Button type="submit" variant="primary" label="Answer question" isLoading={submitting} />
-      {error !== undefined && <Banner status="error" role="alert" title={error} />}
+      <Stack gap={3}>
+        <IssueMentionTextArea
+          label="Answer"
+          id={`answer-${question.id}`}
+          htmlName="answer"
+          value={answer}
+          onChange={setAnswer}
+          rows={3}
+          required
+          issues={projectIssues}
+        />
+        {error !== undefined && <Banner status="error" role="alert" title={error} />}
+        <Stack hAlign="start">
+          <Button type="submit" variant="primary" label="Answer question" isLoading={submitting} />
+        </Stack>
+      </Stack>
     </form>
   );
 }

@@ -1,3 +1,5 @@
+import { Divider } from "@astryxdesign/core/Divider";
+import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
@@ -18,9 +20,48 @@ export function isPendingQuestion(question: Question) {
   return question.status === "open" || question.status === "paused";
 }
 
-export function QuestionDetails({ question }: { question: Question }) {
+export function QuestionDetails({
+  question,
+  nested = false,
+}: {
+  question: Question;
+  nested?: boolean;
+}) {
   const deadline = question.responseDeadlineAt;
   const status = statusMeta[question.status];
+
+  const details = (
+    <Stack gap={2}>
+      <Stack gap={0.5}>
+        <Text as="span" type="supporting" weight="semibold" color="secondary">
+          {question.authorizedFallback === null ? "Proposed fallback" : "Fallback used"}
+        </Text>
+        <Text as="p" display="block" type="body" color="primary">
+          {question.authorizedFallback ?? question.proposedFallback}
+        </Text>
+      </Stack>
+      {question.answer !== null && (
+        <Stack gap={0.5}>
+          <Text as="span" type="supporting" weight="semibold" color="secondary">
+            Answer
+          </Text>
+          <Text as="p" display="block" type="body" color="primary" data-question-answer="">
+            {question.answer}
+          </Text>
+        </Stack>
+      )}
+      {question.followUp !== null && (
+        <Stack gap={0.5}>
+          <Text as="span" type="supporting" weight="semibold" color="secondary">
+            Follow-up
+          </Text>
+          <Text as="p" display="block" type="body" color="primary" data-question-follow-up="">
+            {question.followUp}
+          </Text>
+        </Stack>
+      )}
+    </Stack>
+  );
 
   return (
     <Stack gap={2}>
@@ -49,22 +90,16 @@ export function QuestionDetails({ question }: { question: Question }) {
       >
         {question.question}
       </Text>
-      <dl>
-        <dt>{question.authorizedFallback === null ? "Proposed fallback" : "Fallback used"}</dt>
-        <dd>{question.authorizedFallback ?? question.proposedFallback}</dd>
-        {question.answer !== null && (
-          <>
-            <dt>Answer</dt>
-            <dd data-question-answer="">{question.answer}</dd>
-          </>
-        )}
-        {question.followUp !== null && (
-          <>
-            <dt>Follow-up</dt>
-            <dd data-question-follow-up="">{question.followUp}</dd>
-          </>
-        )}
-      </dl>
+      {nested ? (
+        <>
+          <Divider />
+          {details}
+        </>
+      ) : (
+        <Section variant="muted" padding={3}>
+          {details}
+        </Section>
+      )}
     </Stack>
   );
 }

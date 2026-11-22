@@ -139,23 +139,23 @@ export const orreryTheme = {
     "--color-info-muted": "light-dark(#b9d7ff, #88bcff3D)",
     "--color-on-info": "light-dark(#ffffff, #111111)",
     "--color-text-info": "light-dark(#0067ce, #a1caff)",
-    "--color-text-success": "light-dark(#2f7d33, #90ca90)",
-    "--color-text-warning": "light-dark(#836700, #eec448)",
-    "--color-text-error": "light-dark(#c0262c, #ffaea7)",
+    "--color-text-success": "var(--orrery-success)",
+    "--color-text-warning": "var(--orrery-attention-text)",
+    "--color-text-error": "var(--orrery-error)",
     "--color-on-info-muted": "light-dark(#003978, #a1caff)",
-    "--color-on-success-muted": "light-dark(#00490b, #90ca90)",
-    "--color-on-warning-muted": "light-dark(#4b3900, #eec448)",
-    "--color-on-error-muted": "light-dark(#76000c, #ffaea7)",
+    "--color-on-success-muted": "var(--orrery-success)",
+    "--color-on-warning-muted": "var(--orrery-attention-text)",
+    "--color-on-error-muted": "var(--orrery-error)",
     "--color-icon-accent": "var(--orrery-accent)",
-    "--color-icon-primary": "light-dark(#000000, #ffffff)",
-    "--color-icon-secondary": "light-dark(#6a6a6a, #9e9e9e)",
+    "--color-icon-primary": "var(--orrery-text)",
+    "--color-icon-secondary": "var(--orrery-muted)",
     "--color-icon-disabled": "light-dark(#919191, #525252)",
-    "--color-success": "light-dark(#198100, #64af4c)",
+    "--color-success": "var(--orrery-success)",
     "--color-warning": "#ffce2f",
     "--color-error": "var(--orrery-error)",
-    "--color-success-muted": "light-dark(#bce0bb, #90ca903D)",
-    "--color-error-muted": "light-dark(#ffc4be, #ff98903D)",
-    "--color-warning-muted": "light-dark(#fae19e, #e2b6233D)",
+    "--color-success-muted": "var(--orrery-success-fill)",
+    "--color-error-muted": "var(--orrery-error-fill)",
+    "--color-warning-muted": "var(--orrery-attention-fill)",
     "--color-border": "var(--orrery-border)",
     "--color-border-emphasized": "var(--orrery-control-border)",
     "--color-skeleton": "light-dark(#f1f1f1, #525252)",
@@ -204,14 +204,14 @@ export const orreryTheme = {
     "--radius-none": "0px",
     "--radius-inner": "0.375rem",
     "--radius-element": "var(--orrery-radius)",
-    "--radius-container": "0.75rem",
+    "--radius-container": "var(--orrery-panel-radius)",
     "--radius-page": "1.75rem",
     "--radius-full": "9999px",
     "--shadow-low": "0 2px 4px light-dark(oklch(0 0 0 / 5%), oklch(0 0 0 / 25%)), 0 4px 8px light-dark(oklch(0 0 0 / 10%), oklch(0 0 0 / 40%)), inset 0 0 0 1px light-dark(transparent, oklch(1 0 0 / 8%))",
     "--shadow-med": "0 2px 4px light-dark(oklch(0 0 0 / 5%), oklch(0 0 0 / 35%)), 0 4px 12px light-dark(oklch(0 0 0 / 10%), oklch(0 0 0 / 50%)), inset 0 0 0 1px light-dark(transparent, oklch(1 0 0 / 12%))",
     "--shadow-high": "0 4px 6px light-dark(oklch(0 0 0 / 10%), oklch(0 0 0 / 50%)), 0 12px 24px light-dark(oklch(0 0 0 / 15%), oklch(0 0 0 / 70%)), inset 0 0 0 1px light-dark(transparent, oklch(1 0 0 / 15%))",
-    "--shadow-inset-hover": "inset 0px 0px 0px 2px #0074e24D",
-    "--shadow-inset-selected": "inset 0px 0px 0px 2px #0074e280",
+    "--shadow-inset-hover": "inset 0px 0px 0px 2px color-mix(in srgb, var(--orrery-accent) 28%, transparent)",
+    "--shadow-inset-selected": "inset 0px 0px 0px 2px color-mix(in srgb, var(--orrery-accent) 52%, transparent)",
     "--shadow-inset-success": "inset 0px 0px 0px 2px #2f7d334D",
     "--shadow-inset-warning": "inset 0px 0px 0px 2px #f8d36a4D",
     "--shadow-inset-error": "inset 0px 0px 0px 2px #de47454D"
@@ -221,12 +221,12 @@ export const orreryTheme = {
     "--orrery-ink": "#14161b",
     "--orrery-cream": "#f6f3ec",
     "--orrery-orange": "#f2561d",
-    "--orrery-canvas": "light-dark(#f6f3ec, #1a1c22)",
+    "--orrery-canvas": "light-dark(#ece6da, #15171c)",
     "--orrery-text": "light-dark(#14161b, #f6f3ec)",
-    "--orrery-surface": "light-dark(#fffdf8, #23252d)",
-    "--orrery-recessed": "light-dark(#efeae0, #30323b)",
+    "--orrery-surface": "light-dark(#fffdf8, #25272f)",
+    "--orrery-recessed": "light-dark(#e6dfd1, #1b1d25)",
     "--orrery-muted": "light-dark(#595a5e, #b4b0a8)",
-    "--orrery-border": "light-dark(#dcd5c9, #40424b)",
+    "--orrery-border": "light-dark(#d2c8b6, #40434d)",
     "--orrery-control-border": "light-dark(#827b70, #82838e)",
     "--orrery-accent": "light-dark(#a8360e, #ff996a)",
     "--orrery-accent-hover": "light-dark(#862807, #ffb18c)",
@@ -475,12 +475,58 @@ export const orreryTheme = {
     },
     "card": {
       "base": {
-        "padding": "var(--spacing-3)"
+        "padding": "var(--spacing-4)",
+        "borderRadius": "var(--orrery-panel-radius)"
       }
     },
     "section": {
       "base": {
-        "padding": "var(--spacing-3)"
+        "padding": "var(--spacing-4)",
+        "borderRadius": "var(--orrery-panel-radius)"
+      },
+      "variant:section": {
+        "borderWidth": "1px",
+        "borderStyle": "solid",
+        "borderColor": "var(--color-border)"
+      },
+      "variant:muted": {
+        "borderWidth": "1px",
+        "borderStyle": "solid",
+        "borderColor": "var(--color-border)"
+      }
+    },
+    "clickable-card": {
+      "base": {
+        "borderRadius": "var(--orrery-panel-radius)"
+      }
+    },
+    "side-nav": {
+      "base": {
+        "backgroundColor": "var(--color-background-surface)"
+      }
+    },
+    "side-nav-item": {
+      "selected": {
+        "backgroundColor": "color-mix(in srgb, var(--orrery-text) 9%, transparent)",
+        "color": "var(--orrery-text)",
+        "fontWeight": "600"
+      }
+    },
+    "progress-bar-track": {
+      "base": {
+        "backgroundColor": "color-mix(in srgb, var(--orrery-recessed) 50%, var(--orrery-surface))"
+      }
+    },
+    "app-shell-sidenav": {
+      "base": {
+        "backgroundColor": "var(--orrery-surface)",
+        "borderInlineEnd": "1px solid var(--orrery-border)"
+      }
+    },
+    "app-shell-header": {
+      "base": {
+        "backgroundColor": "var(--orrery-surface)",
+        "borderBlockEnd": "1px solid var(--orrery-border)"
       }
     }
   },

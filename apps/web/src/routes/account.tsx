@@ -1,5 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -33,7 +34,7 @@ function AccountPage() {
 
   if (isPending) {
     return (
-      <Stack as="main" gap={5}>
+      <Stack gap={5}>
         <Text as="p" display="block" type="supporting" role="status">
           Loading account…
         </Text>
@@ -42,7 +43,7 @@ function AccountPage() {
   }
   if (isError || !session.signedIn) {
     return (
-      <Stack as="main" gap={5}>
+      <Stack gap={5}>
         <PageHeader title="Account" />
         <Banner
           status="error"
@@ -63,7 +64,7 @@ function AccountPage() {
   }
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
           <Link key="home" to="/">
@@ -116,19 +117,19 @@ function ProfileSection({ initialDisplayName }: { initialDisplayName: string | n
   }
 
   return (
-    <Section padding={3}>
+    <Section padding={4}>
       <Stack gap={3}>
         <Stack gap={1}>
           <Heading level={2} color="inherit">
             Profile
           </Heading>
-          <Text as="p" display="block" type="supporting">
+          <Text as="p" display="block" type="supporting" color="secondary">
             Set the display name shown in your sidebar and account header. Leave it blank to show
             your email address instead.
           </Text>
         </Stack>
         <form onSubmit={onSubmit}>
-          <Stack gap={3} hAlign="start">
+          <FormLayout>
             <TextField
               id="account-display-name"
               label="Display name"
@@ -141,12 +142,14 @@ function ProfileSection({ initialDisplayName }: { initialDisplayName: string | n
                 setSavedMessage(null);
               }}
             />
-            <Button
-              type="submit"
-              variant="primary"
-              label={mutation.isPending ? "Saving…" : "Save profile"}
-              isLoading={mutation.isPending}
-            />
+            <Stack hAlign="start">
+              <Button
+                type="submit"
+                variant="primary"
+                label={mutation.isPending ? "Saving…" : "Save profile"}
+                isLoading={mutation.isPending}
+              />
+            </Stack>
             {savedMessage !== null && (
               <Text as="p" display="block" type="supporting" role="status">
                 {savedMessage}
@@ -159,7 +162,7 @@ function ProfileSection({ initialDisplayName }: { initialDisplayName: string | n
                 description={mutation.error.message}
               />
             )}
-          </Stack>
+          </FormLayout>
         </form>
       </Stack>
     </Section>
@@ -201,19 +204,19 @@ function PasswordSection() {
   const errorMessage = clientError ?? (mutation.isError ? mutation.error.message : null);
 
   return (
-    <Section padding={3}>
+    <Section padding={4}>
       <Stack gap={3}>
         <Stack gap={1}>
           <Heading level={2} color="inherit">
             Password
           </Heading>
-          <Text as="p" display="block" type="supporting">
+          <Text as="p" display="block" type="supporting" color="secondary">
             Changing your password signs out all other browsers while keeping this session signed
             in.
           </Text>
         </Stack>
         <form onSubmit={onSubmit}>
-          <Stack gap={3} hAlign="start">
+          <FormLayout>
             <TextField
               id="account-current-password"
               type="password"
@@ -247,12 +250,14 @@ function PasswordSection() {
               value={confirmPassword}
               onChange={setConfirmPassword}
             />
-            <Button
-              type="submit"
-              variant="primary"
-              label={mutation.isPending ? "Updating…" : "Update password"}
-              isLoading={mutation.isPending}
-            />
+            <Stack hAlign="start">
+              <Button
+                type="submit"
+                variant="primary"
+                label={mutation.isPending ? "Updating…" : "Update password"}
+                isLoading={mutation.isPending}
+              />
+            </Stack>
             {savedMessage !== null && (
               <Text as="p" display="block" type="supporting" role="status">
                 {savedMessage}
@@ -261,7 +266,7 @@ function PasswordSection() {
             {errorMessage !== null && (
               <Banner status="error" title="Could not update password" description={errorMessage} />
             )}
-          </Stack>
+          </FormLayout>
         </form>
       </Stack>
     </Section>
@@ -270,13 +275,13 @@ function PasswordSection() {
 
 function PreferencesSection() {
   return (
-    <Section padding={3}>
+    <Section padding={4}>
       <Stack gap={3} hAlign="start">
         <Stack gap={1}>
           <Heading level={2} color="inherit">
             Appearance
           </Heading>
-          <Text as="p" display="block" type="supporting">
+          <Text as="p" display="block" type="supporting" color="secondary">
             Choose how Orrery looks in this browser: follow your system theme, light mode, or dark
             mode.
           </Text>
@@ -305,13 +310,13 @@ function SessionSection() {
   });
 
   return (
-    <Section padding={3}>
+    <Section padding={4}>
       <Stack gap={3} hAlign="start">
         <Stack gap={1}>
           <Heading level={2} color="inherit">
             Session
           </Heading>
-          <Text as="p" display="block" type="supporting">
+          <Text as="p" display="block" type="supporting" color="secondary">
             Sign out of Orrery on this browser.
           </Text>
         </Stack>

@@ -1,5 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -68,11 +69,16 @@ function SignInPage() {
 
   return (
     <Stack as="main" gap={5}>
-      <Heading level={1} color="inherit">
-        Sign in
-      </Heading>
+      <Stack gap={1.5}>
+        <Heading level={1} color="inherit">
+          Sign in
+        </Heading>
+        <Text as="p" display="block" type="supporting" color="secondary">
+          Sign in to your Orrery account to access your workspaces and projects.
+        </Text>
+      </Stack>
       <form onSubmit={(event) => void onSubmit(event)}>
-        <Stack gap={3}>
+        <FormLayout>
           <TextField
             label="Email"
             id="signin-email"
@@ -106,7 +112,7 @@ function SignInPage() {
             isLoading={submitting}
             label="Sign in"
           />
-        </Stack>
+        </FormLayout>
       </form>
       <Text as="p" display="block" type="supporting">
         <Link to="/forgot-password">Forgot your password?</Link>

@@ -1,8 +1,11 @@
+import { Avatar } from "@astryxdesign/core/Avatar";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -44,7 +47,7 @@ export const Route = createFileRoute("/")({
   },
   component: Home,
   errorComponent: () => (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <Banner
         status="error"
         title="Server: unreachable"
@@ -63,7 +66,7 @@ function Home() {
   if (!session.signedIn) return null;
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack gap={5}>
       <PageHeader
         title="Workspaces"
         subtitle={`Signed in as ${session.email}.`}
@@ -78,48 +81,56 @@ function Home() {
         }
       />
 
-      <Section variant="transparent" padding={0}>
-        <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
-          <Heading level={2} color="inherit">
-            Your workspaces
-          </Heading>
-        </Stack>
-        <Stack as="ul" direction="horizontal" gap={2} wrap="wrap">
-          {workspaces.map((workspace) => (
-            <Stack as="li" key={workspace.id} data-workspace-id={workspace.id} padding={3} gap={2}>
-              <Stack direction="horizontal" gap={2} justify="between" align="center">
-                <Link
-                  to="/workspaces/$workspaceId"
-                  params={{ workspaceId: workspace.id }}
-                  weight="semibold"
-                  color="primary"
-                >
-                  {workspace.name}
-                </Link>
-                <Token
-                  label={
-                    workspace.kind === "personal"
-                      ? "Personal"
-                      : workspace.isOwner
-                        ? "Owner"
-                        : "Member"
-                  }
-                  color={
-                    workspace.kind === "personal" ? "gray" : workspace.isOwner ? "orange" : "blue"
-                  }
-                  size="sm"
-                />
-              </Stack>
-              <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
-                <Text type="supporting">
-                  {workspace.kind === "personal" ? "Private workspace" : "Shared team workspace"}
-                </Text>
-                <Link to="/workspaces/$workspaceId" params={{ workspaceId: workspace.id }}>
-                  Open
-                </Link>
-              </Stack>
-            </Stack>
-          ))}
+      <Section padding={4}>
+        <Stack gap={3}>
+          <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+            <Heading level={2} color="inherit">
+              Your workspaces
+            </Heading>
+            <Text type="supporting" color="secondary">
+              {workspaces.length} {workspaces.length === 1 ? "workspace" : "workspaces"}
+            </Text>
+          </Stack>
+          <List hasDividers aria-label="Your workspaces">
+            {workspaces.map((workspace) => (
+              <ListItem
+                key={workspace.id}
+                itemKey={workspace.id}
+                data-workspace-id={workspace.id}
+                startContent={
+                  <Avatar name={workspace.name} shape="rounded" size="sm" tooltip={false} />
+                }
+                label={
+                  <Link
+                    to="/workspaces/$workspaceId"
+                    params={{ workspaceId: workspace.id }}
+                    weight="semibold"
+                    color="primary"
+                  >
+                    {workspace.name}
+                  </Link>
+                }
+                description={
+                  workspace.kind === "personal" ? "Private workspace" : "Shared team workspace"
+                }
+                endContent={
+                  <Token
+                    label={
+                      workspace.kind === "personal"
+                        ? "Personal"
+                        : workspace.isOwner
+                          ? "Owner"
+                          : "Member"
+                    }
+                    color={
+                      workspace.kind === "personal" ? "gray" : workspace.isOwner ? "orange" : "blue"
+                    }
+                    size="sm"
+                  />
+                }
+              />
+            ))}
+          </List>
         </Stack>
       </Section>
 
@@ -183,7 +194,7 @@ function CreateWorkspaceForm({ onCreated }: { onCreated: () => void }) {
 
   return (
     <form onSubmit={(event) => void onSubmit(event)}>
-      <Stack gap={3} hAlign="start">
+      <FormLayout>
         <TextField
           label="Workspace name"
           id="workspace-name"
@@ -196,14 +207,16 @@ function CreateWorkspaceForm({ onCreated }: { onCreated: () => void }) {
           width="100%"
         />
         {error !== undefined && <Banner status="error" role="alert" title={error} />}
-        <Button
-          type="submit"
-          isDisabled={submitting}
-          isLoading={submitting}
-          label="Create workspace"
-          variant="primary"
-        />
-      </Stack>
+        <Stack direction="horizontal" hAlign="start">
+          <Button
+            type="submit"
+            isDisabled={submitting}
+            isLoading={submitting}
+            label="Create workspace"
+            variant="primary"
+          />
+        </Stack>
+      </FormLayout>
     </form>
   );
 }

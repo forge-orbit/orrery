@@ -3,7 +3,10 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
 import {
@@ -16,10 +19,11 @@ import {
 } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
+import { Token } from "@astryxdesign/core/Token";
 import { ActivityDetailBlockV1, type SessionActivityDetail } from "@orrery/contract";
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useId, useState, type ReactNode } from "react";
-import { HarnessBadge } from "../../lib/harness.tsx";
+import { useId, useState, type ReactNode } from "react";
+import { AgentAvatar, HarnessBadge } from "../../lib/harness.tsx";
 import { Link } from "../../lib/Link.tsx";
 import { TelemetryFacts } from "../../lib/telemetry.tsx";
 import { formatDateTime, formatFullDateTime } from "../../lib/time.ts";
@@ -34,13 +38,14 @@ type BlockRenderer = (block: ActivityDetailBlockV1) => ReactNode;
 const blockRenderers: Record<BlockType, BlockRenderer> = {
   key_value: (block) =>
     block.type === "key_value" ? (
-      <Stack as="dl" data-activity-block-kind="key_value" gap={0.5}>
-        {block.items.map((item, index) => (
-          <Fragment key={`${item.key}-${index}`}>
-            <dt>{item.key}</dt>
-            <dd>{item.value}</dd>
-          </Fragment>
-        ))}
+      <Stack data-activity-block-kind="key_value">
+        <MetadataList>
+          {block.items.map((item, index) => (
+            <MetadataListItem key={`${item.key}-${index}`} label={item.key}>
+              {item.value}
+            </MetadataListItem>
+          ))}
+        </MetadataList>
       </Stack>
     ) : null,
   table: (block) =>
@@ -175,28 +180,30 @@ export function SessionInspector({
   const [open, setOpen] = useState(initialOpen);
 
   return (
-    <Card padding={3} data-session-inspector="" aria-label="Session inspector">
-      <Stack direction="horizontal" gap={2} wrap="wrap" justify="start">
-        <Heading level={2} color="inherit">
-          Session inspector
-        </Heading>
-        <Button
-          label={open ? "Hide session inspector" : "Show session inspector"}
-          variant="secondary"
-          size="sm"
-          aria-expanded={open}
-          aria-controls={panelId}
-          onClick={() => setOpen((value) => !value)}
-        />
+    <Card padding={4} data-session-inspector="" aria-label="Session inspector">
+      <Stack gap={2}>
+        <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" vAlign="center">
+          <Heading level={2} color="inherit">
+            Session inspector
+          </Heading>
+          <Button
+            label={open ? "Hide session inspector" : "Show session inspector"}
+            variant="secondary"
+            size="sm"
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={() => setOpen((value) => !value)}
+          />
+        </Stack>
+        <section id={panelId} hidden={!open}>
+          <SessionInspectorDetails
+            issueId={issueId}
+            canContribute={canContribute}
+            open={open}
+            initialSessionId={initialSessionId}
+          />
+        </section>
       </Stack>
-      <section id={panelId} hidden={!open}>
-        <SessionInspectorDetails
-          issueId={issueId}
-          canContribute={canContribute}
-          open={open}
-          initialSessionId={initialSessionId}
-        />
-      </section>
     </Card>
   );
 }
@@ -239,7 +246,7 @@ export function SessionInspectorDetails({
   const activityList = activities.data ?? [];
 
   return (
-    <Stack paddingBlockStart={2}>
+    <Stack gap={3} paddingBlockStart={2}>
       {sessions.isPending && (
         <Text as="p" display="block" type="supporting" role="status">
           Loading work sessions…
@@ -249,7 +256,7 @@ export function SessionInspectorDetails({
         <Banner status="error" role="alert" title="Could not load work sessions." />
       )}
       {sessions.isSuccess && selected === undefined && (
-        <Text as="p" display="block" type="supporting">
+        <Text as="p" display="block" type="supporting" color="secondary">
           No work sessions recorded for this issue.
         </Text>
       )}
@@ -258,6 +265,7 @@ export function SessionInspectorDetails({
           <Selector
             label="Work session"
             id={`session-inspector-select-${issueId}`}
+            size="sm"
             value={selected.id}
             onChange={setPickedId}
             options={list.map((session) => ({
@@ -265,11 +273,27 @@ export function SessionInspectorDetails({
               label: `${session.status} · ${formatDateTime(session.createdAt)}`,
             }))}
           />
-          <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
-            <strong>{run?.agentName ?? "Agent work session"}</strong>
-            <Text type="inherit" color="inherit" data-inspector-session-status={displayStatus}>
-              {displayStatus}
-            </Text>
+          <Stack direction="horizontal" gap={1.5} vAlign="center" justify="between" wrap="wrap">
+            <Stack direction="horizontal" gap={1.5} vAlign="center">
+              <AgentAvatar name={run?.agentName ?? "Agent"} harness={run?.harness} size={16} />
+              <Text type="body" weight="semibold" color="primary">
+                {run?.agentName ?? "Agent work session"}
+              </Text>
+            </Stack>
+            {displayStatus !== undefined && (
+              <Token
+                label={displayStatus}
+                color={
+                  displayStatus === "active"
+                    ? "green"
+                    : displayStatus === "stopping"
+                      ? "orange"
+                      : "gray"
+                }
+                size="sm"
+                data-inspector-session-status={displayStatus}
+              />
+            )}
           </Stack>
           {selected.progress !== "" && (
             <Text as="p" display="block" type="supporting" color="secondary">
@@ -277,36 +301,36 @@ export function SessionInspectorDetails({
             </Text>
           )}
           {pendingQuestion !== undefined && (
-            <Card padding={3}>
-              <QuestionDetails question={pendingQuestion} />
-              {canContribute && (
-                <Link to="/inbox" search={{ issue: issueId }} color="accent" hasUnderline>
-                  Answer in Inbox
-                </Link>
-              )}
-            </Card>
+            <Section variant="muted" padding={3} data-pending="true">
+              <Stack gap={2}>
+                <QuestionDetails question={pendingQuestion} nested />
+                {canContribute && (
+                  <Link to="/inbox" search={{ issue: issueId }} color="accent" hasUnderline>
+                    Answer in Inbox
+                  </Link>
+                )}
+              </Stack>
+            </Section>
           )}
-          <Stack as="dl" gap={0.5}>
-            <dt>Harness</dt>
-            <dd>
+          <Divider />
+          <MetadataList>
+            <MetadataListItem label="Harness">
               <HarnessBadge harness={run?.harness} empty="Unknown" />
-            </dd>
-            <dt>Model</dt>
-            <dd>{run?.model ?? "Unknown"}</dd>
-            <dt>Run</dt>
-            <dd>
+            </MetadataListItem>
+            <MetadataListItem label="Model">{run?.model ?? "Unknown"}</MetadataListItem>
+            <MetadataListItem label="Run">
               <ShortId value={selected.runId} label="run ID" />
-            </dd>
-            <dt>Session</dt>
-            <dd>
+            </MetadataListItem>
+            <MetadataListItem label="Session">
               <ShortId value={selected.id} label="session ID" />
-            </dd>
+            </MetadataListItem>
             <TelemetryFacts
               inputTokens={selected.inputTokens}
               outputTokens={selected.outputTokens}
               costUsdMicros={selected.costUsdMicros}
             />
-          </Stack>
+          </MetadataList>
+          <Divider />
           <Heading level={3} color="inherit">
             Session activity
           </Heading>
@@ -323,7 +347,7 @@ export function SessionInspectorDetails({
               No activities recorded yet.
             </Text>
           ) : (
-            <Stack as="ol" data-activity-timeline="">
+            <Stack as="ol" gap={2} data-activity-timeline="">
               {activityList.map((activity) => (
                 <Stack
                   as="li"
@@ -331,15 +355,31 @@ export function SessionInspectorDetails({
                   data-activity-id={activity.id}
                   data-activity-kind={activity.kind}
                 >
-                  <time
-                    dateTime={activity.createdAt}
-                    title={formatFullDateTime(activity.createdAt)}
-                  >
-                    {formatDateTime(activity.createdAt)}
-                  </time>
-                  <strong>{activity.kind}</strong>
-                  <Stack data-activity-summary="">{activity.summary}</Stack>
-                  {activity.detail !== null && renderDetail(activity.detail)}
+                  <Card padding={2}>
+                    <Stack gap={1.5}>
+                      <Stack
+                        direction="horizontal"
+                        gap={1.5}
+                        justify="between"
+                        vAlign="center"
+                        wrap="wrap"
+                      >
+                        <Token label={activity.kind} color="gray" size="sm" />
+                        <Text type="supporting" color="secondary">
+                          <time
+                            dateTime={activity.createdAt}
+                            title={formatFullDateTime(activity.createdAt)}
+                          >
+                            {formatDateTime(activity.createdAt)}
+                          </time>
+                        </Text>
+                      </Stack>
+                      <Text as="p" display="block" type="body" data-activity-summary="">
+                        {activity.summary}
+                      </Text>
+                      {activity.detail !== null && renderDetail(activity.detail)}
+                    </Stack>
+                  </Card>
                 </Stack>
               ))}
             </Stack>

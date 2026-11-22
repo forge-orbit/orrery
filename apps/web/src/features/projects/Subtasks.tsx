@@ -1,6 +1,8 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
 import { Heading } from "@astryxdesign/core/Heading";
+import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -69,8 +71,8 @@ export function Subtasks({
   const isSubtask = issue.parentIssueId !== null;
 
   return (
-    <Section padding={3} data-subtasks-section="">
-      <Stack gap={2}>
+    <Section padding={4} data-subtasks-section="">
+      <Stack gap={3}>
         {isSubtask && (
           <Heading level={2} color="inherit">
             Subtasks
@@ -78,20 +80,20 @@ export function Subtasks({
         )}
         {isSubtask ? (
           parent !== undefined ? (
-            <Text as="p" display="block" type="supporting">
+            <Text as="p" display="block" type="supporting" color="secondary">
               Subtask of{" "}
               <Link to="/issues/$issueId" params={{ issueId: parent.id }}>
                 {parent.identifier} {parent.title}
               </Link>
             </Text>
           ) : (
-            <Text as="p" display="block" type="supporting">
+            <Text as="p" display="block" type="supporting" color="secondary">
               Subtask of another issue.
             </Text>
           )
         ) : (
           <>
-            <Stack direction="horizontal">
+            <Stack direction="horizontal" justify="between" vAlign="center" gap={2} wrap="wrap">
               <Heading level={2} color="inherit">
                 Subtasks
               </Heading>
@@ -103,12 +105,20 @@ export function Subtasks({
                 data-completed-subtask-count={String(completed)}
               />
             </Stack>
+            {subtasks.length > 0 && (
+              <ProgressBar
+                label="Subtask progress"
+                isLabelHidden
+                value={(completed / subtasks.length) * 100}
+                variant="success"
+              />
+            )}
             {subtasks.length === 0 ? (
-              <Text as="p" display="block" type="supporting">
+              <Text as="p" display="block" type="supporting" color="secondary">
                 No subtasks yet.
               </Text>
             ) : (
-              <Stack as="ul">
+              <Stack as="ul" gap={2}>
                 {subtasks.map((subtask) => (
                   <Stack
                     as="li"
@@ -116,49 +126,69 @@ export function Subtasks({
                     data-subtask-id={subtask.id}
                     data-subtask-status={subtask.status}
                   >
-                    <Stack direction="horizontal">
-                      <Text as="span">{subtask.identifier}</Text>
-                      <Link to="/issues/$issueId" params={{ issueId: subtask.id }}>
-                        {subtask.title}
-                      </Link>
-                    </Stack>
-                    <Token
-                      label={issueStatusLabels[subtask.status]}
-                      color={
-                        subtask.status === "done"
-                          ? "green"
-                          : subtask.status === "cancelled"
-                            ? "red"
-                            : subtask.status === "in_progress"
-                              ? "orange"
-                              : "gray"
-                      }
-                      size="sm"
-                    />
+                    <Card variant="muted" padding={2}>
+                      <Stack
+                        direction="horizontal"
+                        justify="between"
+                        vAlign="center"
+                        gap={2}
+                        wrap="wrap"
+                      >
+                        <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+                          <Text as="span" type="code" color="secondary">
+                            {subtask.identifier}
+                          </Text>
+                          <Link
+                            to="/issues/$issueId"
+                            params={{ issueId: subtask.id }}
+                            color="primary"
+                            weight="medium"
+                          >
+                            {subtask.title}
+                          </Link>
+                        </Stack>
+                        <Token
+                          label={issueStatusLabels[subtask.status]}
+                          color={
+                            subtask.status === "done"
+                              ? "green"
+                              : subtask.status === "cancelled"
+                                ? "red"
+                                : subtask.status === "in_progress"
+                                  ? "orange"
+                                  : "gray"
+                          }
+                          size="sm"
+                        />
+                      </Stack>
+                    </Card>
                   </Stack>
                 ))}
               </Stack>
             )}
             {canContribute && (
               <form onSubmit={(event) => void onCreate(event)}>
-                <TextField
-                  label="Subtask name"
-                  id="new-subtask-title"
-                  htmlName="title"
-                  value={title}
-                  onChange={setTitle}
-                  maxLength={200}
-                  placeholder="Add a subtask…"
-                  required
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  label="Create subtask"
-                  variant="secondary"
-                  isDisabled={saving}
-                  isLoading={saving}
-                />
+                <Stack direction="horizontal" gap={2} vAlign="end" wrap="wrap">
+                  <TextField
+                    label="Subtask name"
+                    id="new-subtask-title"
+                    htmlName="title"
+                    value={title}
+                    onChange={setTitle}
+                    maxLength={200}
+                    placeholder="Add a subtask…"
+                    width="min(100%, 24rem)"
+                    required
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    label="Create subtask"
+                    variant="secondary"
+                    isDisabled={saving}
+                    isLoading={saving}
+                  />
+                </Stack>
               </form>
             )}
             {error !== undefined && <Banner status="error" role="alert" title={error} />}

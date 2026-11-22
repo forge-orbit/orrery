@@ -110,14 +110,20 @@ export function IssuePriorityControls({
   }
 
   return (
-    <Stack direction="horizontal" gap={1} vAlign="center" data-issue-order-controls={issue.id}>
+    <Stack
+      direction={showReorder ? "horizontal" : "vertical"}
+      gap={1}
+      {...(showReorder ? { vAlign: "center" as const } : { width: "100%" })}
+      data-issue-order-controls={issue.id}
+    >
       <Selector
         label="Priority"
         isLabelHidden={compact}
         id={`issue-priority-${issue.id}`}
         data-issue-priority-select={issue.id}
         size="sm"
-        variant="secondary"
+        variant={compact ? "secondary" : "input"}
+        {...(compact ? {} : { width: "100%" })}
         value={issue.priority}
         isDisabled={saving}
         onChange={(value) => {

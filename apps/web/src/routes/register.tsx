@@ -1,6 +1,7 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -136,15 +137,17 @@ function RegisterPage() {
 
   return (
     <Stack as="main" gap={5}>
-      <Heading level={1} color="inherit">
-        Accept your invitation
-      </Heading>
-      <Text as="p" display="block" type="supporting">
-        You have been invited to join this Orrery installation. Choose a password to create your
-        account and personal workspace.
-      </Text>
+      <Stack gap={1.5}>
+        <Heading level={1} color="inherit">
+          Accept your invitation
+        </Heading>
+        <Text as="p" display="block" type="supporting" color="secondary">
+          You have been invited to join this Orrery installation. Choose a password to create your
+          account and personal workspace.
+        </Text>
+      </Stack>
       <form onSubmit={(event) => void onSubmit(event)}>
-        <Stack gap={3}>
+        <FormLayout>
           <TextField
             label="Password"
             description="At least 8 characters."
@@ -168,7 +171,7 @@ function RegisterPage() {
             isLoading={submitting}
             label="Register"
           />
-        </Stack>
+        </FormLayout>
       </form>
       <Stack gap={2} align="center">
         <Button
