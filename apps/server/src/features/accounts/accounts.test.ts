@@ -324,6 +324,7 @@ describe("accounts", () => {
         email: EMAIL,
         displayName: null,
         emailVerified: false,
+        avatarUrl: null,
       });
 
       const noSession = await app.request("/api/auth/session");
@@ -416,6 +417,7 @@ describe("accounts", () => {
         email: EMAIL,
         displayName: null,
         emailVerified: false,
+        avatarUrl: null,
       });
 
       const relogin = await postJson(second, "/api/auth/login", {
@@ -448,6 +450,7 @@ describe("accounts", () => {
         email: EMAIL,
         displayName: "Ada Lovelace",
         emailVerified: false,
+        avatarUrl: null,
       });
 
       const session = await app.request("/api/auth/session", { headers: { cookie } });
@@ -455,6 +458,7 @@ describe("accounts", () => {
         email: EMAIL,
         displayName: "Ada Lovelace",
         emailVerified: false,
+        avatarUrl: null,
       });
 
       const cleared = await app.request("/api/account/profile", {
@@ -467,6 +471,7 @@ describe("accounts", () => {
         email: EMAIL,
         displayName: null,
         emailVerified: false,
+        avatarUrl: null,
       });
     });
 

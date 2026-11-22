@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AvatarUrl } from "./auth.ts";
 import { Email, NewPassword, WorkspaceKind } from "./common.ts";
 import { InvitationGrant, InvitationStatus, WorkspaceInvitationProjectGrant } from "./invitations.ts";
 
@@ -56,6 +57,7 @@ export const WorkspaceMember = z
   .object({
     humanId: z.string(),
     email: Email,
+    avatarUrl: AvatarUrl.nullable(),
     isOwner: z.boolean(),
     
     canCreateProjects: z.boolean(),

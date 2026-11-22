@@ -1,5 +1,6 @@
 # Self-hosted Orrery: `cp .env.example .env`, set POSTGRES_PASSWORD, then `docker compose up -d`.
 # For HTTPS on a public domain, set ORRERY_DOMAIN and PUBLIC_URL and add `--profile tls`.
+# For S3 storage, set ORRERY_STORAGE_DRIVER=s3 and add `--profile storage` to run RustFS.
 name: orrery
 
 services:
@@ -19,12 +20,27 @@ services:
       ORRERY_ENCRYPTION_KEY: ${ORRERY_ENCRYPTION_KEY:-}
       # Default-deny SSRF: webhooks only reach public https URLs unless explicitly opted in.
       ORRERY_WEBHOOK_ALLOW_PRIVATE_URLS: ${ORRERY_WEBHOOK_ALLOW_PRIVATE_URLS:-false}
+      # Object storage (ADR-0008). The default driver needs no extra services: blobs
+      # live under ORRERY_DATA_DIR/objects, backed by the named `orrery-data` volume.
+      # Set ORRERY_STORAGE_DRIVER=s3 in .env and start `--profile storage` (or point
+      # at your own S3 provider) to use the bucket instead.
+      ORRERY_STORAGE_DRIVER: ${ORRERY_STORAGE_DRIVER:-local}
+      ORRERY_DATA_DIR: /app/data
+      # No fallbacks here on purpose: with driver=s3 a missing value must stop startup.
+      ORRERY_S3_ENDPOINT: ${ORRERY_S3_ENDPOINT:-}
+      ORRERY_S3_BUCKET: ${ORRERY_S3_BUCKET:-}
+      ORRERY_S3_REGION: ${ORRERY_S3_REGION:-}
+      ORRERY_S3_ACCESS_KEY_ID: ${ORRERY_S3_ACCESS_KEY_ID:-}
+      ORRERY_S3_SECRET_ACCESS_KEY: ${ORRERY_S3_SECRET_ACCESS_KEY:-}
+      ORRERY_S3_FORCE_PATH_STYLE: ${ORRERY_S3_FORCE_PATH_STYLE:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # Lets an opted-in webhook reach a receiver listening on the host (used by the e2e suite).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "${ORRERY_PORT:-8080}:8080"
+    volumes:
+      - orrery-data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,6 +77,24 @@ services:
       # container reaches the SMTP listener at mailpit:1025 over the compose network.
       - "127.0.0.1:${MAILPIT_HTTP_PORT:-8025}:8025"
 
+  # Optional S3-compatible object storage for larger or multi-replica installations. Like the
+  # tls and mail-test profiles, a plain `docker compose up -d` does NOT start it. Set
+  # ORRERY_STORAGE_DRIVER=s3 in .env, start this profile, and create the bucket once (see
+  # docs/guides/install.md). Both ports are host-side only; the app reaches :9000 over the
+  # compose network, and :9001 is RustFS's web console for bucket administration.
+  rustfs:
+    image: rustfs/rustfs:latest
+    profiles: [storage]
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${ORRERY_S3_ACCESS_KEY_ID:-orreryaccesskey}
+      RUSTFS_SECRET_KEY: ${ORRERY_S3_SECRET_ACCESS_KEY:-orrerysecretkey}
+    ports:
+      - "127.0.0.1:${RUSTFS_PORT:-9000}:9000"
+      - "127.0.0.1:${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rustfs-data:/data
+
   # Optional HTTPS with an automatic Let's Encrypt certificate. Agents on members' machines need
   # Orrery over HTTPS. Skip this profile if you already run a reverse proxy; point it at :8080.
   caddy:
@@ -82,5 +116,7 @@ services:
 
 volumes:
   pgdata:
+  orrery-data:
+  rustfs-data:
   caddy-data:
   caddy-config:

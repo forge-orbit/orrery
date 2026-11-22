@@ -1,4 +1,5 @@
 import {
+  avatarUrlFor,
   InvitationStatus,
   ProjectAccessLevel,
   WorkspaceKind,
@@ -69,6 +70,7 @@ function humanActor(
   id: string | null,
   email: string | null,
   deactivatedAt: Date | null = null,
+  avatarObjectId: string | null = null,
 ): Actor {
   const deactivated = deactivatedAt !== null;
   const label = email ?? id ?? "unknown human";
@@ -77,11 +79,17 @@ function humanActor(
     email,
     displayName: deactivated ? `${label} (deactivated)` : label,
     ...(deactivated ? { deactivated: true } : {}),
+    avatarUrl: id !== null && avatarObjectId !== null ? avatarUrlFor(id, avatarObjectId) : null,
   };
 }
 
 function agentActor(id: string | null, name: string | null): Actor {
-  return { agentId: id, agentName: name, displayName: name ?? id ?? "unknown agent" };
+  return {
+    agentId: id,
+    agentName: name,
+    displayName: name ?? id ?? "unknown agent",
+    avatarUrl: null,
+  };
 }
 
 type Db = PostgresJsDatabase | DbTransaction;
@@ -118,9 +126,11 @@ async function loadWorkspaceEvents(db: Db, workspaceId: string, workspaceName: s
       actorId: actorHuman.id,
       actorEmail: actorHuman.email,
       actorDeactivatedAt: actorHuman.deactivatedAt,
+      actorAvatarObjectId: actorHuman.avatarObjectId,
       subjectId: subjectHuman.id,
       subjectEmail: subjectHuman.email,
       subjectDeactivatedAt: subjectHuman.deactivatedAt,
+      subjectAvatarObjectId: subjectHuman.avatarObjectId,
     })
     .from(workspaceEvents)
     .leftJoin(actorHuman, eq(actorHuman.id, workspaceEvents.actorHumanId))
@@ -134,8 +144,13 @@ async function loadWorkspaceEvents(db: Db, workspaceId: string, workspaceName: s
     type: row.type,
     scope,
     createdAt: row.createdAt.toISOString(),
-    actor: humanActor(row.actorId, row.actorEmail, row.actorDeactivatedAt),
-    subject: humanActor(row.subjectId, row.subjectEmail, row.subjectDeactivatedAt),
+    actor: humanActor(row.actorId, row.actorEmail, row.actorDeactivatedAt, row.actorAvatarObjectId),
+    subject: humanActor(
+      row.subjectId,
+      row.subjectEmail,
+      row.subjectDeactivatedAt,
+      row.subjectAvatarObjectId,
+    ),
     summary: null,
     level: null,
     previousLevel: null,
@@ -152,6 +167,7 @@ async function loadKeyEvents(db: Db, workspaceId: string, workspaceName: string)
       actorId: actorHuman.id,
       actorEmail: actorHuman.email,
       actorDeactivatedAt: actorHuman.deactivatedAt,
+      actorAvatarObjectId: actorHuman.avatarObjectId,
       agentId: agents.id,
       agentName: agents.name,
     })
@@ -168,7 +184,7 @@ async function loadKeyEvents(db: Db, workspaceId: string, workspaceName: string)
     type: row.type,
     scope,
     createdAt: row.createdAt.toISOString(),
-    actor: humanActor(row.actorId, row.actorEmail, row.actorDeactivatedAt),
+    actor: humanActor(row.actorId, row.actorEmail, row.actorDeactivatedAt, row.actorAvatarObjectId),
     subject: agentActor(row.agentId, row.agentName),
     summary: null,
     level: null,
@@ -201,9 +217,11 @@ async function loadProjectAccessEvents(
       actorId: actorHuman.id,
       actorEmail: actorHuman.email,
       actorDeactivatedAt: actorHuman.deactivatedAt,
+      actorAvatarObjectId: actorHuman.avatarObjectId,
       subjectId: subjectHuman.id,
       subjectEmail: subjectHuman.email,
       subjectDeactivatedAt: subjectHuman.deactivatedAt,
+      subjectAvatarObjectId: subjectHuman.avatarObjectId,
     })
     .from(projectAccessEvents)
     .leftJoin(actorHuman, eq(actorHuman.id, projectAccessEvents.actorHumanId))
@@ -228,8 +246,13 @@ async function loadProjectAccessEvents(
       name: names.get(row.projectId) ?? null,
     },
     createdAt: row.createdAt.toISOString(),
-    actor: humanActor(row.actorId, row.actorEmail, row.actorDeactivatedAt),
-    subject: humanActor(row.subjectId, row.subjectEmail, row.subjectDeactivatedAt),
+    actor: humanActor(row.actorId, row.actorEmail, row.actorDeactivatedAt, row.actorAvatarObjectId),
+    subject: humanActor(
+      row.subjectId,
+      row.subjectEmail,
+      row.subjectDeactivatedAt,
+      row.subjectAvatarObjectId,
+    ),
     summary: null,
     level: row.level === null ? null : ProjectAccessLevel.parse(row.level),
     previousLevel: row.previousLevel === null ? null : ProjectAccessLevel.parse(row.previousLevel),
@@ -248,6 +271,7 @@ async function loadProjectActivity(db: Db, projectId: string, projectName: strin
       humanId: actorHuman.id,
       humanEmail: actorHuman.email,
       humanDeactivatedAt: actorHuman.deactivatedAt,
+      humanAvatarObjectId: actorHuman.avatarObjectId,
       agentId: actorAgent.id,
       agentName: actorAgent.name,
     })
@@ -266,7 +290,7 @@ async function loadProjectActivity(db: Db, projectId: string, projectName: strin
     actor:
       row.agentId !== null
         ? agentActor(row.agentId, row.agentName)
-        : humanActor(row.humanId, row.humanEmail, row.humanDeactivatedAt),
+        : humanActor(row.humanId, row.humanEmail, row.humanDeactivatedAt, row.humanAvatarObjectId),
     subject: null,
     summary: row.summary,
     level: null,
@@ -283,6 +307,7 @@ async function loadInstallationEvents(db: Db): Promise<HistoryEvent[]> {
       humanId: instanceSetup.administratorHumanId,
       email: humans.email,
       deactivatedAt: humans.deactivatedAt,
+      avatarObjectId: humans.avatarObjectId,
       createdAt: instanceSetup.completedAt,
     })
     .from(instanceSetup)
@@ -295,8 +320,8 @@ async function loadInstallationEvents(db: Db): Promise<HistoryEvent[]> {
       type: INSTALLATION_TYPE.bootstrap,
       scope,
       createdAt: setup.createdAt.toISOString(),
-      actor: humanActor(setup.humanId, setup.email, setup.deactivatedAt),
-      subject: humanActor(setup.humanId, setup.email, setup.deactivatedAt),
+      actor: humanActor(setup.humanId, setup.email, setup.deactivatedAt, setup.avatarObjectId),
+      subject: humanActor(setup.humanId, setup.email, setup.deactivatedAt, setup.avatarObjectId),
       summary: `Installation bootstrapped by ${setup.email}`,
       level: null,
       previousLevel: null,
@@ -317,12 +342,18 @@ async function loadInstallationEvents(db: Db): Promise<HistoryEvent[]> {
       inviterId: inviter.id,
       inviterEmail: inviter.email,
       inviterDeactivatedAt: inviter.deactivatedAt,
+      inviterAvatarObjectId: inviter.avatarObjectId,
     })
     .from(invitations)
     .leftJoin(inviter, eq(inviter.id, invitations.invitedByHumanId))
     .orderBy(desc(invitations.createdAt), desc(invitations.id));
   for (const row of rows) {
-    const inviterActor = humanActor(row.inviterId, row.inviterEmail, row.inviterDeactivatedAt);
+    const inviterActor = humanActor(
+      row.inviterId,
+      row.inviterEmail,
+      row.inviterDeactivatedAt,
+      row.inviterAvatarObjectId,
+    );
     const inviteeActor = humanActor(null, row.email);
     const add = (type: string, at: Date | null, actor: Actor, subject: Actor) => {
       if (at === null) return;
@@ -364,9 +395,11 @@ async function loadAccountStatusEvents(db: Db): Promise<HistoryEvent[]> {
       subjectId: subjectHuman.id,
       subjectEmail: subjectHuman.email,
       subjectDeactivatedAt: subjectHuman.deactivatedAt,
+      subjectAvatarObjectId: subjectHuman.avatarObjectId,
       actorId: actorHuman.id,
       actorEmail: actorHuman.email,
       actorDeactivatedAt: actorHuman.deactivatedAt,
+      actorAvatarObjectId: actorHuman.avatarObjectId,
     })
     .from(accountRecoveryEvents)
     .innerJoin(subjectHuman, eq(subjectHuman.id, accountRecoveryEvents.humanId))
@@ -392,8 +425,14 @@ async function loadAccountStatusEvents(db: Db): Promise<HistoryEvent[]> {
       row.actorId ?? row.subjectId,
       row.actorEmail ?? row.subjectEmail,
       row.actorDeactivatedAt ?? row.subjectDeactivatedAt,
+      row.actorAvatarObjectId ?? row.subjectAvatarObjectId,
     ),
-    subject: humanActor(row.subjectId, row.subjectEmail, row.subjectDeactivatedAt),
+    subject: humanActor(
+      row.subjectId,
+      row.subjectEmail,
+      row.subjectDeactivatedAt,
+      row.subjectAvatarObjectId,
+    ),
     summary: null,
     level: null,
     previousLevel: null,

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  avatarUrlFor,
   FallbackPolicy,
   ISSUE_SORT_STEP,
   IssueStatus,
@@ -316,12 +317,14 @@ function actorForWrite(actor: WorkActor): Actor {
       humanId: actor.account.humanId,
       email: actor.account.email,
       displayName: actor.account.email,
+      avatarUrl: actor.account.avatarUrl ?? null,
     };
   }
   return {
     agentId: actor.identity.agentId,
     agentName: actor.identity.name,
     displayName: actor.identity.name,
+    avatarUrl: null,
   };
 }
 
@@ -331,6 +334,7 @@ function actorFromRow(
   agentId: string | null,
   agentName: string | null,
   deactivatedAt: Date | null = null,
+  avatarObjectId: string | null = null,
 ): Actor {
   if (humanId !== null && email !== null) {
     const deactivated = deactivatedAt !== null;
@@ -339,13 +343,14 @@ function actorFromRow(
       email,
       displayName: deactivated ? `${email} (deactivated)` : email,
       ...(deactivated ? { deactivated: true } : {}),
+      avatarUrl: avatarObjectId === null ? null : avatarUrlFor(humanId, avatarObjectId),
     };
   }
   if (agentId !== null && agentName !== null) {
-    return { agentId, agentName, displayName: agentName };
+    return { agentId, agentName, displayName: agentName, avatarUrl: null };
   }
 
-  return { displayName: "Unknown author" };
+  return { displayName: "Unknown author", avatarUrl: null };
 }
 
 function assigneeFromRow(row: {
@@ -353,6 +358,7 @@ function assigneeFromRow(row: {
   assigneeId: string | null;
   assigneeHumanEmail: string | null;
   assigneeHumanDeactivatedAt: Date | null;
+  assigneeHumanAvatarObjectId: string | null;
   assigneeAgentName: string | null;
 }): Actor | null {
   if (row.assigneeType === "human" && row.assigneeId !== null && row.assigneeHumanEmail !== null) {
@@ -362,6 +368,7 @@ function assigneeFromRow(row: {
       null,
       null,
       row.assigneeHumanDeactivatedAt,
+      row.assigneeHumanAvatarObjectId,
     );
   }
   if (row.assigneeType === "agent" && row.assigneeId !== null && row.assigneeAgentName !== null) {
@@ -405,6 +412,7 @@ const projectColumns = {
   createdByHumanId: projects.createdByHumanId,
   createdByEmail: projectCreator.email,
   createdByDeactivatedAt: projectCreator.deactivatedAt,
+  createdByAvatarObjectId: projectCreator.avatarObjectId,
   fallbackPolicy: projects.fallbackPolicy,
 };
 
@@ -433,6 +441,7 @@ const issueColumns = {
   assigneeId: issues.assigneeId,
   assigneeHumanEmail: assigneeHuman.email,
   assigneeHumanDeactivatedAt: assigneeHuman.deactivatedAt,
+  assigneeHumanAvatarObjectId: assigneeHuman.avatarObjectId,
   assigneeAgentName: assigneeAgent.name,
   fallbackPolicyOverride: issues.fallbackPolicyOverride,
   createdAt: issues.createdAt,
@@ -444,11 +453,13 @@ const issueColumns = {
   createdByHumanId: issues.createdByHumanId,
   createdByEmail: issueCreator.email,
   createdByDeactivatedAt: issueCreator.deactivatedAt,
+  createdByAvatarObjectId: issueCreator.avatarObjectId,
   createdByAgentId: issues.createdByAgentId,
   createdByAgentName: issueAgentCreator.name,
   updatedByHumanId: issues.updatedByHumanId,
   updatedByEmail: issueEditor.email,
   updatedByDeactivatedAt: issueEditor.deactivatedAt,
+  updatedByAvatarObjectId: issueEditor.avatarObjectId,
   updatedByAgentId: issues.updatedByAgentId,
   updatedByAgentName: issueAgentEditor.name,
 };
@@ -461,6 +472,7 @@ const commentColumns = {
   authorHumanId: issueComments.createdByHumanId,
   authorEmail: commentAuthor.email,
   authorDeactivatedAt: commentAuthor.deactivatedAt,
+  authorAvatarObjectId: commentAuthor.avatarObjectId,
   authorAgentId: issueComments.createdByAgentId,
   authorAgentName: commentAgentAuthor.name,
 };
@@ -475,6 +487,7 @@ const linkColumns = {
   createdByHumanId: issueLinks.createdByHumanId,
   createdByEmail: linkCreator.email,
   createdByDeactivatedAt: linkCreator.deactivatedAt,
+  createdByAvatarObjectId: linkCreator.avatarObjectId,
   createdByAgentId: issueLinks.createdByAgentId,
   createdByAgentName: linkAgentCreator.name,
 };
@@ -489,11 +502,13 @@ const knowledgeColumns = {
   createdByHumanId: knowledgeEntries.createdByHumanId,
   createdByEmail: knowledgeCreator.email,
   createdByDeactivatedAt: knowledgeCreator.deactivatedAt,
+  createdByAvatarObjectId: knowledgeCreator.avatarObjectId,
   createdByAgentId: knowledgeEntries.createdByAgentId,
   createdByAgentName: knowledgeAgentCreator.name,
   updatedByHumanId: knowledgeEntries.updatedByHumanId,
   updatedByEmail: knowledgeEditor.email,
   updatedByDeactivatedAt: knowledgeEditor.deactivatedAt,
+  updatedByAvatarObjectId: knowledgeEditor.avatarObjectId,
   updatedByAgentId: knowledgeEntries.updatedByAgentId,
   updatedByAgentName: knowledgeAgentEditor.name,
 };
@@ -505,6 +520,7 @@ const dependencyColumns = {
   createdByHumanId: issueDependencies.createdByHumanId,
   createdByEmail: dependencyHumanCreator.email,
   createdByDeactivatedAt: dependencyHumanCreator.deactivatedAt,
+  createdByAvatarObjectId: dependencyHumanCreator.avatarObjectId,
   createdByAgentId: issueDependencies.createdByAgentId,
   createdByAgentName: dependencyAgentCreator.name,
 };
@@ -520,6 +536,7 @@ const activityColumns = {
   actorHumanId: projectActivity.actorHumanId,
   actorEmail: activityActor.email,
   actorDeactivatedAt: activityActor.deactivatedAt,
+  actorAvatarObjectId: activityActor.avatarObjectId,
   actorAgentId: projectActivity.actorAgentId,
   actorAgentName: activityAgentActor.name,
 };
@@ -533,6 +550,7 @@ type ProjectRow = {
   createdByHumanId: string;
   createdByEmail: string;
   createdByDeactivatedAt: Date | null;
+  createdByAvatarObjectId: string | null;
   workspaceKind: WorkspaceKind;
   accessLevel: ProjectAccessLevel;
   fallbackPolicy: FallbackPolicy;
@@ -545,6 +563,7 @@ type ProjectGrantRow = {
   grantedByHumanId: string;
   grantedByEmail: string;
   grantedByDeactivatedAt: Date | null;
+  grantedByAvatarObjectId: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -565,6 +584,7 @@ type IssueRow = {
   assigneeId: string | null;
   assigneeHumanEmail: string | null;
   assigneeHumanDeactivatedAt: Date | null;
+  assigneeHumanAvatarObjectId: string | null;
   assigneeAgentName: string | null;
   fallbackPolicyOverride: FallbackPolicy | null;
 
@@ -577,11 +597,13 @@ type IssueRow = {
   createdByHumanId: string | null;
   createdByEmail: string | null;
   createdByDeactivatedAt: Date | null;
+  createdByAvatarObjectId: string | null;
   createdByAgentId: string | null;
   createdByAgentName: string | null;
   updatedByHumanId: string | null;
   updatedByEmail: string | null;
   updatedByDeactivatedAt: Date | null;
+  updatedByAvatarObjectId: string | null;
   updatedByAgentId: string | null;
   updatedByAgentName: string | null;
 };
@@ -593,6 +615,7 @@ type IssueDependencyRow = {
   createdByHumanId: string | null;
   createdByEmail: string | null;
   createdByDeactivatedAt: Date | null;
+  createdByAvatarObjectId: string | null;
   createdByAgentId: string | null;
   createdByAgentName: string | null;
 };
@@ -605,6 +628,7 @@ type CommentRow = {
   authorHumanId: string | null;
   authorEmail: string | null;
   authorDeactivatedAt: Date | null;
+  authorAvatarObjectId: string | null;
   authorAgentId: string | null;
   authorAgentName: string | null;
 };
@@ -619,6 +643,7 @@ type LinkRow = {
   createdByHumanId: string | null;
   createdByEmail: string | null;
   createdByDeactivatedAt: Date | null;
+  createdByAvatarObjectId: string | null;
   createdByAgentId: string | null;
   createdByAgentName: string | null;
 };
@@ -633,11 +658,13 @@ type KnowledgeRow = {
   createdByHumanId: string | null;
   createdByEmail: string | null;
   createdByDeactivatedAt: Date | null;
+  createdByAvatarObjectId: string | null;
   createdByAgentId: string | null;
   createdByAgentName: string | null;
   updatedByHumanId: string | null;
   updatedByEmail: string | null;
   updatedByDeactivatedAt: Date | null;
+  updatedByAvatarObjectId: string | null;
   updatedByAgentId: string | null;
   updatedByAgentName: string | null;
 };
@@ -653,6 +680,7 @@ type ActivityRow = {
   actorHumanId: string | null;
   actorEmail: string | null;
   actorDeactivatedAt: Date | null;
+  actorAvatarObjectId: string | null;
   actorAgentId: string | null;
   actorAgentName: string | null;
 };
@@ -670,6 +698,7 @@ function toProject(row: ProjectRow): Project {
       null,
       null,
       row.createdByDeactivatedAt,
+      row.createdByAvatarObjectId,
     ),
     workspaceKind: row.workspaceKind,
     accessLevel: row.accessLevel,
@@ -688,6 +717,7 @@ function toProjectGrant(row: ProjectGrantRow): ProjectAccessGrant {
       null,
       null,
       row.grantedByDeactivatedAt,
+      row.grantedByAvatarObjectId,
     ),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -720,6 +750,7 @@ function toIssue(row: IssueRow, labels: ProjectLabel[] = []): Issue {
       row.createdByAgentId,
       row.createdByAgentName,
       row.createdByDeactivatedAt,
+      row.createdByAvatarObjectId,
     ),
     updatedBy: actorFromRow(
       row.updatedByHumanId,
@@ -727,6 +758,7 @@ function toIssue(row: IssueRow, labels: ProjectLabel[] = []): Issue {
       row.updatedByAgentId,
       row.updatedByAgentName,
       row.updatedByDeactivatedAt,
+      row.updatedByAvatarObjectId,
     ),
   };
 }
@@ -742,6 +774,7 @@ function toIssueDependency(row: IssueDependencyRow): IssueDependency {
       row.createdByAgentId,
       row.createdByAgentName,
       row.createdByDeactivatedAt,
+      row.createdByAvatarObjectId,
     ),
   };
 }
@@ -756,6 +789,7 @@ type LabelRow = {
   createdByHumanId: string | null;
   createdByEmail: string | null;
   createdByDeactivatedAt: Date | null;
+  createdByAvatarObjectId: string | null;
   createdByAgentId: string | null;
   createdByAgentName: string | null;
 };
@@ -770,6 +804,7 @@ const labelColumns = {
   createdByHumanId: projectLabels.createdByHumanId,
   createdByEmail: labelCreator.email,
   createdByDeactivatedAt: labelCreator.deactivatedAt,
+  createdByAvatarObjectId: labelCreator.avatarObjectId,
   createdByAgentId: projectLabels.createdByAgentId,
   createdByAgentName: labelAgentCreator.name,
 };
@@ -788,6 +823,7 @@ function toProjectLabel(row: LabelRow): ProjectLabel {
       row.createdByAgentId,
       row.createdByAgentName,
       row.createdByDeactivatedAt,
+      row.createdByAvatarObjectId,
     ),
   };
 }
@@ -804,6 +840,7 @@ function toComment(row: CommentRow): IssueComment {
       row.authorAgentId,
       row.authorAgentName,
       row.authorDeactivatedAt,
+      row.authorAvatarObjectId,
     ),
   };
 }
@@ -822,6 +859,7 @@ function toLink(row: LinkRow): IssueLink {
       row.createdByAgentId,
       row.createdByAgentName,
       row.createdByDeactivatedAt,
+      row.createdByAvatarObjectId,
     ),
   };
 }
@@ -851,6 +889,7 @@ function toKnowledge(row: KnowledgeRow): KnowledgeEntry {
       row.createdByAgentId,
       row.createdByAgentName,
       row.createdByDeactivatedAt,
+      row.createdByAvatarObjectId,
     ),
     updatedBy: actorFromRow(
       row.updatedByHumanId,
@@ -858,6 +897,7 @@ function toKnowledge(row: KnowledgeRow): KnowledgeEntry {
       row.updatedByAgentId,
       row.updatedByAgentName,
       row.updatedByDeactivatedAt,
+      row.updatedByAvatarObjectId,
     ),
   };
 }
@@ -877,6 +917,7 @@ function toActivity(row: ActivityRow): ProjectActivity {
       row.actorAgentId,
       row.actorAgentName,
       row.actorDeactivatedAt,
+      row.actorAvatarObjectId,
     ),
   };
 }
@@ -1165,14 +1206,20 @@ async function validateAssignee(
   let resolved: Actor;
   if (assignee.type === "human") {
     const [human] = await tx
-      .select({ id: humans.id, email: humans.email })
+      .select({ id: humans.id, email: humans.email, avatarObjectId: humans.avatarObjectId })
       .from(humans)
       .where(and(eq(humans.id, assignee.id), isNull(humans.deactivatedAt)))
       .limit(1)
       .for("key share");
     if (human === undefined) throw new ProjectsError("assignee_not_found");
     targetHumanId = human.id;
-    resolved = { humanId: human.id, email: human.email, displayName: human.email };
+    resolved = {
+      humanId: human.id,
+      email: human.email,
+      displayName: human.email,
+      avatarUrl:
+        human.avatarObjectId === null ? null : avatarUrlFor(human.id, human.avatarObjectId),
+    };
   } else {
     const [agent] = await tx
       .select({ id: agents.id, humanId: agents.humanId, name: agents.name })
@@ -1205,7 +1252,12 @@ async function validateAssignee(
       .for("key share");
     if (owner === undefined) throw new ProjectsError("assignee_not_found");
     targetHumanId = agent.humanId;
-    resolved = { agentId: agent.id, agentName: agent.name, displayName: agent.name };
+    resolved = {
+      agentId: agent.id,
+      agentName: agent.name,
+      displayName: agent.name,
+      avatarUrl: null,
+    };
   }
 
   if (workspace.personalOwnerHumanId !== targetHumanId) {
@@ -1487,6 +1539,7 @@ const grantColumns = {
   grantedByHumanId: projectAccessGrants.grantedByHumanId,
   grantedByEmail: accessGrantor.email,
   grantedByDeactivatedAt: accessGrantor.deactivatedAt,
+  grantedByAvatarObjectId: accessGrantor.avatarObjectId,
   createdAt: projectAccessGrants.createdAt,
   updatedAt: projectAccessGrants.updatedAt,
 };
@@ -1882,7 +1935,12 @@ export function createProjectsService({
           name: created.name,
           key: created.key,
           createdAt: created.createdAt.toISOString(),
-          createdBy: { humanId: actor.humanId, email: actor.email, displayName: actor.email },
+          createdBy: {
+            humanId: actor.humanId,
+            email: actor.email,
+            displayName: actor.email,
+            avatarUrl: actor.avatarUrl ?? null,
+          },
           workspaceKind: workspace.kind,
           accessLevel: ProjectAccessLevel.enum.manage,
           fallbackPolicy: FallbackPolicy.enum.require_human,
@@ -2688,6 +2746,8 @@ export function createProjectsService({
             current.createdByEmail,
             current.createdByAgentId,
             current.createdByAgentName,
+            undefined,
+            current.createdByAvatarObjectId,
           ),
           updatedBy: actorForWrite(actor),
           fallbackPolicyOverride: current.fallbackPolicyOverride,
@@ -3143,6 +3203,8 @@ export function createProjectsService({
             current.createdByEmail,
             current.createdByAgentId,
             current.createdByAgentName,
+            undefined,
+            current.createdByAvatarObjectId,
           ),
           updatedBy: actorForWrite(actor),
         };

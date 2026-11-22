@@ -157,6 +157,19 @@ const statusFor = {
 const failure = (c: Context, error: AccountsError) =>
   problemResponse(c, { status: statusFor[error.kind], code: error.kind, title: error.message });
 
+export function toSessionResponse(
+  account: Pick<SessionAccount, "email" | "displayName" | "emailVerifiedAt" | "avatarUrl">,
+  overrides?: { avatarUrl?: string | null },
+) {
+  return {
+    email: account.email,
+    displayName: account.displayName ?? null,
+    emailVerified: account.emailVerifiedAt !== null,
+    avatarUrl:
+      overrides?.avatarUrl !== undefined ? overrides.avatarUrl : (account.avatarUrl ?? null),
+  };
+}
+
 export function createAccountsRest(service: AccountsService) {
   const policy = service.sessionPolicy();
 
@@ -230,14 +243,7 @@ export function createAccountsRest(service: AccountsService) {
       return problemResponse(c, { status: 401, code: "not_signed_in", title: "Not signed in." });
     }
 
-    return c.json(
-      {
-        email: account.email,
-        displayName: account.displayName ?? null,
-        emailVerified: account.emailVerifiedAt !== null,
-      },
-      200,
-    );
+    return c.json(toSessionResponse(account), 200);
   });
 
   app.openapi(updateProfile, async (c) => {
@@ -247,14 +253,7 @@ export function createAccountsRest(service: AccountsService) {
     }
     try {
       const updated = await service.updateProfile(account.humanId, c.req.valid("json"));
-      return c.json(
-        {
-          email: updated.email,
-          displayName: updated.displayName ?? null,
-          emailVerified: updated.emailVerifiedAt !== null,
-        },
-        200,
-      );
+      return c.json(toSessionResponse(updated), 200);
     } catch (error) {
       if (error instanceof AccountsError && error.kind === "invalid_credentials") {
         return problemResponse(c, {

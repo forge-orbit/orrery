@@ -73,6 +73,7 @@ function RegisterPage() {
         email: account.email,
         displayName: null,
         emailVerified: account.emailVerified,
+        avatarUrl: null,
       };
       queryClient.setQueryData(sessionQuery.queryKey, session);
       await navigate({ to: "/" });

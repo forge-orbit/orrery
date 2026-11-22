@@ -1,5 +1,4 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
-import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -62,6 +61,7 @@ import {
 } from "../features/projects/index.ts";
 import { workspaceRunsQuery } from "../features/runs/index.ts";
 import { activeSessionsQuery } from "../features/work-sessions/index.ts";
+import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextField } from "../lib/fields.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
@@ -375,7 +375,11 @@ function ProjectPage() {
                                       size={18}
                                     />
                                   ) : (
-                                    <Avatar name={assignee.displayName} shape="circle" size="xsm" />
+                                    <HumanAvatar
+                                      name={assignee.displayName}
+                                      avatarUrl={assignee.avatarUrl}
+                                      size="xsm"
+                                    />
                                   )}
                                   <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
                                 </Stack>
@@ -1007,9 +1011,17 @@ function Activity({ projectId }: { projectId: string }) {
             return (
               <TableRow key={event.id} data-activity-type={event.type}>
                 <TableCell>
-                  <Text type="body" color="primary">
-                    <strong>{event.actor.displayName}</strong> {activityLabels[event.type]} {target}
-                  </Text>
+                  <Stack direction="horizontal" gap={1.5} vAlign="center">
+                    <HumanAvatar
+                      name={event.actor.displayName}
+                      avatarUrl={event.actor.avatarUrl}
+                      size="sm"
+                    />
+                    <Text type="body" color="primary">
+                      <strong>{event.actor.displayName}</strong> {activityLabels[event.type]}{" "}
+                      {target}
+                    </Text>
+                  </Stack>
                 </TableCell>
                 <TableCell>
                   <Text type="supporting" color="secondary">

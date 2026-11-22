@@ -22,6 +22,89 @@ describe("loadConfig: BOOTSTRAP_SECRET", () => {
   });
 });
 
+describe("loadConfig: object storage", () => {
+  it("defaults to the local driver under a data directory", () => {
+    const config = loadConfig(baseEnv);
+    expect(config.ORRERY_STORAGE_DRIVER).toBe("local");
+    expect(config.ORRERY_DATA_DIR).toBe("data");
+  });
+
+  it("reads the data directory and rejects a blank one", () => {
+    expect(loadConfig({ ...baseEnv, ORRERY_DATA_DIR: "/srv/orrery" }).ORRERY_DATA_DIR).toBe(
+      "/srv/orrery",
+    );
+    expect(() => loadConfig({ ...baseEnv, ORRERY_DATA_DIR: "" })).toThrow(/ORRERY_DATA_DIR/);
+  });
+
+  it("refuses an unknown storage driver", () => {
+    expect(() => loadConfig({ ...baseEnv, ORRERY_STORAGE_DRIVER: "gcs" })).toThrow(
+      /ORRERY_STORAGE_DRIVER/,
+    );
+  });
+
+  const s3Env = {
+    ...baseEnv,
+    ORRERY_STORAGE_DRIVER: "s3" as const,
+    ORRERY_S3_ENDPOINT: "http://rustfs:9000",
+    ORRERY_S3_BUCKET: "orrery",
+    ORRERY_S3_ACCESS_KEY_ID: "access",
+    ORRERY_S3_SECRET_ACCESS_KEY: "secret",
+  };
+
+  it("accepts a complete S3 configuration", () => {
+    const config = loadConfig(s3Env);
+    expect(config.ORRERY_STORAGE_DRIVER).toBe("s3");
+    expect(config.ORRERY_S3_BUCKET).toBe("orrery");
+    expect(config.ORRERY_S3_REGION).toBe("us-east-1");
+    expect(config.ORRERY_S3_FORCE_PATH_STYLE).toBe(false);
+  });
+
+  it("parses force path style and a custom region", () => {
+    const config = loadConfig({
+      ...s3Env,
+      ORRERY_S3_REGION: "eu-central-1",
+      ORRERY_S3_FORCE_PATH_STYLE: "true",
+    });
+    expect(config.ORRERY_S3_REGION).toBe("eu-central-1");
+    expect(config.ORRERY_S3_FORCE_PATH_STYLE).toBe(true);
+  });
+
+  it("treats the empty strings Compose passes for unset S3 variables as defaults", () => {
+    const config = loadConfig({ ...s3Env, ORRERY_S3_REGION: "" });
+    expect(config.ORRERY_S3_REGION).toBe("us-east-1");
+  });
+
+  it("fails fast when a required S3 variable is missing or blank", () => {
+    for (const name of [
+      "ORRERY_S3_ENDPOINT",
+      "ORRERY_S3_BUCKET",
+      "ORRERY_S3_ACCESS_KEY_ID",
+      "ORRERY_S3_SECRET_ACCESS_KEY",
+    ] as const) {
+      expect(() => loadConfig({ ...s3Env, [name]: "" })).toThrow(new RegExp(name));
+    }
+    // This is what Compose passes when none of the S3 variables are set in .env.
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        ORRERY_STORAGE_DRIVER: "s3",
+        ORRERY_S3_ENDPOINT: "",
+        ORRERY_S3_BUCKET: "",
+        ORRERY_S3_REGION: "",
+        ORRERY_S3_ACCESS_KEY_ID: "",
+        ORRERY_S3_SECRET_ACCESS_KEY: "",
+        ORRERY_S3_FORCE_PATH_STYLE: "false",
+      }),
+    ).toThrow(/ORRERY_S3_ENDPOINT/);
+  });
+
+  it("rejects a malformed S3 endpoint", () => {
+    expect(() => loadConfig({ ...s3Env, ORRERY_S3_ENDPOINT: "rustfs:9000" })).toThrow(
+      /ORRERY_S3_ENDPOINT/,
+    );
+  });
+});
+
 describe("loadConfig: ORRERY_ENCRYPTION_KEY", () => {
   it("treats an unset, empty, or blank key as no key", () => {
     expect(loadConfig({ ...baseEnv }).ORRERY_ENCRYPTION_KEY).toBeUndefined();

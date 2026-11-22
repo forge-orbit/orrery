@@ -1,5 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { FileInput } from "@astryxdesign/core/FileInput";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Section } from "@astryxdesign/core/Section";
@@ -12,11 +13,15 @@ import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import {
   changePassword,
+  removeAvatar,
   sessionQuery,
   signOut,
   updateProfile,
+  uploadAvatar,
+  type Session,
 } from "../features/accounts/index.ts";
 import { AppearancePicker } from "../lib/appearance.tsx";
+import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextField } from "../lib/fields.tsx";
 import { Link } from "../lib/Link.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
@@ -84,7 +89,11 @@ function AccountPage() {
           />
         }
       />
-      <ProfileSection initialDisplayName={session.displayName} />
+      <ProfileSection
+        initialDisplayName={session.displayName}
+        avatarUrl={session.avatarUrl}
+        displayName={session.displayName ?? session.email}
+      />
       <PasswordSection />
       <PreferencesSection />
       <SessionSection />
@@ -92,12 +101,23 @@ function AccountPage() {
   );
 }
 
-function ProfileSection({ initialDisplayName }: { initialDisplayName: string | null }) {
+function ProfileSection({
+  initialDisplayName,
+  avatarUrl,
+  displayName,
+}: {
+  initialDisplayName: string | null;
+  avatarUrl: string | null;
+  displayName: string;
+}) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [draftDisplayName, setDraftDisplayName] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
-  const displayName = draftDisplayName ?? initialDisplayName ?? "";
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const name = draftDisplayName ?? displayName;
+  const currentDisplayName = draftDisplayName ?? initialDisplayName ?? "";
 
   const mutation = useMutation({
     mutationFn: updateProfile,
@@ -109,11 +129,61 @@ function ProfileSection({ initialDisplayName }: { initialDisplayName: string | n
     },
   });
 
+  function applyAvatar(nextAvatarUrl: string | null) {
+    queryClient.setQueryData<Session>(sessionQuery.queryKey, (current) =>
+      current?.signedIn ? { ...current, avatarUrl: nextAvatarUrl } : current,
+    );
+  }
+
+  const avatarMutation = useMutation({
+    mutationFn: uploadAvatar,
+    onSuccess: async (updated) => {
+      setSelectedFile(null);
+      setUploadError(null);
+      applyAvatar(updated.avatarUrl);
+      toast({ body: "Profile photo updated." });
+      // Every Human-bearing response now carries a new avatarUrl, so refresh all
+      // cached lists (members, issues, comments, activity, history) as well.
+      await queryClient.invalidateQueries();
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: removeAvatar,
+    onSuccess: async (updated) => {
+      setSelectedFile(null);
+      setUploadError(null);
+      applyAvatar(updated.avatarUrl);
+      toast({ body: "Profile photo removed." });
+      await queryClient.invalidateQueries();
+    },
+  });
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     setSavedMessage(null);
-    const trimmed = displayName.trim();
+    const trimmed = currentDisplayName.trim();
     mutation.mutate({ displayName: trimmed.length === 0 ? null : trimmed });
+  }
+
+  async function onPhotoChange(files: File | File[] | null) {
+    const file = Array.isArray(files) ? (files[0] ?? null) : files;
+    setSelectedFile(file);
+    setUploadError(null);
+    if (file === null) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setUploadError("Choose a JPEG, PNG or WebP image.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("The image must be 5 MB or smaller.");
+      return;
+    }
+    try {
+      await avatarMutation.mutateAsync(file);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not upload the photo.");
+    }
   }
 
   return (
@@ -128,6 +198,51 @@ function ProfileSection({ initialDisplayName }: { initialDisplayName: string | n
             your email address instead.
           </Text>
         </Stack>
+        <Stack gap={3}>
+          <HumanAvatar
+            avatarUrl={avatarUrl}
+            name={name}
+            alt={`Profile photo for ${name}`}
+            size={96}
+            tooltip={false}
+          />
+          <FileInput
+            label="Profile photo"
+            value={selectedFile}
+            onChange={(files) => {
+              setSelectedFile(Array.isArray(files) ? (files[0] ?? null) : files);
+              setUploadError(null);
+            }}
+            changeAction={(files) => onPhotoChange(files)}
+            accept="image/jpeg,image/png,image/webp"
+            maxSize={5 * 1024 * 1024}
+            description="JPEG, PNG or WebP, up to 5 MB. Stored as a 256×256 square with metadata removed."
+            isLoading={avatarMutation.isPending}
+            width="min(100%, 28rem)"
+            {...(uploadError === null
+              ? {}
+              : { status: { type: "error" as const, message: uploadError } })}
+          />
+          {avatarUrl !== null && (
+            <Stack gap={2} hAlign="start">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                label={removeMutation.isPending ? "Removing…" : "Remove photo"}
+                isLoading={removeMutation.isPending}
+                onClick={() => removeMutation.mutate()}
+              />
+              {removeMutation.isError && (
+                <Banner
+                  status="error"
+                  title="Could not remove photo"
+                  description={removeMutation.error.message}
+                />
+              )}
+            </Stack>
+          )}
+        </Stack>
         <form onSubmit={onSubmit}>
           <FormLayout>
             <TextField
@@ -136,7 +251,7 @@ function ProfileSection({ initialDisplayName }: { initialDisplayName: string | n
               placeholder="Your name"
               width="min(100%, 28rem)"
               maxLength={120}
-              value={displayName}
+              value={currentDisplayName}
               onChange={(value) => {
                 setDraftDisplayName(value);
                 setSavedMessage(null);

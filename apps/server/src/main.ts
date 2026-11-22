@@ -8,6 +8,7 @@ import { createDb } from "./platform/db.ts";
 import { createApp } from "./platform/http.ts";
 import { createLogger } from "./platform/log.ts";
 import { migrate } from "./platform/migrate.ts";
+import { createObjectStore } from "./platform/storage.ts";
 import { version } from "./platform/version.ts";
 
 const config = loadConfig();
@@ -25,7 +26,14 @@ for (const warning of [
   log.warn(warning);
 }
 
-const features = createFeatures(database, config, log);
+const storage = createObjectStore(config);
+const storageHealth = await storage.checkHealth();
+if (!storageHealth.ok) {
+  log.error("object storage is not ready", { reason: storageHealth.reason });
+  process.exit(1);
+}
+
+const features = createFeatures(database, config, log, storage);
 
 for (const feature of features) feature.startBackgroundTasks?.();
 

@@ -20,6 +20,8 @@ These pages are also published on the website:
   `BOOTSTRAP_SECRET`, `ORRERY_ENCRYPTION_KEY`, and image tags.
 - [Backup and restore](./guides/backup-and-restore.md) — verified `pg_dump` / `pg_restore`, preserving
   the encryption key, and an upgrade/rollback checklist.
+- [Object storage](./guides/object-storage.md) — local disk vs S3/RustFS, `--profile storage`, and
+  the `rclone sync` / `aws s3 sync` migration runbook.
 - [Connect an agent](./guides/connect-agent.md) — one-page quickstart for Claude Code, Codex and
   Cursor.
 - [Claude Code run reporting](./guides/claude-code-runs.md) — hook and static MCP setup, with the

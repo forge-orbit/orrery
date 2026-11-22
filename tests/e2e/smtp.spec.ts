@@ -135,19 +135,21 @@ test("completes email verification by POSTing the token, exactly once", async ()
     email: ADMIN_EMAIL,
     displayName: null,
     emailVerified: false,
+    avatarUrl: null,
   });
 
   const res = await api.post("/api/settings/email-verification", {
     data: { token: verificationToken },
   });
   expect(res.status()).toBe(200);
-  expect(await res.json()).toEqual({ email: ADMIN_EMAIL, emailVerified: true });
+  expect(await res.json()).toEqual({ email: ADMIN_EMAIL, emailVerified: true, avatarUrl: null });
 
   const after = await api.get("/api/auth/session");
   expect(await after.json()).toEqual({
     email: ADMIN_EMAIL,
     displayName: null,
     emailVerified: true,
+    avatarUrl: null,
   });
 
   const again = await api.post("/api/settings/email-verification", {
@@ -215,6 +217,7 @@ test("keeps the settings and the verified email across a restart", async () => {
     email: ADMIN_EMAIL,
     displayName: null,
     emailVerified: true,
+    avatarUrl: null,
   });
 
   const send = await api.post("/api/settings/smtp/test");

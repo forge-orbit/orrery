@@ -20,6 +20,7 @@ import {
   WorkSessionStatus,
   WorkspaceKind,
   SmtpSecurity,
+  StoredObjectStatus,
 } from "@orrery/contract";
 import { sql } from "drizzle-orm";
 import {
@@ -37,6 +38,36 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
+export const storedObjects = pgTable(
+  "stored_objects",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull().unique(),
+    status: text("status").$type<StoredObjectStatus>().notNull().default("pending"),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    sha256: text("sha256").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    check(
+      "stored_objects_status",
+      sql`${t.status} in (${sql.raw(sqlLiteralList(StoredObjectStatus))})`,
+    ),
+    check("stored_objects_byte_size_positive", sql`${t.byteSize} > 0`),
+    check("stored_objects_sha256_format", sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "stored_objects_key_relative",
+      sql`${t.key} !~ '^/' and ${t.key} !~ '(^|/)\\.\\.(/|$)' and ${t.key} !~ '\\\\'`,
+    ),
+    check(
+      "stored_objects_deleted_at_matches_status",
+      sql`(${t.status} = ${sql.raw(`'${StoredObjectStatus.enum.deleted}'`)}) = (${t.deletedAt} is not null)`,
+    ),
+  ],
+);
+
 export const humans = pgTable(
   "humans",
   {
@@ -49,6 +80,10 @@ export const humans = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 
     deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
+
+    avatarObjectId: text("avatar_object_id").references(() => storedObjects.id, {
+      onDelete: "set null",
+    }),
   },
   (t) => [
     check("humans_email_normalized", sql`${t.email} = lower(btrim(${t.email}))`),
@@ -56,6 +91,7 @@ export const humans = pgTable(
       "humans_display_name_valid",
       sql`${t.displayName} is null or (btrim(${t.displayName}) <> '' and char_length(${t.displayName}) <= 120)`,
     ),
+    uniqueIndex("one_human_per_avatar_object").on(t.avatarObjectId),
   ],
 );
 

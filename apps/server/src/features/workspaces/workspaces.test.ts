@@ -562,6 +562,7 @@ describe("workspaces", () => {
       {
         humanId: admin.id,
         email: EMAIL,
+        avatarUrl: null,
         isOwner: true,
         canCreateProjects: true,
         canInviteMembers: true,
@@ -762,6 +763,7 @@ describe("workspaces", () => {
     expect(await registered.json()).toEqual({
       email: "new.member@example.com",
       emailVerified: true,
+      avatarUrl: null,
     });
 
     const [human] = await database.db
@@ -854,6 +856,7 @@ describe("workspaces", () => {
     expect(WorkspaceMember.parse(await appointed.json())).toEqual({
       humanId: member.id,
       email: INVITEE,
+      avatarUrl: null,
       isOwner: true,
       canCreateProjects: true,
       canInviteMembers: true,

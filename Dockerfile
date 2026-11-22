@@ -45,6 +45,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=server /app /app
 COPY --from=web /app/apps/web/dist /app/apps/web/dist
+RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s \

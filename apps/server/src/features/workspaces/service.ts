@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
+  avatarUrlFor,
   InvitationDelivery,
   InvitationStatus,
   ProjectAccessLevel,
@@ -184,6 +185,7 @@ async function lockWorkspaceForMutation(
 interface WorkspaceMembershipRow {
   humanId: string;
   email: string;
+  avatarObjectId: string | null;
   isOwner: boolean;
   canCreateProjects: boolean;
   canInviteMembers: boolean;
@@ -202,6 +204,7 @@ async function readMembership(
     .select({
       humanId: workspaceMemberships.humanId,
       email: humans.email,
+      avatarObjectId: humans.avatarObjectId,
       isOwner: workspaceMemberships.isOwner,
       canCreateProjects: workspaceMemberships.canCreateProjects,
       canInviteMembers: workspaceMemberships.canInviteMembers,
@@ -381,6 +384,7 @@ function toMember(row: WorkspaceMembershipRow): WorkspaceMember {
   return {
     humanId: row.humanId,
     email: row.email,
+    avatarUrl: row.avatarObjectId === null ? null : avatarUrlFor(row.humanId, row.avatarObjectId),
     isOwner: row.isOwner,
     canCreateProjects: row.isOwner || row.canCreateProjects,
     canInviteMembers: row.isOwner || row.canInviteMembers,
@@ -618,7 +622,7 @@ export interface WorkspacesService {
   registerThroughInvitation(input: {
     token: string;
     password: string;
-  }): Promise<{ email: string; emailVerified: true }>;
+  }): Promise<{ email: string; emailVerified: true; avatarUrl: null }>;
   appointOwner(
     account: SessionAccount | null,
     workspaceId: string,
@@ -892,6 +896,7 @@ export function createWorkspacesService({
             .select({
               humanId: workspaceMemberships.humanId,
               email: humans.email,
+              avatarObjectId: humans.avatarObjectId,
               isOwner: workspaceMemberships.isOwner,
               canCreateProjects: workspaceMemberships.canCreateProjects,
               canInviteMembers: workspaceMemberships.canInviteMembers,
@@ -1512,7 +1517,7 @@ export function createWorkspacesService({
         }
         return invitation.email;
       });
-      return { email, emailVerified: true as const };
+      return { email, emailVerified: true as const, avatarUrl: null };
     },
 
     async appointOwner(account, workspaceId, humanId) {

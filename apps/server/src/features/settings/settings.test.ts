@@ -777,11 +777,12 @@ describe("settings", () => {
         email: EMAIL,
         displayName: null,
         emailVerified: false,
+        avatarUrl: null,
       });
 
       const res = await postJson(app, "/api/settings/email-verification", { token }, cookie);
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ email: EMAIL, emailVerified: true });
+      expect(await res.json()).toEqual({ email: EMAIL, emailVerified: true, avatarUrl: null });
 
       const [admin] = await database.db.select().from(humans).where(eq(humans.email, EMAIL));
       expect(admin?.emailVerifiedAt).not.toBeNull();
@@ -793,6 +794,7 @@ describe("settings", () => {
         email: EMAIL,
         displayName: null,
         emailVerified: true,
+        avatarUrl: null,
       });
 
       const again = await postJson(app, "/api/settings/email-verification", { token }, cookie);
@@ -853,7 +855,7 @@ describe("settings", () => {
         cookie,
       );
       expect(valid.status).toBe(200);
-      expect(await valid.json()).toEqual({ email: EMAIL, emailVerified: true });
+      expect(await valid.json()).toEqual({ email: EMAIL, emailVerified: true, avatarUrl: null });
     });
 
     it("refuses another account's token without consuming it, and its owner can still redeem it", async () => {
@@ -892,7 +894,11 @@ describe("settings", () => {
         memberCookie,
       );
       expect(own.status).toBe(200);
-      expect(await own.json()).toEqual({ email: "member@example.com", emailVerified: true });
+      expect(await own.json()).toEqual({
+        email: "member@example.com",
+        emailVerified: true,
+        avatarUrl: null,
+      });
     });
   });
 
