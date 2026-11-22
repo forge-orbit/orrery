@@ -79,7 +79,7 @@ function InboxPage() {
           description="Showing questions associated with the selected issue."
           endContent={
             <Link to="/inbox" search={{}} color="accent" hasUnderline>
-              Show all
+              View all questions
             </Link>
           }
         />
