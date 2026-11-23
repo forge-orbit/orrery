@@ -37,6 +37,7 @@ export interface RouterContext {
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     accessPage?: boolean;
+    fullHeightLayout?: boolean;
   }
 }
 
@@ -232,6 +233,9 @@ function RootLayout() {
   const accessPage = useMatches({
     select: (matches) => matches.some((match) => match.staticData.accessPage === true),
   });
+  const fullHeightLayout = useMatches({
+    select: (matches) => matches.some((match) => match.staticData.fullHeightLayout === true),
+  });
 
   if (accessPage) {
     return (
@@ -291,11 +295,15 @@ function RootLayout() {
           </SideNav>
         }
       >
-        <Layout contentWidth="78rem">
-          <Stack as="main" id="content" data-app-content="" padding={6}>
-            <Outlet />
-          </Stack>
-        </Layout>
+        {fullHeightLayout ? (
+          <Outlet />
+        ) : (
+          <Layout contentWidth="78rem">
+            <Stack as="main" id="content" data-app-content="" padding={6}>
+              <Outlet />
+            </Stack>
+          </Layout>
+        )}
       </AppShell>
     </LinkProvider>
   );
