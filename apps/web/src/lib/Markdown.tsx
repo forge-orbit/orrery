@@ -7,7 +7,6 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
-import mermaid from "mermaid";
 import { createElement, type ReactNode, useId } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -123,6 +122,7 @@ async function renderMermaid(
   scheme: "light" | "dark",
   instanceId: string,
 ): Promise<string> {
+  const { default: mermaid } = await import("mermaid");
   if (initializedTheme !== scheme) {
     mermaid.initialize({
       startOnLoad: false,
