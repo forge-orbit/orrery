@@ -11,7 +11,12 @@ import { AgentAvatar } from "../../lib/harness.tsx";
 import { updateIssue } from "./commands.ts";
 import { issueActivityQuery, issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
 
-export type AssigneeCandidate = { value: string; label: string; assignee: Assignee };
+export type AssigneeCandidate = {
+  value: string;
+  label: string;
+  assignee: Assignee;
+  noProjectAccess?: boolean;
+};
 
 export function AssigneeControl({
   issue,
@@ -29,6 +34,8 @@ export function AssigneeControl({
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const value = currentValue(issue);
+  const selectedHuman = candidates.find((candidate) => candidate.value === value);
+  const noProjectAccess = selectedHuman?.noProjectAccess === true;
 
   async function onChange(nextValue: string) {
     if (nextValue === value) return;
@@ -104,13 +111,24 @@ export function AssigneeControl({
         onChange={(nextValue) => void onChange(nextValue)}
         options={[
           { value: "", label: "Unassigned" },
-          ...candidates.map((candidate) => ({ value: candidate.value, label: candidate.label })),
+          ...candidates.map((candidate) => ({
+            value: candidate.value,
+            label: candidate.label,
+            description: candidate.noProjectAccess === true ? "No project access" : undefined,
+          })),
           ...(issue.assignee !== null && !candidates.some((c) => c.value === value)
             ? [{ value, label: currentLabel(issue) }]
             : []),
         ]}
       />
       {assigneeIdentity}
+      {noProjectAccess && (
+        <Banner
+          status="warning"
+          title="No project access"
+          description="This member will not see the issue in My work until they are granted access to the project."
+        />
+      )}
       {error !== undefined && <Banner status="error" role="alert" title={error} />}
     </Stack>
   );

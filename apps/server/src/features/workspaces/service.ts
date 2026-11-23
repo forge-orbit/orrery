@@ -8,6 +8,7 @@ import {
   UpdateWorkspaceMemberRequest,
   workspaceCapabilities,
   type CreateWorkspaceRequest,
+  type HumanSuggestion,
   type InvitationSummary,
   type InviteWorkspaceMemberRequest,
   type Workspace,
@@ -16,7 +17,23 @@ import {
   type WorkspaceInvitationPreview,
   type WorkspaceMember,
 } from "@orrery/contract";
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DbTransaction } from "../../platform/db.ts";
 import { errorNameAndCode, uniqueConstraintName } from "../../platform/errors.ts";
@@ -197,6 +214,7 @@ async function lockWorkspaceForMutation(
 interface WorkspaceMembershipRow {
   humanId: string;
   email: string;
+  displayName: string | null;
   avatarObjectId: string | null;
   isOwner: boolean;
   canCreateProjects: boolean;
@@ -216,6 +234,7 @@ async function readMembership(
     .select({
       humanId: workspaceMemberships.humanId,
       email: humans.email,
+      displayName: humans.displayName,
       avatarObjectId: humans.avatarObjectId,
       isOwner: workspaceMemberships.isOwner,
       canCreateProjects: workspaceMemberships.canCreateProjects,
@@ -396,6 +415,7 @@ function toMember(row: WorkspaceMembershipRow): WorkspaceMember {
   return {
     humanId: row.humanId,
     email: row.email,
+    displayName: row.displayName,
     avatarUrl: row.avatarObjectId === null ? null : avatarUrlFor(row.humanId, row.avatarObjectId),
     isOwner: row.isOwner,
     canCreateProjects: row.isOwner || row.canCreateProjects,
@@ -611,6 +631,11 @@ export interface WorkspacesService {
   list(account: SessionAccount | null): Promise<Workspace[]>;
   get(account: SessionAccount | null, workspaceId: string): Promise<Workspace>;
   members(account: SessionAccount | null, workspaceId: string): Promise<WorkspaceMember[]>;
+  suggestHumans(
+    account: SessionAccount | null,
+    workspaceId: string,
+    query: string,
+  ): Promise<HumanSuggestion[]>;
   create(account: SessionAccount | null, input: CreateWorkspaceRequest): Promise<Workspace>;
   invite(
     account: SessionAccount | null,
@@ -908,6 +933,7 @@ export function createWorkspacesService({
             .select({
               humanId: workspaceMemberships.humanId,
               email: humans.email,
+              displayName: humans.displayName,
               avatarObjectId: humans.avatarObjectId,
               isOwner: workspaceMemberships.isOwner,
               canCreateProjects: workspaceMemberships.canCreateProjects,
@@ -927,6 +953,88 @@ export function createWorkspacesService({
             )
             .orderBy(workspaceMemberships.createdAt, workspaceMemberships.humanId);
           return rows.map(toMember);
+        },
+        { isolationLevel: "repeatable read", accessMode: "read only" },
+      );
+    },
+
+    async suggestHumans(account, workspaceId, query) {
+      const actor = requireAccount(account);
+      return db.transaction(
+        async (tx) => {
+          await readSharedWorkspace(tx, workspaceId);
+          const membership = await readMembership(
+            tx,
+            workspaceId,
+            actor.humanId,
+            "workspace_not_found",
+          );
+          if (
+            !membership.isOwner &&
+            !membership.canManageMemberPermissions &&
+            !membership.canInviteMembers
+          ) {
+            throw new WorkspacesError("not_workspace_owner");
+          }
+
+          // Escape LIKE metacharacters so punctuation in an address searches literally.
+          const pattern = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
+          const matches = or(
+            ilike(humans.email, sql`${pattern} escape '\\'`),
+            ilike(humans.displayName, sql`${pattern} escape '\\'`),
+          );
+          const currentMembers = tx
+            .select({ humanId: workspaceMemberships.humanId })
+            .from(workspaceMemberships)
+            .where(eq(workspaceMemberships.workspaceId, workspaceId));
+          const conditions = [
+            isNull(humans.deactivatedAt),
+            ne(humans.id, actor.humanId),
+            notInArray(humans.id, currentMembers),
+            matches,
+          ];
+          if (!account?.isSystemAdministrator) {
+            // A non-administrator may only discover Humans already met in another
+            // shared workspace. Strangers on the installation stay invisible.
+            const actorWorkspaces = tx
+              .select({ workspaceId: workspaceMemberships.workspaceId })
+              .from(workspaceMemberships)
+              .where(
+                and(
+                  eq(workspaceMemberships.humanId, actor.humanId),
+                  isNull(workspaceMemberships.suspendedAt),
+                ),
+              );
+            const coWorkspaceHumans = tx
+              .select({ humanId: workspaceMemberships.humanId })
+              .from(workspaceMemberships)
+              .where(
+                and(
+                  isNull(workspaceMemberships.suspendedAt),
+                  inArray(workspaceMemberships.workspaceId, actorWorkspaces),
+                ),
+              );
+            conditions.push(inArray(humans.id, coWorkspaceHumans));
+          }
+
+          const rows = await tx
+            .select({
+              humanId: humans.id,
+              email: humans.email,
+              displayName: humans.displayName,
+              avatarObjectId: humans.avatarObjectId,
+            })
+            .from(humans)
+            .where(and(...conditions))
+            .orderBy(humans.email)
+            .limit(20);
+          return rows.map((row) => ({
+            humanId: row.humanId,
+            email: row.email,
+            displayName: row.displayName,
+            avatarUrl:
+              row.avatarObjectId === null ? null : avatarUrlFor(row.humanId, row.avatarObjectId),
+          }));
         },
         { isolationLevel: "repeatable read", accessMode: "read only" },
       );

@@ -37,6 +37,7 @@ import { useState } from "react";
 import {
   IssuePriorityControls,
   issuesQuery,
+  projectAccessCandidates,
   issueStatusLabels,
   knowledgeEntriesQuery,
   LabelPill,
@@ -55,6 +56,7 @@ import {
 } from "../features/projects/index.ts";
 import { workspaceRunsQuery } from "../features/runs/index.ts";
 import { activeSessionsQuery } from "../features/work-sessions/index.ts";
+import { workspaceMembersQuery } from "../features/workspaces/index.ts";
 import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextField } from "../lib/fields.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
@@ -663,6 +665,15 @@ function ProjectSettings({ project }: { project: Project }) {
 
 function ProjectAccess({ projectId }: { projectId: string }) {
   const { data: grants } = useSuspenseQuery(projectAccessQuery(projectId));
+  const { data: project } = useSuspenseQuery(projectQuery(projectId));
+  const { data: members = [] } = useQuery({
+    ...workspaceMembersQuery(project.workspaceId),
+    enabled: project.workspaceKind === "shared" && project.accessLevel === "manage",
+  });
+  const candidates = projectAccessCandidates(
+    members,
+    grants.map((grant) => grant.humanId),
+  );
   const queryClient = useQueryClient();
   const toast = useToast();
   const [email, setEmail] = useState("");
@@ -821,17 +832,30 @@ function ProjectAccess({ projectId }: { projectId: string }) {
               Grant project access
             </Heading>
             <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="end">
-              <TextField
-                label="Email"
-                id="access-email"
+              <Selector
+                label="Member"
+                id="access-member"
                 htmlName="email"
-                type="email"
+                hasSearch
+                searchPlaceholder="Search workspace members"
+                placeholder="Choose a workspace member"
                 value={email}
                 onChange={setEmail}
-                required
-                autoComplete="off"
-                placeholder="member@example.com"
-                width="min(100%, 20rem)"
+                isRequired
+                isDisabled={saving || candidates.length === 0}
+                options={candidates.map((candidate) => ({
+                  value: candidate.email,
+                  label: candidate.label,
+                  description: candidate.displayName === null ? undefined : candidate.email,
+                  icon: (
+                    <HumanAvatar
+                      name={candidate.label}
+                      avatarUrl={candidate.avatarUrl}
+                      size="xsm"
+                    />
+                  ),
+                }))}
+                width="min(100%, 22rem)"
               />
               <Selector
                 label="Access level"

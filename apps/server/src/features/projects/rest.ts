@@ -20,6 +20,7 @@ import {
   Project,
   ProjectAccessGrant,
   ProjectAccessGrantsResponse,
+  ProjectAccessHumanIds,
   ProjectActivityResponse,
   ProjectLabel,
   ProjectLabelsResponse,
@@ -160,6 +161,24 @@ const listProjectAccess = createRoute({
     400: problem("The project id is invalid"),
     401: problem("Not signed in"),
     403: problem("Read or Contribute access cannot manage project access"),
+    404: problem("No project with this id is accessible to the caller"),
+  },
+});
+
+const projectAccessHumanIds = createRoute({
+  method: "get",
+  path: "/api/projects/{projectId}/access/humans",
+  summary: "The Humans who currently hold project access",
+  description:
+    "Read access is enough: the assignee picker uses these ids to warn that a workspace Member without a grant will not see the issue in My Work. Workspace owners have implicit access and are not listed. A caller without access to the project gets the same 404 as a missing project.",
+  request: { params: projectParams },
+  responses: {
+    200: {
+      description: "The human ids with an active grant",
+      content: { "application/json": { schema: ProjectAccessHumanIds } },
+    },
+    400: problem("The project id is invalid"),
+    401: problem("Not signed in"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -860,6 +879,7 @@ export const routes = [
   updateProject,
   setProjectFallbackPolicy,
   listProjectAccess,
+  projectAccessHumanIds,
   setProjectAccess,
   removeProjectAccess,
   listIssues,
@@ -1114,6 +1134,15 @@ export function createProjectsRest(
       return c.json(await service.listProjectAccess(await sessionReader(c), projectId), 200);
     } catch (error) {
       return failure(c, error, projectWriteKinds);
+    }
+  });
+
+  app.openapi(projectAccessHumanIds, async (c) => {
+    try {
+      const { projectId } = c.req.valid("param");
+      return c.json(await service.projectAccessHumanIds(await sessionReader(c), projectId), 200);
+    } catch (error) {
+      return failure(c, error, projectReadKinds);
     }
   });
 

@@ -12,6 +12,7 @@ import { Grid } from "@astryxdesign/core/Grid";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
+import { List, ListItem } from "@astryxdesign/core/List";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -48,6 +49,7 @@ import { WebhooksSection, workspaceWebhooksQuery } from "../features/webhooks/in
 import { activeSessionsQuery as workspaceActiveSessionsQuery } from "../features/work-sessions/index.ts";
 import {
   appointWorkspaceOwner,
+  humanSuggestionsQuery,
   inviteWorkspaceMember,
   removeWorkspaceMember,
   resendWorkspaceInvitation,
@@ -875,6 +877,12 @@ function InviteMemberForm({
     ? projects
     : projects.filter((project) => project.accessLevel === "manage");
   const [email, setEmail] = useState("");
+  const [suggestionSearch, setSuggestionSearch] = useState("");
+  const searchingKnownHumans = suggestionSearch.trim().length >= 2;
+  const { data: suggestions = [] } = useQuery({
+    ...humanSuggestionsQuery(workspaceId, suggestionSearch),
+    enabled: searchingKnownHumans,
+  });
   const [offered, setOffered] = useState<Record<string, ProjectAccessLevel>>({});
   const [error, setError] = useState<string>();
   const [invited, setInvited] = useState<string>();
@@ -908,6 +916,7 @@ function InviteMemberForm({
       });
       setInvited(invitation.email);
       setEmail("");
+      setSuggestionSearch("");
       setOffered({});
       toast({ body: `Invitation sent to ${invitation.email}.` });
     } catch (cause) {
@@ -932,12 +941,39 @@ function InviteMemberForm({
           htmlName="email"
           type="email"
           value={email}
-          onChange={setEmail}
+          onChange={(next) => {
+            setEmail(next);
+            setSuggestionSearch(next.trim());
+          }}
           required
           autoComplete="off"
           placeholder="teammate@example.com"
           width="100%"
         />
+        {searchingKnownHumans && suggestions.length > 0 && (
+          <List header="Known people" density="compact" aria-label="Known people suggestions">
+            {suggestions.map((suggestion) => (
+              <ListItem
+                key={suggestion.humanId}
+                itemKey={suggestion.humanId}
+                label={suggestion.displayName ?? suggestion.email}
+                description={suggestion.email}
+                startContent={
+                  <HumanAvatar
+                    name={suggestion.displayName ?? suggestion.email}
+                    avatarUrl={suggestion.avatarUrl}
+                    size="xsm"
+                  />
+                }
+                onClick={() => {
+                  setEmail(suggestion.email);
+                  setSuggestionSearch("");
+                }}
+                data-human-suggestion={suggestion.email}
+              />
+            ))}
+          </List>
+        )}
         {selectable.length > 0 && (
           <fieldset>
             <legend>Project access (optional)</legend>

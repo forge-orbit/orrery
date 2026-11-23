@@ -22,6 +22,8 @@ import { agentKeysQuery, workspaceAgentKeysQuery } from "../features/agents/inde
 import {
   type AssigneeCandidate,
   createIssue,
+  missingProjectAccessHumanIds,
+  projectAccessHumanIdsQuery,
   issueQuery,
   issuesQuery,
   issueStatusLabels,
@@ -81,6 +83,11 @@ function NewIssuePage() {
     ...workspaceMembersQuery(project.workspaceId),
     enabled: canReadMembers,
   });
+  const { data: grantedHumanIds = [] } = useQuery({
+    ...projectAccessHumanIdsQuery(projectId),
+    enabled: canReadMembers,
+  });
+  const withoutAccess = missingProjectAccessHumanIds(members, grantedHumanIds);
   const { data: workspaceKeys = [] } = useQuery({
     ...workspaceAgentKeysQuery(project.workspaceId),
     enabled: workspace.kind === "shared" && workspace.isOwner,
@@ -106,6 +113,7 @@ function NewIssuePage() {
         value: `human:${actor.humanId}`,
         label: `Human · ${actor.email ?? actor.displayName}`,
         assignee: { type: "human" as const, id: actor.humanId },
+        noProjectAccess: withoutAccess.has(actor.humanId),
       });
     }
   }
@@ -116,6 +124,7 @@ function NewIssuePage() {
       value: `human:${member.humanId}`,
       label: `Human · ${member.email}`,
       assignee: { type: "human" as const, id: member.humanId },
+      noProjectAccess: withoutAccess.has(member.humanId),
     });
   }
   const seenAgents = new Set<string>();
@@ -129,6 +138,9 @@ function NewIssuePage() {
     });
   }
 
+  const noProjectAccess = candidates.find(
+    (candidate) => candidate.value === assigneeValue,
+  )?.noProjectAccess;
   const canContribute = project.accessLevel !== "read";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -268,9 +280,20 @@ function NewIssuePage() {
         onChange={setAssigneeValue}
         options={[
           { value: "", label: "Unassigned" },
-          ...candidates.map((candidate) => ({ value: candidate.value, label: candidate.label })),
+          ...candidates.map((candidate) => ({
+            value: candidate.value,
+            label: candidate.label,
+            description: candidate.noProjectAccess === true ? "No project access" : undefined,
+          })),
         ]}
       />
+      {noProjectAccess === true && (
+        <Banner
+          status="warning"
+          title="No project access"
+          description="This member will not see the issue in My work until they are granted access to the project."
+        />
+      )}
       <MultiSelector
         label="Labels"
         id="new-issue-labels"

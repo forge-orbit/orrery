@@ -230,6 +230,11 @@ export const ProjectAccessGrantsResponse = z
   .meta({ id: "ProjectAccessGrantsResponse" });
 export type ProjectAccessGrantsResponse = z.infer<typeof ProjectAccessGrantsResponse>;
 
+export const ProjectAccessHumanIds = z
+  .array(z.string())
+  .meta({ id: "ProjectAccessHumanIds" });
+export type ProjectAccessHumanIds = z.infer<typeof ProjectAccessHumanIds>;
+
 
 
 

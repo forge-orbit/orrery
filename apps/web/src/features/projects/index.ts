@@ -21,6 +21,11 @@ export {
   updateProject,
   updateProjectLabel,
 } from "./commands.ts";
+export {
+  missingProjectAccessHumanIds,
+  projectAccessCandidates,
+  type ProjectAccessCandidate,
+} from "./assignee-access.ts";
 export { AssigneeControl, type AssigneeCandidate } from "./AssigneeControl.tsx";
 export { IssueLabels } from "./IssueLabels.tsx";
 export { IssueMentionTextArea } from "./IssueMentionTextArea.tsx";
@@ -40,6 +45,7 @@ export {
   issuesQuery,
   knowledgeEntriesQuery,
   knowledgeEntryQuery,
+  projectAccessHumanIdsQuery,
   projectAccessQuery,
   projectActivityQuery,
   projectLabelsQuery,

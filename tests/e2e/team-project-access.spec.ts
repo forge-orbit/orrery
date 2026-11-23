@@ -264,7 +264,8 @@ test("grants access in the browser and shows Read without mutation controls", as
 
   await page.goto(`/projects/${projectId}`);
   await page.getByRole("tab", { name: "Settings" }).click();
-  await page.getByLabel("Email").fill(COLLEAGUE_EMAIL);
+  await page.getByRole("button", { name: /Member/ }).click();
+  await page.getByRole("option", { name: new RegExp(COLLEAGUE_EMAIL) }).click();
   await page.getByRole("combobox", { name: "Access level" }).click();
   await page.getByRole("option", { name: "Contribute", exact: true }).click();
   await page.getByRole("button", { name: "Grant access" }).click();

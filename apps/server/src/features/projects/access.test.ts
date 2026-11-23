@@ -4,6 +4,7 @@ import {
   IssueDetail,
   Problem,
   Project,
+  ProjectAccessHumanIds,
   ProjectAccessGrant,
   ProjectAccessGrantsResponse,
   ProjectsResponse,
@@ -1033,5 +1034,39 @@ describe("shared project access", () => {
       IssueDetail.parse(await (await getJson(app, `/api/issues/${issue.id}`, reader.cookie)).json())
         .links,
     ).toHaveLength(1);
+  });
+
+  it("exposes only current grant holders to project readers for the assignee warning", async () => {
+    const { app, adminCookie } = await readyApp();
+    const workspace = await createSharedWorkspace(app, adminCookie, "Access Lab");
+    const project = await createProject(app, adminCookie, workspace.id, "Launch");
+    const member = await secondHuman(MEMBER_EMAIL, workspace.id);
+    const colleague = await secondHuman(COLLEAGUE_EMAIL, workspace.id);
+    const outsider = await secondHuman(OUTSIDER_EMAIL);
+
+    const before = await getJson(app, `/api/projects/${project.id}/access/humans`, adminCookie);
+    expect(before.status).toBe(200);
+    expect(ProjectAccessHumanIds.parse(await before.json())).toEqual([]);
+
+    await grantAccess(app, adminCookie, project.id, MEMBER_EMAIL, "read");
+    const granted = await getJson(app, `/api/projects/${project.id}/access/humans`, adminCookie);
+    expect(ProjectAccessHumanIds.parse(await granted.json())).toEqual([member.human.id]);
+    // A Reader can see the grant ids so the assignee picker can warn about colleagues.
+    const readerView = await getJson(
+      app,
+      `/api/projects/${project.id}/access/humans`,
+      member.cookie,
+    );
+    expect(ProjectAccessHumanIds.parse(await readerView.json())).toEqual([member.human.id]);
+    await expectProblem(
+      await getJson(app, `/api/projects/${project.id}/access/humans`, colleague.cookie),
+      404,
+      "project_not_found",
+    );
+    await expectProblem(
+      await getJson(app, `/api/projects/${project.id}/access/humans`, outsider.cookie),
+      404,
+      "project_not_found",
+    );
   });
 });

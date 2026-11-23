@@ -1314,6 +1314,12 @@
           "email": {
             "$ref": "#/components/schemas/Email"
           },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "avatarUrl": {
             "$ref": "#/components/schemas/AvatarUrl"
           },
@@ -1336,12 +1342,45 @@
         "required": [
           "humanId",
           "email",
+          "displayName",
           "avatarUrl",
           "isOwner",
           "canCreateProjects",
           "canInviteMembers",
           "canRemoveMembers",
           "canManageMemberPermissions"
+        ]
+      },
+      "HumanSuggestionsResponse": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/HumanSuggestion"
+        }
+      },
+      "HumanSuggestion": {
+        "type": "object",
+        "properties": {
+          "humanId": {
+            "type": "string"
+          },
+          "email": {
+            "$ref": "#/components/schemas/Email"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
+          }
+        },
+        "required": [
+          "humanId",
+          "email",
+          "displayName",
+          "avatarUrl"
         ]
       },
       "CreateWorkspaceRequest": {
@@ -1710,6 +1749,12 @@
           "createdAt",
           "updatedAt"
         ]
+      },
+      "ProjectAccessHumanIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
       },
       "SetProjectAccessRequest": {
         "type": "object",
@@ -7695,6 +7740,86 @@
         }
       }
     },
+    "/api/workspaces/{workspaceId}/human-suggestions": {
+      "get": {
+        "summary": "Known Humans to suggest when inviting someone to a shared workspace",
+        "description": "The free-text email field stays authoritative: these are only suggestions, never a directory of the installation. System administrators may find any active Human not already in the workspace. Other owners, permission managers and delegated inviters may only find active Humans they already share another workspace with; strangers answer exactly like a query with no matches. Deactivated accounts and current members are never suggested.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "workspaceId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "required": true,
+            "name": "q",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Up to twenty matching Humans, ordered by email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanSuggestionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The workspace id or search query is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller lacks the workspace capability required to invite members",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No accessible shared workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspaceId}/invitations": {
       "post": {
         "summary": "Invite an email into a shared workspace",
@@ -9105,6 +9230,66 @@
           },
           "409": {
             "description": "Workspace owners already have Manage access to every project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/access/humans": {
+      "get": {
+        "summary": "The Humans who currently hold project access",
+        "description": "Read access is enough: the assignee picker uses these ids to warn that a workspace Member without a grant will not see the issue in My Work. Workspace owners have implicit access and are not listed. A caller without access to the project gets the same 404 as a missing project.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The human ids with an active grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAccessHumanIds"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The project id is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No project with this id is accessible to the caller",
             "content": {
               "application/problem+json": {
                 "schema": {

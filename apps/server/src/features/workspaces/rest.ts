@@ -5,6 +5,8 @@ import {
   AppointWorkspaceOwnerRequest,
   CreateWorkspaceRequest,
   DeclineWorkspaceInvitationRequest,
+  HumanSuggestionsQuery,
+  HumanSuggestionsResponse,
   InvitationSummaries,
   InvitationSummary,
   InviteWorkspaceMemberRequest,
@@ -81,6 +83,25 @@ const listWorkspaceMembers = createRoute({
     400: problem("The workspace id is invalid"),
     401: problem("Not signed in"),
     403: problem("The caller lacks the workspace capability required to see the directory"),
+    404: problem("No accessible shared workspace"),
+  },
+});
+
+const suggestHumans = createRoute({
+  method: "get",
+  path: "/api/workspaces/{workspaceId}/human-suggestions",
+  summary: "Known Humans to suggest when inviting someone to a shared workspace",
+  description:
+    "The free-text email field stays authoritative: these are only suggestions, never a directory of the installation. System administrators may find any active Human not already in the workspace. Other owners, permission managers and delegated inviters may only find active Humans they already share another workspace with; strangers answer exactly like a query with no matches. Deactivated accounts and current members are never suggested.",
+  request: { params: workspaceParams, query: HumanSuggestionsQuery },
+  responses: {
+    200: {
+      description: "Up to twenty matching Humans, ordered by email",
+      content: { "application/json": { schema: HumanSuggestionsResponse } },
+    },
+    400: problem("The workspace id or search query is invalid"),
+    401: problem("Not signed in"),
+    403: problem("The caller lacks the workspace capability required to invite members"),
     404: problem("No accessible shared workspace"),
   },
 });
@@ -377,6 +398,7 @@ export const routes = [
   listWorkspaces,
   getWorkspace,
   listWorkspaceMembers,
+  suggestHumans,
   createWorkspace,
   inviteWorkspaceMember,
   listWorkspaceInvitations,
@@ -424,6 +446,7 @@ function isKind<K extends readonly WorkspacesErrorKind[]>(
 const listKinds = ["not_signed_in"] as const;
 const getKinds = ["not_signed_in", "workspace_not_found"] as const;
 const membersKinds = ["not_signed_in", "workspace_not_found", "not_workspace_owner"] as const;
+const suggestKinds = ["not_signed_in", "workspace_not_found", "not_workspace_owner"] as const;
 const createKinds = ["not_signed_in"] as const;
 const inviteKinds = [
   "not_signed_in",
@@ -552,6 +575,16 @@ export function createWorkspacesRest(service: WorkspacesService, sessionReader: 
       return c.json(await service.members(await sessionReader(c), workspaceId), 200);
     } catch (error) {
       return failure(c, error, membersKinds);
+    }
+  });
+
+  app.openapi(suggestHumans, async (c) => {
+    try {
+      const { workspaceId } = c.req.valid("param");
+      const { q } = c.req.valid("query");
+      return c.json(await service.suggestHumans(await sessionReader(c), workspaceId, q), 200);
+    } catch (error) {
+      return failure(c, error, suggestKinds);
     }
   });
 

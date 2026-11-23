@@ -1,4 +1,5 @@
 import {
+  HumanSuggestionsResponse,
   InvitationSummaries,
   Workspace,
   WorkspaceInvitationPreview,
@@ -37,6 +38,17 @@ export const workspaceMembersQuery = (workspaceId: string) =>
       getJson(`/api/workspaces/${encodeURIComponent(workspaceId)}/members`, (value) =>
         WorkspaceMembersResponse.parse(value),
       ),
+  });
+
+export const humanSuggestionsQuery = (workspaceId: string, query: string) =>
+  queryOptions({
+    queryKey: ["workspaces", workspaceId, "human-suggestions", query],
+    queryFn: () =>
+      getJson(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/human-suggestions?q=${encodeURIComponent(query)}`,
+        (value) => HumanSuggestionsResponse.parse(value),
+      ),
+    enabled: query.trim().length > 0,
   });
 
 export const workspaceInvitationsQuery = (workspaceId: string) =>

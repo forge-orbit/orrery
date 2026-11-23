@@ -2768,6 +2768,50 @@ def extract_code_facts() -> dict[str, Any]:
         "if (sweeping) return;" in att_index_src and "setInterval(" in att_index_src
     )
 
+    # #181: the invitation form's Human suggestions must not become an installation
+    # directory. The decision lives in the workspaces service; the route, shared
+    # contract and generated contract are read too, so deleting any of them fails M40.
+    ws_rest_181 = read_text("apps/server/src/features/workspaces/rest.ts")
+    ws_contract_181 = read_text("packages/contract/src/workspaces.ts")
+    openapi_181 = read_text("contract/openapi.json")
+    suggest_fn = slice_between(ws_src, "async suggestHumans(", "\n    async create(")
+    suggest_kinds = slice_between(ws_rest_181, "const suggestKinds", "const createKinds")
+    m40_account = "requireAccount(account)" in suggest_fn
+    m40_workspace_404 = (
+        "readSharedWorkspace(tx, workspaceId)" in suggest_fn
+        and "readMembership(" in suggest_fn
+        and '"workspace_not_found"' in suggest_fn
+    )
+    m40_capability_gate = all(
+        token in suggest_fn
+        for token in (
+            "!membership.isOwner",
+            "!membership.canManageMemberPermissions",
+            "!membership.canInviteMembers",
+        )
+    )
+    m40_admin_branch = (
+        "!account?.isSystemAdministrator" in suggest_fn
+        and "isSystemAdministrator" in suggest_fn
+    )
+    m40_co_workspace = (
+        "coWorkspaceHumans" in suggest_fn
+        and "inArray(humans.id, coWorkspaceHumans)" in suggest_fn
+    )
+    m40_active_only = "isNull(humans.deactivatedAt)" in suggest_fn
+    m40_exclude_members = "notInArray(humans.id, currentMembers)" in suggest_fn
+    m40_bounded = ".limit(20)" in suggest_fn
+    m40_http_401 = '"not_signed_in"' in suggest_kinds
+    m40_route = (
+        'path: "/api/workspaces/{workspaceId}/human-suggestions"' in ws_rest_181
+        and "service.suggestHumans(" in ws_rest_181
+    )
+    m40_contract = all(
+        name in ws_contract_181
+        for name in ("HumanSuggestionsQuery", "HumanSuggestion", "HumanSuggestionsResponse")
+    )
+    m40_openapi = "/api/workspaces/{workspaceId}/human-suggestions" in openapi_181
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -3190,6 +3234,18 @@ def extract_code_facts() -> dict[str, Any]:
         "m39_knowledge_noop_metadata": m39_knowledge_noop_metadata,
         "m39_metadata_rest_mcp": m39_metadata_rest_mcp,
         "m39_background_overlap": m39_background_overlap,
+        "m40_account": m40_account,
+        "m40_workspace_404": m40_workspace_404,
+        "m40_capability_gate": m40_capability_gate,
+        "m40_admin_branch": m40_admin_branch,
+        "m40_co_workspace": m40_co_workspace,
+        "m40_active_only": m40_active_only,
+        "m40_exclude_members": m40_exclude_members,
+        "m40_bounded": m40_bounded,
+        "m40_http_401": m40_http_401,
+        "m40_route": m40_route,
+        "m40_contract": m40_contract,
+        "m40_openapi": m40_openapi,
     }
 
 
@@ -8442,6 +8498,146 @@ def check_m39(facts: dict[str, bool]) -> CheckResult:
     )
 
 
+def check_m40(facts: dict[str, Any]) -> CheckResult:
+    # #181: probe the Human-suggestion endpoint with each kind of caller against an
+    # existing and a missing workspace, for a co-workspace peer, a stranger, a
+    # deactivated peer and a current member. The outcome is derived from source
+    # guards, so a removed guard (or a missing route/schema/contract) is a leak.
+    files = [
+        "apps/server/src/features/workspaces/service.ts",
+        "apps/server/src/features/workspaces/rest.ts",
+        "packages/contract/src/workspaces.ts",
+        "contract/openapi.json",
+    ]
+    g = {key: value for key, value in facts.items() if key.startswith("m40_")}
+    callers = ("anonymous", "non_member", "plain_member", "owner", "permission_manager", "admin")
+    humans = ("peer", "stranger", "deactivated_peer", "member")
+
+    def visible(caller: str, human: str) -> bool:
+        if not (g["m40_account"] and g["m40_route"] and g["m40_contract"] and g["m40_openapi"]):
+            return False
+        if caller == "admin":
+            if not g["m40_admin_branch"]:
+                return False
+            if human == "member" and g["m40_exclude_members"]:
+                return False
+            if human == "deactivated_peer" and g["m40_active_only"]:
+                return False
+            if human == "deactivated_peer":
+                return True
+            return True
+        # An ordinary member has no invitation authority; a non-admin owner or
+        # permission manager may only meet Humans through a shared workspace, so
+        # removing the co-workspace predicate exposes installation strangers.
+        if caller == "plain_member" and g["m40_capability_gate"]:
+            return False
+        if human == "member":
+            return not g["m40_exclude_members"]
+        if human == "deactivated_peer":
+            return not g["m40_active_only"]
+        if human == "stranger":
+            return not g["m40_co_workspace"]
+        return True
+
+    def run(check_id: str) -> CheckResult:
+        def next_states(state):
+            if state != ("start",):
+                return []
+            return [
+                (
+                    f"{caller} probes {human} (workspace_exists={exists})",
+                    ("probed", caller, exists, human),
+                )
+                for caller in callers
+                for exists in (True, False)
+                for human in humans
+            ]
+
+        def invariant(state):
+            if state[0] != "probed":
+                return True, ""
+            _, caller, exists, human = state
+            if caller == "anonymous":
+                if not g["m40_http_401"]:
+                    return False, "Unauthenticated caller reached the suggestion endpoint"
+                return True, ""
+            if not exists:
+                return True, ""  # every caller gets the same 404 for a missing workspace
+            if caller == "non_member":
+                if g["m40_workspace_404"] is False:
+                    return False, "Non-member distinguished an existing workspace with 403"
+                return True, ""
+            if not g["m40_bounded"]:
+                return False, "Suggestion result set is unbounded"
+            if caller == "plain_member":
+                if visible(caller, human):
+                    return False, f"Plain member saw {human} in the suggestion response"
+                return True, ""
+            if caller in ("owner", "permission_manager"):
+                if human in ("stranger", "deactivated_peer", "member") and visible(caller, human):
+                    return False, f"Non-admin {caller} enumerated {human} on the installation"
+                if human == "peer" and not visible(caller, human):
+                    return False, f"Non-admin {caller} cannot see their co-workspace Human"
+                return True, ""
+            # A system administrator may see any active non-member Human, but
+            # never a current member or a deactivated account.
+            if human == "stranger" and not visible(caller, human):
+                return False, "System administrator cannot see an active Human outside the workspace"
+            if human in ("deactivated_peer", "member") and visible(caller, human):
+                return False, f"System administrator saw {human}"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Human Suggestion Non-Enumeration",
+            "Only active co-workspace Humans are visible to non-admins; current members and deactivated Humans are never suggested; non-members get 404",
+            "safety",
+            ("start",),
+            next_states,
+            invariant,
+            files,
+        )
+
+    result = run("M40")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M40-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M40",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M40",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -8485,6 +8681,7 @@ def main() -> None:
         check_m37(facts),
         check_m38(facts),
         check_m39(facts),
+        check_m40(facts),
     ]
 
     if "--json" in sys.argv:
