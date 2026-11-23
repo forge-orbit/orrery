@@ -31,6 +31,7 @@ export { IssueLabels } from "./IssueLabels.tsx";
 export { IssueMentionTextArea } from "./IssueMentionTextArea.tsx";
 export { IssuePriorityControls, PRIORITY_LABELS, PriorityBadge } from "./IssuePriority.tsx";
 export { LabelPill } from "./LabelPill.tsx";
+export { MentionMarkdown } from "./MentionMarkdown.tsx";
 export { ResourceLoadError } from "./LoadError.tsx";
 export { ProjectLabels } from "./ProjectLabels.tsx";
 export { completedSubtaskCount, Subtasks, subtasksOf } from "./Subtasks.tsx";
@@ -43,6 +44,7 @@ export {
   issueCommentsQuery,
   issueQuery,
   issuesQuery,
+  mentionCandidatesQuery,
   knowledgeEntriesQuery,
   knowledgeEntryQuery,
   projectAccessHumanIdsQuery,

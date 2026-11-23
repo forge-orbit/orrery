@@ -20,6 +20,7 @@ import {
   type CreateProjectLabelRequest,
   type CreateProjectRequest,
   type Issue,
+  type MentionCandidatesResponse,
   type IssueComment,
   type IssueDependency,
   type IssueDetail,
@@ -47,6 +48,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DbTransaction } from "../../platform/db.ts";
 import { uniqueConstraintName } from "../../platform/errors.ts";
 import {
+  agentApiKeyProjects,
   agentApiKeys,
   agents,
   humans,
@@ -67,6 +69,8 @@ import {
 } from "../../db/schema.ts";
 import type { SessionAccount } from "../accounts/index.ts";
 import { attachmentHolderKey, type AttachmentSeams } from "../attachments/index.ts";
+import { extractMentionHandles, newlyAddedMentions } from "../notifications/index.ts";
+import type { NotifyActivity } from "../notifications/index.ts";
 import type { EnqueueWebhookActivity } from "../webhooks/index.ts";
 
 export type ProjectsErrorKind =
@@ -313,11 +317,21 @@ function humanIdMatch(actor: WorkActor, table: "membership" | "grant") {
     : eq(column, humanId);
 }
 
+function agentSlug(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 39);
+  return slug.length >= 2 ? slug : "agent";
+}
+
 function actorForWrite(actor: WorkActor): Actor {
   if (actor.kind === "human") {
     return {
       humanId: actor.account.humanId,
       email: actor.account.email,
+      handle: actor.account.handle,
       displayName: actor.account.email,
       avatarUrl: actor.account.avatarUrl ?? null,
     };
@@ -337,12 +351,14 @@ function actorFromRow(
   agentName: string | null,
   deactivatedAt: Date | null = null,
   avatarObjectId: string | null = null,
+  handle: string | null = null,
 ): Actor {
   if (humanId !== null && email !== null) {
     const deactivated = deactivatedAt !== null;
     return {
       humanId,
       email,
+      ...(handle === null ? {} : { handle }),
       displayName: deactivated ? `${email} (deactivated)` : email,
       ...(deactivated ? { deactivated: true } : {}),
       avatarUrl: avatarObjectId === null ? null : avatarUrlFor(humanId, avatarObjectId),
@@ -413,6 +429,7 @@ const projectColumns = {
   createdAt: projects.createdAt,
   createdByHumanId: projects.createdByHumanId,
   createdByEmail: projectCreator.email,
+  createdByHandle: projectCreator.handle,
   createdByDeactivatedAt: projectCreator.deactivatedAt,
   createdByAvatarObjectId: projectCreator.avatarObjectId,
   fallbackPolicy: projects.fallbackPolicy,
@@ -454,12 +471,14 @@ const issueColumns = {
   purgedAt: issues.purgedAt,
   createdByHumanId: issues.createdByHumanId,
   createdByEmail: issueCreator.email,
+  createdByHandle: issueCreator.handle,
   createdByDeactivatedAt: issueCreator.deactivatedAt,
   createdByAvatarObjectId: issueCreator.avatarObjectId,
   createdByAgentId: issues.createdByAgentId,
   createdByAgentName: issueAgentCreator.name,
   updatedByHumanId: issues.updatedByHumanId,
   updatedByEmail: issueEditor.email,
+  updatedByHandle: issueEditor.handle,
   updatedByDeactivatedAt: issueEditor.deactivatedAt,
   updatedByAvatarObjectId: issueEditor.avatarObjectId,
   updatedByAgentId: issues.updatedByAgentId,
@@ -473,6 +492,7 @@ const commentColumns = {
   createdAt: issueComments.createdAt,
   authorHumanId: issueComments.createdByHumanId,
   authorEmail: commentAuthor.email,
+  authorHandle: commentAuthor.handle,
   authorDeactivatedAt: commentAuthor.deactivatedAt,
   authorAvatarObjectId: commentAuthor.avatarObjectId,
   authorAgentId: issueComments.createdByAgentId,
@@ -503,12 +523,14 @@ const knowledgeColumns = {
   updatedAt: knowledgeEntries.updatedAt,
   createdByHumanId: knowledgeEntries.createdByHumanId,
   createdByEmail: knowledgeCreator.email,
+  createdByHandle: knowledgeCreator.handle,
   createdByDeactivatedAt: knowledgeCreator.deactivatedAt,
   createdByAvatarObjectId: knowledgeCreator.avatarObjectId,
   createdByAgentId: knowledgeEntries.createdByAgentId,
   createdByAgentName: knowledgeAgentCreator.name,
   updatedByHumanId: knowledgeEntries.updatedByHumanId,
   updatedByEmail: knowledgeEditor.email,
+  updatedByHandle: knowledgeEditor.handle,
   updatedByDeactivatedAt: knowledgeEditor.deactivatedAt,
   updatedByAvatarObjectId: knowledgeEditor.avatarObjectId,
   updatedByAgentId: knowledgeEntries.updatedByAgentId,
@@ -552,6 +574,7 @@ type ProjectRow = {
   createdAt: Date;
   createdByHumanId: string;
   createdByEmail: string;
+  createdByHandle: string | null;
   createdByDeactivatedAt: Date | null;
   createdByAvatarObjectId: string | null;
   workspaceKind: WorkspaceKind;
@@ -599,12 +622,14 @@ type IssueRow = {
   purgedAt: Date | null;
   createdByHumanId: string | null;
   createdByEmail: string | null;
+  createdByHandle: string | null;
   createdByDeactivatedAt: Date | null;
   createdByAvatarObjectId: string | null;
   createdByAgentId: string | null;
   createdByAgentName: string | null;
   updatedByHumanId: string | null;
   updatedByEmail: string | null;
+  updatedByHandle: string | null;
   updatedByDeactivatedAt: Date | null;
   updatedByAvatarObjectId: string | null;
   updatedByAgentId: string | null;
@@ -630,6 +655,7 @@ type CommentRow = {
   createdAt: Date;
   authorHumanId: string | null;
   authorEmail: string | null;
+  authorHandle: string | null;
   authorDeactivatedAt: Date | null;
   authorAvatarObjectId: string | null;
   authorAgentId: string | null;
@@ -660,12 +686,14 @@ type KnowledgeRow = {
   updatedAt: Date;
   createdByHumanId: string | null;
   createdByEmail: string | null;
+  createdByHandle: string | null;
   createdByDeactivatedAt: Date | null;
   createdByAvatarObjectId: string | null;
   createdByAgentId: string | null;
   createdByAgentName: string | null;
   updatedByHumanId: string | null;
   updatedByEmail: string | null;
+  updatedByHandle: string | null;
   updatedByDeactivatedAt: Date | null;
   updatedByAvatarObjectId: string | null;
   updatedByAgentId: string | null;
@@ -703,6 +731,7 @@ function toProject(row: ProjectRow): Project {
       null,
       row.createdByDeactivatedAt,
       row.createdByAvatarObjectId,
+      row.createdByHandle,
     ),
     workspaceKind: row.workspaceKind,
     accessLevel: row.accessLevel,
@@ -755,6 +784,7 @@ function toIssue(row: IssueRow, labels: ProjectLabel[] = []): Issue {
       row.createdByAgentName,
       row.createdByDeactivatedAt,
       row.createdByAvatarObjectId,
+      row.createdByHandle,
     ),
     updatedBy: actorFromRow(
       row.updatedByHumanId,
@@ -763,6 +793,7 @@ function toIssue(row: IssueRow, labels: ProjectLabel[] = []): Issue {
       row.updatedByAgentName,
       row.updatedByDeactivatedAt,
       row.updatedByAvatarObjectId,
+      row.updatedByHandle,
     ),
   };
 }
@@ -845,6 +876,7 @@ function toComment(row: CommentRow): IssueComment {
       row.authorAgentName,
       row.authorDeactivatedAt,
       row.authorAvatarObjectId,
+      row.authorHandle,
     ),
     attachments: [],
   };
@@ -895,6 +927,7 @@ function toKnowledge(row: KnowledgeRow): KnowledgeEntry {
       row.createdByAgentName,
       row.createdByDeactivatedAt,
       row.createdByAvatarObjectId,
+      row.createdByHandle,
     ),
     updatedBy: actorFromRow(
       row.updatedByHumanId,
@@ -903,6 +936,7 @@ function toKnowledge(row: KnowledgeRow): KnowledgeEntry {
       row.updatedByAgentName,
       row.updatedByDeactivatedAt,
       row.updatedByAvatarObjectId,
+      row.updatedByHandle,
     ),
     attachments: [],
   };
@@ -1375,6 +1409,8 @@ type RecordActivityInput =
       summary: string;
       issueId: string;
       detail?: IssueActivityDetail;
+      /** Handles newly introduced by this edit; delivery is gated on live project Read access. */
+      mentionHandles?: readonly string[];
     }
   | {
       projectId: string;
@@ -1389,6 +1425,7 @@ async function insertActivityRow(
   tx: DbTransaction,
   input: RecordActivityInput,
   onActivity: EnqueueWebhookActivity,
+  notifyActivity: NotifyActivity,
 ) {
   const activityId = randomUUID();
   await tx.insert(projectActivity).values({
@@ -1404,6 +1441,22 @@ async function insertActivityRow(
     ...("knowledgeEntryId" in input ? { knowledgeEntryId: input.knowledgeEntryId } : {}),
   });
   await onActivity(tx, activityId);
+  if (
+    "mentionHandles" in input &&
+    input.mentionHandles !== undefined &&
+    input.mentionHandles.length > 0
+  ) {
+    await notifyActivity(tx, {
+      activityId,
+      projectId: input.projectId,
+      issueId: input.issueId,
+      kind: "issue_mentioned",
+      summary: input.summary,
+      actorHumanId: humanIdOf(input.actor),
+      actorAgentId: agentIdOf(input.actor),
+      mentionHandles: input.mentionHandles,
+    });
+  }
 }
 
 async function recordAccessEvent(
@@ -1606,6 +1659,8 @@ export interface ProjectsDeps {
 
   evaluateQuestionDeadline?: ((tx: DbTransaction, issueId: string) => Promise<void>) | undefined;
   onActivity?: EnqueueWebhookActivity | undefined;
+  /** Late-bound because the notifications feature is built after projects. */
+  notifyActivity?: NotifyActivity | undefined;
   /** Wired by the feature registry; absent in service-level tests that do not use attachments. */
   attachmentSeams?: AttachmentSeams | undefined;
 }
@@ -1754,6 +1809,10 @@ export interface ProjectsService {
     entryId: string,
     input: UpdateKnowledgeEntryRequest,
   ): Promise<KnowledgeEntry>;
+  listMentionCandidates(
+    actor: WorkActor | null,
+    projectId: string,
+  ): Promise<MentionCandidatesResponse>;
 }
 
 export function createProjectsService({
@@ -1763,10 +1822,11 @@ export function createProjectsService({
   releaseIssueWorkSessions = async () => {},
   evaluateQuestionDeadline,
   onActivity = async () => {},
+  notifyActivity = async () => {},
   attachmentSeams,
 }: ProjectsDeps): ProjectsService {
   const recordActivity = (tx: DbTransaction, input: RecordActivityInput) =>
-    insertActivityRow(tx, input, onActivity);
+    insertActivityRow(tx, input, onActivity, notifyActivity);
 
   const metadataFor = async (
     tx: DbTransaction,
@@ -1979,12 +2039,7 @@ export function createProjectsService({
           name: created.name,
           key: created.key,
           createdAt: created.createdAt.toISOString(),
-          createdBy: {
-            humanId: actor.humanId,
-            email: actor.email,
-            displayName: actor.email,
-            avatarUrl: actor.avatarUrl ?? null,
-          },
+          createdBy: actorForWrite(workActor),
           workspaceKind: workspace.kind,
           accessLevel: ProjectAccessLevel.enum.manage,
           fallbackPolicy: FallbackPolicy.enum.require_human,
@@ -2555,6 +2610,125 @@ export function createProjectsService({
       });
     },
 
+    async listMentionCandidates(actorArg, projectId) {
+      const actor = requireActor(actorArg);
+      return db.transaction(
+        async (tx) => {
+          const project = await requireProject(tx, projectId, actor, ProjectAccessLevel.enum.read);
+          const [workspace] = await tx
+            .select({
+              kind: workspaces.kind,
+              personalOwnerHumanId: workspaces.personalOwnerHumanId,
+            })
+            .from(workspaces)
+            .where(eq(workspaces.id, project.workspaceId))
+            .limit(1);
+
+          const memberIds = await tx
+            .select({ id: humans.id })
+            .from(humans)
+            .innerJoin(
+              workspaceMemberships,
+              and(
+                eq(workspaceMemberships.workspaceId, project.workspaceId),
+                eq(workspaceMemberships.humanId, humans.id),
+                isNull(workspaceMemberships.suspendedAt),
+              ),
+            )
+            .where(isNull(humans.deactivatedAt));
+          const candidateIds = new Set(memberIds.map((row) => row.id));
+          if (
+            workspace?.kind === WorkspaceKind.enum.personal &&
+            workspace.personalOwnerHumanId !== null
+          ) {
+            candidateIds.add(workspace.personalOwnerHumanId);
+          }
+
+          const humansOut: MentionCandidatesResponse["humans"] = [];
+          for (const humanId of candidateIds) {
+            const ceiling = await projectAccessCeilingInTransaction(
+              tx,
+              project.workspaceId,
+              humanId,
+              [projectId],
+            );
+            const level = ceiling.get(projectId) ?? null;
+            if (level === null || !projectAccessAtLeast(level, ProjectAccessLevel.enum.read)) {
+              continue;
+            }
+            const [human] = await tx
+              .select({
+                id: humans.id,
+                email: humans.email,
+                handle: humans.handle,
+                displayName: humans.displayName,
+                avatarObjectId: humans.avatarObjectId,
+              })
+              .from(humans)
+              .where(and(eq(humans.id, humanId), isNull(humans.deactivatedAt)))
+              .limit(1);
+            if (human === undefined || human.handle === null) continue;
+            humansOut.push({
+              type: "human",
+              id: human.id,
+              handle: human.handle,
+              email: human.email,
+              displayName: human.displayName ?? human.email,
+              avatarUrl:
+                human.avatarObjectId === null ? null : avatarUrlFor(human.id, human.avatarObjectId),
+            });
+          }
+          humansOut.sort((a, b) => a.handle.localeCompare(b.handle));
+
+          const agentRows = await tx
+            .selectDistinct({ id: agents.id, name: agents.name, humanId: agents.humanId })
+            .from(agents)
+            // An agent owned by a deactivated Human is not a mention candidate, even
+            // when its key and project grant are otherwise live.
+            .innerJoin(humans, and(eq(humans.id, agents.humanId), isNull(humans.deactivatedAt)))
+            .innerJoin(
+              agentApiKeys,
+              and(
+                eq(agentApiKeys.agentId, agents.id),
+                eq(agentApiKeys.workspaceId, project.workspaceId),
+                isNull(agentApiKeys.revokedAt),
+                or(isNull(agentApiKeys.expiresAt), gt(agentApiKeys.expiresAt, sql`now()`)),
+              ),
+            )
+            .innerJoin(
+              agentApiKeyProjects,
+              and(
+                eq(agentApiKeyProjects.keyId, agentApiKeys.id),
+                eq(agentApiKeyProjects.projectId, projectId),
+              ),
+            );
+          const agentsOut: MentionCandidatesResponse["agents"] = [];
+          for (const row of agentRows) {
+            const ceiling = await projectAccessCeilingInTransaction(
+              tx,
+              project.workspaceId,
+              row.humanId,
+              [projectId],
+            );
+            const level = ceiling.get(projectId) ?? null;
+            if (level === null || !projectAccessAtLeast(level, ProjectAccessLevel.enum.read)) {
+              continue;
+            }
+            agentsOut.push({
+              type: "agent",
+              id: row.id,
+              name: row.name,
+              slug: agentSlug(row.name),
+              avatarUrl: null,
+            });
+          }
+          agentsOut.sort((a, b) => a.slug.localeCompare(b.slug));
+          return { humans: humansOut, agents: agentsOut };
+        },
+        { accessMode: "read only" },
+      );
+    },
+
     async createIssue(actorArg, projectId, input) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
@@ -2630,6 +2804,7 @@ export function createProjectsService({
           actor,
           issueId: id,
           summary: input.title,
+          mentionHandles: extractMentionHandles(input.body ?? ""),
         });
         for (const label of labels) {
           await tx.insert(issueLabels).values({ issueId: id, labelId: label.id });
@@ -2850,6 +3025,7 @@ export function createProjectsService({
             actor,
             issueId,
             summary: title,
+            ...(bodyChanged ? { mentionHandles: newlyAddedMentions(current.body, body) } : {}),
             ...(editChanges.length > 0
               ? { detail: { kind: "issue_edited" as const, changes: editChanges } }
               : {}),
@@ -2917,6 +3093,7 @@ export function createProjectsService({
             current.createdByAgentName,
             undefined,
             current.createdByAvatarObjectId,
+            current.createdByHandle,
           ),
           updatedBy: actorForWrite(actor),
           fallbackPolicyOverride: current.fallbackPolicyOverride,
@@ -3154,6 +3331,7 @@ export function createProjectsService({
           actor,
           issueId,
           summary: issue.title,
+          mentionHandles: extractMentionHandles(input.body),
         });
         await syncBody(tx, {
           holderType: "comment",
@@ -3467,6 +3645,7 @@ export function createProjectsService({
             current.createdByAgentName,
             undefined,
             current.createdByAvatarObjectId,
+            current.createdByHandle,
           ),
           updatedBy: actorForWrite(actor),
           attachments: await metadataFor(tx, "knowledge", entryId),

@@ -9,6 +9,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   issuesQuery,
+  MentionMarkdown,
   knowledgeEntriesQuery,
   knowledgeEntryQuery,
   projectActivityQuery,
@@ -18,7 +19,6 @@ import {
   updateKnowledgeEntry,
 } from "../features/projects/index.ts";
 import { Link } from "../lib/Link.tsx";
-import { Markdown } from "../lib/Markdown.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
 import { formatFullDateTime, relativeTime } from "../lib/time.ts";
 
@@ -145,7 +145,9 @@ function KnowledgePage() {
       ) : (
         <Section variant="transparent" padding={0}>
           <Stack data-knowledge-body="">
-            <Markdown issueRefs={projectIssues}>{entry.body}</Markdown>
+            <MentionMarkdown projectId={entry.projectId} issueRefs={projectIssues}>
+              {entry.body}
+            </MentionMarkdown>
           </Stack>
         </Section>
       )}

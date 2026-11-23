@@ -763,6 +763,8 @@ describe("workspaces", () => {
     expect(registered.status).toBe(200);
     expect(await registered.json()).toEqual({
       email: "new.member@example.com",
+      handle: "new-member",
+      displayName: null,
       emailVerified: true,
       avatarUrl: null,
     });

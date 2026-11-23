@@ -87,6 +87,14 @@ export function insertMentionTrigger(value: string, start: number, end: number):
   };
 }
 
+export function insertAtTrigger(value: string, start: number, end: number): TextSelectionEdit {
+  const needsSpace = start > 0 && !/[\s(]/.test(value[start - 1] ?? "");
+  const insert = needsSpace ? " @" : "@";
+  const nextValue = `${value.slice(0, start)}${insert}${value.slice(end)}`;
+  const cursor = start + insert.length;
+  return { value: nextValue, selectionStart: cursor, selectionEnd: cursor };
+}
+
 export function prefixLines(
   value: string,
   start: number,

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Timestamp } from "./common.ts";
 
 export const NotificationKind = z
-  .enum(["handoff", "needs_input", "session_expired"])
+  .enum(["handoff", "needs_input", "session_expired", "issue_mentioned"])
   .meta({ id: "NotificationKind" });
 export type NotificationKind = z.infer<typeof NotificationKind>;
 

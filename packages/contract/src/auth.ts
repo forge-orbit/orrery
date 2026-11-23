@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Email, LoginEmail, LoginPassword, NewPassword } from "./common.ts";
+import { Email, Handle, LoginEmail, LoginPassword, NewPassword } from "./common.ts";
 
 
 
@@ -40,6 +40,7 @@ export type AvatarUrl = z.infer<typeof AvatarUrl>;
 export const SessionResponse = z
   .object({
     email: Email,
+    handle: Handle,
     displayName: z.string().nullable().optional(),
     emailVerified: z.boolean(),
     avatarUrl: AvatarUrl.nullable(),
@@ -50,6 +51,7 @@ export type SessionResponse = z.infer<typeof SessionResponse>;
 export const UpdateProfileRequest = z
   .object({
     displayName: DisplayName.nullable(),
+    handle: Handle.optional(),
   })
   .meta({ id: "UpdateProfileRequest" });
 export type UpdateProfileRequest = z.infer<typeof UpdateProfileRequest>;

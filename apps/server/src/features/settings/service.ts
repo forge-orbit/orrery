@@ -1,7 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createTransport } from "nodemailer";
-import type { SmtpSecurity, SmtpSettings, SmtpSettingsResponse } from "@orrery/contract";
-import type { SessionAccount } from "../accounts/index.ts";
+import type {
+  SessionResponse,
+  SmtpSecurity,
+  SmtpSettings,
+  SmtpSettingsResponse,
+} from "@orrery/contract";
+import { toSessionResponse, type SessionAccount } from "../accounts/index.ts";
 import type { DbTransaction } from "../../platform/db.ts";
 import { errorNameAndCode } from "../../platform/errors.ts";
 import type { Logger } from "../../platform/log.ts";
@@ -115,10 +120,7 @@ export interface SettingsService {
   smtp(account: SessionAccount | null): Promise<SmtpSettingsResponse>;
   saveSmtp(account: SessionAccount | null, input: SmtpSettings): Promise<SmtpSettingsResponse>;
   sendTestEmail(account: SessionAccount | null): Promise<{ sentTo: string; message: string }>;
-  verifyEmail(
-    account: SessionAccount | null,
-    input: { token: string },
-  ): Promise<{ email: string; emailVerified: true; avatarUrl: string | null }>;
+  verifyEmail(account: SessionAccount | null, input: { token: string }): Promise<SessionResponse>;
 
   deliver(mail: OutgoingMail): Promise<void>;
 }
@@ -386,11 +388,7 @@ export function createSettingsService({
         }
         await markEmailVerified(row.humanId, tx);
       });
-      return {
-        email: account.email,
-        emailVerified: true as const,
-        avatarUrl: account.avatarUrl ?? null,
-      };
+      return toSessionResponse({ ...account, emailVerifiedAt: new Date() });
     },
 
     async deliver(mail) {

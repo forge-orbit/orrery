@@ -91,6 +91,7 @@ function AccountPage() {
       />
       <ProfileSection
         initialDisplayName={session.displayName}
+        initialHandle={session.handle}
         avatarUrl={session.avatarUrl}
         displayName={session.displayName ?? session.email}
       />
@@ -103,29 +104,37 @@ function AccountPage() {
 
 function ProfileSection({
   initialDisplayName,
+  initialHandle,
   avatarUrl,
   displayName,
 }: {
   initialDisplayName: string | null;
+  initialHandle: string;
   avatarUrl: string | null;
   displayName: string;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [draftDisplayName, setDraftDisplayName] = useState<string | null>(null);
+  const [draftHandle, setDraftHandle] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const name = draftDisplayName ?? displayName;
   const currentDisplayName = draftDisplayName ?? initialDisplayName ?? "";
+  const currentHandle = draftHandle ?? initialHandle;
 
   const mutation = useMutation({
     mutationFn: updateProfile,
     onSuccess: async () => {
       setDraftDisplayName(null);
+      setDraftHandle(null);
       setSavedMessage("Profile saved.");
       toast({ body: "Profile saved." });
       await queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey });
+      // A handle change flows into every Human-bearing response (members, issues,
+      // comments, activity, mention candidates), so refresh all cached lists too.
+      await queryClient.invalidateQueries();
     },
   });
 
@@ -163,7 +172,10 @@ function ProfileSection({
     event.preventDefault();
     setSavedMessage(null);
     const trimmed = currentDisplayName.trim();
-    mutation.mutate({ displayName: trimmed.length === 0 ? null : trimmed });
+    mutation.mutate({
+      displayName: trimmed.length === 0 ? null : trimmed,
+      handle: currentHandle,
+    });
   }
 
   async function onPhotoChange(files: File | File[] | null) {
@@ -254,6 +266,19 @@ function ProfileSection({
               value={currentDisplayName}
               onChange={(value) => {
                 setDraftDisplayName(value);
+                setSavedMessage(null);
+              }}
+            />
+            <TextField
+              id="account-handle"
+              label="Handle"
+              description="Used for @mentions. 2-39 lowercase letters, digits or hyphens."
+              placeholder="your-handle"
+              width="min(100%, 28rem)"
+              maxLength={39}
+              value={currentHandle}
+              onChange={(value) => {
+                setDraftHandle(value.toLowerCase());
                 setSavedMessage(null);
               }}
             />

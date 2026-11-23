@@ -11,6 +11,7 @@ import {
 } from "./service.ts";
 
 export { routes as notificationsRoutes };
+export { extractMentionHandles, newlyAddedMentions } from "./mentions.ts";
 export { NotificationsError } from "./service.ts";
 export type {
   ActivityNotificationInput,

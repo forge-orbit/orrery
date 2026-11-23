@@ -185,6 +185,9 @@
           "email": {
             "$ref": "#/components/schemas/Email"
           },
+          "handle": {
+            "$ref": "#/components/schemas/Handle"
+          },
           "displayName": {
             "type": [
               "string",
@@ -200,9 +203,16 @@
         },
         "required": [
           "email",
+          "handle",
           "emailVerified",
           "avatarUrl"
         ]
+      },
+      "Handle": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 39,
+        "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
       },
       "AvatarUrl": {
         "type": [
@@ -216,6 +226,9 @@
         "properties": {
           "displayName": {
             "$ref": "#/components/schemas/DisplayName"
+          },
+          "handle": {
+            "$ref": "#/components/schemas/Handle"
           }
         },
         "required": [
@@ -1636,6 +1649,19 @@
               }
             ]
           },
+          "handle": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Handle"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
           "agentId": {
             "type": [
               "string",
@@ -1930,6 +1956,19 @@
               }
             ]
           },
+          "handle": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Handle"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
           "agentId": {
             "type": [
               "string",
@@ -2006,6 +2045,94 @@
       "LabelColor": {
         "type": "string",
         "pattern": "^#[0-9a-fA-F]{6}$"
+      },
+      "MentionCandidatesResponse": {
+        "type": "object",
+        "properties": {
+          "humans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MentionHuman"
+            }
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MentionAgent"
+            }
+          }
+        },
+        "required": [
+          "humans",
+          "agents"
+        ]
+      },
+      "MentionHuman": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "human"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "handle": {
+            "$ref": "#/components/schemas/Handle"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "$ref": "#/components/schemas/Email"
+          },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "handle",
+          "displayName",
+          "email",
+          "avatarUrl"
+        ]
+      },
+      "MentionAgent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "agent"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "slug": {
+            "$ref": "#/components/schemas/Handle"
+          },
+          "name": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "slug",
+          "name",
+          "avatarUrl"
+        ]
       },
       "CreateIssueRequest": {
         "type": "object",
@@ -4369,7 +4496,8 @@
         "enum": [
           "handoff",
           "needs_input",
-          "session_expired"
+          "session_expired",
+          "issue_mentioned"
         ]
       },
       "NotificationProject": {
@@ -5585,6 +5713,26 @@
           },
           "401": {
             "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Setup is not available",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Handle already in use",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9531,6 +9679,66 @@
           },
           "409": {
             "description": "The parent already has a parent, or has subtasks of its own",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/mention-candidates": {
+      "get": {
+        "summary": "Humans and agents that can be @mentioned in a project",
+        "description": "Read access. Returns project-accessible Humans with their handle and display name, plus workspace Agents whose live API key grants project access. Used by the editor's @ autocomplete.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The actors that may be mentioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MentionCandidatesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The project id is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the agent key is unusable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No project with this id is accessible to the caller",
             "content": {
               "application/problem+json": {
                 "schema": {
