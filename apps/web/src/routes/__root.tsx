@@ -14,6 +14,7 @@ import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   Outlet,
   createRootRouteWithContext,
+  redirect,
   useLocation,
   useMatches,
   useNavigate,
@@ -21,7 +22,7 @@ import {
 import { createElement } from "react";
 import markDark from "../../../../assets/orrery-mark-dark.svg";
 import markLight from "../../../../assets/orrery-mark.svg";
-import { sessionQuery, signOut } from "../features/accounts/index.ts";
+import { sessionQuery, setupStatusQuery, signOut } from "../features/accounts/index.ts";
 import { installationInvitationsQuery } from "../features/invitations/index.ts";
 import { notificationUnreadCountQuery } from "../features/notifications/index.ts";
 import { workspacesQuery } from "../features/workspaces/index.ts";
@@ -40,6 +41,18 @@ declare module "@tanstack/react-router" {
 }
 
 export const Route = createRootRouteWithContext<RouterContext>()({
+  beforeLoad: async ({ context, location }) => {
+    if (location.pathname.replace(/\/+$/, "") === "/setup") return;
+    let status: { setupComplete: boolean };
+    try {
+      status = await context.queryClient.ensureQueryData(setupStatusQuery);
+    } catch {
+      return;
+    }
+    if (!status.setupComplete) {
+      throw redirect({ to: "/setup", replace: true });
+    }
+  },
   component: RootLayout,
   notFoundComponent: () => (
     <Stack gap={5}>
