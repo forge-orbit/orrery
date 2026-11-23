@@ -26,7 +26,8 @@ setting and updates when it changes. The browser saves an explicit choice on tha
   session inspector stays in its board drawer. An open question links directly to the Inbox.
   On narrow screens the board scrolls horizontally within the page.
 - **Issue detail** places the description and discussion in the main column and the session
-  inspector alongside them. On narrow screens the inspector stacks above the issue content.
+  inspector alongside them. On narrow screens the inspector stacks below the issue content so
+  the description is immediately visible and destructive actions stay at the bottom of the page.
   Keep session progress, run metadata, and activity distinct from issue comments.
 - **Inbox** groups questions into **Needs an answer** and **Resolved**. The question shows its
   issue, the agent when known, the deadline, the proposed fallback, and the recorded resolution.

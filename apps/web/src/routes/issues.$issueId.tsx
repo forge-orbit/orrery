@@ -987,8 +987,9 @@ function IssuePage() {
         if (isNarrow) {
           return (
             <Stack gap={4}>
-              {inspectorColumn}
               {mainColumn}
+              <Divider />
+              {inspectorColumn}
             </Stack>
           );
         }

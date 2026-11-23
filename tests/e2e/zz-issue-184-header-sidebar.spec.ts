@@ -105,7 +105,9 @@ test("keeps Edit beside a wrapping long title and puts Move to Trash in the side
   for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
 });
 
-test("sticks the right sidebar on desktop and stacks it on narrow screens", async ({ page }) => {
+test("sticks the right sidebar on desktop and stacks it below the content on narrow screens", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 1360, height: 900 });
   await openIssue(page);
 
@@ -136,16 +138,58 @@ test("sticks the right sidebar on desktop and stacks it on narrow screens", asyn
     throw new Error("the sticky sidebar did not lay out");
   expect(Math.abs(secondSidebarBox.y - firstSidebarBox.y)).toBeLessThan(4);
 
-  await page.setViewportSize({ width: 800, height: 900 });
-  const stackedProperties = page.locator('[aria-label="Issue properties"]');
-  await expect(stackedProperties).toBeVisible();
-  await expect(description).toBeVisible();
-  const stackedSidebarBox = await stackedProperties.boundingBox();
-  const stackedDescriptionBox = await description.boundingBox();
-  if (stackedSidebarBox === null || stackedDescriptionBox === null)
-    throw new Error("the stacked layout did not lay out");
-  expect(stackedSidebarBox.y).toBeLessThan(stackedDescriptionBox.y);
-  await expect(page.locator("[data-trash-button]")).toBeVisible();
+  async function assertNarrowLayout(width: number, height: number) {
+    await page.setViewportSize({ width, height });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const stackedProperties = page.locator('[aria-label="Issue properties"]');
+    const stackedTrash = page.locator("[data-trash-button]");
+    await expect(stackedProperties).toBeVisible();
+    await expect(description).toBeVisible();
+    await expect(stackedTrash).toBeVisible();
+    const stackedSidebarBox = await stackedProperties.boundingBox();
+    const stackedDescriptionBox = await description.boundingBox();
+    const stackedTrashBox = await stackedTrash.boundingBox();
+    if (stackedSidebarBox === null || stackedDescriptionBox === null || stackedTrashBox === null)
+      throw new Error("the stacked layout did not lay out");
+    expect(stackedDescriptionBox.y).toBeLessThan(stackedSidebarBox.y);
+    expect(stackedTrashBox.y).toBeGreaterThan(stackedSidebarBox.y + stackedSidebarBox.height - 4);
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  }
+
+  await assertNarrowLayout(800, 900);
+  await assertNarrowLayout(390, 844);
+
+  for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
+});
+
+test("keeps the new issue form full width with Triage stacked below on a phone", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  await page.goto(`/projects/${await newProject()}/issues/new`);
+  await expect(page.getByRole("heading", { name: "New issue", level: 1 })).toBeVisible();
+
+  const overflow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+
+  const titleBox = await page.locator("#new-issue-title").boundingBox();
+  if (titleBox === null) throw new Error("the new issue title did not lay out");
+  expect(titleBox.width).toBeGreaterThan(250);
+
+  const formBox = await page.locator("[data-new-issue-form]").boundingBox();
+  const triage = page.getByRole("heading", { name: "Triage" });
+  const triageBox = await triage.boundingBox();
+  if (formBox === null || triageBox === null)
+    throw new Error("the stacked new issue layout did not lay out");
+  expect(triageBox.y).toBeGreaterThan(formBox.y + formBox.height);
 
   for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
 });

@@ -54,11 +54,6 @@ function NewKnowledgePage() {
         ]}
         title="New knowledge document"
         badge="Knowledge"
-        subtitle={
-          readOnly
-            ? undefined
-            : `Write in ${project.name}. Supports GitHub-flavored Markdown, Mermaid diagrams, and #issue references.`
-        }
       />
       {readOnly ? (
         <Section padding={4}>

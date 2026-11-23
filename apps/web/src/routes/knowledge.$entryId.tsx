@@ -2,7 +2,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
-import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -82,9 +81,6 @@ function KnowledgePage() {
       {isEditing ? (
         <Section padding={4}>
           <Stack gap={2} data-knowledge-editor="">
-            <Text as="p" display="block" type="supporting">
-              Supports GitHub-flavored Markdown, Mermaid diagrams, and #issue references.
-            </Text>
             <TitleBodyForm
               key={entry.updatedAt}
               idPrefix="edit-knowledge"
