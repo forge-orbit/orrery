@@ -496,27 +496,20 @@ function IssuePage() {
           >
             Board
           </Link>,
-          <Text
-            key="identifier"
-            type="inherit"
-            color="inherit"
-            data-issue-identifier={issue.identifier}
-          >
-            {issue.identifier}
-          </Text>,
         ]}
         title={issue.title}
-        nonWrappingActions
-        statusToken={
-          <Token
-            label={issueStatusLabels[issue.status]}
-            color={STATUS_COLORS[issue.status]}
-            size="sm"
-            data-issue-status={issue.status}
-          />
-        }
+        nonWrappingActions={!isNarrow}
         subtitle={
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+            <Token
+              label={issueStatusLabels[issue.status]}
+              color={STATUS_COLORS[issue.status]}
+              size="sm"
+              data-issue-status={issue.status}
+            />
+            <Text as="span" type="code" color="secondary" data-issue-identifier={issue.identifier}>
+              {issue.identifier}
+            </Text>
             <PriorityBadge priority={issue.priority} />
             {issue.assignee !== null && (
               <Stack
@@ -990,7 +983,7 @@ function IssuePage() {
               <LayoutPanel
                 width={320}
                 padding={0}
-                isScrollable={false}
+                isScrollable
                 role="complementary"
                 label="Issue details"
                 data-issue-sidebar=""
