@@ -680,6 +680,34 @@ describe("workspace-scoped agent API keys", () => {
     expect(JSON.stringify(events)).not.toContain(issued.secret);
   });
 
+  it("refuses duplicate project grants when issuing a key", async () => {
+    const app = await makeApp();
+    await bootstrapAdmin(app);
+    const cookie = await cookieFor(app, ADMIN_EMAIL, ADMIN_PASSWORD);
+    const [admin] = await database.db.select().from(humans).where(eq(humans.email, ADMIN_EMAIL));
+    if (admin === undefined) throw new Error("the admin was not found");
+    const workspace = await personalWorkspaceOf(admin.id);
+    const p = await project(workspace.id, "Duplicate-grant project", admin.id);
+    const agentId = await makeAgent(app, cookie, "duplicate-grant-bot");
+
+    const res = await postJson(
+      app,
+      "/api/agents/keys",
+      {
+        agentId,
+        workspaceId: workspace.id,
+        projects: [
+          { projectId: p.id, level: "read" },
+          { projectId: p.id, level: "manage" },
+        ],
+      },
+      cookie,
+    );
+    await expectProblem(res, 400, "validation_failed");
+    expect(await database.db.select().from(agentApiKeys)).toEqual([]);
+    expect(await database.db.select().from(agentApiKeyProjects)).toEqual([]);
+  });
+
   it("refuses a key used in another workspace or on a project outside its scope", async () => {
     const app = await makeApp();
     await bootstrapAdmin(app);
@@ -1513,6 +1541,37 @@ describe("workspace-scoped agent API keys", () => {
       await removeGrant(p.id, member.id);
       const none = await rotate(app, memberCookie, source.key.id);
       expect(none.key.projects).toEqual([]);
+    });
+
+    it("refuses duplicate project grants when rotating a key", async () => {
+      const app = await makeApp();
+      await bootstrapAdmin(app);
+      const cookie = await cookieFor(app, ADMIN_EMAIL, ADMIN_PASSWORD);
+      const [admin] = await database.db.select().from(humans).where(eq(humans.email, ADMIN_EMAIL));
+      if (admin === undefined) throw new Error("the admin was not found");
+      const workspace = await personalWorkspaceOf(admin.id);
+      const p = await project(workspace.id, "Duplicate rotation project", admin.id);
+      const agentId = await makeAgent(app, cookie, "duplicate-rotation-bot");
+      const source = await issueKey(app, cookie, {
+        agentId,
+        workspaceId: workspace.id,
+        projects: [{ projectId: p.id, level: "read" }],
+      });
+
+      const res = await postJson(
+        app,
+        `/api/agents/keys/${source.key.id}/rotate`,
+        {
+          projects: [
+            { projectId: p.id, level: "read" },
+            { projectId: p.id, level: "manage" },
+          ],
+        },
+        cookie,
+      );
+      await expectProblem(res, 400, "validation_failed");
+      expect(await database.db.select().from(agentApiKeys)).toHaveLength(1);
+      expect(await database.db.select().from(agentApiKeyProjects)).toHaveLength(1);
     });
 
     it("refuses a revoked, expired, foreign, or inaccessible key and mints no replacement", async () => {
