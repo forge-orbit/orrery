@@ -299,6 +299,46 @@ async function getProject(cookie: string, projectId: string) {
   return Project.parse(await res.json());
 }
 
+async function waitForLockWait(queryPattern: string, minimum = 1) {
+  await expect
+    .poll(
+      async () => {
+        const [row] = await database.sql<{ count: number }[]>`
+          select count(*)::int as count
+          from pg_stat_activity
+          where wait_event_type = 'Lock'
+            and query ilike ${queryPattern}
+            and pid <> pg_backend_pid()
+        `;
+        return row?.count ?? 0;
+      },
+      { timeout: 10_000, interval: 25 },
+    )
+    .toBeGreaterThanOrEqual(minimum);
+}
+
+async function holdIssueLock(issueId: string) {
+  let locked!: () => void;
+  const acquired = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  let unlock!: () => void;
+  const release = new Promise<void>((resolve) => {
+    unlock = resolve;
+  });
+  const holding = database.db.transaction(async (tx) => {
+    await tx
+      .select({ id: issuesTable.id })
+      .from(issuesTable)
+      .where(eq(issuesTable.id, issueId))
+      .for("update");
+    locked();
+    await release;
+  });
+  await acquired;
+  return { release: () => unlock(), holding };
+}
+
 beforeAll(async () => {
   pg = await new PostgreSqlContainer("postgres:18").start();
   database = createDb(pg.getConnectionUri());
@@ -1535,5 +1575,78 @@ describe("shared-to-shared project transfer against real Postgres", () => {
     const destinationSecret = await issueKey(ownerCookie, destW2.workspaceId, sourceW1.project.id);
     const session = await claimIssue(destinationSecret, sourceHumanIssue);
     expect(session.issueId).toBe(sourceHumanIssue);
+  });
+});
+
+describe("issue creation racing a transfer against real Postgres", () => {
+  it("refuses a create that checked access before the project moved out of the source workspace", async () => {
+    const sourceW1 = await sharedSource("Race Access Source");
+    const destW2 = await createSharedWorkspace(sourceW1.cookie, "Race Access Dest", ADMIN_EMAIL);
+    const contributorEmail = "race-contributor@example.com";
+    const contributor = await insertHuman(contributorEmail);
+    await addMembership(sourceW1.workspaceId, contributor.id);
+    const contributorCookie = await sessionFor(contributor.id);
+    await setAccess(sourceW1.cookie, sourceW1.project.id, contributorEmail, "contribute");
+    const seededIssueId = await createIssue(sourceW1.cookie, sourceW1.project.id, "Seed issue");
+    const authorization = await authorize(sourceW1.cookie, sourceW1.project.id, destW2.workspaceId);
+
+    // The accept locks projects before it locks issues. Holding an issue lock
+    // parks it after it has taken the projects row lock but before it commits,
+    // so a concurrent create must observe the transfer's committed state.
+    const { release, holding } = await holdIssueLock(seededIssueId);
+    try {
+      const accepting = accept(sourceW1.cookie, authorization.token);
+      await waitForLockWait('%from "issues"%for update%');
+      const creating = postJson(
+        `/api/projects/${sourceW1.project.id}/issues`,
+        { title: "Racing issue" },
+        contributorCookie,
+      );
+      await waitForLockWait('%"projects"%');
+
+      release();
+      const [acceptRes, createRes] = await Promise.all([accepting, creating, holding]);
+      expect(acceptRes.status).toBe(200);
+      expect(createRes.status).toBe(404);
+      expect(await createRes.json()).toMatchObject({ status: 404, code: "project_not_found" });
+      const remaining = await database.db
+        .select({ title: issuesTable.title })
+        .from(issuesTable)
+        .where(eq(issuesTable.projectId, sourceW1.project.id));
+      expect(remaining.map((row) => row.title)).toEqual(["Seed issue"]);
+    } finally {
+      release();
+      await holding.catch(() => {});
+    }
+  });
+
+  it("uses the transferred key for an issue created while the key is being changed", async () => {
+    const sourceW1 = await sharedSource("Race Key Source");
+    const destW2 = await createSharedWorkspace(sourceW1.cookie, "Race Key Dest", ADMIN_EMAIL);
+    const sourceKey = sourceW1.project.key;
+    await createProjectWithKey(sourceW1.cookie, destW2.workspaceId, "Key occupier", sourceKey);
+    const seededIssueId = await createIssue(sourceW1.cookie, sourceW1.project.id, "Seed issue");
+    const authorization = await authorize(sourceW1.cookie, sourceW1.project.id, destW2.workspaceId);
+
+    const { release, holding } = await holdIssueLock(seededIssueId);
+    try {
+      const accepting = acceptWithKey(sourceW1.cookie, authorization.token, "RENAMED");
+      await waitForLockWait('%from "issues"%for update%');
+      const creating = postJson(
+        `/api/projects/${sourceW1.project.id}/issues`,
+        { title: "Racing issue" },
+        sourceW1.cookie,
+      );
+      await waitForLockWait('%"projects"%');
+
+      release();
+      const [acceptRes, createRes] = await Promise.all([accepting, creating, holding]);
+      expect(acceptRes.status).toBe(200);
+      expect(createRes.status).toBe(201);
+      expect(field(await createRes.json(), "identifier")).toBe("RENAMED-2");
+    } finally {
+      release();
+      await holding.catch(() => {});
+    }
   });
 });
