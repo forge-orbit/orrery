@@ -13,19 +13,40 @@ import { TextField } from "../lib/fields.tsx";
 import { Link } from "../lib/Link.tsx";
 
 const INVITATION_NEXT = /^\/workspace-invitation\?token=([A-Za-z0-9_-]+)$/;
+const DISALLOWED_NEXT_PATHS = new Set([
+  "/",
+  "/setup",
+  "/signin",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/workspace-invitation",
+]);
 
 function invitationTokenFrom(next: string | undefined): string | undefined {
   if (next === undefined) return undefined;
   return INVITATION_NEXT.exec(next)?.[1];
 }
 
+function safeNextPath(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (INVITATION_NEXT.test(value)) return value;
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return undefined;
+  try {
+    const parsed = new URL(value, "http://orrery.local");
+    if (parsed.origin !== "http://orrery.local") return undefined;
+    const normalizedPath = parsed.pathname.replace(/\/+$/, "") || "/";
+    if (DISALLOWED_NEXT_PATHS.has(normalizedPath)) return undefined;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return undefined;
+  }
+}
+
 export const Route = createFileRoute("/signin")({
   staticData: { accessPage: true },
   validateSearch: (search: Record<string, unknown>) => {
-    const next =
-      typeof search.next === "string" && INVITATION_NEXT.test(search.next)
-        ? search.next
-        : undefined;
+    const next = safeNextPath(search.next);
     return next === undefined ? {} : { next };
   },
   beforeLoad: async ({ context }) => {
@@ -56,6 +77,8 @@ function SignInPage() {
       const token = invitationTokenFrom(next);
       if (token !== undefined) {
         await navigate({ to: "/workspace-invitation", search: { token } });
+      } else if (next !== undefined) {
+        await navigate({ href: next, replace: true });
       } else {
         await navigate({ to: "/" });
       }
