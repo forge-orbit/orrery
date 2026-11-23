@@ -132,6 +132,9 @@ function ProfileSection({
       setSavedMessage("Profile saved.");
       toast({ body: "Profile saved." });
       await queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey });
+      // A handle change flows into every Human-bearing response (members, issues,
+      // comments, activity, mention candidates), so refresh all cached lists too.
+      await queryClient.invalidateQueries();
     },
   });
 

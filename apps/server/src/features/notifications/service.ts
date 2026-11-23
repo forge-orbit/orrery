@@ -178,8 +178,19 @@ export function createNotificationsService(deps: NotificationsDeps): Notificatio
       .limit(1);
     if (project === undefined) return;
 
+    const isMention = input.kind === "issue_mentioned";
+    const mentionedIds = new Set<string>();
+    if (input.mentionHandles !== undefined && input.mentionHandles.length > 0) {
+      const handles = [...new Set(input.mentionHandles.map((handle) => handle.toLowerCase()))];
+      const mentioned = await tx
+        .select({ id: humans.id })
+        .from(humans)
+        .where(and(inArray(sql`lower(${humans.handle})`, handles), isNull(humans.deactivatedAt)));
+      for (const { id } of mentioned) mentionedIds.add(id);
+    }
+
     const recipients = new Set<string>();
-    if (input.actorAgentId !== null && input.actorAgentId !== undefined) {
+    if (!isMention && input.actorAgentId !== null && input.actorAgentId !== undefined) {
       const [owner] = await tx
         .select({ humanId: agents.humanId })
         .from(agents)
@@ -187,7 +198,9 @@ export function createNotificationsService(deps: NotificationsDeps): Notificatio
         .limit(1);
       if (owner !== undefined) recipients.add(owner.humanId);
     }
-    if (issue.assigneeType === "human" && issue.assigneeId !== null) {
+    // An `issue_mentioned` notification is only for the handles actually written:
+    // an unmentioned assignee must never receive one.
+    if (!isMention && issue.assigneeType === "human" && issue.assigneeId !== null) {
       recipients.add(issue.assigneeId);
     }
     // A handoff with no human assignee also notifies the issue's human creator (if any).
@@ -198,27 +211,13 @@ export function createNotificationsService(deps: NotificationsDeps): Notificatio
     ) {
       recipients.add(issue.createdByHumanId);
     }
-    if (input.mentionHandles !== undefined && input.mentionHandles.length > 0) {
-      const handles = [...new Set(input.mentionHandles.map((handle) => handle.toLowerCase()))];
-      const mentioned = await tx
-        .select({ id: humans.id })
-        .from(humans)
-        .where(and(inArray(sql`lower(${humans.handle})`, handles), isNull(humans.deactivatedAt)));
-      for (const { id } of mentioned) recipients.add(id);
-    }
+    for (const humanId of mentionedIds) recipients.add(humanId);
+
     // Never notify the human who caused the event, even when they mentioned themselves.
+    // An agent's owner is not auto-added for a mention, so an explicit @mention of that
+    // owner is delivered; for all other events the owner remains a recipient as before.
     if (input.actorHumanId !== null && input.actorHumanId !== undefined) {
       recipients.delete(input.actorHumanId);
-    }
-    if (input.actorAgentId !== null && input.actorAgentId !== undefined) {
-      const [owner] = await tx
-        .select({ humanId: agents.humanId })
-        .from(agents)
-        .where(eq(agents.id, input.actorAgentId))
-        .limit(1);
-      if (owner !== undefined && input.mentionHandles !== undefined) {
-        recipients.delete(owner.humanId);
-      }
     }
     if (recipients.size === 0) return;
 

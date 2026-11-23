@@ -6,7 +6,7 @@
 CREATE OR REPLACE FUNCTION orrery_human_handle_for(p_email text, p_exclude_id text DEFAULT NULL)
 RETURNS text
 LANGUAGE plpgsql
-STABLE
+VOLATILE
 AS $$
 DECLARE
   base text;
@@ -25,6 +25,10 @@ BEGIN
   IF char_length(base) < 2 THEN
     base := 'user';
   END IF;
+  -- Serialize inserts that derive the same base handle (e.g. alex@a.com and
+  -- alex@b.com). VOLATILE above makes the loop below re-read committed rows after
+  -- the wait, so the loser sees the winner's handle and takes the -2 suffix.
+  PERFORM pg_advisory_xact_lock(hashtext('orrery_human_handle'), hashtext(base));
   candidate := base;
   WHILE EXISTS (
     SELECT 1 FROM humans h

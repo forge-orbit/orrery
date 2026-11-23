@@ -210,7 +210,9 @@
       },
       "Handle": {
         "type": "string",
-        "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
+        "minLength": 2,
+        "maxLength": 39,
+        "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
       },
       "AvatarUrl": {
         "type": [

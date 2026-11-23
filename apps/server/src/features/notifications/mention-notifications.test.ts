@@ -3,6 +3,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
+  agents,
   humans,
   notifications,
   projectAccessGrants,
@@ -41,6 +42,8 @@ describe("issue_mentioned notifications", () => {
   let workspaceId: string;
   let projectId: string;
   let actor: WorkActor;
+  let editorId: string;
+  let readerId: string;
 
   beforeAll(async () => {
     pg = await new PostgreSqlContainer("postgres:18").start();
@@ -56,6 +59,7 @@ describe("issue_mentioned notifications", () => {
       await tx.execute(sql`delete from project_activity`);
       await tx.execute(sql`delete from project_access_grants`);
       await tx.execute(sql`delete from issues`);
+      await tx.execute(sql`delete from agents`);
       await tx.execute(sql`delete from projects`);
       await tx.execute(sql`delete from workspace_memberships`);
       await tx.execute(sql`delete from workspaces`);
@@ -79,7 +83,9 @@ describe("issue_mentioned notifications", () => {
 
   beforeEach(async () => {
     const editor = await seedHuman("editor@example.com", "editor");
+    editorId = editor.id;
     const reader = await seedHuman("reader@example.com", "reader");
+    readerId = reader.id;
     const reader2 = await seedHuman("reader2@example.com", "reader2");
     const outsider = await seedHuman("outsider@example.com", "outsider");
     workspaceId = randomUUID();
@@ -235,5 +241,44 @@ describe("issue_mentioned notifications", () => {
         .where(eq(issues.projectId, projectId)),
     ).toHaveLength(1);
     expect(await database.db.select({ id: issueComments.id }).from(issueComments)).toHaveLength(0);
+  });
+
+  it("does not send issue_mentioned to an assignee whose handle was not written", async () => {
+    const { projectsService } = services();
+    await projectsService.createIssue(actor, projectId, {
+      title: "Mention someone else",
+      body: "Please review this, @reader2.",
+      assignee: { type: "human", id: readerId },
+    });
+    // The assignee still gets ordinary assignment activity, never a mention notification.
+    expect(await notificationsFor("reader")).toHaveLength(0);
+    expect(await notificationsFor("reader2")).toHaveLength(1);
+    const stored = await database.db.select({ kind: notifications.kind }).from(notifications);
+    expect(stored.every((row) => row.kind === "issue_mentioned")).toBe(true);
+  });
+
+  it("lets an acting agent @mention its own owning Human", async () => {
+    const agentId = randomUUID();
+    await database.db.insert(agents).values({ id: agentId, humanId: editorId, name: "builder" });
+    const agentActor: WorkActor = {
+      kind: "agent",
+      identity: {
+        agentId,
+        name: "builder",
+        humanId: editorId,
+        keyId: randomUUID(),
+        workspaceId,
+        validity: "never",
+        projects: [{ projectId, projectName: "Mention project", level: "contribute" }],
+      },
+    };
+    const { projectsService } = services();
+    await projectsService.createIssue(agentActor, projectId, {
+      title: "Agent asks its owner",
+      body: "Hey @editor, can you take a look?",
+    });
+    const items = await notificationsFor("editor");
+    expect(items).toHaveLength(1);
+    expect(items[0]?.kind).toBe("issue_mentioned");
   });
 });

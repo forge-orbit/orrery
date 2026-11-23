@@ -2776,42 +2776,42 @@ def extract_code_facts() -> dict[str, Any]:
     mentions_src = read_text("apps/server/src/features/notifications/mentions.ts")
     notif_create_fn = slice_between(notif_src, "const createForActivity: NotifyActivity", "const notificationColumns")
     notif_readable_fn = slice_between(notif_src, "const readableAccess =", "export function createNotificationsService")
-    m40_handle_check = (
+    m41_handle_check = (
         "humans_handle_valid" in schema_src
         and "humans_handle_valid" in mig_handle
         and "char_length" in mig_handle
     )
-    m40_handle_unique = (
+    m41_handle_unique = (
         "humans_handle_unique" in schema_src
         and 'lower("handle")' in mig_handle
         and "lower" in mig_backfill
     )
-    m40_backfill_before_not_null = (
+    m41_backfill_before_not_null = (
         "orrery_human_handle_for" in mig_backfill
         and mig_backfill.index("UPDATE humans") < mig_backfill.index("SET NOT NULL")
         and "CREATE TRIGGER humans_assign_handle" in mig_backfill
     )
-    m40_mention_diff = (
+    m41_mention_diff = (
         "newlyAddedMentions(" in proj_src
         and "extractMentionHandles(" in proj_src
         and "newlyAddedMentions" in mentions_src
     )
-    m40_ignore_non_text = all(
+    m41_ignore_non_text = all(
         marker in mentions_src
         for marker in ("FENCED_CODE", "INLINE_CODE", "MARKDOWN_LINK", "EMAIL")
     )
-    m40_mention_recipients = (
+    m41_mention_recipients = (
         "mentionHandles" in notif_create_fn
         and "lower(${humans.handle})" in notif_create_fn
         and "recipients.delete(input.actorHumanId)" in notif_create_fn
     )
-    m40_live_read_gate = (
+    m41_live_read_gate = (
         "${workspaces.id} = ${projects.workspaceId}" in notif_readable_fn
         and "suspendedAt} is null" in notif_readable_fn
         and "hasReadAccess(tx, humanId, project.workspaceId" in notif_create_fn
     )
     notif_contract_src = read_text("packages/contract/src/notifications.ts")
-    m40_dedupe_per_event = (
+    m41_dedupe_per_event = (
         ".onConflictDoNothing()" in notif_create_fn
         and "one_notification_per_human_and_activity" in schema_src
         and "issue_mentioned" in notif_contract_src
@@ -3239,14 +3239,14 @@ def extract_code_facts() -> dict[str, Any]:
         "m39_knowledge_noop_metadata": m39_knowledge_noop_metadata,
         "m39_metadata_rest_mcp": m39_metadata_rest_mcp,
         "m39_background_overlap": m39_background_overlap,
-        "m40_handle_check": m40_handle_check,
-        "m40_handle_unique": m40_handle_unique,
-        "m40_backfill_before_not_null": m40_backfill_before_not_null,
-        "m40_mention_diff": m40_mention_diff,
-        "m40_ignore_non_text": m40_ignore_non_text,
-        "m40_mention_recipients": m40_mention_recipients,
-        "m40_live_read_gate": m40_live_read_gate,
-        "m40_dedupe_per_event": m40_dedupe_per_event,
+        "m41_handle_check": m41_handle_check,
+        "m41_handle_unique": m41_handle_unique,
+        "m41_backfill_before_not_null": m41_backfill_before_not_null,
+        "m41_mention_diff": m41_mention_diff,
+        "m41_ignore_non_text": m41_ignore_non_text,
+        "m41_mention_recipients": m41_mention_recipients,
+        "m41_live_read_gate": m41_live_read_gate,
+        "m41_dedupe_per_event": m41_dedupe_per_event,
     }
 
 
@@ -8499,8 +8499,8 @@ def check_m39(facts: dict[str, bool]) -> CheckResult:
     )
 
 
-def check_m40(facts: dict[str, bool]) -> CheckResult:
-    g = {k: facts[k] for k in facts if k.startswith("m40_")}
+def check_m41(facts: dict[str, bool]) -> CheckResult:
+    g = {k: facts[k] for k in facts if k.startswith("m41_")}
 
     # State: (handles_unique, handle_assigned, notified, events_applied, violations).
     # `events_applied` is the set of mutations already interleaved, so the BFS
@@ -8518,46 +8518,46 @@ def check_m40(facts: dict[str, bool]) -> CheckResult:
         )
 
     def insert_colliding_human(state):
-        if not g["m40_handle_check"] or not g["m40_handle_unique"]:
+        if not g["m41_handle_check"] or not g["m41_handle_unique"]:
             return step(state, "colliding insert", "duplicate_or_invalid_handle", uniq=False, assigned=True)
-        if not g["m40_backfill_before_not_null"]:
+        if not g["m41_backfill_before_not_null"]:
             return step(state, "colliding insert", "collision_suffix_not_allocated", uniq=False, assigned=True)
         return step(state, "colliding insert", assigned=True)
 
     def backfill_legacy_row(state):
-        if not g["m40_backfill_before_not_null"]:
+        if not g["m41_backfill_before_not_null"]:
             return step(state, "backfill", "legacy_row_left_with_null_handle", assigned=False)
         return step(state, "backfill", assigned=True)
 
     def create_issue_with_duplicate_mention(state):
-        if not g["m40_dedupe_per_event"]:
+        if not g["m41_dedupe_per_event"]:
             return step(state, "create duplicate mention", "duplicate_notification_per_event", notified=True)
-        if not g["m40_ignore_non_text"]:
+        if not g["m41_ignore_non_text"]:
             return step(state, "create duplicate mention", "non_text_mention_notified", notified=True)
         return step(state, "create duplicate mention", notified=True)
 
     def mention_without_read_access(state):
-        if not g["m40_live_read_gate"]:
+        if not g["m41_live_read_gate"]:
             return step(state, "non-member mention", "non_member_notified", notified=True)
         return step(state, "non-member mention")
 
     def self_mention(state):
-        if not g["m40_mention_recipients"]:
+        if not g["m41_mention_recipients"]:
             return step(state, "self mention", "self_notified", notified=True)
         return step(state, "self mention")
 
     def edit_adds_mention(state):
-        if not g["m40_mention_diff"]:
+        if not g["m41_mention_diff"]:
             return step(state, "edit adds mention", "already_mentioned_notified_again", notified=True)
         return step(state, "edit adds mention", notified=True)
 
     def edit_keeps_mention(state):
-        if not g["m40_mention_diff"]:
+        if not g["m41_mention_diff"]:
             return step(state, "edit keeps mention", "unchanged_mention_notified_again", notified=True)
         return step(state, "edit keeps mention")
 
     def mention_inside_code_or_email(state):
-        if not g["m40_ignore_non_text"]:
+        if not g["m41_ignore_non_text"]:
             return step(state, "code mention", "non_text_mention_notified", notified=True)
         return step(state, "code mention")
 
@@ -8583,7 +8583,7 @@ def check_m40(facts: dict[str, bool]) -> CheckResult:
         return True, ""
 
     return bfs_check(
-        "M40",
+        "M41",
         "Human Handles and @Mentions (#183)",
         "Handles are backfilled and unique; mention notifications are deduplicated, gated on live Read access, never self-sent, and only newly added on an edit",
         "safety",
@@ -8645,7 +8645,7 @@ def main() -> None:
         check_m37(facts),
         check_m38(facts),
         check_m39(facts),
-        check_m40(facts),
+        check_m41(facts),
     ]
 
     if "--json" in sys.argv:

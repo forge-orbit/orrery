@@ -2646,6 +2646,9 @@ export function createProjectsService({
           const agentRows = await tx
             .selectDistinct({ id: agents.id, name: agents.name, humanId: agents.humanId })
             .from(agents)
+            // An agent owned by a deactivated Human is not a mention candidate, even
+            // when its key and project grant are otherwise live.
+            .innerJoin(humans, and(eq(humans.id, agents.humanId), isNull(humans.deactivatedAt)))
             .innerJoin(
               agentApiKeys,
               and(
