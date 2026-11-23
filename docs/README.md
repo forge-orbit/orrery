@@ -60,6 +60,7 @@ Want to write or change a page? See [Writing the docs](./writing-docs.md).
 - [Workspace-scoped outgoing webhooks with a transactional outbox and default-deny SSRF guard](./adr/0007-outgoing-webhooks-outbox-and-security.md)
 - [Pluggable object storage with local filesystem default and S3-compatible backend](./adr/0008-pluggable-object-storage.md)
 - [Project-scoped Markdown attachments with reference-tracked lifecycle](./adr/0009-project-scoped-markdown-attachments.md)
+- [Local agent runner: host/runner identity, transactional HTTP/SSE transport, ACP supervision, and ObjectStore stream rollup](./adr/0010-local-agent-runner-and-live-streaming.md)
 
 ## Help shape Orrery
 
