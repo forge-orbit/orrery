@@ -2461,6 +2461,11 @@ export function createProjectsService({
           .orderBy(issues.id)
           .for("update", { skipLocked: true });
         const expiredIds = expired.map((row) => row.id);
+        // Collect every holder across the whole batch before locking any
+        // attachment row: a per-issue purge could lock B from issue 1 then A
+        // from issue 2 (A < B) and AB-BA deadlock against a save. One batch call
+        // locks all candidates in a single ascending id order.
+        const attachmentHolders: { holderType: "issue" | "comment"; holderId: string }[] = [];
         for (const row of expired) {
           // Comments are hard-deleted, so collect their holder ids before the
           // rows vanish. References from both the issue and its comments have to
@@ -2470,15 +2475,13 @@ export function createProjectsService({
             .from(issueComments)
             .where(eq(issueComments.issueId, row.id));
           await tx.delete(issueComments).where(eq(issueComments.issueId, row.id));
-          if (attachmentSeams !== undefined) {
-            await attachmentSeams.purgeHolders(tx, [
-              { holderType: "issue", holderId: row.id },
-              ...comments.map((comment) => ({
-                holderType: "comment" as const,
-                holderId: comment.id,
-              })),
-            ]);
-          }
+          attachmentHolders.push(
+            { holderType: "issue", holderId: row.id },
+            ...comments.map((comment) => ({
+              holderType: "comment" as const,
+              holderId: comment.id,
+            })),
+          );
           await tx.delete(issueLinks).where(eq(issueLinks.issueId, row.id));
           await tx.delete(issueLabels).where(eq(issueLabels.issueId, row.id));
           await tx
@@ -2500,6 +2503,9 @@ export function createProjectsService({
               purgedAt: sql`statement_timestamp()`,
             })
             .where(eq(issues.id, row.id));
+        }
+        if (attachmentSeams !== undefined && attachmentHolders.length > 0) {
+          await attachmentSeams.purgeHolders(tx, attachmentHolders);
         }
 
         if (expiredIds.length > 0) {
@@ -3380,7 +3386,11 @@ export function createProjectsService({
         );
         const title = input.title ?? current.title;
         const body = input.body ?? current.body;
-        if (title === current.title && body === current.body) return toKnowledge(current);
+        if (title === current.title && body === current.body) {
+          const unchanged = toKnowledge(current);
+          unchanged.attachments = await metadataFor(tx, "knowledge", entryId);
+          return unchanged;
+        }
         const [updated] = await tx
           .update(knowledgeEntries)
           .set({

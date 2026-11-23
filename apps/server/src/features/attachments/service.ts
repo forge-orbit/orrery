@@ -579,22 +579,29 @@ export function createAttachmentsService({
 
       // The holder row has already been written by the caller; attachments come
       // next in ascending id order so every save/purge shares one lock order.
-      const bindable = wanted.size
+      // Lock the union of added AND dropped candidates up front: leaving dropped
+      // rows for the trailing UPDATE would lock B before A when an edit drops A
+      // and adds B with A < B, deadlocking against a purge that locks in id order.
+      const candidateIds = [...new Set([...wanted, ...existingIds])].toSorted();
+      const locked = candidateIds.length
         ? await tx
-            .select({ id: attachments.id })
+            .select({
+              id: attachments.id,
+              projectId: attachments.projectId,
+              status: storedObjects.status,
+            })
             .from(attachments)
             .innerJoin(storedObjects, eq(storedObjects.id, attachments.objectId))
-            .where(
-              and(
-                inArray(attachments.id, [...wanted]),
-                eq(attachments.projectId, input.projectId),
-                eq(storedObjects.status, "active"),
-              ),
-            )
+            .where(inArray(attachments.id, candidateIds))
             .orderBy(attachments.id)
             .for("update", { of: attachments })
         : [];
-      const bindableIds = bindable.map((row) => row.id);
+      const bindableIds = locked
+        .filter(
+          (row) =>
+            row.projectId === input.projectId && row.status === "active" && wanted.has(row.id),
+        )
+        .map((row) => row.id);
       const bindableSet = new Set(bindableIds);
       const dropped = existingIds.filter((id) => !bindableSet.has(id));
 

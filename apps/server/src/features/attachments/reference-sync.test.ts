@@ -406,6 +406,13 @@ describe("#179 attachment reference sync, metadata, grace sweep and Trash cleanu
 
     const entry = await knowledge(`Documentation [log](${url})`);
     expect(entry.attachments).toEqual(expected);
+    const noop = await app.request(`/api/knowledge/${entry.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", ...withCookie() },
+      body: JSON.stringify({ title: entry.title, body: entry.body }),
+    });
+    expect(noop.status).toBe(200);
+    expect(KnowledgeEntry.parse(await noop.json()).attachments).toEqual(expected);
     const fetched = await app.request(`/api/knowledge/${entry.id}`, { headers: withCookie() });
     expect(KnowledgeEntry.parse(await fetched.json()).attachments).toEqual(expected);
     expect(

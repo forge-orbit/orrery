@@ -2700,8 +2700,8 @@ def extract_code_facts() -> dict[str, Any]:
         and ".orderBy(attachments.id)" in att_sync_fn
     )
     m39_active_only = (
-        'eq(storedObjects.status, "active")' in att_sync_fn
-        and "eq(attachments.projectId, input.projectId)" in att_sync_fn
+        'row.status === "active"' in att_sync_fn
+        and "row.projectId === input.projectId" in att_sync_fn
     )
     m39_dedupe = ".onConflictDoNothing()" in att_sync_fn
     m39_unref_clear = "unreferencedAt: null" in att_sync_fn
@@ -2727,7 +2727,22 @@ def extract_code_facts() -> dict[str, Any]:
         '.for("update", { of: attachments })' in att_purge_fn
         and "await tx.delete(attachmentReferences)" in att_purge_fn
         and "referenceCount(tx, row.id)" in att_purge_fn
-        and "attachmentSeams.purgeHolders(tx, [" in purge_fn
+        and "attachmentSeams.purgeHolders(tx, attachmentHolders)" in purge_fn
+    )
+    m39_sync_lock_union = (
+        "[...new Set([...wanted, ...existingIds])].toSorted()" in att_sync_fn
+        and "inArray(attachments.id, candidateIds)" in att_sync_fn
+        and ".orderBy(attachments.id)" in att_sync_fn
+    )
+    m39_purge_single_batch = (
+        "const attachmentHolders:" in purge_fn
+        and "attachmentHolders.push(" in purge_fn
+        and purge_fn.count("attachmentSeams.purgeHolders(tx, attachmentHolders)") == 1
+        and purge_fn.index("attachmentHolders.push(")
+        < purge_fn.index("attachmentSeams.purgeHolders(tx, attachmentHolders)")
+    )
+    m39_knowledge_noop_metadata = (
+        'unchanged.attachments = await metadataFor(tx, "knowledge", entryId);' in project_src
     )
     m39_trash_preserve = (
         "THIRTY_DAYS_AGO" in purge_fn
@@ -2736,9 +2751,9 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m39_holder_before_attachment = (
         project_src.count("await syncBody(tx, {") >= 5
-        and 'attachmentSeams.purgeHolders(tx, [' in purge_fn
+        and "attachmentSeams.purgeHolders(tx, attachmentHolders)" in purge_fn
         and purge_fn.index(".for(\"update\", { skipLocked: true })")
-        < purge_fn.index("attachmentSeams.purgeHolders(tx, [")
+        < purge_fn.index("attachmentSeams.purgeHolders(tx, attachmentHolders)")
     )
     m39_metadata_rest_mcp = (
         "attachments: z.array(AttachmentMetadata)" in contract_project_src
@@ -3170,6 +3185,9 @@ def extract_code_facts() -> dict[str, Any]:
         "m39_purge_holders": m39_purge_holders,
         "m39_trash_preserve": m39_trash_preserve,
         "m39_holder_before_attachment": m39_holder_before_attachment,
+        "m39_sync_lock_union": m39_sync_lock_union,
+        "m39_purge_single_batch": m39_purge_single_batch,
+        "m39_knowledge_noop_metadata": m39_knowledge_noop_metadata,
         "m39_metadata_rest_mcp": m39_metadata_rest_mcp,
         "m39_background_overlap": m39_background_overlap,
     }
@@ -8325,17 +8343,48 @@ def check_m39(facts: dict[str, bool]) -> CheckResult:
                         bad(v, "metadata_missing_from_rest_mcp"))
             return state
 
+        def swap_dropped_and_added(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if phase != "referenced" or issue == "purged":
+                return state
+            # An edit drops A and adds B with A < B: locking only the added row
+            # before updating A inverts the ascending-id lock order.
+            if not g["m39_sync_lock_union"]:
+                return (phase, refs, issue, hours, expired, sweeping,
+                        bad(v, "dropped_then_added_ab_ba_deadlock"))
+            return state
+
+        def purge_two_expired_issues(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if issue != "trash" or not expired or not refs:
+                return state
+            # A per-issue purge locks B from issue 1, then A from issue 2 (A < B).
+            if not g["m39_purge_single_batch"]:
+                return (phase, refs, issue, hours, expired, sweeping,
+                        bad(v, "multi_issue_purge_ab_ba_deadlock"))
+            return state
+
+        def noop_knowledge_patch(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if "knowledge" in refs and not g["m39_knowledge_noop_metadata"]:
+                return (phase, refs, issue, hours, expired, sweeping,
+                        bad(v, "noop_response_missing_metadata"))
+            return state
+
         actions = [
             ("upload starts a 24h unreferenced grace window", upload),
             ("save binds same-project attachment URLs (twice in one body)", save_bind),
             ("save binds only a cross-referenced live issue", bind_live_only),
             ("an edit drops the last reference", edit_drop),
+            ("an edit drops A and adds B in one save", swap_dropped_and_added),
+            ("a no-op knowledge PATCH reads bound metadata", noop_knowledge_patch),
             ("the database clock advances", tick),
             ("the issue is moved to Trash", trash_issue),
             ("a Trash issue is restored", restore_issue),
             ("the Trash window expires", age_trash),
             ("a save races a purge on a Trash issue", concurrent_save_purge),
             ("purgeExpiredTrash scrubs an expired issue and its comments", purge),
+            ("one batch purge handles several expired issues", purge_two_expired_issues),
             ("the 24h sweep tick starts", start_sweep),
             ("the 24h sweep locks and re-verifies candidates", sweep),
             ("the 24h sweep wins the race against a late save", sweep_wins_race),
