@@ -20,6 +20,7 @@ import {
   issues,
   projectAccessEvents,
   projectAccessGrants,
+  projectTransferAuthorizations,
   projects,
   workSessions,
   workspaceMemberships,
@@ -172,6 +173,16 @@ export function createDeactivationService({ db }: DeactivationDeps): Deactivatio
           .where(eq(humans.id, humanId));
 
         await tx.delete(browserSessions).where(eq(browserSessions.humanId, humanId));
+
+        await tx
+          .update(projectTransferAuthorizations)
+          .set({ status: "revoked", revokedAt: sql`statement_timestamp()` })
+          .where(
+            and(
+              eq(projectTransferAuthorizations.authorizedByHumanId, humanId),
+              eq(projectTransferAuthorizations.status, "pending"),
+            ),
+          );
 
         const ownedAgents = tx
           .select({ id: agents.id })

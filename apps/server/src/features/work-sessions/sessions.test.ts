@@ -40,7 +40,12 @@ import { migrate } from "../../platform/migrate.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
 import { createAgentsFeature, type AgentAuthenticator } from "../agents/index.ts";
-import { createProjectsFeature, ProjectsError, type WorkSessionGate } from "../projects/index.ts";
+import {
+  createProjectsFeature,
+  ProjectsError,
+  type ProjectsErrorKind,
+  type WorkSessionGate,
+} from "../projects/index.ts";
 import {
   createSessionsFeature,
   releaseIssueWorkSessions,
@@ -59,6 +64,10 @@ let database: Database;
 let app: Hono;
 let projectsService: ReturnType<typeof createProjectsFeature>["service"];
 let sessionsService: SessionsService;
+let accountsForApp: ReturnType<typeof createAccountsFeature>;
+let projectsForApp: ReturnType<typeof createProjectsFeature>;
+let agentsForApp: ReturnType<typeof createAgentsFeature>;
+let bearerAuthenticator: AgentAuthenticator;
 
 const atLeast = (actual: string, required: string) =>
   ["read", "contribute", "manage"].indexOf(actual) >=
@@ -161,6 +170,10 @@ beforeAll(async () => {
     publicUrl: PUBLIC_URL,
     log: silentLogger,
   });
+  accountsForApp = accounts;
+  projectsForApp = projectsFeature;
+  agentsForApp = agentsFeature;
+  bearerAuthenticator = lateAuth;
 }, 120_000);
 
 afterAll(async () => {
@@ -366,6 +379,23 @@ async function issueStatus(issueId: string) {
   return row;
 }
 
+// readyWork checks access in one transaction and then reads the board through the
+// injected listIssues seam. A revocation between the two makes the seam throw a
+// ProjectsError; this feature reproduces that window deterministically.
+function sessionsFeatureFailingListIssues(kind: ProjectsErrorKind) {
+  return createSessionsFeature({
+    db: database.db,
+    sessionReader: accountsForApp.sessionReader,
+    authenticate: bearerAuthenticator,
+    projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
+      projectsForApp.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
+    projectAccessAtLeast: (actual, required) => atLeast(actual, required),
+    listIssues: async () => {
+      throw new ProjectsError(kind);
+    },
+  });
+}
+
 describe("work sessions against real Postgres", () => {
   it("claims and stops a session tied to the agent, run, workspace and issue", async () => {
     const f = await bootstrap();
@@ -478,6 +508,90 @@ describe("work sessions against real Postgres", () => {
     const ready = await sessionsService.readyWork({ kind: "agent", identity }, f.projectId);
     expect(ready.map((item) => item.id)).toContain(a.id);
     expect(ready.map((item) => item.id)).not.toContain(b.id);
+  });
+
+  it("locks issues before work sessions when expiring a committed lease", async () => {
+    const f = await bootstrap();
+    const identity = await identityFor(f.secret);
+    const issue = await humanIssue(f, "Expired lease lock order");
+    const runId = await newRun(identity);
+    const first = await sessionsService.claim(
+      { kind: "agent", identity },
+      { issueId: issue.id, runId },
+    );
+    await setLease(issue.id, "statement_timestamp() - interval '1 second'");
+
+    let markLocked!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      markLocked = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let workSessionRows = 0;
+    // Stand in for the main transactions that lock issues before expiring work
+    // sessions: hold the issue row, then try to lock the work-session row too.
+    const holder = database.sql.begin(async (tx) => {
+      await tx`select id from issues where id = ${issue.id} for update`;
+      markLocked();
+      await gate;
+      const rows = await tx<{ id: string }[]>`
+        select id from work_sessions
+        where issue_id = ${issue.id} and status = 'active'
+        for update nowait
+      `;
+      workSessionRows = rows.length;
+    });
+
+    let claim: Promise<WorkSession> | undefined;
+    try {
+      await locked;
+      claim = sessionsService.claim(
+        { kind: "agent", identity },
+        { issueId: issue.id, runId: await newRun(identity) },
+      );
+      await expect
+        .poll(
+          async () => {
+            const [row] = await database.sql<{ count: number }[]>`
+              select count(*)::int as count
+              from pg_stat_activity
+              where wait_event_type = 'Lock'
+                and query ilike '%issues%'
+                and pid <> pg_backend_pid()
+            `;
+            return row?.count ?? 0;
+          },
+          { timeout: 5_000, interval: 25 },
+        )
+        .toBeGreaterThan(0);
+      const [waiting] = await database.sql<{ query: string }[]>`
+        select query from pg_stat_activity
+        where wait_event_type = 'Lock'
+          and query ilike '%issues%'
+          and pid <> pg_backend_pid()
+        limit 1
+      `;
+      release();
+      await holder;
+      expect(workSessionRows).toBe(1);
+      // The committed expiry must block on lockIssue, not revert the issue only
+      // after updating work_sessions: that reversed order deadlocks with holder.
+      expect(waiting?.query).toMatch(/^select[\s\S]*from "issues"[\s\S]*for update/i);
+      await expect(claim).resolves.toMatchObject({ status: "active" });
+    } catch (error) {
+      release();
+      await holder.catch(() => {});
+      if (claim !== undefined) await claim.catch(() => {});
+      throw error;
+    }
+    const [old] = await database.db
+      .select({ status: workSessions.status })
+      .from(workSessions)
+      .where(eq(workSessions.id, first.id));
+    expect(old?.status).toBe("expired");
+    expect(await issueStatus(issue.id)).toMatchObject({ status: "in_progress" });
   });
 
   it("rejects a stale edit, close, progress and completion even when nobody else claimed", async () => {
@@ -1007,6 +1121,56 @@ describe("work sessions against real Postgres", () => {
     );
     await expectProblem(edit, 409, "session_required");
     expect(identity.agentId).toBe(f.agentId);
+  });
+
+  it("translates a ProjectsError from listIssues into a SessionsError when access lapses after the eligibility check", async () => {
+    const f = await bootstrap();
+    const identity = await identityFor(f.secret);
+    const issue = await humanIssue(f, "Lapsed access issue");
+
+    // The issue is eligible, so readyWork reaches the listIssues seam.
+    expect(
+      (await sessionsService.readyWork({ kind: "agent", identity }, f.projectId)).map((i) => i.id),
+    ).toContain(issue.id);
+
+    for (const [kind, expected] of [
+      ["project_not_found", "project_not_found"],
+      ["insufficient_project_access", "insufficient_access"],
+    ] as const) {
+      const service = sessionsFeatureFailingListIssues(kind).service;
+      const error = await rejection(service.readyWork({ kind: "agent", identity }, f.projectId));
+      expect(error).toBeInstanceOf(SessionsError);
+      expect(errorKind(error)).toBe(expected);
+    }
+  });
+
+  it("returns a Problem, not a 500, when listIssues reports revoked project access", async () => {
+    const f = await bootstrap();
+    const identity = await identityFor(f.secret);
+    await humanIssue(f, "REST lapsed access issue");
+    expect(
+      (await sessionsService.readyWork({ kind: "agent", identity }, f.projectId)).length,
+    ).toBeGreaterThan(0);
+
+    for (const [kind, status, code] of [
+      ["project_not_found", 404, "project_not_found"],
+      ["insufficient_project_access", 403, "insufficient_access"],
+    ] as const) {
+      const throwingApp = createApp({
+        features: [
+          accountsForApp,
+          projectsForApp,
+          agentsForApp,
+          sessionsFeatureFailingListIssues(kind),
+        ],
+        publicUrl: PUBLIC_URL,
+        log: silentLogger,
+      });
+      const res = await throwingApp.request(`/api/projects/${f.projectId}/ready-work`, {
+        headers: { authorization: `Bearer ${f.secret}` },
+      });
+      await expectProblem(res, status, code);
+    }
   });
 
   it("reports progress and retains it across interruption, distinguishing a live claim from an expired one on resume", async () => {

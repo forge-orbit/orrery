@@ -80,6 +80,14 @@ export const AgentKeyGrant = z
   .meta({ id: "AgentKeyGrant" });
 export type AgentKeyGrant = z.infer<typeof AgentKeyGrant>;
 
+export const AgentKeyGrants = z
+  .array(AgentKeyGrant)
+  .refine(
+    (grants) => new Set(grants.map((grant) => grant.projectId)).size === grants.length,
+    "Grant each project at most once.",
+  );
+export type AgentKeyGrants = z.infer<typeof AgentKeyGrants>;
+
 export const CreateAgentKeyRequest = z
   .object({
     agentId: z.string().min(1),
@@ -87,7 +95,7 @@ export const CreateAgentKeyRequest = z
     
     
     validity: AgentKeyValidity.default("90"),
-    projects: z.array(AgentKeyGrant),
+    projects: AgentKeyGrants,
   })
   .meta({ id: "CreateAgentKeyRequest" });
 export type CreateAgentKeyRequest = z.infer<typeof CreateAgentKeyRequest>;
@@ -99,7 +107,7 @@ export type CreateAgentKeyRequest = z.infer<typeof CreateAgentKeyRequest>;
 export const RotateAgentKeyRequest = z
   .object({
     validity: AgentKeyValidity.optional(),
-    projects: z.array(AgentKeyGrant).optional(),
+    projects: AgentKeyGrants.optional(),
   })
   .meta({ id: "RotateAgentKeyRequest" });
 export type RotateAgentKeyRequest = z.infer<typeof RotateAgentKeyRequest>;

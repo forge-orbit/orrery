@@ -5,15 +5,22 @@ import {
   attachmentUrlFor,
   extractAttachmentUrls,
   parseAttachmentUrl,
+  type AgentIdentity,
   type AttachmentHolderType,
   type AttachmentMetadata,
   type ProjectAccessLevel,
   type Attachment as AttachmentResponse,
 } from "@orrery/contract";
-import { and, eq, inArray, isNotNull, notExists, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, notExists, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import sharp from "sharp";
-import { attachmentReferences, attachments, projects, storedObjects } from "../../db/schema.ts";
+import {
+  attachmentReferences,
+  attachments,
+  humans,
+  projects,
+  storedObjects,
+} from "../../db/schema.ts";
 import type { Config } from "../../platform/config.ts";
 import type { DbTransaction } from "../../platform/db.ts";
 import { discardObject, isDeleted, type ObjectRow } from "../../platform/object-sweep.ts";
@@ -113,6 +120,13 @@ export interface AttachmentsDeps {
     projectIds: readonly string[],
   ) => Promise<Map<string, ProjectAccessLevel | null>>;
   projectAccessAtLeast: (actual: ProjectAccessLevel, required: ProjectAccessLevel) => boolean;
+  /** Re-resolves the agent key inside the calling transaction, refusing stale identity state. */
+  agentProjectAccess: (
+    tx: DbTransaction,
+    identity: AgentIdentity,
+    workspaceId: string,
+    projectId: string,
+  ) => Promise<ProjectAccessLevel | null>;
 }
 
 type UploadFormat =
@@ -389,6 +403,7 @@ export function createAttachmentsService({
   maxAttachmentBytes,
   projectAccessCeiling,
   projectAccessAtLeast,
+  agentProjectAccess,
 }: AttachmentsDeps): AttachmentsService {
   function assertContentLength(contentLength: string | null): void {
     if (contentLength === null) return;
@@ -415,11 +430,16 @@ export function createAttachmentsService({
 
     let level: ProjectAccessLevel | null = null;
     if (actor.kind === "agent") {
-      if (actor.identity.workspaceId === project.workspaceId) {
-        level =
-          actor.identity.projects.find((grant) => grant.projectId === projectId)?.level ?? null;
-      }
+      // The identity was resolved before the upload began; only the database can
+      // say whether its key, owner, membership and grants are still live.
+      level = await agentProjectAccess(tx, actor.identity, project.workspaceId, projectId);
     } else {
+      const [account] = await tx
+        .select({ id: humans.id })
+        .from(humans)
+        .where(and(eq(humans.id, actor.account.humanId), isNull(humans.deactivatedAt)))
+        .limit(1);
+      if (account === undefined) throw new AttachmentsError("not_signed_in");
       const ceiling = await projectAccessCeiling(tx, project.workspaceId, actor.account.humanId, [
         projectId,
       ]);

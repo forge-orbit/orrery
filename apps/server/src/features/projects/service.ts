@@ -1611,6 +1611,10 @@ async function lockProjectForMutation(tx: DbTransaction, projectId: string) {
     .for("update");
 }
 
+async function lockIssueForMutation(tx: DbTransaction, issueId: string) {
+  await tx.select({ id: issues.id }).from(issues).where(eq(issues.id, issueId)).for("update");
+}
+
 const grantColumns = {
   humanId: projectAccessGrants.humanId,
   email: humans.email,
@@ -2732,6 +2736,10 @@ export function createProjectsService({
     async createIssue(actorArg, projectId, input) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        // transfers.accept holds this row FOR UPDATE until it commits the new
+        // workspace, key and access grants. Lock first so the access check and
+        // every value derived from project cannot use a pre-transfer snapshot.
+        await lockProjectForMutation(tx, projectId);
         const project = await requireProject(
           tx,
           projectId,
@@ -3106,18 +3114,16 @@ export function createProjectsService({
       const actor = requireActor(actorArg);
       const blockedByIssueId = input.blockedByIssueId;
       return db.transaction(async (tx) => {
-        const current = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
+        let current = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
         if (issueId === blockedByIssueId) throw new ProjectsError("self_dependency");
-        const blocker = await requireIssue(
-          tx,
-          blockedByIssueId,
-          actor,
-          ProjectAccessLevel.enum.read,
-        );
+        let blocker = await requireIssue(tx, blockedByIssueId, actor, ProjectAccessLevel.enum.read);
         if (blocker.projectId !== current.projectId) {
           throw new ProjectsError("cross_project_dependency");
         }
 
+        // Lock projects before issues, matching transfers.accept's order, then
+        // re-check access: a transfer may have committed between the reads
+        // above and the locks, revoking the actor's source-workspace grant.
         await tx
           .select({ id: projects.id })
           .from(projects)
@@ -3130,6 +3136,12 @@ export function createProjectsService({
           .where(inArray(issues.id, [issueId, blockedByIssueId].toSorted()))
           .orderBy(issues.id)
           .for("update");
+
+        current = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
+        blocker = await requireIssue(tx, blockedByIssueId, actor, ProjectAccessLevel.enum.read);
+        if (blocker.projectId !== current.projectId) {
+          throw new ProjectsError("cross_project_dependency");
+        }
 
         const [existing] = await tx
           .select(dependencyColumns)
@@ -3306,6 +3318,10 @@ export function createProjectsService({
     async createComment(actorArg, issueId, input) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        // transfers.accept locks projects before issues; locking the issue
+        // serializes this write with a transfer and makes the access check
+        // below observe the committed workspace and grants.
+        await lockIssueForMutation(tx, issueId);
         const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
         const id = randomUUID();
         const [created] = await tx
@@ -3353,6 +3369,7 @@ export function createProjectsService({
     async addIssueLink(actorArg, issueId, input) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        await lockIssueForMutation(tx, issueId);
         const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
         let created:
           | {
@@ -3532,6 +3549,7 @@ export function createProjectsService({
     async createKnowledge(actorArg, projectId, input) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        await lockProjectForMutation(tx, projectId);
         await requireProject(tx, projectId, actor, ProjectAccessLevel.enum.contribute);
         const id = randomUUID();
         const [created] = await tx
@@ -3674,6 +3692,7 @@ export function createProjectsService({
     async createLabel(actorArg, projectId, input) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        await lockProjectForMutation(tx, projectId);
         await requireProject(tx, projectId, actor, ProjectAccessLevel.enum.contribute);
 
         const [existing] = await tx
@@ -3811,6 +3830,7 @@ export function createProjectsService({
     async attachLabel(actorArg, issueId, labelId) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        await lockIssueForMutation(tx, issueId);
         const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
         const [label] = await tx
           .select({
@@ -3849,6 +3869,7 @@ export function createProjectsService({
     async detachLabel(actorArg, issueId, labelId) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        await lockIssueForMutation(tx, issueId);
         const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
         const [label] = await tx
           .select({

@@ -381,9 +381,10 @@ async function resolveKeyInTransaction(
   tx: DbTransaction,
   projectAccessCeiling: ProjectAccessCeiling,
   projectAccessAtLeast: ProjectAccessAtLeast,
-  token: string,
+  credential: string | AgentIdentity,
   target?: AgentKeyTarget,
 ): Promise<AgentIdentity> {
+  const byToken = typeof credential === "string";
   const [row] = await tx
     .select({
       key: keyRowColumns(),
@@ -394,9 +395,21 @@ async function resolveKeyInTransaction(
     .from(agentApiKeys)
     .innerJoin(agents, eq(agents.id, agentApiKeys.agentId))
     .innerJoin(humans, eq(humans.id, agents.humanId))
-    .where(eq(agentApiKeys.tokenHash, tokenHash(token)))
+    .where(
+      byToken
+        ? eq(agentApiKeys.tokenHash, tokenHash(credential))
+        : eq(agentApiKeys.id, credential.keyId),
+    )
     .limit(1);
   if (row === undefined) throw new AgentsError("invalid_key");
+  if (
+    !byToken &&
+    (row.key.agentId !== credential.agentId ||
+      row.humanId !== credential.humanId ||
+      row.key.workspaceId !== credential.workspaceId)
+  ) {
+    throw new AgentsError("invalid_key");
+  }
 
   if (row.humanDeactivatedAt !== null) throw new AgentsError("human_deactivated");
 
@@ -466,6 +479,31 @@ async function resolveKeyInTransaction(
     validity: AgentKeyValidity.parse(row.key.validity),
     projects: effective,
   };
+}
+
+/**
+ * Re-resolve an already-authenticated agent inside a write transaction. The
+ * AgentIdentity captured at request start can outlive a key revocation, owner
+ * deactivation, membership suspension or project-access change; this reads the
+ * live rows through the same checks as authentication and returns the key's
+ * current effective level for the project (or null when it has no grant).
+ */
+export async function agentProjectAccessInTransaction(
+  tx: DbTransaction,
+  projectAccessCeiling: ProjectAccessCeiling,
+  projectAccessAtLeast: ProjectAccessAtLeast,
+  identity: AgentIdentity,
+  workspaceId: string,
+  projectId: string,
+): Promise<ProjectAccessLevel | null> {
+  const live = await resolveKeyInTransaction(
+    tx,
+    projectAccessCeiling,
+    projectAccessAtLeast,
+    identity,
+    { workspaceId, projectId },
+  );
+  return live.projects.find((grant) => grant.projectId === projectId)?.level ?? null;
 }
 
 export function createAgentsService({

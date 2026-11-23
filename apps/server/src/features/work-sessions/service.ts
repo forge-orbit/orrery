@@ -52,7 +52,7 @@ import {
 } from "../../db/schema.ts";
 import type { NotifyActivity } from "../notifications/index.ts";
 import type { EnqueueWebhookActivity } from "../webhooks/index.ts";
-import type { WorkActor } from "../projects/index.ts";
+import { ProjectsError, type WorkActor } from "../projects/index.ts";
 import { decideReacquire, resumeDispositionFor, workSessionMachine } from "./state-machine.ts";
 
 export type SessionsErrorKind =
@@ -802,8 +802,28 @@ export function createSessionsService({
   const dueQuestionIssueIds = dueQuestionIssueIdsDep ?? (async () => []);
   const notifyActivity: NotifyActivity = notifyActivityDep ?? (async () => {});
 
-  const expireCommitted = (issueId: string) =>
-    db.transaction((tx) => expireStale(tx, issueId, notifyActivity, onActivity));
+  // Only lock the issue when an expired lease actually exists (matching
+  // deadlineCommitted and expireCommittedForProject), and lock issues before
+  // work sessions so expireStale cannot invert lock order and deadlock against
+  // a concurrent claim.
+  const expireCommitted = async (issueId: string) => {
+    const [stale] = await db
+      .select({ id: workSessions.id })
+      .from(workSessions)
+      .where(
+        and(
+          eq(workSessions.issueId, issueId),
+          eq(workSessions.status, WorkSessionStatus.enum.active),
+          lte(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+        ),
+      )
+      .limit(1);
+    if (stale === undefined) return;
+    await db.transaction(async (tx) => {
+      await lockIssue(tx, issueId);
+      await expireStale(tx, issueId, notifyActivity, onActivity);
+    });
+  };
 
   const deadlineCommitted = async (issueId: string) => {
     if (evaluateQuestionDeadline === undefined) return;
@@ -1525,7 +1545,21 @@ export function createSessionsService({
       );
       if (eligible.length === 0) return [];
       const ready = new Set(eligible);
-      const ordered = (await listIssues(actor, projectId)).filter((issue) => ready.has(issue.id));
+      let ordered: Issue[];
+      try {
+        ordered = (await listIssues(actor, projectId)).filter((issue) => ready.has(issue.id));
+      } catch (error) {
+        // Access can be revoked after the check above and before this second read.
+        // listIssues reports that as a ProjectsError; express it as a SessionsError
+        // so the REST and MCP adapters turn it into a Problem instead of a 500.
+        if (error instanceof ProjectsError) {
+          if (error.kind === "project_not_found") throw new SessionsError("project_not_found");
+          if (error.kind === "insufficient_project_access") {
+            throw new SessionsError("insufficient_access");
+          }
+        }
+        throw error;
+      }
 
       ordered.sort((a, b) => Number(assignedToActor(b, actor)) - Number(assignedToActor(a, actor)));
       return ordered;
