@@ -124,7 +124,7 @@ test("sends the test email, and the catcher receives it with a fresh token", asy
   const token = text.match(/\/settings\/smtp\?token=([A-Za-z0-9_-]+)/)?.[1];
   expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
   expect(text).toContain(`/settings/smtp?token=${token}`);
-  expect(text).toContain(`\n${token}\n`);
+  expect(text.replaceAll("\r\n", "\n")).toContain(`\n${token}\n`);
 
   await recordSecret(token ?? "");
   verificationToken = token ?? "";
