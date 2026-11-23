@@ -1318,7 +1318,7 @@ def extract_code_facts() -> dict[str, Any]:
         "workspaceMemberships" in q_list_fn
         and "await Promise.all(" not in q_list_fn
         and "inArray(questions.projectId" in q_list_fn
-        and ".slice(0, 200)" in q_list_fn
+        and ".limit(200)" in q_list_fn
     )
     m20_db_time_reads = (
         "effectiveStatus:" in q_columns_fn
@@ -1950,7 +1950,7 @@ def extract_code_facts() -> dict[str, Any]:
         and "loadProjectAccessEvents(" in hist_src
     )
     m24_history_project_filter = (
-        "loadProjectAccessEvents(db" in hist_proj_fn and "project.workspaceId" in hist_proj_fn
+        "loadProjectAccessEvents(tx" in hist_proj_fn and "project.workspaceId" in hist_proj_fn
     )
     m24_key_cleanup = "tx.delete(agentApiKeyProjects)" in accept_fn
     m24_grant_cleanup = "tx.delete(projectAccessGrants)" in accept_fn
@@ -2385,7 +2385,7 @@ def extract_code_facts() -> dict[str, Any]:
         and "gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`)" in my_work_src
     )
     m33_questions_db_time_contribute = (
-        "inArray(questions.projectId, [...actionable])" in my_work_src
+        "inArray(questions.projectId, actionable)" in my_work_src
         and "effectiveQuestionStatus" in my_work_src
         and "statement_timestamp()" in my_work_src
     )
@@ -2684,7 +2684,7 @@ def extract_code_facts() -> dict[str, Any]:
     )
     att_sweep_fn = att_src[att_src.index("async sweepUnreferenced()") :]
     att_reclaim_fn = slice_between(
-        att_src, "async function reclaim(", "export function createAttachmentsService"
+        att_src, "async function reclaimMany(", "export function createAttachmentsService"
     )
     att_index_src = read_text("apps/server/src/features/attachments/index.ts")
     project_src = read_text("apps/server/src/features/projects/service.ts")
@@ -2713,11 +2713,13 @@ def extract_code_facts() -> dict[str, Any]:
         '.for("update")' in att_sweep_fn and "interval '24 hours'" in att_sweep_fn
     )
     m39_sweep_recheck = (
-        "referenceCount(tx, row.id)" in att_sweep_fn and "continue" in att_sweep_fn
+        "reclaimMany(tx, rows)" in att_sweep_fn
+        and "attachmentReferences.attachmentId" in att_reclaim_fn
+        and "!referenced.has(row.id)" in att_reclaim_fn
     )
     m39_atomic_reclaim = (
-        "await reclaim(tx, row)" in att_sweep_fn
-        and "await reclaim(tx, row)" in att_purge_fn
+        "reclaimMany(tx, rows)" in att_sweep_fn
+        and "await reclaimMany(tx," in att_purge_fn
         and ".delete(attachments)" in att_reclaim_fn
         and ".update(storedObjects)" in att_reclaim_fn
         and 'status: "deleted"' in att_reclaim_fn
@@ -2726,7 +2728,8 @@ def extract_code_facts() -> dict[str, Any]:
     m39_purge_holders = (
         '.for("update", { of: attachments })' in att_purge_fn
         and "await tx.delete(attachmentReferences)" in att_purge_fn
-        and "referenceCount(tx, row.id)" in att_purge_fn
+        and "await reclaimMany(tx," in att_purge_fn
+        and "attachmentReferences.attachmentId" in att_reclaim_fn
         and "attachmentSeams.purgeHolders(tx, attachmentHolders)" in purge_fn
     )
     m39_sync_lock_union = (
@@ -2846,7 +2849,7 @@ def extract_code_facts() -> dict[str, Any]:
     m41_live_read_gate = (
         "${workspaces.id} = ${projects.workspaceId}" in notif_readable_fn
         and "suspendedAt} is null" in notif_readable_fn
-        and "hasReadAccess(tx, humanId, project.workspaceId" in notif_create_fn
+        and "readableAccess(humans.id)" in notif_create_fn
     )
     notif_contract_src = read_text("packages/contract/src/notifications.ts")
     m41_dedupe_per_event = (
