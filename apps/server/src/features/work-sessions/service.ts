@@ -52,7 +52,7 @@ import {
 } from "../../db/schema.ts";
 import type { NotifyActivity } from "../notifications/index.ts";
 import type { EnqueueWebhookActivity } from "../webhooks/index.ts";
-import type { WorkActor } from "../projects/index.ts";
+import { ProjectsError, type WorkActor } from "../projects/index.ts";
 import { decideReacquire, resumeDispositionFor, workSessionMachine } from "./state-machine.ts";
 
 export type SessionsErrorKind =
@@ -1531,7 +1531,21 @@ export function createSessionsService({
       );
       if (eligible.length === 0) return [];
       const ready = new Set(eligible);
-      const ordered = (await listIssues(actor, projectId)).filter((issue) => ready.has(issue.id));
+      let ordered: Issue[];
+      try {
+        ordered = (await listIssues(actor, projectId)).filter((issue) => ready.has(issue.id));
+      } catch (error) {
+        // Access can be revoked after the check above and before this second read.
+        // listIssues reports that as a ProjectsError; express it as a SessionsError
+        // so the REST and MCP adapters turn it into a Problem instead of a 500.
+        if (error instanceof ProjectsError) {
+          if (error.kind === "project_not_found") throw new SessionsError("project_not_found");
+          if (error.kind === "insufficient_project_access") {
+            throw new SessionsError("insufficient_access");
+          }
+        }
+        throw error;
+      }
 
       ordered.sort((a, b) => Number(assignedToActor(b, actor)) - Number(assignedToActor(a, actor)));
       return ordered;

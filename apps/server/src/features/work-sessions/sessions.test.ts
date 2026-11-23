@@ -40,7 +40,12 @@ import { migrate } from "../../platform/migrate.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
 import { createAgentsFeature, type AgentAuthenticator } from "../agents/index.ts";
-import { createProjectsFeature, ProjectsError, type WorkSessionGate } from "../projects/index.ts";
+import {
+  createProjectsFeature,
+  ProjectsError,
+  type ProjectsErrorKind,
+  type WorkSessionGate,
+} from "../projects/index.ts";
 import {
   createSessionsFeature,
   releaseIssueWorkSessions,
@@ -59,6 +64,10 @@ let database: Database;
 let app: Hono;
 let projectsService: ReturnType<typeof createProjectsFeature>["service"];
 let sessionsService: SessionsService;
+let accountsForApp: ReturnType<typeof createAccountsFeature>;
+let projectsForApp: ReturnType<typeof createProjectsFeature>;
+let agentsForApp: ReturnType<typeof createAgentsFeature>;
+let bearerAuthenticator: AgentAuthenticator;
 
 const atLeast = (actual: string, required: string) =>
   ["read", "contribute", "manage"].indexOf(actual) >=
@@ -161,6 +170,10 @@ beforeAll(async () => {
     publicUrl: PUBLIC_URL,
     log: silentLogger,
   });
+  accountsForApp = accounts;
+  projectsForApp = projectsFeature;
+  agentsForApp = agentsFeature;
+  bearerAuthenticator = lateAuth;
 }, 120_000);
 
 afterAll(async () => {
@@ -364,6 +377,23 @@ async function issueStatus(issueId: string) {
     .where(eq(issues.id, issueId));
   if (row === undefined) throw new Error("missing issue");
   return row;
+}
+
+// readyWork checks access in one transaction and then reads the board through the
+// injected listIssues seam. A revocation between the two makes the seam throw a
+// ProjectsError; this feature reproduces that window deterministically.
+function sessionsFeatureFailingListIssues(kind: ProjectsErrorKind) {
+  return createSessionsFeature({
+    db: database.db,
+    sessionReader: accountsForApp.sessionReader,
+    authenticate: bearerAuthenticator,
+    projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
+      projectsForApp.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
+    projectAccessAtLeast: (actual, required) => atLeast(actual, required),
+    listIssues: async () => {
+      throw new ProjectsError(kind);
+    },
+  });
 }
 
 describe("work sessions against real Postgres", () => {
@@ -1091,6 +1121,56 @@ describe("work sessions against real Postgres", () => {
     );
     await expectProblem(edit, 409, "session_required");
     expect(identity.agentId).toBe(f.agentId);
+  });
+
+  it("translates a ProjectsError from listIssues into a SessionsError when access lapses after the eligibility check", async () => {
+    const f = await bootstrap();
+    const identity = await identityFor(f.secret);
+    const issue = await humanIssue(f, "Lapsed access issue");
+
+    // The issue is eligible, so readyWork reaches the listIssues seam.
+    expect(
+      (await sessionsService.readyWork({ kind: "agent", identity }, f.projectId)).map((i) => i.id),
+    ).toContain(issue.id);
+
+    for (const [kind, expected] of [
+      ["project_not_found", "project_not_found"],
+      ["insufficient_project_access", "insufficient_access"],
+    ] as const) {
+      const service = sessionsFeatureFailingListIssues(kind).service;
+      const error = await rejection(service.readyWork({ kind: "agent", identity }, f.projectId));
+      expect(error).toBeInstanceOf(SessionsError);
+      expect(errorKind(error)).toBe(expected);
+    }
+  });
+
+  it("returns a Problem, not a 500, when listIssues reports revoked project access", async () => {
+    const f = await bootstrap();
+    const identity = await identityFor(f.secret);
+    await humanIssue(f, "REST lapsed access issue");
+    expect(
+      (await sessionsService.readyWork({ kind: "agent", identity }, f.projectId)).length,
+    ).toBeGreaterThan(0);
+
+    for (const [kind, status, code] of [
+      ["project_not_found", 404, "project_not_found"],
+      ["insufficient_project_access", 403, "insufficient_access"],
+    ] as const) {
+      const throwingApp = createApp({
+        features: [
+          accountsForApp,
+          projectsForApp,
+          agentsForApp,
+          sessionsFeatureFailingListIssues(kind),
+        ],
+        publicUrl: PUBLIC_URL,
+        log: silentLogger,
+      });
+      const res = await throwingApp.request(`/api/projects/${f.projectId}/ready-work`, {
+        headers: { authorization: `Bearer ${f.secret}` },
+      });
+      await expectProblem(res, status, code);
+    }
   });
 
   it("reports progress and retains it across interruption, distinguishing a live claim from an expired one on resume", async () => {
