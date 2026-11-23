@@ -9,11 +9,11 @@ Exhaustive finite-state model checking for Orrery's highest-stakes concurrency, 
 
 ## Sync Commit & Coverage Record
 
-- **Last verified commit:** `06dc7e7` (all 36 models M1–M35 verified against the current code; the previous `3c0a76c` marker was stale — M20's deadline guard already failed there — and the drift check used a mismatched `cba3e38` baseline)
-- **Uncommitted addition:** M36 models the avatar upload / orphan-sweep claim-first lifecycle (37 models M1–M36). All 5 extracted M36 guards are proven sensitive by single-guard mutation in `verify.py`. Advance the marker above after the avatar fix is committed and `verify.py` still passes.
+- **Last verified commit:** `a590fa8` (all 37 models M1–M36 verified against the current code, including the committed M36 avatar claim-first lifecycle; earlier stale markers were `3c0a76c` and `06dc7e7`, with a mismatched `cba3e38` drift baseline)
+- **M36 coverage (committed):** M36 models the avatar upload / orphan-sweep claim-first lifecycle (37 models M1–M36). All 5 extracted M36 guards are proven sensitive by single-guard mutation in `verify.py`, which passes at the baseline above.
 - **Check whether a change touches verified code:**
   ```bash
-  git diff --name-only 06dc7e7 -- \
+  git diff --name-only a590fa8 -- \
     apps/server/src/features/inbox/service.ts \
     apps/server/src/features/inbox/rest.ts \
     apps/server/src/features/inbox/mcp.ts \
