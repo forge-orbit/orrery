@@ -281,13 +281,25 @@ test("grants access in the browser and shows Read without mutation controls", as
   const createProjectsCheckbox = permissionsDialog.getByRole("checkbox", {
     name: "Create projects",
   });
+  const savePermissions = permissionsDialog.getByRole("button", { name: "Save permissions" });
+  await expect(createProjectsCheckbox).toBeChecked();
+  await expect(savePermissions).toBeDisabled();
+
   await createProjectsCheckbox.click();
   await expect(createProjectsCheckbox).not.toBeChecked();
-  await expect(memberRow.locator('[data-capability="canCreateProjects"]')).toHaveCount(0);
-  await createProjectsCheckbox.click();
-  await expect(createProjectsCheckbox).toBeChecked();
+  await expect(savePermissions).toBeEnabled();
+  // The draft stays local until Save permissions is submitted.
   await expect(memberRow.locator('[data-capability="canCreateProjects"]')).toBeVisible();
-  await page.keyboard.press("Escape");
+  await savePermissions.click();
+  await expect(memberRow.locator('[data-capability="canCreateProjects"]')).toHaveCount(0);
+
+  await memberRow.getByRole("button", { name: "Permissions" }).click();
+  const reopenedDialog = page.getByRole("dialog");
+  const reopenedCheckbox = reopenedDialog.getByRole("checkbox", { name: "Create projects" });
+  await reopenedCheckbox.click();
+  await expect(reopenedCheckbox).toBeChecked();
+  await reopenedDialog.getByRole("button", { name: "Save permissions" }).click();
+  await expect(memberRow.locator('[data-capability="canCreateProjects"]')).toBeVisible();
 
   const colleagueContext = await browser.newContext();
   const colleaguePage = await colleagueContext.newPage();

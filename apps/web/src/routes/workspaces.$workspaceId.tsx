@@ -31,6 +31,7 @@ import {
   ProjectAccessLevel,
   workspaceCapabilities,
   type InvitationSummary,
+  type UpdateWorkspaceMemberRequest,
   type Workspace,
   type WorkspaceCapability,
   type WorkspaceMember,
@@ -110,6 +111,12 @@ function mayRemove(
   if (!workspace.isOwner && !workspace.canRemoveMembers) return false;
   return workspace.isOwner || (!member.isOwner && !member.canManageMemberPermissions);
 }
+
+type PermissionDraft = {
+  humanId: string;
+  // Only locally changed capabilities; an absent key means "use the saved value".
+  capabilities: Partial<Record<WorkspaceCapability, boolean>>;
+};
 
 type WorkspaceTab = "projects" | "agents" | "runs" | "members" | "webhooks";
 
@@ -518,6 +525,7 @@ function WorkspaceMembers({
   const [error, setError] = useState<string>();
   const [updating, setUpdating] = useState<string>();
   const [editingMemberId, setEditingMemberId] = useState<string>();
+  const [permissionDraft, setPermissionDraft] = useState<PermissionDraft>();
   const [confirmAppoint, setConfirmAppoint] = useState<WorkspaceMember>();
   const [confirmRemove, setConfirmRemove] = useState<WorkspaceMember>();
 
@@ -526,6 +534,31 @@ function WorkspaceMembers({
     editingMemberId === undefined
       ? undefined
       : members.find((candidate) => candidate.humanId === editingMemberId);
+  // Ignore a draft left over from another member; the drawer is re-seeded on open.
+  const draftCapabilities =
+    editingMember === undefined || permissionDraft?.humanId !== editingMember.humanId
+      ? undefined
+      : permissionDraft.capabilities;
+  const editableCapabilities =
+    editingMember === undefined ? [] : changeableCapabilities(workspace, editingMember, ownEmail);
+  const hasPermissionChanges =
+    editingMember !== undefined &&
+    editableCapabilities.some((capability) => {
+      const value = draftCapabilities?.[capability];
+      return value !== undefined && value !== editingMember[capability];
+    });
+  const savingPermissions = editingMember !== undefined && updating === editingMember.humanId;
+
+  function openPermissions(member: WorkspaceMember) {
+    setPermissionDraft({ humanId: member.humanId, capabilities: {} });
+    setEditingMemberId(member.humanId);
+    setError(undefined);
+  }
+
+  function closePermissions() {
+    setEditingMemberId(undefined);
+    setPermissionDraft(undefined);
+  }
 
   async function refresh() {
     await Promise.all([
@@ -541,7 +574,7 @@ function WorkspaceMembers({
     try {
       await appointWorkspaceOwner(workspaceId, member.humanId);
       setConfirmAppoint(undefined);
-      if (editingMemberId === member.humanId) setEditingMemberId(undefined);
+      if (editingMemberId === member.humanId) closePermissions();
       await refresh();
       toast({ body: `${member.email} is now a workspace owner.` });
     } catch (cause) {
@@ -553,23 +586,26 @@ function WorkspaceMembers({
     }
   }
 
-  async function onCapability(humanId: string, capability: WorkspaceCapability, enabled: boolean) {
-    setUpdating(humanId);
+  async function onSavePermissions() {
+    if (editingMember === undefined) return;
+    const changes: UpdateWorkspaceMemberRequest = {};
+    for (const capability of editableCapabilities) {
+      const value = draftCapabilities?.[capability];
+      if (value !== undefined && value !== editingMember[capability]) {
+        changes[capability] = value;
+      }
+    }
+    if (Object.keys(changes).length === 0) return;
+
+    setUpdating(editingMember.humanId);
     setError(undefined);
-    const membersKey = workspaceMembersQuery(workspaceId).queryKey;
-    const previous = queryClient.getQueryData<WorkspaceMember[]>(membersKey);
-    queryClient.setQueryData<WorkspaceMember[]>(membersKey, (current) =>
-      current?.map((candidate) =>
-        candidate.humanId === humanId ? { ...candidate, [capability]: enabled } : candidate,
-      ),
-    );
     try {
-      await updateWorkspaceMember(workspaceId, humanId, { [capability]: enabled });
+      await updateWorkspaceMember(workspaceId, editingMember.humanId, changes);
+      closePermissions();
       await refresh();
       toast({ body: "Member permissions updated." });
     } catch (cause) {
-      if (previous !== undefined) queryClient.setQueryData(membersKey, previous);
-      const msg = cause instanceof Error ? cause.message : "Could not change the capability.";
+      const msg = cause instanceof Error ? cause.message : "Could not update the member.";
       setError(msg);
       toast({ body: msg, type: "error" });
     } finally {
@@ -583,7 +619,7 @@ function WorkspaceMembers({
     try {
       await removeWorkspaceMember(workspaceId, member.humanId);
       setConfirmRemove(undefined);
-      if (editingMemberId === member.humanId) setEditingMemberId(undefined);
+      if (editingMemberId === member.humanId) closePermissions();
       await refresh();
       toast({ body: `Removed ${member.email} from the workspace.` });
     } catch (cause) {
@@ -674,7 +710,7 @@ function WorkspaceMembers({
                             variant="secondary"
                             label="Permissions"
                             isDisabled={updating !== undefined}
-                            onClick={() => setEditingMemberId(member.humanId)}
+                            onClick={() => openPermissions(member)}
                           />
                         )}
                         {canAppoint && (
@@ -693,7 +729,7 @@ function WorkspaceMembers({
                             size="sm"
                             variant="destructive"
                             data-action="remove-member"
-                            label="Remove member"
+                            label="Remove"
                             isDisabled={updating !== undefined}
                             onClick={() => setConfirmRemove(member)}
                           />
@@ -715,7 +751,7 @@ function WorkspaceMembers({
       <Drawer
         isOpen={editingMember !== undefined}
         onOpenChange={(open) => {
-          if (!open) setEditingMemberId(undefined);
+          if (!open) closePermissions();
         }}
         purpose="form"
         label={
@@ -733,7 +769,7 @@ function WorkspaceMembers({
                 title="Member permissions"
                 subtitle={editingMember.email}
                 onOpenChange={(open) => {
-                  if (!open) setEditingMemberId(undefined);
+                  if (!open) closePermissions();
                 }}
                 hasDivider
               />
@@ -742,17 +778,26 @@ function WorkspaceMembers({
             <LayoutContent>
               <Stack gap={3}>
                 <Text as="p" display="block" type="supporting">
-                  Changes apply immediately. You can only delegate permissions you hold yourself.
+                  Changes are saved when you select Save permissions. You can only delegate
+                  permissions you hold yourself.
                 </Text>
                 <Stack gap={2}>
-                  {changeableCapabilities(workspace, editingMember, ownEmail).map((capability) => (
+                  {editableCapabilities.map((capability) => (
                     <Stack key={capability} gap={0.5} data-capability-control={capability}>
                       <CheckboxInput
                         label={capabilityLabels[capability]}
-                        value={editingMember[capability]}
-                        isDisabled={updating === editingMember.humanId}
+                        value={draftCapabilities?.[capability] ?? editingMember[capability]}
+                        isDisabled={savingPermissions}
                         onChange={(checked) =>
-                          void onCapability(editingMember.humanId, capability, checked)
+                          setPermissionDraft((current) => ({
+                            humanId: editingMember.humanId,
+                            capabilities: {
+                              ...(current?.humanId === editingMember.humanId
+                                ? current.capabilities
+                                : {}),
+                              [capability]: checked,
+                            },
+                          }))
                         }
                       />
                       <Text type="supporting" color="secondary">
@@ -760,6 +805,23 @@ function WorkspaceMembers({
                       </Text>
                     </Stack>
                   ))}
+                </Stack>
+                <Stack direction="horizontal" hAlign="start" gap={2}>
+                  <Button
+                    type="button"
+                    label="Save permissions"
+                    variant="primary"
+                    isDisabled={!hasPermissionChanges || savingPermissions}
+                    isLoading={savingPermissions}
+                    onClick={() => void onSavePermissions()}
+                  />
+                  <Button
+                    type="button"
+                    label="Cancel"
+                    variant="secondary"
+                    isDisabled={savingPermissions}
+                    onClick={closePermissions}
+                  />
                 </Stack>
               </Stack>
             </LayoutContent>
