@@ -19,6 +19,7 @@ const kindTokens: Record<NotificationKind, { label: string; color: "blue" | "ora
   handoff: { label: "Handoff", color: "blue" },
   needs_input: { label: "Needs input", color: "orange" },
   session_expired: { label: "Session expired", color: "red" },
+  issue_mentioned: { label: "Mention", color: "blue" },
 };
 
 export function NotificationRow({

@@ -264,7 +264,8 @@ test("grants access in the browser and shows Read without mutation controls", as
 
   await page.goto(`/projects/${projectId}`);
   await page.getByRole("tab", { name: "Settings" }).click();
-  await page.getByLabel("Email").fill(COLLEAGUE_EMAIL);
+  await page.getByRole("button", { name: /Member/ }).click();
+  await page.getByRole("option", { name: new RegExp(COLLEAGUE_EMAIL) }).click();
   await page.getByRole("combobox", { name: "Access level" }).click();
   await page.getByRole("option", { name: "Contribute", exact: true }).click();
   await page.getByRole("button", { name: "Grant access" }).click();
@@ -281,13 +282,25 @@ test("grants access in the browser and shows Read without mutation controls", as
   const createProjectsCheckbox = permissionsDialog.getByRole("checkbox", {
     name: "Create projects",
   });
+  const savePermissions = permissionsDialog.getByRole("button", { name: "Save permissions" });
+  await expect(createProjectsCheckbox).toBeChecked();
+  await expect(savePermissions).toBeDisabled();
+
   await createProjectsCheckbox.click();
   await expect(createProjectsCheckbox).not.toBeChecked();
-  await expect(memberRow.locator('[data-capability="canCreateProjects"]')).toHaveCount(0);
-  await createProjectsCheckbox.click();
-  await expect(createProjectsCheckbox).toBeChecked();
+  await expect(savePermissions).toBeEnabled();
+  // The draft stays local until Save permissions is submitted.
   await expect(memberRow.locator('[data-capability="canCreateProjects"]')).toBeVisible();
-  await page.keyboard.press("Escape");
+  await savePermissions.click();
+  await expect(memberRow.locator('[data-capability="canCreateProjects"]')).toHaveCount(0);
+
+  await memberRow.getByRole("button", { name: "Permissions" }).click();
+  const reopenedDialog = page.getByRole("dialog");
+  const reopenedCheckbox = reopenedDialog.getByRole("checkbox", { name: "Create projects" });
+  await reopenedCheckbox.click();
+  await expect(reopenedCheckbox).toBeChecked();
+  await reopenedDialog.getByRole("button", { name: "Save permissions" }).click();
+  await expect(memberRow.locator('[data-capability="canCreateProjects"]')).toBeVisible();
 
   const colleagueContext = await browser.newContext();
   const colleaguePage = await colleagueContext.newPage();
@@ -322,6 +335,28 @@ test("grants access in the browser and shows Read without mutation controls", as
   for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
 });
 
+test("a project manager without member-directory access keeps the email field", async ({
+  page,
+}) => {
+  await page.goto("/signin");
+  await page.getByLabel("Email").fill(MEMBER_EMAIL);
+  await page.getByLabel("Password").fill(MEMBER_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByText(`Signed in as ${MEMBER_EMAIL}.`)).toBeVisible();
+
+  await page.goto(`/projects/${memberProjectId}`);
+  await page.getByRole("tab", { name: "Settings" }).click();
+  const email = page.getByLabel("Email");
+  await expect(email).toBeVisible();
+  await expect(page.getByRole("button", { name: /Member/ })).toHaveCount(0);
+  await email.fill(COLLEAGUE_EMAIL);
+  await page.getByRole("button", { name: "Grant access" }).click();
+  await expect(page.locator(`[data-project-access-for="${COLLEAGUE_EMAIL}"]`)).toContainText(
+    "read",
+  );
+  for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
+});
+
 async function newContext(): Promise<APIRequestContext> {
   return request.newContext({ baseURL: baseUrl });
 }
@@ -350,7 +385,9 @@ async function ensureAdminVerified() {
     data: { token },
   });
   expect(verified.status()).toBe(200);
-  expect(await verified.json()).toEqual({
+  // #183 adds handle and displayName to the session; keep checking the fields this
+  // test cares about without pinning the whole response shape.
+  expect(await verified.json()).toMatchObject({
     email: ADMIN_EMAIL,
     emailVerified: true,
     avatarUrl: null,

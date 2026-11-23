@@ -2,10 +2,12 @@ import {
   IssueCommentsResponse,
   IssueDetail,
   IssuesResponse,
+  MentionCandidatesResponse,
   KnowledgeEntriesResponse,
   KnowledgeEntry,
   Project,
   ProjectAccessGrantsResponse,
+  ProjectAccessHumanIds,
   ProjectActivityResponse,
   ProjectLabelsResponse,
   ProjectsResponse,
@@ -40,6 +42,15 @@ export const projectAccessQuery = (projectId: string) =>
       ),
   });
 
+export const projectAccessHumanIdsQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: ["projects", projectId, "access", "human-ids"],
+    queryFn: () =>
+      getJson(`/api/projects/${encodeURIComponent(projectId)}/access/humans`, (value) =>
+        ProjectAccessHumanIds.parse(value),
+      ),
+  });
+
 export const projectLabelsQuery = (projectId: string) =>
   queryOptions({
     queryKey: ["projects", projectId, "labels"],
@@ -64,6 +75,15 @@ export const issuesQuery = (projectId: string) =>
     queryFn: () =>
       getJson(`/api/projects/${encodeURIComponent(projectId)}/issues`, (value) =>
         IssuesResponse.parse(value),
+      ),
+  });
+
+export const mentionCandidatesQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: ["projects", projectId, "mention-candidates"],
+    queryFn: () =>
+      getJson(`/api/projects/${encodeURIComponent(projectId)}/mention-candidates`, (value) =>
+        MentionCandidatesResponse.parse(value),
       ),
   });
 

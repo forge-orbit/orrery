@@ -562,6 +562,7 @@ describe("workspaces", () => {
       {
         humanId: admin.id,
         email: EMAIL,
+        displayName: null,
         avatarUrl: null,
         isOwner: true,
         canCreateProjects: true,
@@ -762,6 +763,8 @@ describe("workspaces", () => {
     expect(registered.status).toBe(200);
     expect(await registered.json()).toEqual({
       email: "new.member@example.com",
+      handle: "new-member",
+      displayName: null,
       emailVerified: true,
       avatarUrl: null,
     });
@@ -856,6 +859,7 @@ describe("workspaces", () => {
     expect(WorkspaceMember.parse(await appointed.json())).toEqual({
       humanId: member.id,
       email: INVITEE,
+      displayName: null,
       avatarUrl: null,
       isOwner: true,
       canCreateProjects: true,

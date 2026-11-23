@@ -134,6 +134,7 @@ test("completes email verification by POSTing the token, exactly once", async ()
   const before = await api.get("/api/auth/session");
   expect(await before.json()).toEqual({
     email: ADMIN_EMAIL,
+    handle: expect.any(String),
     displayName: null,
     emailVerified: false,
     avatarUrl: null,
@@ -143,11 +144,18 @@ test("completes email verification by POSTing the token, exactly once", async ()
     data: { token: verificationToken },
   });
   expect(res.status()).toBe(200);
-  expect(await res.json()).toEqual({ email: ADMIN_EMAIL, emailVerified: true, avatarUrl: null });
+  expect(await res.json()).toEqual({
+    email: ADMIN_EMAIL,
+    handle: expect.any(String),
+    displayName: null,
+    emailVerified: true,
+    avatarUrl: null,
+  });
 
   const after = await api.get("/api/auth/session");
   expect(await after.json()).toEqual({
     email: ADMIN_EMAIL,
+    handle: expect.any(String),
     displayName: null,
     emailVerified: true,
     avatarUrl: null,
@@ -216,6 +224,7 @@ test("keeps the settings and the verified email across a restart", async () => {
   expect(session.status()).toBe(200);
   expect(await session.json()).toEqual({
     email: ADMIN_EMAIL,
+    handle: expect.any(String),
     displayName: null,
     emailVerified: true,
     avatarUrl: null,

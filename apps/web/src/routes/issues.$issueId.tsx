@@ -49,8 +49,11 @@ import {
   issuesQuery,
   issueStatusLabels,
   groupLabelEvents,
+  missingProjectAccessHumanIds,
   PRIORITY_LABELS,
+  projectAccessHumanIdsQuery,
   LabelPill,
+  MentionMarkdown,
   PriorityBadge,
   projectActivityQuery,
   projectLabelsQuery,
@@ -78,7 +81,6 @@ import { TextField } from "../lib/fields.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
 import { quoteReply } from "../lib/markdown-toolbar.ts";
-import { Markdown } from "../lib/Markdown.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
 import { formatCompactDateTime, formatFullDateTime, relativeTime } from "../lib/time.ts";
 
@@ -185,11 +187,13 @@ function ActorAvatar({ actor }: { actor: Actor }) {
 
 function TimelineRow({
   entry,
+  projectId,
   projectIssues,
   canContribute,
   onQuoteReply,
 }: {
   entry: TimelineEntry;
+  projectId: string;
   projectIssues: Issue[];
   canContribute: boolean;
   onQuoteReply: (comment: IssueComment) => void;
@@ -219,7 +223,9 @@ function TimelineRow({
               </Text>
             </Stack>
             <Stack data-comment-body="">
-              <Markdown issueRefs={projectIssues}>{entry.comment.body}</Markdown>
+              <MentionMarkdown projectId={projectId} issueRefs={projectIssues}>
+                {entry.comment.body}
+              </MentionMarkdown>
             </Stack>
             {canContribute && (
               <Stack hAlign="start">
@@ -317,6 +323,14 @@ function IssuePage() {
     ...workspaceMembersQuery(project.workspaceId),
     enabled: canReadMembers,
   });
+  const accessIds = useQuery({
+    ...projectAccessHumanIdsQuery(project.id),
+    enabled: canReadMembers,
+  });
+  const withoutAccess =
+    accessIds.data === undefined
+      ? new Set<string>()
+      : missingProjectAccessHumanIds(membersQuery.data ?? [], accessIds.data);
   const { data: myKeys } = useSuspenseQuery(agentKeysQuery(project.workspaceId));
   const workspaceKeys = useQuery({
     ...workspaceAgentKeysQuery(project.workspaceId),
@@ -357,6 +371,7 @@ function IssuePage() {
         value: `human:${actor.humanId}`,
         label: `Human · ${actor.email ?? actor.displayName}`,
         assignee: { type: "human" as const, id: actor.humanId },
+        noProjectAccess: withoutAccess.has(actor.humanId),
       });
     }
   }
@@ -367,6 +382,7 @@ function IssuePage() {
       value: `human:${member.humanId}`,
       label: `Human · ${member.email}`,
       assignee: { type: "human" as const, id: member.humanId },
+      noProjectAccess: withoutAccess.has(member.humanId),
     });
   }
   const seen = new Set<string>();
@@ -496,26 +512,20 @@ function IssuePage() {
           >
             Board
           </Link>,
-          <Text
-            key="identifier"
-            type="inherit"
-            color="inherit"
-            data-issue-identifier={issue.identifier}
-          >
-            {issue.identifier}
-          </Text>,
         ]}
         title={issue.title}
-        statusToken={
-          <Token
-            label={issueStatusLabels[issue.status]}
-            color={STATUS_COLORS[issue.status]}
-            size="sm"
-            data-issue-status={issue.status}
-          />
-        }
+        nonWrappingActions={!isNarrow}
         subtitle={
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+            <Token
+              label={issueStatusLabels[issue.status]}
+              color={STATUS_COLORS[issue.status]}
+              size="sm"
+              data-issue-status={issue.status}
+            />
+            <Text as="span" type="code" color="secondary" data-issue-identifier={issue.identifier}>
+              {issue.identifier}
+            </Text>
             <PriorityBadge priority={issue.priority} />
             {issue.assignee !== null && (
               <Stack
@@ -602,15 +612,6 @@ function IssuePage() {
                   isLoading={statusSubmitting}
                   label={toggleNextStatus === "done" ? "Close issue" : "Reopen issue"}
                   onClick={() => requestStatusChange(toggleNextStatus)}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  label="Move to Trash"
-                  isDisabled={activeSession !== undefined || trashing}
-                  data-trash-button=""
-                  onClick={() => setConfirmTrashOpen(true)}
                 />
               </>
             )}
@@ -753,7 +754,9 @@ function IssuePage() {
                     </Text>
                   ) : (
                     <Stack data-issue-body="">
-                      <Markdown issueRefs={projectIssues}>{issue.body}</Markdown>
+                      <MentionMarkdown projectId={issue.projectId} issueRefs={projectIssues}>
+                        {issue.body}
+                      </MentionMarkdown>
                     </Stack>
                   )}
                 </Stack>
@@ -853,6 +856,7 @@ function IssuePage() {
                       <TimelineRow
                         key={entry.id}
                         entry={entry}
+                        projectId={issue.projectId}
                         projectIssues={projectIssues}
                         canContribute={canContribute}
                         onQuoteReply={onQuoteReply}
@@ -961,6 +965,22 @@ function IssuePage() {
               initialOpen={inspector}
               initialSessionId={inspectorSession}
             />
+
+            {canContribute && (
+              <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
+                <Stack hAlign="start">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    label="Move to Trash"
+                    isDisabled={activeSession !== undefined || trashing}
+                    data-trash-button=""
+                    onClick={() => setConfirmTrashOpen(true)}
+                  />
+                </Stack>
+              </Section>
+            )}
           </Stack>
         );
 
@@ -982,9 +1002,10 @@ function IssuePage() {
               <LayoutPanel
                 width={320}
                 padding={0}
-                isScrollable={false}
+                isScrollable
                 role="complementary"
                 label="Issue details"
+                data-issue-sidebar=""
               >
                 <Section variant="transparent" dividers={["start"]} padding={0}>
                   <Stack paddingInlineStart={6}>{inspectorColumn}</Stack>

@@ -104,7 +104,13 @@ test("the link's GET is inert; the POST registers; reuse fails", async () => {
     data: { token: inviteeToken, password: INVITEE_PASSWORD },
   });
   expect(res.status()).toBe(200);
-  expect(await res.json()).toEqual({ email: INVITEE_EMAIL, emailVerified: true, avatarUrl: null });
+  expect(await res.json()).toEqual({
+    email: INVITEE_EMAIL,
+    handle: expect.any(String),
+    displayName: null,
+    emailVerified: true,
+    avatarUrl: null,
+  });
 
   const again = await api.post("/api/invitations/installation/registration", {
     data: { token: inviteeToken, password: INVITEE_PASSWORD },
@@ -121,6 +127,7 @@ test("the link's GET is inert; the POST registers; reuse fails", async () => {
     const session = await newcomer.get("/api/auth/session");
     expect(await session.json()).toEqual({
       email: INVITEE_EMAIL,
+      handle: expect.any(String),
       displayName: null,
       emailVerified: true,
       avatarUrl: null,

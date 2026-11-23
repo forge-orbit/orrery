@@ -57,6 +57,7 @@ export const WorkspaceMember = z
   .object({
     humanId: z.string(),
     email: Email,
+    displayName: z.string().nullable(),
     avatarUrl: AvatarUrl.nullable(),
     isOwner: z.boolean(),
     
@@ -89,6 +90,28 @@ export const WorkspaceMembersResponse = z
   .array(WorkspaceMember)
   .meta({ id: "WorkspaceMembersResponse" });
 export type WorkspaceMembersResponse = z.infer<typeof WorkspaceMembersResponse>;
+
+export const HumanSuggestionsQuery = z
+  .object({
+    q: z.string().trim().min(1).max(120),
+  })
+  .meta({ id: "HumanSuggestionsQuery" });
+export type HumanSuggestionsQuery = z.infer<typeof HumanSuggestionsQuery>;
+
+export const HumanSuggestion = z
+  .object({
+    humanId: z.string(),
+    email: Email,
+    displayName: z.string().nullable(),
+    avatarUrl: AvatarUrl.nullable(),
+  })
+  .meta({ id: "HumanSuggestion" });
+export type HumanSuggestion = z.infer<typeof HumanSuggestion>;
+
+export const HumanSuggestionsResponse = z
+  .array(HumanSuggestion)
+  .meta({ id: "HumanSuggestionsResponse" });
+export type HumanSuggestionsResponse = z.infer<typeof HumanSuggestionsResponse>;
 
 
 

@@ -7,8 +7,10 @@ import { Stack } from "@astryxdesign/core/Stack";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
-import type { Issue } from "@orrery/contract";
+import type { Issue, MentionActor, MentionAgent, MentionHuman } from "@orrery/contract";
+import { useQuery } from "@tanstack/react-query";
 import {
+  AtSign,
   Bold,
   Code,
   Hash,
@@ -31,6 +33,7 @@ import {
   attachmentMarkdown,
   attachmentPlaceholder,
   continueListOnEnter,
+  insertAtTrigger,
   insertCode,
   insertCodeBlock,
   insertLink,
@@ -42,8 +45,17 @@ import {
   wrapSelection,
   type TextSelectionEdit,
 } from "../../lib/markdown-toolbar.ts";
+import { AgentAvatar } from "../../lib/harness.tsx";
+import { HumanAvatar } from "../../lib/avatar.tsx";
 import { Markdown } from "../../lib/Markdown.tsx";
+import {
+  actorLabel,
+  filterMentionCandidates,
+  findAtMention,
+  mentionToken,
+} from "../../lib/mentions.ts";
 import { issueStatusLabels } from "./issue-status.ts";
+import { mentionCandidatesQuery } from "./queries.ts";
 
 function findHashMention(text: string): { start: number; query: string } | null {
   const match = /(?:^|[\s(])#([a-zA-Z0-9-]*)$/.exec(text);
@@ -52,6 +64,49 @@ function findHashMention(text: string): { start: number; query: string } | null 
   const hashIndex = text.lastIndexOf("#");
   if (hashIndex < 0) return null;
   return { start: hashIndex, query };
+}
+
+type Suggestion =
+  | { kind: "issue"; key: string; token: string; label: string; issue: Issue }
+  | { kind: "human"; key: string; token: string; label: string; actor: MentionHuman }
+  | { kind: "agent"; key: string; token: string; label: string; actor: MentionAgent };
+
+function SuggestionRow({ suggestion }: { suggestion: Suggestion }) {
+  if (suggestion.kind === "issue") {
+    return (
+      <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+        <Text as="span" type="code" color="secondary">
+          {suggestion.issue.identifier}
+        </Text>
+        <Text as="span" type="body" weight="medium" color="primary">
+          {suggestion.label}
+        </Text>
+      </Stack>
+    );
+  }
+  return (
+    <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+      {suggestion.actor.type === "human" ? (
+        <HumanAvatar
+          name={actorLabel(suggestion.actor)}
+          avatarUrl={suggestion.actor.avatarUrl}
+          size="xsm"
+          tooltip={false}
+        />
+      ) : (
+        <AgentAvatar name={suggestion.actor.name} size={16} />
+      )}
+      <Text as="span" type="code" color="secondary">
+        {suggestion.token}
+      </Text>
+      <Text as="span" type="body" weight="medium" color="primary">
+        {suggestion.label}
+      </Text>
+      {suggestion.kind === "agent" && (
+        <Token label="Agent" color="orange" size="sm" data-mention-agent="" />
+      )}
+    </Stack>
+  );
 }
 
 export interface IssueMentionTextAreaProps {
@@ -107,22 +162,59 @@ export function IssueMentionTextArea({
   }
   const activeRef = inputRef ?? textareaRef;
 
-  const mention = mode === "write" && issues.length > 0 ? findHashMention(value) : null;
+  const candidates = useQuery({
+    ...mentionCandidatesQuery(projectId ?? ""),
+    enabled: projectId !== undefined,
+  });
+  const mentionHumans: readonly MentionHuman[] = candidates.data?.humans ?? [];
+  const mentionAgents: readonly MentionAgent[] = candidates.data?.agents ?? [];
+  const mentionActors: readonly MentionActor[] = [...mentionHumans, ...mentionAgents];
+
+  const atMention = mode === "write" && mentionActors.length > 0 ? findAtMention(value) : null;
+  const hashMention = mode === "write" && issues.length > 0 ? findHashMention(value) : null;
+  const mention = atMention ?? hashMention;
   const showMenu = mention !== null && dismissedAt !== mention.start;
-  const matches = showMenu
-    ? issues
-        .filter((candidate) => {
-          const q = mention.query.trim().toLowerCase();
-          if (q === "") return true;
-          return (
-            String(candidate.number).includes(q) ||
-            candidate.identifier.toLowerCase().includes(q) ||
-            candidate.title.toLowerCase().includes(q)
-          );
-        })
-        .slice(0, 6)
-    : [];
-  const activeIndex = matches.length === 0 ? 0 : Math.min(selectedIndex, matches.length - 1);
+  const suggestions: Suggestion[] = !showMenu
+    ? []
+    : atMention !== null
+      ? filterMentionCandidates(mentionHumans, mentionAgents, atMention.query).map(
+          (actor): Suggestion =>
+            actor.type === "human"
+              ? {
+                  kind: "human",
+                  key: `human-${actor.id}`,
+                  token: mentionToken(actor),
+                  label: actorLabel(actor),
+                  actor,
+                }
+              : {
+                  kind: "agent",
+                  key: `agent-${actor.id}`,
+                  token: mentionToken(actor),
+                  label: actorLabel(actor),
+                  actor,
+                },
+        )
+      : issues
+          .filter((candidate) => {
+            const q = mention.query.trim().toLowerCase();
+            if (q === "") return true;
+            return (
+              String(candidate.number).includes(q) ||
+              candidate.identifier.toLowerCase().includes(q) ||
+              candidate.title.toLowerCase().includes(q)
+            );
+          })
+          .slice(0, 6)
+          .map((issue) => ({
+            kind: "issue" as const,
+            key: issue.id,
+            token: `#${issue.number}`,
+            label: issue.title,
+            issue,
+          }));
+  const activeIndex =
+    suggestions.length === 0 ? 0 : Math.min(selectedIndex, suggestions.length - 1);
 
   function commitEdit(edit: TextSelectionEdit) {
     setDraft(edit.value);
@@ -143,9 +235,9 @@ export function IssueMentionTextArea({
     commitEdit(compute(start, end));
   }
 
-  function insertMention(target: Issue) {
+  function insertSuggestion(suggestion: Suggestion) {
     if (mention === null) return;
-    setDraft(`${value.slice(0, mention.start)}#${target.number} `);
+    setDraft(`${value.slice(0, mention.start)}${suggestion.token} `);
     setDismissedAt(null);
     setSelectedIndex(0);
   }
@@ -236,22 +328,22 @@ export function IssueMentionTextArea({
           }
         }
 
-        if (matches.length > 0) {
+        if (suggestions.length > 0) {
           if (event.key === "ArrowDown") {
             event.preventDefault();
-            setSelectedIndex((prev) => (prev + 1) % matches.length);
+            setSelectedIndex((prev) => (prev + 1) % suggestions.length);
             return;
           }
           if (event.key === "ArrowUp") {
             event.preventDefault();
-            setSelectedIndex((prev) => (prev - 1 + matches.length) % matches.length);
+            setSelectedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
             return;
           }
           if (event.key === "Enter" || event.key === "Tab") {
-            const chosen = matches[activeIndex];
+            const chosen = suggestions[activeIndex];
             if (chosen !== undefined) {
               event.preventDefault();
-              insertMention(chosen);
+              insertSuggestion(chosen);
               return;
             }
           }
@@ -454,6 +546,20 @@ export function IssueMentionTextArea({
                   />
                 </>
               )}
+              {mentionActors.length > 0 && (
+                <>
+                  {issues.length === 0 && <Divider orientation="vertical" />}
+                  <IconButton
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    label="Mention a teammate"
+                    tooltip="Mention a teammate (@)"
+                    icon={<Icon icon={AtSign} />}
+                    onClick={() => applyEdit((s, e) => insertAtTrigger(value, s, e))}
+                  />
+                </>
+              )}
             </Stack>
           )}
         </Stack>
@@ -501,7 +607,7 @@ export function IssueMentionTextArea({
                 {...(placeholder !== undefined
                   ? { placeholder }
                   : issues.length > 0
-                    ? { placeholder: "Write in Markdown… Type # to reference an issue" }
+                    ? { placeholder: "Write in Markdown… Type # for an issue or @ to mention" }
                     : { placeholder: "Write in Markdown…" })}
               />
             </Stack>
@@ -512,7 +618,12 @@ export function IssueMentionTextArea({
                   Nothing to preview.
                 </Text>
               ) : (
-                <Markdown {...(issues.length > 0 ? { issueRefs: issues } : {})}>{value}</Markdown>
+                <Markdown
+                  mentionActors={mentionActors}
+                  {...(issues.length > 0 ? { issueRefs: issues } : {})}
+                >
+                  {value}
+                </Markdown>
               )}
             </Stack>
           )}
@@ -540,32 +651,36 @@ export function IssueMentionTextArea({
         )}
       </Card>
 
-      {matches.length > 0 && (
+      {suggestions.length > 0 && (
         <Card elevation="med" padding={1}>
-          <Stack as="ul" role="listbox" aria-label="Reference an issue" gap={0.5}>
-            {matches.map((candidate, index) => (
+          <Stack
+            as="ul"
+            role="listbox"
+            aria-label={atMention !== null ? "Mention a teammate" : "Reference an issue"}
+            gap={0.5}
+          >
+            {suggestions.map((suggestion, index) => (
               <Stack
                 as="li"
-                key={candidate.id}
+                key={suggestion.key}
                 role="option"
                 aria-selected={index === activeIndex}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  insertMention(candidate);
+                  insertSuggestion(suggestion);
                 }}
               >
                 <Card variant={index === activeIndex ? "muted" : "transparent"} padding={2}>
                   <Stack direction="horizontal" justify="between" vAlign="center" gap={2}>
-                    <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-                      <Text as="span" type="code" color="secondary">
-                        {candidate.identifier}
-                      </Text>
-                      <Text as="span" type="body" weight="medium" color="primary">
-                        {candidate.title}
-                      </Text>
-                    </Stack>
-                    <Token label={issueStatusLabels[candidate.status]} color="gray" size="sm" />
+                    <SuggestionRow suggestion={suggestion} />
+                    {suggestion.kind === "issue" && (
+                      <Token
+                        label={issueStatusLabels[suggestion.issue.status]}
+                        color="gray"
+                        size="sm"
+                      />
+                    )}
                   </Stack>
                 </Card>
               </Stack>

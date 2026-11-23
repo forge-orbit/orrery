@@ -2768,6 +2768,93 @@ def extract_code_facts() -> dict[str, Any]:
         "if (sweeping) return;" in att_index_src and "setInterval(" in att_index_src
     )
 
+    # #181: the invitation form's Human suggestions must not become an installation
+    # directory. The decision lives in the workspaces service; the route, shared
+    # contract and generated contract are read too, so deleting any of them fails M40.
+    ws_rest_181 = read_text("apps/server/src/features/workspaces/rest.ts")
+    ws_contract_181 = read_text("packages/contract/src/workspaces.ts")
+    openapi_181 = read_text("contract/openapi.json")
+    suggest_fn = slice_between(ws_src, "async suggestHumans(", "\n    async create(")
+    suggest_kinds = slice_between(ws_rest_181, "const suggestKinds", "const createKinds")
+    m40_account = "requireAccount(account)" in suggest_fn
+    m40_workspace_404 = (
+        "readSharedWorkspace(tx, workspaceId)" in suggest_fn
+        and "readMembership(" in suggest_fn
+        and '"workspace_not_found"' in suggest_fn
+    )
+    m40_capability_gate = (
+        "!membership.isOwner" in suggest_fn and "!membership.canInviteMembers" in suggest_fn
+    )
+    m40_admin_branch = (
+        "!account?.isSystemAdministrator" in suggest_fn
+        and "isSystemAdministrator" in suggest_fn
+    )
+    m40_co_workspace = (
+        "coWorkspaceHumans" in suggest_fn
+        and "inArray(humans.id, coWorkspaceHumans)" in suggest_fn
+    )
+    m40_active_only = "isNull(humans.deactivatedAt)" in suggest_fn
+    m40_exclude_members = "notInArray(humans.id, currentMembers)" in suggest_fn
+    m40_bounded = ".limit(20)" in suggest_fn
+    m40_http_401 = '"not_signed_in"' in suggest_kinds
+    m40_route = (
+        'path: "/api/workspaces/{workspaceId}/human-suggestions"' in ws_rest_181
+        and "service.suggestHumans(" in ws_rest_181
+    )
+    m40_contract = all(
+        name in ws_contract_181
+        for name in ("HumanSuggestionsQuery", "HumanSuggestion", "HumanSuggestionsResponse")
+    )
+    m40_openapi = "/api/workspaces/{workspaceId}/human-suggestions" in openapi_181
+    # #183 (#183 human handles and @mentions): the handle column is backfilled
+    # before it becomes NOT NULL, and mention delivery is gated on a freshly
+    # computed diff, live project Read access, and one row per activity.
+    mig_handle = read_text("db/migrations/0047_adorable_hammerhead.sql")
+    mig_backfill = read_text("db/migrations/0048_backfill_human_handles.sql")
+    mentions_src = read_text("apps/server/src/features/notifications/mentions.ts")
+    notif_create_fn = slice_between(notif_src, "const createForActivity: NotifyActivity", "const notificationColumns")
+    notif_readable_fn = slice_between(notif_src, "const readableAccess =", "export function createNotificationsService")
+    m41_handle_check = (
+        "humans_handle_valid" in schema_src
+        and "humans_handle_valid" in mig_handle
+        and "char_length" in mig_handle
+    )
+    m41_handle_unique = (
+        "humans_handle_unique" in schema_src
+        and 'lower("handle")' in mig_handle
+        and "lower" in mig_backfill
+    )
+    m41_backfill_before_not_null = (
+        "orrery_human_handle_for" in mig_backfill
+        and mig_backfill.index("UPDATE humans") < mig_backfill.index("SET NOT NULL")
+        and "CREATE TRIGGER humans_assign_handle" in mig_backfill
+    )
+    m41_mention_diff = (
+        "newlyAddedMentions(" in proj_src
+        and "extractMentionHandles(" in proj_src
+        and "newlyAddedMentions" in mentions_src
+    )
+    m41_ignore_non_text = all(
+        marker in mentions_src
+        for marker in ("FENCED_CODE", "INLINE_CODE", "MARKDOWN_LINK", "EMAIL")
+    )
+    m41_mention_recipients = (
+        "mentionHandles" in notif_create_fn
+        and "lower(${humans.handle})" in notif_create_fn
+        and "recipients.delete(input.actorHumanId)" in notif_create_fn
+    )
+    m41_live_read_gate = (
+        "${workspaces.id} = ${projects.workspaceId}" in notif_readable_fn
+        and "suspendedAt} is null" in notif_readable_fn
+        and "hasReadAccess(tx, humanId, project.workspaceId" in notif_create_fn
+    )
+    notif_contract_src = read_text("packages/contract/src/notifications.ts")
+    m41_dedupe_per_event = (
+        ".onConflictDoNothing()" in notif_create_fn
+        and "one_notification_per_human_and_activity" in schema_src
+        and "issue_mentioned" in notif_contract_src
+    )
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -3190,6 +3277,26 @@ def extract_code_facts() -> dict[str, Any]:
         "m39_knowledge_noop_metadata": m39_knowledge_noop_metadata,
         "m39_metadata_rest_mcp": m39_metadata_rest_mcp,
         "m39_background_overlap": m39_background_overlap,
+        "m40_account": m40_account,
+        "m40_workspace_404": m40_workspace_404,
+        "m40_capability_gate": m40_capability_gate,
+        "m40_admin_branch": m40_admin_branch,
+        "m40_co_workspace": m40_co_workspace,
+        "m40_active_only": m40_active_only,
+        "m40_exclude_members": m40_exclude_members,
+        "m40_bounded": m40_bounded,
+        "m40_http_401": m40_http_401,
+        "m40_route": m40_route,
+        "m40_contract": m40_contract,
+        "m40_openapi": m40_openapi,
+        "m41_handle_check": m41_handle_check,
+        "m41_handle_unique": m41_handle_unique,
+        "m41_backfill_before_not_null": m41_backfill_before_not_null,
+        "m41_mention_diff": m41_mention_diff,
+        "m41_ignore_non_text": m41_ignore_non_text,
+        "m41_mention_recipients": m41_mention_recipients,
+        "m41_live_read_gate": m41_live_read_gate,
+        "m41_dedupe_per_event": m41_dedupe_per_event,
     }
 
 
@@ -8442,6 +8549,258 @@ def check_m39(facts: dict[str, bool]) -> CheckResult:
     )
 
 
+def check_m40(facts: dict[str, Any]) -> CheckResult:
+    # #181: probe the Human-suggestion endpoint with each kind of caller against an
+    # existing and a missing workspace, for a co-workspace peer, a stranger, a
+    # deactivated peer and a current member. The outcome is derived from source
+    # guards, so a removed guard (or a missing route/schema/contract) is a leak.
+    files = [
+        "apps/server/src/features/workspaces/service.ts",
+        "apps/server/src/features/workspaces/rest.ts",
+        "packages/contract/src/workspaces.ts",
+        "contract/openapi.json",
+    ]
+    g = {key: value for key, value in facts.items() if key.startswith("m40_")}
+    callers = (
+        "anonymous",
+        "non_member",
+        "plain_member",
+        "permission_manager",
+        "inviter",
+        "owner",
+        "admin",
+    )
+    humans = ("peer", "stranger", "deactivated_peer", "member")
+
+    def visible(caller: str, human: str) -> bool:
+        if not (g["m40_account"] and g["m40_route"] and g["m40_contract"] and g["m40_openapi"]):
+            return False
+        if caller == "admin":
+            if not g["m40_admin_branch"]:
+                return False
+            if human == "member" and g["m40_exclude_members"]:
+                return False
+            if human == "deactivated_peer" and g["m40_active_only"]:
+                return False
+            if human == "deactivated_peer":
+                return True
+            return True
+        # An ordinary member or a permission manager without invite authority has
+        # no suggestion rights; a non-admin owner or delegated inviter may only
+        # meet Humans through a shared workspace, so removing the co-workspace
+        # predicate exposes installation strangers.
+        if caller in ("plain_member", "permission_manager") and g["m40_capability_gate"]:
+            return False
+        if human == "member":
+            return not g["m40_exclude_members"]
+        if human == "deactivated_peer":
+            return not g["m40_active_only"]
+        if human == "stranger":
+            return not g["m40_co_workspace"]
+        return True
+
+    def run(check_id: str) -> CheckResult:
+        def next_states(state):
+            if state != ("start",):
+                return []
+            return [
+                (
+                    f"{caller} probes {human} (workspace_exists={exists})",
+                    ("probed", caller, exists, human),
+                )
+                for caller in callers
+                for exists in (True, False)
+                for human in humans
+            ]
+
+        def invariant(state):
+            if state[0] != "probed":
+                return True, ""
+            _, caller, exists, human = state
+            if caller == "anonymous":
+                if not g["m40_http_401"]:
+                    return False, "Unauthenticated caller reached the suggestion endpoint"
+                return True, ""
+            if not exists:
+                return True, ""  # every caller gets the same 404 for a missing workspace
+            if caller == "non_member":
+                if g["m40_workspace_404"] is False:
+                    return False, "Non-member distinguished an existing workspace with 403"
+                return True, ""
+            if not g["m40_bounded"]:
+                return False, "Suggestion result set is unbounded"
+            if caller in ("plain_member", "permission_manager"):
+                if visible(caller, human):
+                    return False, f"{caller} without invite authority saw {human}"
+                return True, ""
+            if caller in ("owner", "inviter"):
+                if human in ("stranger", "deactivated_peer", "member") and visible(caller, human):
+                    return False, f"Non-admin {caller} enumerated {human} on the installation"
+                if human == "peer" and not visible(caller, human):
+                    return False, f"Non-admin {caller} cannot see their co-workspace Human"
+                return True, ""
+            # A system administrator may see any active non-member Human, but
+            # never a current member or a deactivated account.
+            if human == "stranger" and not visible(caller, human):
+                return False, "System administrator cannot see an active Human outside the workspace"
+            if human in ("deactivated_peer", "member") and visible(caller, human):
+                return False, f"System administrator saw {human}"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Human Suggestion Non-Enumeration",
+            "Only active co-workspace Humans are visible to non-admins; current members and deactivated Humans are never suggested; non-members get 404",
+            "safety",
+            ("start",),
+            next_states,
+            invariant,
+            files,
+        )
+
+    result = run("M40")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M40-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M40",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M40",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
+def check_m41(facts: dict[str, bool]) -> CheckResult:
+    g = {k: facts[k] for k in facts if k.startswith("m41_")}
+
+    # State: (handles_unique, handle_assigned, notified, events_applied, violations).
+    # `events_applied` is the set of mutations already interleaved, so the BFS
+    # visits every ordering of the eight #183 transitions.
+    init = (True, True, False, frozenset(), frozenset())
+
+    def step(state, label, violation=None, uniq=None, assigned=None, notified=None):
+        u, a, n, events, v = state
+        return (
+            u if uniq is None else uniq,
+            a if assigned is None else assigned,
+            n if notified is None else notified,
+            events | {label},
+            v if violation is None else v | {violation},
+        )
+
+    def insert_colliding_human(state):
+        if not g["m41_handle_check"] or not g["m41_handle_unique"]:
+            return step(state, "colliding insert", "duplicate_or_invalid_handle", uniq=False, assigned=True)
+        if not g["m41_backfill_before_not_null"]:
+            return step(state, "colliding insert", "collision_suffix_not_allocated", uniq=False, assigned=True)
+        return step(state, "colliding insert", assigned=True)
+
+    def backfill_legacy_row(state):
+        if not g["m41_backfill_before_not_null"]:
+            return step(state, "backfill", "legacy_row_left_with_null_handle", assigned=False)
+        return step(state, "backfill", assigned=True)
+
+    def create_issue_with_duplicate_mention(state):
+        if not g["m41_dedupe_per_event"]:
+            return step(state, "create duplicate mention", "duplicate_notification_per_event", notified=True)
+        if not g["m41_ignore_non_text"]:
+            return step(state, "create duplicate mention", "non_text_mention_notified", notified=True)
+        return step(state, "create duplicate mention", notified=True)
+
+    def mention_without_read_access(state):
+        if not g["m41_live_read_gate"]:
+            return step(state, "non-member mention", "non_member_notified", notified=True)
+        return step(state, "non-member mention")
+
+    def self_mention(state):
+        if not g["m41_mention_recipients"]:
+            return step(state, "self mention", "self_notified", notified=True)
+        return step(state, "self mention")
+
+    def edit_adds_mention(state):
+        if not g["m41_mention_diff"]:
+            return step(state, "edit adds mention", "already_mentioned_notified_again", notified=True)
+        return step(state, "edit adds mention", notified=True)
+
+    def edit_keeps_mention(state):
+        if not g["m41_mention_diff"]:
+            return step(state, "edit keeps mention", "unchanged_mention_notified_again", notified=True)
+        return step(state, "edit keeps mention")
+
+    def mention_inside_code_or_email(state):
+        if not g["m41_ignore_non_text"]:
+            return step(state, "code mention", "non_text_mention_notified", notified=True)
+        return step(state, "code mention")
+
+    actions = [
+        ("insert a second human whose email derives to the same handle", insert_colliding_human),
+        ("backfill a legacy human row", backfill_legacy_row),
+        ("create an issue that mentions the same valid handle twice", create_issue_with_duplicate_mention),
+        ("mention a human without live project Read access", mention_without_read_access),
+        ("mention yourself in your own issue", self_mention),
+        ("edit an issue to add a mention", edit_adds_mention),
+        ("edit an issue without adding a mention", edit_keeps_mention),
+        ("write @handle inside code, a link or an email address", mention_inside_code_or_email),
+    ]
+
+    def inv(state):
+        uniq, assigned, notified, events, v = state
+        if not uniq:
+            return False, "human handles are not unique or valid"
+        if not assigned:
+            return False, "a human row was left without a handle"
+        if v:
+            return False, f"mention invariant broken: {sorted(v)[0]}"
+        return True, ""
+
+    return bfs_check(
+        "M41",
+        "Human Handles and @Mentions (#183)",
+        "Handles are backfilled and unique; mention notifications are deduplicated, gated on live Read access, never self-sent, and only newly added on an edit",
+        "safety",
+        init,
+        lambda s: [(label, fn(s)) for label, fn in actions],
+        inv,
+        [
+            "apps/server/src/db/schema.ts",
+            "db/migrations/0047_adorable_hammerhead.sql",
+            "db/migrations/0048_backfill_human_handles.sql",
+            "apps/server/src/features/notifications/service.ts",
+            "apps/server/src/features/notifications/mentions.ts",
+            "apps/server/src/features/projects/service.ts",
+            "packages/contract/src/notifications.ts",
+        ],
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -8485,6 +8844,8 @@ def main() -> None:
         check_m37(facts),
         check_m38(facts),
         check_m39(facts),
+        check_m40(facts),
+        check_m41(facts),
     ]
 
     if "--json" in sys.argv:

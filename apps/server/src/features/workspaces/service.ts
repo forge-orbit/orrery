@@ -8,21 +8,39 @@ import {
   UpdateWorkspaceMemberRequest,
   workspaceCapabilities,
   type CreateWorkspaceRequest,
+  type HumanSuggestion,
   type InvitationSummary,
   type InviteWorkspaceMemberRequest,
+  type SessionResponse,
   type Workspace,
   type WorkspaceCapability,
   type WorkspaceInvitation,
   type WorkspaceInvitationPreview,
   type WorkspaceMember,
 } from "@orrery/contract";
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DbTransaction } from "../../platform/db.ts";
 import { errorNameAndCode, uniqueConstraintName } from "../../platform/errors.ts";
 import type { Logger } from "../../platform/log.ts";
 import { tokenHash } from "../../platform/tokens.ts";
-import type { SessionAccount } from "../accounts/index.ts";
+import { toSessionResponse, type SessionAccount } from "../accounts/index.ts";
 import { canResendInvitation, supersedeTargetForPending } from "../invitations/index.ts";
 import { renderEmail, type OutgoingMail } from "../settings/index.ts";
 import {
@@ -197,6 +215,7 @@ async function lockWorkspaceForMutation(
 interface WorkspaceMembershipRow {
   humanId: string;
   email: string;
+  displayName: string | null;
   avatarObjectId: string | null;
   isOwner: boolean;
   canCreateProjects: boolean;
@@ -216,6 +235,7 @@ async function readMembership(
     .select({
       humanId: workspaceMemberships.humanId,
       email: humans.email,
+      displayName: humans.displayName,
       avatarObjectId: humans.avatarObjectId,
       isOwner: workspaceMemberships.isOwner,
       canCreateProjects: workspaceMemberships.canCreateProjects,
@@ -396,6 +416,7 @@ function toMember(row: WorkspaceMembershipRow): WorkspaceMember {
   return {
     humanId: row.humanId,
     email: row.email,
+    displayName: row.displayName,
     avatarUrl: row.avatarObjectId === null ? null : avatarUrlFor(row.humanId, row.avatarObjectId),
     isOwner: row.isOwner,
     canCreateProjects: row.isOwner || row.canCreateProjects,
@@ -572,7 +593,7 @@ export interface WorkspacesDeps {
   createInvitedHuman: (
     input: { email: string; password: string },
     tx: DbTransaction,
-  ) => Promise<{ humanId: string }>;
+  ) => Promise<{ humanId: string; handle: string }>;
   markEmailVerified: (humanId: string, tx: DbTransaction) => Promise<void>;
 
   deliver: (mail: OutgoingMail) => Promise<void>;
@@ -611,6 +632,11 @@ export interface WorkspacesService {
   list(account: SessionAccount | null): Promise<Workspace[]>;
   get(account: SessionAccount | null, workspaceId: string): Promise<Workspace>;
   members(account: SessionAccount | null, workspaceId: string): Promise<WorkspaceMember[]>;
+  suggestHumans(
+    account: SessionAccount | null,
+    workspaceId: string,
+    query: string,
+  ): Promise<HumanSuggestion[]>;
   create(account: SessionAccount | null, input: CreateWorkspaceRequest): Promise<Workspace>;
   invite(
     account: SessionAccount | null,
@@ -631,10 +657,7 @@ export interface WorkspacesService {
   declineInvitation(input: { token: string }): Promise<void>;
   previewInvitation(token: string): Promise<WorkspaceInvitationPreview>;
   acceptInvitation(account: SessionAccount | null, token: string): Promise<Workspace>;
-  registerThroughInvitation(input: {
-    token: string;
-    password: string;
-  }): Promise<{ email: string; emailVerified: true; avatarUrl: null }>;
+  registerThroughInvitation(input: { token: string; password: string }): Promise<SessionResponse>;
   appointOwner(
     account: SessionAccount | null,
     workspaceId: string,
@@ -908,6 +931,7 @@ export function createWorkspacesService({
             .select({
               humanId: workspaceMemberships.humanId,
               email: humans.email,
+              displayName: humans.displayName,
               avatarObjectId: humans.avatarObjectId,
               isOwner: workspaceMemberships.isOwner,
               canCreateProjects: workspaceMemberships.canCreateProjects,
@@ -927,6 +951,86 @@ export function createWorkspacesService({
             )
             .orderBy(workspaceMemberships.createdAt, workspaceMemberships.humanId);
           return rows.map(toMember);
+        },
+        { isolationLevel: "repeatable read", accessMode: "read only" },
+      );
+    },
+
+    async suggestHumans(account, workspaceId, query) {
+      const actor = requireAccount(account);
+      return db.transaction(
+        async (tx) => {
+          await readSharedWorkspace(tx, workspaceId);
+          const membership = await readMembership(
+            tx,
+            workspaceId,
+            actor.humanId,
+            "workspace_not_found",
+          );
+          // The same authority required to POST an invitation: an owner or a
+          // delegated inviter. Permission management alone is not enough.
+          if (!membership.isOwner && !membership.canInviteMembers) {
+            throw new WorkspacesError("not_workspace_owner");
+          }
+
+          // Escape LIKE metacharacters so punctuation in an address searches literally.
+          const pattern = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
+          const matches = or(
+            ilike(humans.email, sql`${pattern} escape '\\'`),
+            ilike(humans.displayName, sql`${pattern} escape '\\'`),
+          );
+          const currentMembers = tx
+            .select({ humanId: workspaceMemberships.humanId })
+            .from(workspaceMemberships)
+            .where(eq(workspaceMemberships.workspaceId, workspaceId));
+          const conditions = [
+            isNull(humans.deactivatedAt),
+            ne(humans.id, actor.humanId),
+            notInArray(humans.id, currentMembers),
+            matches,
+          ];
+          if (!account?.isSystemAdministrator) {
+            // A non-administrator may only discover Humans already met in another
+            // shared workspace. Strangers on the installation stay invisible.
+            const actorWorkspaces = tx
+              .select({ workspaceId: workspaceMemberships.workspaceId })
+              .from(workspaceMemberships)
+              .where(
+                and(
+                  eq(workspaceMemberships.humanId, actor.humanId),
+                  isNull(workspaceMemberships.suspendedAt),
+                ),
+              );
+            const coWorkspaceHumans = tx
+              .select({ humanId: workspaceMemberships.humanId })
+              .from(workspaceMemberships)
+              .where(
+                and(
+                  isNull(workspaceMemberships.suspendedAt),
+                  inArray(workspaceMemberships.workspaceId, actorWorkspaces),
+                ),
+              );
+            conditions.push(inArray(humans.id, coWorkspaceHumans));
+          }
+
+          const rows = await tx
+            .select({
+              humanId: humans.id,
+              email: humans.email,
+              displayName: humans.displayName,
+              avatarObjectId: humans.avatarObjectId,
+            })
+            .from(humans)
+            .where(and(...conditions))
+            .orderBy(humans.email)
+            .limit(20);
+          return rows.map((row) => ({
+            humanId: row.humanId,
+            email: row.email,
+            displayName: row.displayName,
+            avatarUrl:
+              row.avatarObjectId === null ? null : avatarUrlFor(row.humanId, row.avatarObjectId),
+          }));
         },
         { isolationLevel: "repeatable read", accessMode: "read only" },
       );
@@ -1490,7 +1594,7 @@ export function createWorkspacesService({
     },
 
     async registerThroughInvitation(input) {
-      const email = await db.transaction(async (tx) => {
+      const registered = await db.transaction(async (tx) => {
         const invitation = await redeemWorkspaceInvitation(tx, input.token);
 
         const [existing] = await tx
@@ -1500,11 +1604,14 @@ export function createWorkspacesService({
           .limit(1);
         if (existing !== undefined) throw new WorkspacesError("account_exists");
 
+        let handle = "";
         try {
-          const { humanId } = await createInvitedHuman(
+          const created = await createInvitedHuman(
             { email: invitation.email, password: input.password },
             tx,
           );
+          const { humanId } = created;
+          handle = created.handle;
           await markEmailVerified(humanId, tx);
           await tx.insert(workspaceMemberships).values({
             id: randomUUID(),
@@ -1527,9 +1634,15 @@ export function createWorkspacesService({
           }
           throw error;
         }
-        return invitation.email;
+        return { email: invitation.email, handle };
       });
-      return { email, emailVerified: true as const, avatarUrl: null };
+      return toSessionResponse({
+        email: registered.email,
+        handle: registered.handle,
+        displayName: null,
+        emailVerifiedAt: new Date(),
+        avatarUrl: null,
+      });
     },
 
     async appointOwner(account, workspaceId, humanId) {

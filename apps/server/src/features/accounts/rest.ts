@@ -23,6 +23,7 @@ import {
   type AccountsErrorKind,
   type AccountsService,
   type SessionAccount,
+  deriveHandleFromEmail,
   rejectLogin,
 } from "./service.ts";
 
@@ -111,6 +112,8 @@ const updateProfile = createRoute({
     },
     400: problem("Invalid profile fields"),
     401: problem("No valid session"),
+    403: problem("Setup is not available"),
+    409: problem("Handle already in use"),
   },
 });
 
@@ -152,17 +155,22 @@ const statusFor = {
   setup_complete: 409,
   invalid_credentials: 401,
   invalid_current_password: 401,
+  handle_taken: 409,
 } as const satisfies Record<AccountsErrorKind, number>;
 
 const failure = (c: Context, error: AccountsError) =>
   problemResponse(c, { status: statusFor[error.kind], code: error.kind, title: error.message });
 
 export function toSessionResponse(
-  account: Pick<SessionAccount, "email" | "displayName" | "emailVerifiedAt" | "avatarUrl">,
+  account: Pick<
+    SessionAccount,
+    "email" | "handle" | "displayName" | "emailVerifiedAt" | "avatarUrl"
+  >,
   overrides?: { avatarUrl?: string | null },
 ) {
   return {
     email: account.email,
+    handle: account.handle ?? deriveHandleFromEmail(account.email),
     displayName: account.displayName ?? null,
     emailVerified: account.emailVerifiedAt !== null,
     avatarUrl:
@@ -255,13 +263,7 @@ export function createAccountsRest(service: AccountsService) {
       const updated = await service.updateProfile(account.humanId, c.req.valid("json"));
       return c.json(toSessionResponse(updated), 200);
     } catch (error) {
-      if (error instanceof AccountsError && error.kind === "invalid_credentials") {
-        return problemResponse(c, {
-          status: statusFor.invalid_credentials,
-          code: error.kind,
-          title: error.message,
-        });
-      }
+      if (error instanceof AccountsError) return failure(c, error);
       throw error;
     }
   });

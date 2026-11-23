@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { AttachmentMetadata } from "./attachments.ts";
 import { AvatarUrl } from "./auth.ts";
-import { Email, Timestamp, WorkspaceKind } from "./common.ts";
+import { Email, Handle, Timestamp, WorkspaceKind } from "./common.ts";
 
 
 
@@ -134,6 +134,7 @@ export const Actor = z
   .object({
     humanId: z.string().nullable().optional(),
     email: Email.nullable().optional(),
+    handle: Handle.nullable().optional(),
     agentId: z.string().nullable().optional(),
     agentName: z.string().nullable().optional(),
     displayName: z.string(),
@@ -229,6 +230,11 @@ export const ProjectAccessGrantsResponse = z
   .array(ProjectAccessGrant)
   .meta({ id: "ProjectAccessGrantsResponse" });
 export type ProjectAccessGrantsResponse = z.infer<typeof ProjectAccessGrantsResponse>;
+
+export const ProjectAccessHumanIds = z
+  .array(z.string())
+  .meta({ id: "ProjectAccessHumanIds" });
+export type ProjectAccessHumanIds = z.infer<typeof ProjectAccessHumanIds>;
 
 
 

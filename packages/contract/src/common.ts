@@ -5,6 +5,17 @@ import { z } from "zod";
 export const Email = z.string().trim().toLowerCase().max(254).pipe(z.email()).meta({ id: "Email" });
 export type Email = z.infer<typeof Email>;
 
+export const Handle = z
+  .string()
+  .min(2)
+  .max(39)
+  .regex(
+    /^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$/,
+    "Use 2-39 lowercase letters, digits or hyphens, starting and ending with a letter or digit.",
+  )
+  .meta({ id: "Handle" });
+export type Handle = z.infer<typeof Handle>;
+
 
 export const NewPassword = z
   .string()

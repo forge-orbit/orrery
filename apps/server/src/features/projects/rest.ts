@@ -15,11 +15,13 @@ import {
   IssueDetail,
   IssueLink,
   IssuesResponse,
+  MentionCandidatesResponse,
   KnowledgeEntriesResponse,
   KnowledgeEntry,
   Project,
   ProjectAccessGrant,
   ProjectAccessGrantsResponse,
+  ProjectAccessHumanIds,
   ProjectActivityResponse,
   ProjectLabel,
   ProjectLabelsResponse,
@@ -164,6 +166,25 @@ const listProjectAccess = createRoute({
   },
 });
 
+const projectAccessHumanIds = createRoute({
+  method: "get",
+  path: "/api/projects/{projectId}/access/humans",
+  summary: "The Humans who currently hold project access",
+  description:
+    "Contribute access is enough: only someone who can assign issues needs the warning that a workspace Member without a grant will not see the issue in My Work. Workspace owners have implicit access and are not listed. A Reader is refused with insufficient_project_access; an outsider and a missing project both get 404.",
+  request: { params: projectParams },
+  responses: {
+    200: {
+      description: "The human ids with an active grant",
+      content: { "application/json": { schema: ProjectAccessHumanIds } },
+    },
+    400: problem("The project id is invalid"),
+    401: problem("Not signed in"),
+    403: problem("Read access is not enough to assign issues"),
+    404: problem("No project with this id is accessible to the caller"),
+  },
+});
+
 const setProjectAccess = createRoute({
   method: "patch",
   path: "/api/projects/{projectId}/access",
@@ -244,6 +265,24 @@ const listIssues = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    404: problem("No project with this id is accessible to the caller"),
+  },
+});
+
+const listMentionCandidates = createRoute({
+  method: "get",
+  path: "/api/projects/{projectId}/mention-candidates",
+  summary: "Humans and agents that can be @mentioned in a project",
+  description:
+    "Read access. Returns project-accessible Humans with their handle and display name, plus workspace Agents whose live API key grants project access. Used by the editor's @ autocomplete.",
+  request: { params: projectParams },
+  responses: {
+    200: {
+      description: "The actors that may be mentioned",
+      content: { "application/json": { schema: MentionCandidatesResponse } },
+    },
+    400: problem("The project id is invalid"),
+    401: problem("Not signed in, or the agent key is unusable"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -860,9 +899,11 @@ export const routes = [
   updateProject,
   setProjectFallbackPolicy,
   listProjectAccess,
+  projectAccessHumanIds,
   setProjectAccess,
   removeProjectAccess,
   listIssues,
+  listMentionCandidates,
   createIssue,
   getIssue,
   deleteIssue,
@@ -1117,6 +1158,15 @@ export function createProjectsRest(
     }
   });
 
+  app.openapi(projectAccessHumanIds, async (c) => {
+    try {
+      const { projectId } = c.req.valid("param");
+      return c.json(await service.projectAccessHumanIds(await sessionReader(c), projectId), 200);
+    } catch (error) {
+      return failure(c, error, projectWriteKinds);
+    }
+  });
+
   app.openapi(setProjectAccess, async (c) => {
     try {
       const { projectId } = c.req.valid("param");
@@ -1143,6 +1193,15 @@ export function createProjectsRest(
     try {
       const { projectId } = c.req.valid("param");
       return c.json(await service.listIssues(await workActor(c), projectId), 200);
+    } catch (error) {
+      return failure(c, error, projectReadKinds);
+    }
+  });
+
+  app.openapi(listMentionCandidates, async (c) => {
+    try {
+      const { projectId } = c.req.valid("param");
+      return c.json(await service.listMentionCandidates(await workActor(c), projectId), 200);
     } catch (error) {
       return failure(c, error, projectReadKinds);
     }
