@@ -4185,6 +4185,16 @@
             },
             "actor": {
               "$ref": "#/$defs/Actor"
+            },
+            "detail": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/IssueActivityDetail"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -4195,7 +4205,8 @@
             "issueId",
             "knowledgeEntryId",
             "createdAt",
-            "actor"
+            "actor",
+            "detail"
           ],
           "additionalProperties": false
         },
@@ -4302,6 +4313,349 @@
         "AvatarUrl": {
           "type": "string",
           "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "IssueActivityDetail": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "issue_edited"
+                },
+                "changes": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "status"
+                          },
+                          "from": {
+                            "$ref": "#/$defs/IssueStatus"
+                          },
+                          "to": {
+                            "$ref": "#/$defs/IssueStatus"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "from",
+                          "to"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "priority"
+                          },
+                          "from": {
+                            "$ref": "#/$defs/IssuePriority"
+                          },
+                          "to": {
+                            "$ref": "#/$defs/IssuePriority"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "from",
+                          "to"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "assignee"
+                          },
+                          "from": {
+                            "$ref": "#/$defs/IssueAssignee"
+                          },
+                          "to": {
+                            "$ref": "#/$defs/IssueAssignee"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "from",
+                          "to"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "changes"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "label_added"
+                },
+                "label": {
+                  "$ref": "#/$defs/ActivityLabel"
+                }
+              },
+              "required": [
+                "kind",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "label_removed"
+                },
+                "label": {
+                  "$ref": "#/$defs/ActivityLabel"
+                }
+              },
+              "required": [
+                "kind",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "issue_closed"
+                },
+                "from": {
+                  "$ref": "#/$defs/IssueStatus"
+                },
+                "to": {
+                  "$ref": "#/$defs/IssueStatus"
+                }
+              },
+              "required": [
+                "kind",
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "issue_reopened"
+                },
+                "from": {
+                  "$ref": "#/$defs/IssueStatus"
+                },
+                "to": {
+                  "$ref": "#/$defs/IssueStatus"
+                }
+              },
+              "required": [
+                "kind",
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "parent_changed"
+                },
+                "from": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "issue_dependency_added"
+                },
+                "issueId": {
+                  "type": "string"
+                },
+                "blockedByIssueId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "issueId",
+                "blockedByIssueId",
+                "title"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "issue_dependency_removed"
+                },
+                "issueId": {
+                  "type": "string"
+                },
+                "blockedByIssueId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "issueId",
+                "blockedByIssueId",
+                "title"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "issue_link_added"
+                },
+                "linkId": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "linkId",
+                "url",
+                "title"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "issue_link_removed"
+                },
+                "linkId": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "linkId",
+                "url",
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "IssueStatus": {
+          "type": "string",
+          "enum": [
+            "backlog",
+            "todo",
+            "in_progress",
+            "review",
+            "done",
+            "cancelled"
+          ]
+        },
+        "IssuePriority": {
+          "type": "string",
+          "enum": [
+            "urgent",
+            "high",
+            "medium",
+            "low",
+            "none"
+          ]
+        },
+        "IssueAssignee": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Actor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ActivityLabel": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "color": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "color"
+          ],
+          "additionalProperties": false
         }
       }
     }

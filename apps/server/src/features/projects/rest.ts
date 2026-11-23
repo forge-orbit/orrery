@@ -644,6 +644,26 @@ const listComments = createRoute({
   },
 });
 
+const listIssueActivity = createRoute({
+  method: "get",
+  path: "/api/issues/{issueId}/activity",
+  summary: "An issue's lifecycle activity",
+  description:
+    "Read access is enough. Lists this issue's structured lifecycle events in the order they happened, each with its actor and, for events recorded after #178, structured detail. Historical rows without detail keep their summary. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
+  request: { params: issueParams },
+  responses: {
+    200: {
+      description: "The issue's activity",
+      content: { "application/json": { schema: ProjectActivityResponse } },
+    },
+    400: problem("The issue id is invalid"),
+    401: problem(
+      "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+    ),
+    404: problem("No issue with this id is accessible to the caller"),
+  },
+});
+
 const createComment = createRoute({
   method: "post",
   path: "/api/issues/{issueId}/comments",
@@ -859,6 +879,7 @@ export const routes = [
   listBlockedBy,
   listBlocking,
   listComments,
+  listIssueActivity,
   createComment,
   createIssueLink,
   removeIssueLink,
@@ -1304,6 +1325,15 @@ export function createProjectsRest(
     try {
       const { issueId } = c.req.valid("param");
       return c.json(await service.listComments(await workActor(c), issueId), 200);
+    } catch (error) {
+      return failure(c, error, issueReadKinds);
+    }
+  });
+
+  app.openapi(listIssueActivity, async (c) => {
+    try {
+      const { issueId } = c.req.valid("param");
+      return c.json(await service.listIssueActivity(await workActor(c), issueId), 200);
     } catch (error) {
       return failure(c, error, issueReadKinds);
     }

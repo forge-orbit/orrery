@@ -22,7 +22,7 @@ import {
   Strikethrough,
   Table2,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { TextAreaField } from "../../lib/fields.tsx";
 import {
   continueListOnEnter,
@@ -58,6 +58,10 @@ export interface IssueMentionTextAreaProps {
   required?: boolean;
   placeholder?: string;
   issues?: readonly Issue[];
+  /** Focused by a parent action such as "Quote reply". */
+  inputRef?: RefObject<HTMLTextAreaElement | null>;
+  /** Increment to bring the editor back to write mode before focusing it. */
+  focusSignal?: number;
 }
 
 const EMPTY_ISSUES: readonly Issue[] = [];
@@ -72,11 +76,19 @@ export function IssueMentionTextArea({
   required,
   placeholder,
   issues = EMPTY_ISSUES,
+  inputRef,
+  focusSignal = 0,
 }: IssueMentionTextAreaProps) {
   const [mode, setMode] = useState<"write" | "preview">("write");
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [lastFocusSignal, setLastFocusSignal] = useState(focusSignal);
+  if (focusSignal !== lastFocusSignal) {
+    setLastFocusSignal(focusSignal);
+    if (mode === "preview") setMode("write");
+  }
+  const activeRef = inputRef ?? textareaRef;
 
   const mention = mode === "write" && issues.length > 0 ? findHashMention(value) : null;
   const showMenu = mention !== null && dismissedAt !== mention.start;
@@ -100,7 +112,7 @@ export function IssueMentionTextArea({
     setDismissedAt(null);
     setSelectedIndex(0);
     requestAnimationFrame(() => {
-      const target = textareaRef.current;
+      const target = activeRef.current;
       if (target === null) return;
       target.focus();
       target.setSelectionRange(edit.selectionStart, edit.selectionEnd);
@@ -108,7 +120,7 @@ export function IssueMentionTextArea({
   }
 
   function applyEdit(compute: (start: number, end: number) => TextSelectionEdit) {
-    const el = textareaRef.current;
+    const el = activeRef.current;
     const start = el?.selectionStart ?? value.length;
     const end = el?.selectionEnd ?? value.length;
     commitEdit(compute(start, end));
@@ -190,7 +202,7 @@ export function IssueMentionTextArea({
           !event.ctrlKey &&
           !event.altKey
         ) {
-          const el = textareaRef.current;
+          const el = activeRef.current;
           if (el !== null && document.activeElement === el) {
             const edit = continueListOnEnter(value, el.selectionStart, el.selectionEnd);
             if (edit !== null) {
@@ -385,7 +397,7 @@ export function IssueMentionTextArea({
           {mode === "write" ? (
             <Stack id={`${id}-write-panel`} role="tabpanel" width="100%">
               <TextAreaField
-                ref={textareaRef}
+                ref={activeRef}
                 label={label}
                 isLabelHidden
                 id={id}
@@ -397,7 +409,7 @@ export function IssueMentionTextArea({
                   setSelectedIndex(0);
                 }}
                 onPaste={(event) => {
-                  const el = textareaRef.current;
+                  const el = activeRef.current;
                   if (el === null) return;
                   const pasted = event.clipboardData.getData("text");
                   const edit = pasteUrlOverSelection(

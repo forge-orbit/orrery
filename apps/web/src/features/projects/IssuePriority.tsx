@@ -9,7 +9,7 @@ import { ISSUE_SORT_STEP, IssuePriority, type Issue, type IssueDetail } from "@o
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { updateIssue } from "./commands.ts";
-import { issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
+import { issueActivityQuery, issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
 
 export const PRIORITY_LABELS: Record<IssuePriority, string> = {
   urgent: "Urgent",
@@ -91,6 +91,7 @@ export function IssuePriorityControls({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issuesQuery(projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(projectId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: issueActivityQuery(issue.id).queryKey }),
       ]);
       if (input.priority !== undefined) {
         toast({ body: `Priority set to ${PRIORITY_LABELS[input.priority]}.` });

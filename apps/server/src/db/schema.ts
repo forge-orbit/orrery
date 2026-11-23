@@ -8,6 +8,7 @@ import {
   IssueLinkKind,
   IssuePriority,
   IssueStatus,
+  type IssueActivityDetail,
   NotificationKind,
   TERMINAL_ISSUE_STATUSES,
   ProjectAccessEventType,
@@ -1172,6 +1173,7 @@ export const projectActivity = pgTable(
     issueId: text("issue_id").references(() => issues.id),
     knowledgeEntryId: text("knowledge_entry_id").references(() => knowledgeEntries.id),
     summary: text("summary").notNull(),
+    detail: jsonb("detail").$type<IssueActivityDetail>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

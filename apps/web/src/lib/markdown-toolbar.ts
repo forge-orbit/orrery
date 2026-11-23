@@ -188,3 +188,14 @@ export function continueListOnEnter(
 
   return null;
 }
+
+/** Format a quoted comment (or append one to an existing draft) as a Markdown blockquote. */
+export function quoteReply(comment: string, draft = ""): string {
+  const quoted = comment
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
+  if (draft.trim() === "") return `${quoted}\n\n`;
+  const separator = draft.endsWith("\n\n") ? "" : draft.endsWith("\n") ? "\n" : "\n\n";
+  return `${draft}${separator}${quoted}\n\n`;
+}

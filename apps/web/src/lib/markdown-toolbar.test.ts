@@ -7,6 +7,7 @@ import {
   insertTable,
   pasteUrlOverSelection,
   prefixLines,
+  quoteReply,
   wrapSelection,
 } from "./markdown-toolbar.ts";
 
@@ -105,5 +106,17 @@ describe("markdown-toolbar helpers", () => {
       selectionStart: 0,
       selectionEnd: 0,
     });
+  });
+});
+
+describe("quoteReply", () => {
+  it("prefixes every line of a comment with a Markdown blockquote marker", () => {
+    expect(quoteReply("One line.")).toBe("> One line.\n\n");
+    expect(quoteReply("First line.\nSecond line.\n")).toBe("> First line.\n> Second line.\n> \n\n");
+  });
+
+  it("appends a quoted comment after an existing draft with separating whitespace", () => {
+    expect(quoteReply("Quoted.", "My reply")).toBe("My reply\n\n> Quoted.\n\n");
+    expect(quoteReply("Quoted.", "My reply\n")).toBe("My reply\n\n> Quoted.\n\n");
   });
 });

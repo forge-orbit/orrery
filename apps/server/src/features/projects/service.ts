@@ -25,6 +25,7 @@ import {
   type IssueDetail,
   type IssueLink,
   IssueLinkKind,
+  IssueActivityDetail,
   IssuePriority,
   type KnowledgeEntry,
   type Project,
@@ -530,6 +531,7 @@ const activityColumns = {
   projectId: projectActivity.projectId,
   type: projectActivity.type,
   summary: projectActivity.summary,
+  detail: projectActivity.detail,
   issueId: projectActivity.issueId,
   knowledgeEntryId: projectActivity.knowledgeEntryId,
   createdAt: projectActivity.createdAt,
@@ -674,6 +676,7 @@ type ActivityRow = {
   projectId: string;
   type: ProjectActivityType;
   summary: string;
+  detail: IssueActivityDetail | null;
   issueId: string | null;
   knowledgeEntryId: string | null;
   createdAt: Date;
@@ -908,6 +911,7 @@ function toActivity(row: ActivityRow): ProjectActivity {
     projectId: row.projectId,
     type: row.type,
     summary: row.summary,
+    detail: row.detail === null ? null : IssueActivityDetail.parse(row.detail),
     issueId: row.issueId,
     knowledgeEntryId: row.knowledgeEntryId,
     createdAt: row.createdAt.toISOString(),
@@ -1329,6 +1333,7 @@ type RecordActivityInput =
         | "project_label_deleted";
       actor: WorkActor;
       summary: string;
+      detail?: IssueActivityDetail;
     }
   | {
       projectId: string;
@@ -1351,6 +1356,7 @@ type RecordActivityInput =
       actor: WorkActor;
       summary: string;
       issueId: string;
+      detail?: IssueActivityDetail;
     }
   | {
       projectId: string;
@@ -1358,6 +1364,7 @@ type RecordActivityInput =
       actor: WorkActor;
       summary: string;
       knowledgeEntryId: string;
+      detail?: IssueActivityDetail;
     };
 
 async function insertActivityRow(
@@ -1373,6 +1380,7 @@ async function insertActivityRow(
     actorHumanId: humanIdOf(input.actor),
     actorAgentId: agentIdOf(input.actor),
     summary: input.summary,
+    detail: input.detail ?? null,
     createdAt: sql`statement_timestamp()`,
     ...("issueId" in input ? { issueId: input.issueId } : {}),
     ...("knowledgeEntryId" in input ? { knowledgeEntryId: input.knowledgeEntryId } : {}),
@@ -1712,6 +1720,7 @@ export interface ProjectsService {
   ): Promise<IssueLink>;
   removeIssueLink(actor: WorkActor | null, issueId: string, linkId: string): Promise<void>;
   listActivity(actor: WorkActor | null, projectId: string): Promise<ProjectActivity[]>;
+  listIssueActivity(actor: WorkActor | null, issueId: string): Promise<ProjectActivity[]>;
   listKnowledge(actor: WorkActor | null, projectId: string): Promise<KnowledgeEntry[]>;
   getKnowledge(actor: WorkActor | null, entryId: string): Promise<KnowledgeEntry>;
   createKnowledge(
@@ -2693,6 +2702,20 @@ export function createProjectsService({
         }
 
         const workflowMove = statusChanged && !terminalNow && !wasTerminal;
+        const editChanges: Extract<IssueActivityDetail, { kind: "issue_edited" }>["changes"] = [];
+        if (workflowMove) {
+          editChanges.push({ kind: "status", from: currentStatus, to: status });
+        }
+        if (priorityChanged) {
+          editChanges.push({ kind: "priority", from: current.priority, to: priority });
+        }
+        if (assigneeChanged) {
+          editChanges.push({
+            kind: "assignee",
+            from: assigneeFromRow(current),
+            to: input.assignee === undefined ? null : resolvedAssignee,
+          });
+        }
         if (titleChanged || bodyChanged || priorityChanged || assigneeChanged || workflowMove) {
           await recordActivity(tx, {
             projectId: current.projectId,
@@ -2700,6 +2723,9 @@ export function createProjectsService({
             actor,
             issueId,
             summary: title,
+            ...(editChanges.length > 0
+              ? { detail: { kind: "issue_edited" as const, changes: editChanges } }
+              : {}),
           });
         }
         if (statusChanged && (terminalNow || wasTerminal)) {
@@ -2709,6 +2735,9 @@ export function createProjectsService({
             actor,
             issueId,
             summary: title,
+            detail: terminalNow
+              ? { kind: "issue_closed" as const, from: currentStatus, to: status }
+              : { kind: "issue_reopened" as const, from: currentStatus, to: status },
           });
         }
         if (parentChanged) {
@@ -2718,6 +2747,11 @@ export function createProjectsService({
             actor,
             issueId,
             summary: title,
+            detail: {
+              kind: "parent_changed",
+              from: current.parentIssueId,
+              to: requestedParent ?? current.parentIssueId,
+            },
           });
         }
         return {
@@ -2841,6 +2875,12 @@ export function createProjectsService({
           actor,
           issueId,
           summary: `${current.title} blocked by ${blocker.title}`,
+          detail: {
+            kind: "issue_dependency_added",
+            issueId,
+            blockedByIssueId,
+            title: blocker.title,
+          },
         });
         return {
           issueId,
@@ -2876,6 +2916,12 @@ export function createProjectsService({
           actor,
           issueId,
           summary: `${current.title} no longer blocked by ${blocker?.title ?? blockedByIssueId}`,
+          detail: {
+            kind: "issue_dependency_removed",
+            issueId,
+            blockedByIssueId,
+            title: blocker?.title ?? blockedByIssueId,
+          },
         });
       });
     },
@@ -3021,6 +3067,12 @@ export function createProjectsService({
           actor,
           issueId,
           summary: `${issue.title} — ${input.title}`,
+          detail: {
+            kind: "issue_link_added",
+            linkId: created.id,
+            url: created.url,
+            title: created.title,
+          },
         });
         return {
           id: created.id,
@@ -3041,7 +3093,7 @@ export function createProjectsService({
         const [removed] = await tx
           .delete(issueLinks)
           .where(and(eq(issueLinks.id, linkId), eq(issueLinks.issueId, issueId)))
-          .returning({ title: issueLinks.title });
+          .returning({ id: issueLinks.id, url: issueLinks.url, title: issueLinks.title });
         if (removed === undefined) throw new ProjectsError("issue_link_not_found");
         await recordActivity(tx, {
           projectId: issue.projectId,
@@ -3049,6 +3101,12 @@ export function createProjectsService({
           actor,
           issueId,
           summary: `${issue.title} — ${removed.title}`,
+          detail: {
+            kind: "issue_link_removed",
+            linkId: removed.id,
+            url: removed.url,
+            title: removed.title,
+          },
         });
       });
     },
@@ -3064,6 +3122,24 @@ export function createProjectsService({
             .leftJoin(activityActor, eq(activityActor.id, projectActivity.actorHumanId))
             .leftJoin(activityAgentActor, eq(activityAgentActor.id, projectActivity.actorAgentId))
             .where(eq(projectActivity.projectId, projectId))
+            .orderBy(projectActivity.createdAt, projectActivity.id);
+          return rows.map(toActivity);
+        },
+        { accessMode: "read only" },
+      );
+    },
+
+    async listIssueActivity(actorArg, issueId) {
+      const actor = requireActor(actorArg);
+      return db.transaction(
+        async (tx) => {
+          const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.read);
+          const rows = await tx
+            .select(activityColumns)
+            .from(projectActivity)
+            .leftJoin(activityActor, eq(activityActor.id, projectActivity.actorHumanId))
+            .leftJoin(activityAgentActor, eq(activityAgentActor.id, projectActivity.actorAgentId))
+            .where(eq(projectActivity.issueId, issue.id))
             .orderBy(projectActivity.createdAt, projectActivity.id);
           return rows.map(toActivity);
         },
@@ -3371,7 +3447,11 @@ export function createProjectsService({
       return db.transaction(async (tx) => {
         const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
         const [label] = await tx
-          .select({ projectId: projectLabels.projectId, name: projectLabels.name })
+          .select({
+            projectId: projectLabels.projectId,
+            name: projectLabels.name,
+            color: projectLabels.color,
+          })
           .from(projectLabels)
           .where(eq(projectLabels.id, labelId))
           .limit(1);
@@ -3390,6 +3470,10 @@ export function createProjectsService({
             actor,
             issueId,
             summary: `${issue.title} labelled ${label.name}`,
+            detail: {
+              kind: "label_added",
+              label: { id: labelId, name: label.name, color: label.color },
+            },
           });
         }
         return { ...toIssue(issue, await loadIssueLabels(tx, issueId)) };
@@ -3401,7 +3485,11 @@ export function createProjectsService({
       return db.transaction(async (tx) => {
         const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
         const [label] = await tx
-          .select({ projectId: projectLabels.projectId, name: projectLabels.name })
+          .select({
+            projectId: projectLabels.projectId,
+            name: projectLabels.name,
+            color: projectLabels.color,
+          })
           .from(projectLabels)
           .where(eq(projectLabels.id, labelId))
           .limit(1);
@@ -3419,6 +3507,10 @@ export function createProjectsService({
             actor,
             issueId,
             summary: `${issue.title} unlabelled ${label.name}`,
+            detail: {
+              kind: "label_removed",
+              label: { id: labelId, name: label.name, color: label.color },
+            },
           });
         }
         return { ...toIssue(issue, await loadIssueLabels(tx, issueId)) };
