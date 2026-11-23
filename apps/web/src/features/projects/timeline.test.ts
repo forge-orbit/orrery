@@ -47,6 +47,7 @@ function comment(id: string, createdAt: string): IssueComment {
     body: `comment ${id}`,
     createdAt,
     author: alice,
+    attachments: [],
   };
 }
 

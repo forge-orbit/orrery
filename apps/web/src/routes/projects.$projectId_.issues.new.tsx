@@ -155,6 +155,7 @@ function NewIssuePage() {
       queryClient.setQueryData<IssueDetail>(issueQuery(created.id).queryKey, {
         ...created,
         links: [],
+        attachments: [],
       });
       if (createMore) {
         // The toast renders in a portal outside the router context, so use a plain link.

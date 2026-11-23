@@ -272,9 +272,6 @@
           "id": {
             "type": "string"
           },
-          "projectId": {
-            "type": "string"
-          },
           "filename": {
             "type": "string"
           },
@@ -285,11 +282,14 @@
             "type": "integer",
             "exclusiveMinimum": 0
           },
-          "inline": {
-            "type": "boolean"
-          },
           "downloadUrl": {
             "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "inline": {
+            "type": "boolean"
           },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -297,12 +297,12 @@
         },
         "required": [
           "id",
-          "projectId",
           "filename",
           "contentType",
           "byteSize",
-          "inline",
           "downloadUrl",
+          "projectId",
+          "inline",
           "createdAt"
         ]
       },
@@ -2122,6 +2122,12 @@
             "items": {
               "$ref": "#/components/schemas/IssueLink"
             }
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetadata"
+            }
           }
         },
         "required": [
@@ -2145,7 +2151,8 @@
           "effectiveFallbackPolicy",
           "parentIssueId",
           "labels",
-          "links"
+          "links",
+          "attachments"
         ]
       },
       "IssueLink": {
@@ -2195,6 +2202,34 @@
           "commit",
           "doc",
           "link"
+        ]
+      },
+      "AttachmentMetadata": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "downloadUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "contentType",
+          "byteSize",
+          "downloadUrl"
         ]
       },
       "UpdateIssueRequest": {
@@ -2336,6 +2371,12 @@
           },
           "author": {
             "$ref": "#/components/schemas/Actor"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetadata"
+            }
           }
         },
         "required": [
@@ -2343,7 +2384,8 @@
           "issueId",
           "body",
           "createdAt",
-          "author"
+          "author",
+          "attachments"
         ]
       },
       "ProjectActivityResponse": {
@@ -2830,6 +2872,12 @@
           },
           "updatedBy": {
             "$ref": "#/components/schemas/Actor"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetadata"
+            }
           }
         },
         "required": [
@@ -2840,7 +2888,8 @@
           "createdAt",
           "updatedAt",
           "createdBy",
-          "updatedBy"
+          "updatedBy",
+          "attachments"
         ]
       },
       "CreateKnowledgeEntryRequest": {

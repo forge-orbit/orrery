@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AttachmentMetadata } from "./attachments.ts";
 import { AvatarUrl } from "./auth.ts";
 import { Email, Timestamp, WorkspaceKind } from "./common.ts";
 
@@ -381,7 +382,10 @@ export type CreateIssueLinkRequest = z.infer<typeof CreateIssueLinkRequest>;
 
 
 
-export const IssueDetail = Issue.extend({ links: z.array(IssueLink) }).meta({ id: "IssueDetail" });
+export const IssueDetail = Issue.extend({
+  links: z.array(IssueLink),
+  attachments: z.array(AttachmentMetadata),
+}).meta({ id: "IssueDetail" });
 export type IssueDetail = z.infer<typeof IssueDetail>;
 
 
@@ -463,6 +467,7 @@ export const IssueComment = z
     body: z.string(),
     createdAt: Timestamp,
     author: Actor,
+    attachments: z.array(AttachmentMetadata),
   })
   .meta({ id: "IssueComment" });
 export type IssueComment = z.infer<typeof IssueComment>;
@@ -492,6 +497,7 @@ export const KnowledgeEntry = z
     updatedAt: Timestamp,
     createdBy: Actor,
     updatedBy: Actor,
+    attachments: z.array(AttachmentMetadata),
   })
   .meta({ id: "KnowledgeEntry" });
 export type KnowledgeEntry = z.infer<typeof KnowledgeEntry>;

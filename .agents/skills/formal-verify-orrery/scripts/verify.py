@@ -2675,6 +2675,84 @@ def extract_code_facts() -> dict[str, Any]:
         '.references(() => attachments.id, { onDelete: "cascade" })' in att_refs_table
     )
 
+    # --- M39 (#179): row-locked reference sync, 24h grace sweep, Trash/purge cleanup ---
+    att_sync_fn = slice_between(
+        att_src, "async syncReferences(tx, input)", "async listMetadata(tx, holders)"
+    )
+    att_purge_fn = slice_between(
+        att_src, "async purgeHolders(tx, holders)", "async sweepUnreferenced()"
+    )
+    att_sweep_fn = att_src[att_src.index("async sweepUnreferenced()") :]
+    att_reclaim_fn = slice_between(
+        att_src, "async function reclaim(", "export function createAttachmentsService"
+    )
+    att_index_src = read_text("apps/server/src/features/attachments/index.ts")
+    project_src = read_text("apps/server/src/features/projects/service.ts")
+    purge_fn = slice_between(project_src, "async purgeExpiredTrash()", "async createIssue(")
+    restore_fn = slice_between(project_src, "async restoreIssue(", "async listTrash(")
+    delete_fn = slice_between(project_src, "async deleteIssue(", "async restoreIssue(")
+    contract_project_src = read_text("packages/contract/src/projects.ts")
+    mcp_tools_src = read_text("packages/contract/src/mcp-tools.ts")
+    openapi_src = read_text("contract/openapi.json")
+    mcp_contract_src = read_text("contract/mcp-tools.json")
+    m39_sync_row_lock = (
+        '.for("update", { of: attachments })' in att_sync_fn
+        and ".orderBy(attachments.id)" in att_sync_fn
+    )
+    m39_active_only = (
+        'eq(storedObjects.status, "active")' in att_sync_fn
+        and "eq(attachments.projectId, input.projectId)" in att_sync_fn
+    )
+    m39_dedupe = ".onConflictDoNothing()" in att_sync_fn
+    m39_unref_clear = "unreferencedAt: null" in att_sync_fn
+    m39_unref_reset = (
+        "unreferencedAt: sql`statement_timestamp()`" in att_sync_fn
+        and "notExists(" in att_sync_fn
+    )
+    m39_sweep_lock_expiry = (
+        '.for("update")' in att_sweep_fn and "interval '24 hours'" in att_sweep_fn
+    )
+    m39_sweep_recheck = (
+        "referenceCount(tx, row.id)" in att_sweep_fn and "continue" in att_sweep_fn
+    )
+    m39_atomic_reclaim = (
+        "await reclaim(tx, row)" in att_sweep_fn
+        and "await reclaim(tx, row)" in att_purge_fn
+        and ".delete(attachments)" in att_reclaim_fn
+        and ".update(storedObjects)" in att_reclaim_fn
+        and 'status: "deleted"' in att_reclaim_fn
+    )
+    m39_purge_issue_lock = '.for("update", { skipLocked: true })' in purge_fn
+    m39_purge_holders = (
+        '.for("update", { of: attachments })' in att_purge_fn
+        and "await tx.delete(attachmentReferences)" in att_purge_fn
+        and "referenceCount(tx, row.id)" in att_purge_fn
+        and "attachmentSeams.purgeHolders(tx, [" in purge_fn
+    )
+    m39_trash_preserve = (
+        "THIRTY_DAYS_AGO" in purge_fn
+        and "issue_purged" in restore_fn
+        and "attachment" not in delete_fn
+    )
+    m39_holder_before_attachment = (
+        project_src.count("await syncBody(tx, {") >= 5
+        and 'attachmentSeams.purgeHolders(tx, [' in purge_fn
+        and purge_fn.index(".for(\"update\", { skipLocked: true })")
+        < purge_fn.index("attachmentSeams.purgeHolders(tx, [")
+    )
+    m39_metadata_rest_mcp = (
+        "attachments: z.array(AttachmentMetadata)" in contract_project_src
+        and all(
+            schema in mcp_tools_src
+            for schema in ("IssueDetail", "IssueCommentsResponse", "KnowledgeEntry")
+        )
+        and '"attachments"' in openapi_src
+        and '"attachments"' in mcp_contract_src
+    )
+    m39_background_overlap = (
+        "if (sweeping) return;" in att_index_src and "setInterval(" in att_index_src
+    )
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -3080,6 +3158,20 @@ def extract_code_facts() -> dict[str, Any]:
         "m38_zero_row_clean_error": m38_zero_row_clean_error,
         "m38_unique_reference": m38_unique_reference,
         "m38_reference_cascade": m38_reference_cascade,
+        "m39_sync_row_lock": m39_sync_row_lock,
+        "m39_active_only": m39_active_only,
+        "m39_dedupe": m39_dedupe,
+        "m39_unref_clear": m39_unref_clear,
+        "m39_unref_reset": m39_unref_reset,
+        "m39_sweep_lock_expiry": m39_sweep_lock_expiry,
+        "m39_sweep_recheck": m39_sweep_recheck,
+        "m39_atomic_reclaim": m39_atomic_reclaim,
+        "m39_purge_issue_lock": m39_purge_issue_lock,
+        "m39_purge_holders": m39_purge_holders,
+        "m39_trash_preserve": m39_trash_preserve,
+        "m39_holder_before_attachment": m39_holder_before_attachment,
+        "m39_metadata_rest_mcp": m39_metadata_rest_mcp,
+        "m39_background_overlap": m39_background_overlap,
     }
 
 
@@ -8081,6 +8173,226 @@ def check_m38(facts: dict[str, bool]) -> CheckResult:
     )
 
 
+def check_m39(facts: dict[str, bool]) -> CheckResult:
+    """#179: reference sync locks, 24h grace sweep, Trash preservation and purge cleanup.
+
+    State: (phase, refs, issue, hours, trash_expired, sweeping, violations)
+      phase: absent | unreferenced | referenced | deleted | blob_gone
+      refs: holders currently binding the attachment (issue, comment, knowledge, live)
+    """
+    g = {k: facts[k] for k in facts if k.startswith("m39_")}
+    files = [
+        "apps/server/src/features/attachments/service.ts",
+        "apps/server/src/features/attachments/index.ts",
+        "apps/server/src/features/projects/service.ts",
+        "packages/contract/src/attachments.ts",
+        "packages/contract/src/projects.ts",
+        "contract/openapi.json",
+        "contract/mcp-tools.json",
+    ]
+    init = ("absent", frozenset(), "live", 0, False, False, frozenset())
+
+    def bad(v, name):
+        return v | {name}
+
+    def run(check_id: str) -> CheckResult:
+        def upload(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            return ("unreferenced", frozenset(), "live", 0, False, False, v) if phase == "absent" else state
+
+        def save_bind(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if phase in ("deleted", "blob_gone") or issue == "purged":
+                return state
+            if not g["m39_dedupe"]:
+                v = bad(v, "duplicate_reference_rows")
+            if not g["m39_unref_clear"]:
+                v = bad(v, "grace_not_cleared_on_bind")
+            return ("referenced", frozenset({"issue", "comment", "knowledge", "live"}),
+                    issue, hours, expired, sweeping, v)
+
+        def bind_live_only(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if phase in ("deleted", "blob_gone") or issue == "purged":
+                return state
+            return ("referenced", frozenset({"live"}), issue, hours, expired, sweeping, v)
+
+        def edit_drop(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if phase != "referenced" or not refs:
+                return state
+            if not g["m39_unref_reset"] and hours >= 24:
+                v = bad(v, "fresh_grace_not_started")
+            return ("unreferenced", frozenset(), issue, hours, expired, sweeping, v)
+
+        def tick(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            return (phase, refs, issue, min(25, hours + 1), expired, sweeping, v)
+
+        def age_trash(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            return (phase, refs, issue, hours, True, sweeping, v) if issue == "trash" else state
+
+        def trash_issue(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if issue != "live":
+                return state
+            if not g["m39_trash_preserve"]:
+                return (phase, frozenset(), "trash", hours, False, sweeping,
+                        bad(v, "trash_lost_attachment"))
+            return (phase, refs, "trash", hours, False, sweeping, v)
+
+        def restore_issue(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            return (phase, refs, "live", hours, False, sweeping, v) if issue == "trash" and not expired else state
+
+        def concurrent_save_purge(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if issue == "trash" and refs and not g["m39_holder_before_attachment"]:
+                return (phase, refs, issue, hours, expired, sweeping, bad(v, "ab_ba_deadlock"))
+            return state
+
+        def purge(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if issue != "trash" or not expired:
+                return state
+            if not g["m39_purge_issue_lock"]:
+                v = bad(v, "purge_raced_restore")
+            remaining = set(refs) - {"issue", "comment"}
+            if not g["m39_purge_holders"] and "comment" in refs:
+                v = bad(v, "comment_refs_left_after_purge")
+                remaining.add("comment")
+            if remaining:
+                return ("referenced", frozenset(remaining), "purged", hours, True, sweeping, v)
+            if not g["m39_atomic_reclaim"]:
+                v = bad(v, "fk_zombie_from_split_delete")
+            return ("deleted", frozenset(), "purged", hours, True, sweeping, v)
+
+        def start_sweep(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if sweeping and not g["m39_background_overlap"]:
+                return (phase, refs, issue, hours, expired, sweeping,
+                        bad(v, "overlapping_sweep_ticks"))
+            return (phase, refs, issue, hours, expired, True, v) if not sweeping else state
+
+        def sweep(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if not sweeping:
+                return state
+            if not g["m39_sweep_lock_expiry"] and hours < 24 and phase == "unreferenced":
+                v = bad(v, "draft_deleted_before_24h")
+            if not g["m39_sweep_recheck"] and refs and phase in ("unreferenced", "referenced"):
+                v = bad(v, "live_ref_deleted_by_sweep")
+            eligible = phase == "unreferenced" and hours >= 24 and not refs
+            if eligible:
+                if not g["m39_atomic_reclaim"]:
+                    v = bad(v, "fk_zombie_from_split_delete")
+                return ("deleted", frozenset(), issue, hours, expired, False, v)
+            return (phase, refs, issue, hours, expired, False, v)
+
+        def sweep_wins_race(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if phase != "unreferenced" or hours < 24:
+                return state
+            if not g["m39_atomic_reclaim"]:
+                v = bad(v, "fk_zombie_from_split_delete")
+            return ("deleted", frozenset(), issue, hours, expired, sweeping, v)
+
+        def late_save(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if phase in ("deleted", "blob_gone") and not g["m39_active_only"]:
+                return (phase, refs | {"late"}, issue, hours, expired, sweeping,
+                        bad(v, "reclaimed_url_rebound"))
+            return state  # inert text: no reference row, no rewrite, no error
+
+        def save_wins_race(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if phase != "unreferenced" or hours < 24 or issue == "purged":
+                return state
+            if not g["m39_sync_row_lock"]:
+                return (phase, refs, issue, hours, expired, sweeping,
+                        bad(v, "save_race_no_row_lock"))
+            return ("referenced", refs | {"issue"}, issue, hours, expired, sweeping, v)
+
+        def orphan_sweep(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            return ("blob_gone", refs, issue, hours, expired, sweeping, v) if phase == "deleted" else state
+
+        def read_responses(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if phase == "referenced" and not g["m39_metadata_rest_mcp"]:
+                return (phase, refs, issue, hours, expired, sweeping,
+                        bad(v, "metadata_missing_from_rest_mcp"))
+            return state
+
+        actions = [
+            ("upload starts a 24h unreferenced grace window", upload),
+            ("save binds same-project attachment URLs (twice in one body)", save_bind),
+            ("save binds only a cross-referenced live issue", bind_live_only),
+            ("an edit drops the last reference", edit_drop),
+            ("the database clock advances", tick),
+            ("the issue is moved to Trash", trash_issue),
+            ("a Trash issue is restored", restore_issue),
+            ("the Trash window expires", age_trash),
+            ("a save races a purge on a Trash issue", concurrent_save_purge),
+            ("purgeExpiredTrash scrubs an expired issue and its comments", purge),
+            ("the 24h sweep tick starts", start_sweep),
+            ("the 24h sweep locks and re-verifies candidates", sweep),
+            ("the 24h sweep wins the race against a late save", sweep_wins_race),
+            ("a late save binds the row before the sweep rechecks", save_wins_race),
+            ("a late save sees a reclaimed URL", late_save),
+            ("the shared orphan sweep removes blob and metadata row", orphan_sweep),
+            ("REST and MCP read an issue, comments or knowledge", read_responses),
+        ]
+
+        def inv(state):
+            phase, refs, issue, hours, expired, sweeping, v = state
+            if v:
+                return False, f"attachment lifecycle invariant broken: {sorted(v)[0]}"
+            if refs and phase in ("deleted", "blob_gone"):
+                return False, "attachment lifecycle invariant broken: NoDanglingLiveRef"
+            if issue == "purged" and refs & {"issue", "comment"}:
+                return False, "attachment lifecycle invariant broken: purged_issue_holds_live_ref"
+            if issue == "trash" and "issue" in refs and phase == "deleted":
+                return False, "attachment lifecycle invariant broken: TrashPreservesAttachment"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Attachment Reference Sync, Grace Sweep & Trash Purge (#179)",
+            "A save locks the holder then the attachment rows and binds only live same-project blobs; the 24h sweep re-verifies zero references under its row lock and reclaims the attachment row and stored object atomically; Trash preserves references until a 30-day purge removes the issue's and its comments' references before reclaiming zero-reference attachments",
+            "safety",
+            init,
+            lambda s: [(label, action(s)) for label, action in actions],
+            inv,
+            files,
+        )
+
+    result = run("M39")
+    if result.status != "verified":
+        return result
+    for guard in [key for key in g if key.startswith("m39_")]:
+        saved = g[guard]
+        g[guard] = not saved
+        try:
+            naive = run(f"M39-naive-{guard}")
+        finally:
+            g[guard] = saved
+        if naive.status == "verified":
+            return CheckResult(
+                "M39", result.model, result.property_name, result.kind, "violated",
+                result.states_explored, result.transitions_explored,
+                f"model is not sensitive: flipping {guard} left the invariant intact",
+                [f"flip {guard}"], files,
+            )
+    return CheckResult(
+        "M39", result.model, result.property_name, result.kind, "verified",
+        result.states_explored, result.transitions_explored,
+        f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation",
+        [], files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -8123,6 +8435,7 @@ def main() -> None:
         check_m36(facts),
         check_m37(facts),
         check_m38(facts),
+        check_m39(facts),
     ]
 
     if "--json" in sys.argv:

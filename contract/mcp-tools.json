@@ -765,6 +765,12 @@
               "items": {
                 "$ref": "#/$defs/IssueLink"
               }
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AttachmentMetadata"
+              }
             }
           },
           "required": [
@@ -788,7 +794,8 @@
             "effectiveFallbackPolicy",
             "parentIssueId",
             "labels",
-            "links"
+            "links",
+            "attachments"
           ],
           "additionalProperties": false
         },
@@ -1000,6 +1007,36 @@
             "doc",
             "link"
           ]
+        },
+        "AttachmentMetadata": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "byteSize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "downloadUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "filename",
+            "contentType",
+            "byteSize",
+            "downloadUrl"
+          ],
+          "additionalProperties": false
         }
       }
     }
@@ -3721,6 +3758,12 @@
             },
             "author": {
               "$ref": "#/$defs/Actor"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AttachmentMetadata"
+              }
             }
           },
           "required": [
@@ -3728,7 +3771,8 @@
             "issueId",
             "body",
             "createdAt",
-            "author"
+            "author",
+            "attachments"
           ],
           "additionalProperties": false
         },
@@ -3799,6 +3843,36 @@
         "AvatarUrl": {
           "type": "string",
           "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "AttachmentMetadata": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "byteSize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "downloadUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "filename",
+            "contentType",
+            "byteSize",
+            "downloadUrl"
+          ],
+          "additionalProperties": false
         }
       }
     }
@@ -3857,6 +3931,12 @@
             },
             "author": {
               "$ref": "#/$defs/Actor"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AttachmentMetadata"
+              }
             }
           },
           "required": [
@@ -3864,7 +3944,8 @@
             "issueId",
             "body",
             "createdAt",
-            "author"
+            "author",
+            "attachments"
           ],
           "additionalProperties": false
         },
@@ -3935,6 +4016,36 @@
         "AvatarUrl": {
           "type": "string",
           "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "AttachmentMetadata": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "byteSize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "downloadUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "filename",
+            "contentType",
+            "byteSize",
+            "downloadUrl"
+          ],
+          "additionalProperties": false
         }
       }
     }
@@ -4766,6 +4877,12 @@
             },
             "updatedBy": {
               "$ref": "#/$defs/Actor"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AttachmentMetadata"
+              }
             }
           },
           "required": [
@@ -4776,7 +4893,8 @@
             "createdAt",
             "updatedAt",
             "createdBy",
-            "updatedBy"
+            "updatedBy",
+            "attachments"
           ],
           "additionalProperties": false
         },
@@ -4847,6 +4965,36 @@
         "AvatarUrl": {
           "type": "string",
           "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "AttachmentMetadata": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "byteSize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "downloadUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "filename",
+            "contentType",
+            "byteSize",
+            "downloadUrl"
+          ],
+          "additionalProperties": false
         }
       }
     }
@@ -4908,6 +5056,12 @@
             },
             "updatedBy": {
               "$ref": "#/$defs/Actor"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AttachmentMetadata"
+              }
             }
           },
           "required": [
@@ -4918,7 +5072,8 @@
             "createdAt",
             "updatedAt",
             "createdBy",
-            "updatedBy"
+            "updatedBy",
+            "attachments"
           ],
           "additionalProperties": false
         },
@@ -4989,6 +5144,36 @@
         "AvatarUrl": {
           "type": "string",
           "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "AttachmentMetadata": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "byteSize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "downloadUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "filename",
+            "contentType",
+            "byteSize",
+            "downloadUrl"
+          ],
+          "additionalProperties": false
         }
       }
     }
@@ -5065,6 +5250,12 @@
             },
             "updatedBy": {
               "$ref": "#/$defs/Actor"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AttachmentMetadata"
+              }
             }
           },
           "required": [
@@ -5075,7 +5266,8 @@
             "createdAt",
             "updatedAt",
             "createdBy",
-            "updatedBy"
+            "updatedBy",
+            "attachments"
           ],
           "additionalProperties": false
         },
@@ -5146,6 +5338,36 @@
         "AvatarUrl": {
           "type": "string",
           "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "AttachmentMetadata": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "byteSize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "downloadUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "filename",
+            "contentType",
+            "byteSize",
+            "downloadUrl"
+          ],
+          "additionalProperties": false
         }
       }
     }
@@ -5221,6 +5443,12 @@
             },
             "updatedBy": {
               "$ref": "#/$defs/Actor"
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AttachmentMetadata"
+              }
             }
           },
           "required": [
@@ -5231,7 +5459,8 @@
             "createdAt",
             "updatedAt",
             "createdBy",
-            "updatedBy"
+            "updatedBy",
+            "attachments"
           ],
           "additionalProperties": false
         },
@@ -5302,6 +5531,36 @@
         "AvatarUrl": {
           "type": "string",
           "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "AttachmentMetadata": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "filename": {
+              "type": "string"
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "byteSize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "downloadUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "filename",
+            "contentType",
+            "byteSize",
+            "downloadUrl"
+          ],
+          "additionalProperties": false
         }
       }
     }

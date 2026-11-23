@@ -4,7 +4,11 @@ import type { Feature } from "../platform/feature.ts";
 import type { Logger } from "../platform/log.ts";
 import { createObjectStore, type ObjectStore } from "../platform/storage.ts";
 import { createAccountsFeature, accountsRoutes } from "./accounts/index.ts";
-import { createAttachmentsFeature, attachmentsRoutes } from "./attachments/index.ts";
+import {
+  createAttachmentsFeature,
+  attachmentsRoutes,
+  type AttachmentSeams,
+} from "./attachments/index.ts";
 import { createAvatarsFeature, avatarsRoutes } from "./avatars/index.ts";
 import { createAgentsFeature, agentsRoutes, revokeMemberWorkspaceKeys } from "./agents/index.ts";
 import { createDeactivationFeature, deactivationRoutes } from "./deactivation/index.ts";
@@ -94,6 +98,23 @@ export function createFeatures(
     if (dueQuestionIssueIds === undefined) throw new Error("question deadline is not wired");
     return dueQuestionIssueIds();
   };
+  // Attachments is built after projects (it needs the project access gate), but
+  // saving a holder must sync references inside that holder's transaction.
+  let wiredAttachmentSeams: AttachmentSeams | undefined;
+  const attachmentSeams: AttachmentSeams = {
+    syncReferences: (tx, input) => {
+      if (wiredAttachmentSeams === undefined) throw new Error("attachment sync is not wired");
+      return wiredAttachmentSeams.syncReferences(tx, input);
+    },
+    listMetadata: (tx, holders) => {
+      if (wiredAttachmentSeams === undefined) throw new Error("attachment metadata is not wired");
+      return wiredAttachmentSeams.listMetadata(tx, holders);
+    },
+    purgeHolders: (tx, holders) => {
+      if (wiredAttachmentSeams === undefined) throw new Error("attachment purge is not wired");
+      return wiredAttachmentSeams.purgeHolders(tx, holders);
+    },
+  };
   const projects = createProjectsFeature({
     db: database.db,
     sessionReader: accounts.sessionReader,
@@ -104,6 +125,7 @@ export function createFeatures(
 
     evaluateQuestionDeadline: evaluateDeadline,
     onActivity: webhooks.enqueueForActivity,
+    attachmentSeams,
     log,
   });
   const agents = createAgentsFeature({
@@ -132,7 +154,13 @@ export function createFeatures(
     projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
       projects.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
     projectAccessAtLeast,
+    log,
   });
+  wiredAttachmentSeams = {
+    syncReferences: (tx, input) => attachments.service.syncReferences(tx, input),
+    listMetadata: (tx, holders) => attachments.service.listMetadata(tx, holders),
+    purgeHolders: (tx, holders) => attachments.service.purgeHolders(tx, holders),
+  };
 
   const notifications = createNotificationsFeature({
     db: database.db,

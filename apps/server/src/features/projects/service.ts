@@ -66,6 +66,7 @@ import {
   workspaces,
 } from "../../db/schema.ts";
 import type { SessionAccount } from "../accounts/index.ts";
+import { attachmentHolderKey, type AttachmentSeams } from "../attachments/index.ts";
 import type { EnqueueWebhookActivity } from "../webhooks/index.ts";
 
 export type ProjectsErrorKind =
@@ -845,6 +846,7 @@ function toComment(row: CommentRow): IssueComment {
       row.authorDeactivatedAt,
       row.authorAvatarObjectId,
     ),
+    attachments: [],
   };
 }
 
@@ -902,6 +904,7 @@ function toKnowledge(row: KnowledgeRow): KnowledgeEntry {
       row.updatedByDeactivatedAt,
       row.updatedByAvatarObjectId,
     ),
+    attachments: [],
   };
 }
 
@@ -1603,6 +1606,8 @@ export interface ProjectsDeps {
 
   evaluateQuestionDeadline?: ((tx: DbTransaction, issueId: string) => Promise<void>) | undefined;
   onActivity?: EnqueueWebhookActivity | undefined;
+  /** Wired by the feature registry; absent in service-level tests that do not use attachments. */
+  attachmentSeams?: AttachmentSeams | undefined;
 }
 
 async function freezeDueQuestions(
@@ -1757,9 +1762,23 @@ export function createProjectsService({
   releaseIssueWorkSessions = async () => {},
   evaluateQuestionDeadline,
   onActivity = async () => {},
+  attachmentSeams,
 }: ProjectsDeps): ProjectsService {
   const recordActivity = (tx: DbTransaction, input: RecordActivityInput) =>
     insertActivityRow(tx, input, onActivity);
+
+  const metadataFor = async (
+    tx: DbTransaction,
+    holderType: "issue" | "comment" | "knowledge",
+    holderId: string,
+  ) => {
+    if (attachmentSeams === undefined) return [];
+    const grouped = await attachmentSeams.listMetadata(tx, [{ holderType, holderId }]);
+    return grouped.get(attachmentHolderKey(holderType, holderId)) ?? [];
+  };
+
+  const syncBody = (tx: DbTransaction, input: Parameters<AttachmentSeams["syncReferences"]>[1]) =>
+    attachmentSeams?.syncReferences(tx, input) ?? Promise.resolve();
 
   async function readIssues(
     actor: WorkActor,
@@ -2322,7 +2341,11 @@ export function createProjectsService({
         async (tx) => {
           const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.read);
           const labels = await loadIssueLabels(tx, issueId);
-          return { ...toIssue(issue, labels), links: await loadIssueLinks(tx, issueId) };
+          return {
+            ...toIssue(issue, labels),
+            links: await loadIssueLinks(tx, issueId),
+            attachments: await metadataFor(tx, "issue", issueId),
+          };
         },
         { accessMode: "read only" },
       );
@@ -2435,10 +2458,27 @@ export function createProjectsService({
               sql`${issues.deletedAt} <= ${THIRTY_DAYS_AGO}`,
             ),
           )
-          .orderBy(issues.id);
+          .orderBy(issues.id)
+          .for("update", { skipLocked: true });
         const expiredIds = expired.map((row) => row.id);
         for (const row of expired) {
+          // Comments are hard-deleted, so collect their holder ids before the
+          // rows vanish. References from both the issue and its comments have to
+          // be dropped before the zero-reference check.
+          const comments = await tx
+            .select({ id: issueComments.id })
+            .from(issueComments)
+            .where(eq(issueComments.issueId, row.id));
           await tx.delete(issueComments).where(eq(issueComments.issueId, row.id));
+          if (attachmentSeams !== undefined) {
+            await attachmentSeams.purgeHolders(tx, [
+              { holderType: "issue", holderId: row.id },
+              ...comments.map((comment) => ({
+                holderType: "comment" as const,
+                holderId: comment.id,
+              })),
+            ]);
+          }
           await tx.delete(issueLinks).where(eq(issueLinks.issueId, row.id));
           await tx.delete(issueLabels).where(eq(issueLabels.issueId, row.id));
           await tx
@@ -2562,6 +2602,12 @@ export function createProjectsService({
             },
           });
         }
+        await syncBody(tx, {
+          holderType: "issue",
+          holderId: id,
+          projectId,
+          body: input.body ?? "",
+        });
         const author = actorForWrite(actor);
         return {
           id: created.id,
@@ -2792,6 +2838,14 @@ export function createProjectsService({
             },
           });
         }
+        // The issue row is already locked and written in this transaction, so
+        // locking its attachments now keeps the global lock order intact.
+        await syncBody(tx, {
+          holderType: "issue",
+          holderId: issueId,
+          projectId: current.projectId,
+          body,
+        });
         return {
           id: current.id,
           projectId: current.projectId,
@@ -3012,7 +3066,18 @@ export function createProjectsService({
             .leftJoin(commentAgentAuthor, eq(commentAgentAuthor.id, issueComments.createdByAgentId))
             .where(eq(issueComments.issueId, issueId))
             .orderBy(issueComments.createdAt, issueComments.id);
-          return rows.map(toComment);
+          const grouped =
+            attachmentSeams === undefined || rows.length === 0
+              ? null
+              : await attachmentSeams.listMetadata(
+                  tx,
+                  rows.map((row) => ({ holderType: "comment", holderId: row.id })),
+                );
+          return rows.map((row) => {
+            const comment = toComment(row);
+            comment.attachments = grouped?.get(attachmentHolderKey("comment", row.id)) ?? [];
+            return comment;
+          });
         },
         { accessMode: "read only" },
       );
@@ -3047,12 +3112,19 @@ export function createProjectsService({
           issueId,
           summary: issue.title,
         });
+        await syncBody(tx, {
+          holderType: "comment",
+          holderId: id,
+          projectId: issue.projectId,
+          body: input.body,
+        });
         return {
           id: created.id,
           issueId: created.issueId,
           body: created.body,
           createdAt: created.createdAt.toISOString(),
           author: actorForWrite(actor),
+          attachments: await metadataFor(tx, "comment", id),
         };
       });
     },
@@ -3205,7 +3277,18 @@ export function createProjectsService({
             )
             .where(eq(knowledgeEntries.projectId, projectId))
             .orderBy(knowledgeEntries.createdAt, knowledgeEntries.id);
-          return rows.map(toKnowledge);
+          const grouped =
+            attachmentSeams === undefined || rows.length === 0
+              ? null
+              : await attachmentSeams.listMetadata(
+                  tx,
+                  rows.map((row) => ({ holderType: "knowledge", holderId: row.id })),
+                );
+          return rows.map((row) => {
+            const entry = toKnowledge(row);
+            entry.attachments = grouped?.get(attachmentHolderKey("knowledge", row.id)) ?? [];
+            return entry;
+          });
         },
         { accessMode: "read only" },
       );
@@ -3214,8 +3297,13 @@ export function createProjectsService({
     async getKnowledge(actorArg, entryId) {
       const actor = requireActor(actorArg);
       return db.transaction(
-        async (tx) =>
-          toKnowledge(await requireKnowledge(tx, entryId, actor, ProjectAccessLevel.enum.read)),
+        async (tx) => {
+          const entry = await requireKnowledge(tx, entryId, actor, ProjectAccessLevel.enum.read);
+          return {
+            ...toKnowledge(entry),
+            attachments: await metadataFor(tx, "knowledge", entryId),
+          };
+        },
         { accessMode: "read only" },
       );
     },
@@ -3255,6 +3343,12 @@ export function createProjectsService({
           knowledgeEntryId: id,
           summary: input.title,
         });
+        await syncBody(tx, {
+          holderType: "knowledge",
+          holderId: id,
+          projectId,
+          body: input.body ?? "",
+        });
         const author = actorForWrite(actor);
         return {
           id: created.id,
@@ -3265,6 +3359,7 @@ export function createProjectsService({
           updatedAt: created.updatedAt.toISOString(),
           createdBy: author,
           updatedBy: author,
+          attachments: await metadataFor(tx, "knowledge", id),
         };
       });
     },
@@ -3305,6 +3400,12 @@ export function createProjectsService({
           knowledgeEntryId: entryId,
           summary: title,
         });
+        await syncBody(tx, {
+          holderType: "knowledge",
+          holderId: entryId,
+          projectId: current.projectId,
+          body,
+        });
         return {
           id: current.id,
           projectId: current.projectId,
@@ -3321,6 +3422,7 @@ export function createProjectsService({
             current.createdByAvatarObjectId,
           ),
           updatedBy: actorForWrite(actor),
+          attachments: await metadataFor(tx, "knowledge", entryId),
         };
       });
     },

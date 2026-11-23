@@ -3,13 +3,17 @@ import { File } from "node:buffer";
 import {
   Attachment,
   attachmentUrlFor,
+  extractAttachmentUrls,
+  parseAttachmentUrl,
+  type AttachmentHolderType,
+  type AttachmentMetadata,
   type ProjectAccessLevel,
   type Attachment as AttachmentResponse,
 } from "@orrery/contract";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, notExists, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import sharp from "sharp";
-import { attachments, projects, storedObjects } from "../../db/schema.ts";
+import { attachmentReferences, attachments, projects, storedObjects } from "../../db/schema.ts";
 import type { Config } from "../../platform/config.ts";
 import type { DbTransaction } from "../../platform/db.ts";
 import { discardObject, isDeleted, type ObjectRow } from "../../platform/object-sweep.ts";
@@ -60,6 +64,23 @@ export interface ServedAttachment {
   inline: boolean;
 }
 
+/** An issue, comment, or knowledge entry that can bind an attachment reference. */
+export interface AttachmentHolder {
+  holderType: AttachmentHolderType;
+  holderId: string;
+}
+
+export interface SyncReferencesInput extends AttachmentHolder {
+  projectId: string;
+  body: string;
+}
+
+/** Key used to group attachment metadata by the holder that references it. */
+export const attachmentHolderKey = (holderType: AttachmentHolderType, holderId: string): string =>
+  `${holderType}:${holderId}`;
+
+export type AttachmentMetadataByHolder = Map<string, AttachmentMetadata[]>;
+
 export interface AttachmentsService {
   assertContentLength(contentLength: string | null): void;
   upload(actor: WorkActor | null, projectId: string, file: unknown): Promise<AttachmentResponse>;
@@ -68,6 +89,17 @@ export interface AttachmentsService {
     projectId: string,
     attachmentId: string,
   ): Promise<ServedAttachment>;
+  /** Must run inside the holder's write transaction, after the holder row is written. */
+  syncReferences(tx: DbTransaction, input: SyncReferencesInput): Promise<void>;
+  /** Attachment metadata for each holder, keyed by `attachmentHolderKey`. */
+  listMetadata(
+    tx: DbTransaction,
+    holders: readonly AttachmentHolder[],
+  ): Promise<AttachmentMetadataByHolder>;
+  /** Drop references for purged holders and reclaim attachments with no references left. */
+  purgeHolders(tx: DbTransaction, holders: readonly AttachmentHolder[]): Promise<void>;
+  /** One guarded 24-hour grace sweep tick; returns the number of attachments reclaimed. */
+  sweepUnreferenced(): Promise<number>;
 }
 
 export interface AttachmentsDeps {
@@ -318,6 +350,39 @@ async function normalizeImage(bytes: Buffer, format: UploadFormat): Promise<Buff
   }
 }
 
+function holderConditions(holders: readonly AttachmentHolder[]) {
+  const unique = [
+    ...new Map(holders.map((h) => [attachmentHolderKey(h.holderType, h.holderId), h])).values(),
+  ];
+  return unique.map((holder) =>
+    and(
+      eq(attachmentReferences.holderType, holder.holderType),
+      eq(attachmentReferences.holderId, holder.holderId),
+    ),
+  );
+}
+
+async function referenceCount(tx: DbTransaction, attachmentId: string): Promise<number> {
+  const [row] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(attachmentReferences)
+    .where(eq(attachmentReferences.attachmentId, attachmentId));
+  return row?.count ?? 0;
+}
+
+/**
+ * Delete the attachment row and mark its blob deleted in one transaction. The
+ * reference rows cascade with the attachment, and the shared orphan sweep can
+ * then remove the blob and stored_objects row with no FK violations.
+ */
+async function reclaim(tx: DbTransaction, row: { id: string; objectId: string }): Promise<void> {
+  await tx.delete(attachments).where(eq(attachments.id, row.id));
+  await tx
+    .update(storedObjects)
+    .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
+    .where(and(eq(storedObjects.id, row.objectId), eq(storedObjects.status, "active")));
+}
+
 export function createAttachmentsService({
   db,
   store,
@@ -488,6 +553,183 @@ export function createAttachmentsService({
         contentType: inline ? row.contentType : "application/octet-stream",
         inline,
       };
+    },
+
+    async syncReferences(tx, input) {
+      // Only same-project, still-active attachments are bound. Everything else
+      // stays in the Markdown as inert text; saves are never rejected or rewritten.
+      const wanted = new Set<string>();
+      for (const url of extractAttachmentUrls(input.body)) {
+        const parsed = parseAttachmentUrl(url);
+        if (parsed !== null && parsed.projectId === input.projectId) {
+          wanted.add(parsed.attachmentId);
+        }
+      }
+
+      const existing = await tx
+        .select({ attachmentId: attachmentReferences.attachmentId })
+        .from(attachmentReferences)
+        .where(
+          and(
+            eq(attachmentReferences.holderType, input.holderType),
+            eq(attachmentReferences.holderId, input.holderId),
+          ),
+        );
+      const existingIds = existing.map((row) => row.attachmentId);
+
+      // The holder row has already been written by the caller; attachments come
+      // next in ascending id order so every save/purge shares one lock order.
+      const bindable = wanted.size
+        ? await tx
+            .select({ id: attachments.id })
+            .from(attachments)
+            .innerJoin(storedObjects, eq(storedObjects.id, attachments.objectId))
+            .where(
+              and(
+                inArray(attachments.id, [...wanted]),
+                eq(attachments.projectId, input.projectId),
+                eq(storedObjects.status, "active"),
+              ),
+            )
+            .orderBy(attachments.id)
+            .for("update", { of: attachments })
+        : [];
+      const bindableIds = bindable.map((row) => row.id);
+      const bindableSet = new Set(bindableIds);
+      const dropped = existingIds.filter((id) => !bindableSet.has(id));
+
+      const stale = [...new Set([...existingIds, ...wanted].filter((id) => !bindableSet.has(id)))];
+      if (stale.length > 0) {
+        await tx
+          .delete(attachmentReferences)
+          .where(
+            and(
+              eq(attachmentReferences.holderType, input.holderType),
+              eq(attachmentReferences.holderId, input.holderId),
+              inArray(attachmentReferences.attachmentId, stale),
+            ),
+          );
+      }
+      const added = bindableIds.filter((id) => !existingIds.includes(id));
+      if (added.length > 0) {
+        // The unique (holder type, holder id, attachment id) index absorbs a URL
+        // pasted twice in one body and any repeat of a concurrent save.
+        await tx
+          .insert(attachmentReferences)
+          .values(
+            added.map((attachmentId) => ({
+              id: randomUUID(),
+              attachmentId,
+              holderType: input.holderType,
+              holderId: input.holderId,
+            })),
+          )
+          .onConflictDoNothing();
+      }
+
+      if (bindableIds.length > 0) {
+        await tx
+          .update(attachments)
+          .set({ unreferencedAt: null })
+          .where(inArray(attachments.id, bindableIds));
+      }
+      if (dropped.length > 0) {
+        // A fresh grace window starts only when this holder's drop left the
+        // attachment with no references at all.
+        await tx
+          .update(attachments)
+          .set({ unreferencedAt: sql`statement_timestamp()` })
+          .where(
+            and(
+              inArray(attachments.id, [...new Set(dropped)]),
+              notExists(
+                tx
+                  .select({ one: sql`1` })
+                  .from(attachmentReferences)
+                  .where(eq(attachmentReferences.attachmentId, attachments.id)),
+              ),
+            ),
+          );
+      }
+    },
+
+    async listMetadata(tx, holders) {
+      const conditions = holderConditions(holders);
+      const grouped = new Map<string, AttachmentMetadata[]>();
+      if (conditions.length === 0) return grouped;
+      const rows = await tx
+        .select({
+          holderType: attachmentReferences.holderType,
+          holderId: attachmentReferences.holderId,
+          id: attachments.id,
+          projectId: attachments.projectId,
+          filename: attachments.filename,
+          contentType: attachments.contentType,
+          byteSize: attachments.byteSize,
+        })
+        .from(attachmentReferences)
+        .innerJoin(attachments, eq(attachments.id, attachmentReferences.attachmentId))
+        .innerJoin(storedObjects, eq(storedObjects.id, attachments.objectId))
+        .where(and(or(...conditions), eq(storedObjects.status, "active")))
+        .orderBy(attachmentReferences.holderType, attachmentReferences.holderId, attachments.id);
+      for (const row of rows) {
+        const key = attachmentHolderKey(row.holderType, row.holderId);
+        const list = grouped.get(key) ?? [];
+        list.push({
+          id: row.id,
+          filename: row.filename,
+          contentType: row.contentType,
+          byteSize: row.byteSize,
+          downloadUrl: attachmentUrlFor(row.projectId, row.id),
+        });
+        grouped.set(key, list);
+      }
+      return grouped;
+    },
+
+    async purgeHolders(tx, holders) {
+      const conditions = holderConditions(holders);
+      if (conditions.length === 0) return;
+      // Callers lock the issue rows first; candidates are then locked in id order
+      // before references are removed and zero-reference rows are reclaimed.
+      const rows = await tx
+        .select({ id: attachments.id, objectId: attachments.objectId })
+        .from(attachmentReferences)
+        .innerJoin(attachments, eq(attachments.id, attachmentReferences.attachmentId))
+        .where(or(...conditions))
+        .orderBy(attachments.id)
+        .for("update", { of: attachments });
+      await tx.delete(attachmentReferences).where(or(...conditions));
+      const candidates = [...new Map(rows.map((row) => [row.id, row])).values()];
+      for (const row of candidates) {
+        if ((await referenceCount(tx, row.id)) > 0) continue;
+        await reclaim(tx, row);
+      }
+    },
+
+    async sweepUnreferenced() {
+      return db.transaction(async (tx) => {
+        const rows = await tx
+          .select({ id: attachments.id, objectId: attachments.objectId })
+          .from(attachments)
+          .where(
+            and(
+              isNotNull(attachments.unreferencedAt),
+              sql`${attachments.unreferencedAt} <= statement_timestamp() - interval '24 hours'`,
+            ),
+          )
+          .orderBy(attachments.id)
+          .for("update");
+        let reclaimed = 0;
+        for (const row of rows) {
+          // Re-verify under the row lock: a save that won the race already
+          // cleared unreferenced_at and inserted its reference row.
+          if ((await referenceCount(tx, row.id)) > 0) continue;
+          await reclaim(tx, row);
+          reclaimed++;
+        }
+        return reclaimed;
+      });
     },
   };
 }
