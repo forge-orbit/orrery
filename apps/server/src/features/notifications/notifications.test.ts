@@ -102,9 +102,6 @@ beforeAll(async () => {
 
   notificationsService = createNotificationsService({
     db: database.db,
-    projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
-      projectsFeature.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
-    projectAccessAtLeast,
   });
 
   const sessionsFeature = createSessionsFeature({
@@ -601,9 +598,6 @@ describe("notifications", () => {
       db: database.db,
       sessionReader: accounts.sessionReader,
       authenticate: liveAuth!,
-      projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
-        projectsFeature.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
-      projectAccessAtLeast,
       log: silentLogger,
     });
     const app = createApp({

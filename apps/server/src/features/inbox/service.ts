@@ -117,7 +117,7 @@ const questionColumns = {
   question: questions.question,
   proposedFallback: questions.proposedFallback,
   status: questions.status,
-  effectiveStatus: sql<string>`case when ${questions.status} = 'open' and ${questions.responseDeadlineAt} <= statement_timestamp() then case when coalesce((select ${issues.fallbackPolicyOverride} from ${issues} where ${issues.id} = ${questions.issueId}), (select ${projects.fallbackPolicy} from ${projects} where ${projects.id} = ${questions.projectId})) = 'fallback_allowed' then 'fallback_used' else 'paused' end else ${questions.status} end`,
+  effectiveStatus: sql<string>`case when ${questions.status} = 'open' and ${questions.responseDeadlineAt} <= statement_timestamp() then case when coalesce(${issues.fallbackPolicyOverride}, ${projects.fallbackPolicy}) = 'fallback_allowed' then 'fallback_used' else 'paused' end else ${questions.status} end`,
   responseDeadlineAt: questions.responseDeadlineAt,
   answer: questions.answer,
   answeredByHumanId: questions.answeredByHumanId,
@@ -787,41 +787,50 @@ export function createInboxService(deps: InboxDeps): InboxService {
               ...memberships.map((row) => row.workspaceId),
             ]),
           ];
-          const visible: QuestionView[] = [];
-          for (const workspaceId of workspaceIds) {
-            const candidates = await tx
-              .selectDistinct({ projectId: questions.projectId })
-              .from(questions)
-              .innerJoin(issues, eq(issues.id, questions.issueId))
-              .where(and(eq(questions.workspaceId, workspaceId), isNull(issues.deletedAt)));
-            const projectIds = candidates.map((row) => row.projectId);
-            if (projectIds.length === 0) continue;
-            const ceiling = await deps.projectAccessCeiling(tx, workspaceId, humanId, projectIds);
-
-            const readable = projectIds.filter((projectId) => {
-              const level = ceiling.get(projectId) ?? null;
-              return (
-                level !== null && deps.projectAccessAtLeast(level, ProjectAccessLevel.enum.read)
-              );
-            });
-            if (readable.length === 0) continue;
-            const rows = await tx
-              .select(questionColumns)
-              .from(questions)
-              .innerJoin(issues, eq(issues.id, questions.issueId))
-              .where(
-                and(
-                  eq(questions.workspaceId, workspaceId),
-                  inArray(questions.projectId, readable),
-                  isNull(issues.deletedAt),
-                ),
-              )
-              .orderBy(desc(questions.createdAt))
-              .limit(200);
-            visible.push(...rows);
+          if (workspaceIds.length === 0) return [];
+          const candidates = await tx
+            .selectDistinct({ workspaceId: questions.workspaceId, projectId: questions.projectId })
+            .from(questions)
+            .innerJoin(issues, eq(issues.id, questions.issueId))
+            .where(and(inArray(questions.workspaceId, workspaceIds), isNull(issues.deletedAt)));
+          const candidateProjects = new Map<string, string[]>();
+          for (const row of candidates) {
+            const projectIds = candidateProjects.get(row.workspaceId) ?? [];
+            projectIds.push(row.projectId);
+            candidateProjects.set(row.workspaceId, projectIds);
           }
-          visible.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-          return visible.slice(0, 200).map(toQuestion);
+
+          const readable: string[] = [];
+          for (const [workspaceId, projectIds] of candidateProjects) {
+            const ceiling = await deps.projectAccessCeiling(tx, workspaceId, humanId, projectIds);
+            for (const projectId of projectIds) {
+              const level = ceiling.get(projectId) ?? null;
+              if (
+                level !== null &&
+                deps.projectAccessAtLeast(level, ProjectAccessLevel.enum.read)
+              ) {
+                readable.push(projectId);
+              }
+            }
+          }
+          if (readable.length === 0) return [];
+
+          const rows = await tx
+            .select(questionColumns)
+            .from(questions)
+            .innerJoin(issues, eq(issues.id, questions.issueId))
+            .innerJoin(projects, eq(projects.id, questions.projectId))
+            .where(
+              and(
+                inArray(questions.workspaceId, workspaceIds),
+                inArray(questions.projectId, readable),
+                eq(questions.workspaceId, projects.workspaceId),
+                isNull(issues.deletedAt),
+              ),
+            )
+            .orderBy(desc(questions.createdAt))
+            .limit(200);
+          return rows.map(toQuestion);
         },
         { accessMode: "read only" },
       );
@@ -848,6 +857,8 @@ export function createInboxService(deps: InboxDeps): InboxService {
           const rows = await tx
             .select(questionColumns)
             .from(questions)
+            .innerJoin(issues, eq(issues.id, questions.issueId))
+            .innerJoin(projects, eq(projects.id, questions.projectId))
             .where(eq(questions.issueId, issueId))
             .orderBy(desc(questions.createdAt));
           return rows.map(toQuestion);

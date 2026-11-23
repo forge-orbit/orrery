@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   agents,
@@ -16,12 +16,7 @@ import {
 } from "../../db/schema.ts";
 import { createDb, type Database } from "../../platform/db.ts";
 import { migrate } from "../../platform/migrate.ts";
-import {
-  createProjectsService,
-  projectAccessAtLeast,
-  projectAccessCeilingInTransaction,
-  type WorkActor,
-} from "../projects/index.ts";
+import { createProjectsService, type WorkActor } from "../projects/index.ts";
 import { createNotificationsService } from "./service.ts";
 
 const humanActor = (handle: string, humanId: string, email: string): WorkActor => ({
@@ -137,9 +132,6 @@ describe("issue_mentioned notifications", () => {
   function services() {
     const notificationsService = createNotificationsService({
       db: database.db,
-      projectAccessCeiling: (tx, ws, humanId, ids) =>
-        projectAccessCeilingInTransaction(tx, ws, humanId, ids),
-      projectAccessAtLeast,
     });
     const projectsService = createProjectsService({
       db: database.db,
@@ -168,6 +160,29 @@ describe("issue_mentioned notifications", () => {
     const items = await notificationsFor("reader");
     expect(items).toHaveLength(1);
     expect(items[0]?.kind).toBe("issue_mentioned");
+  });
+
+  it("notifies every readable mentioned Human once from a single activity", async () => {
+    const { projectsService } = services();
+    await projectsService.createIssue(actor, projectId, {
+      title: "Mention both readers",
+      body: "Hello @reader and @reader2, please look.",
+    });
+
+    expect(await notificationsFor("reader")).toHaveLength(1);
+    expect(await notificationsFor("reader2")).toHaveLength(1);
+    const [activity] = await database.db
+      .select({ id: projectActivity.id })
+      .from(projectActivity)
+      .where(
+        and(eq(projectActivity.projectId, projectId), eq(projectActivity.type, "issue_created")),
+      );
+    expect(activity).toBeDefined();
+    const rows = await database.db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(eq(notifications.activityId, activity!.id));
+    expect(rows).toHaveLength(2);
   });
 
   it("does not notify a Human without project Read access or the author", async () => {

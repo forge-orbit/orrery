@@ -192,9 +192,6 @@ export function createFeatures(
     db: database.db,
     sessionReader: accounts.sessionReader,
     authenticate: agentAuthenticator,
-    projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
-      projects.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
-    projectAccessAtLeast,
     log,
   });
   wiredNotifyActivity = notifications.notifyActivity;
