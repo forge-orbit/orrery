@@ -591,7 +591,12 @@ async function acceptInTransaction(
 
   if (source === undefined) throw new TransfersError("source_authority_lost");
   if (source.kind === WorkspaceKind.enum.personal) {
-    if (source.personalOwnerHumanId !== auth.authorizedByHumanId) {
+    const [activeOwner] = await tx
+      .select({ id: humans.id })
+      .from(humans)
+      .where(and(eq(humans.id, auth.authorizedByHumanId), isNull(humans.deactivatedAt)))
+      .limit(1);
+    if (source.personalOwnerHumanId !== auth.authorizedByHumanId || activeOwner === undefined) {
       throw new TransfersError("source_authority_lost");
     }
   } else if (source.kind === WorkspaceKind.enum.shared) {

@@ -10,6 +10,7 @@ import {
   AccountStatus,
   HistoryResponse,
   IssuesResponse,
+  TransferAuthorization,
   WorkspacesResponse,
 } from "@orrery/contract";
 import { and, eq, sql } from "drizzle-orm";
@@ -26,6 +27,7 @@ import {
   passwordResetTokens,
   projectAccessEvents,
   projectAccessGrants,
+  projectTransferAuthorizations,
   projects,
   runs,
   workSessions,
@@ -573,6 +575,46 @@ describe("account deactivation and reactivation (#38)", () => {
       await postJson("/api/auth/password-reset/confirm", { token, password: "new-password" }),
       403,
       "account_deactivated",
+    );
+  });
+
+  it("revokes a pending personal-workspace transfer when its authorizer is deactivated", async () => {
+    const member = await createHuman(
+      "deactivation-transfer@example.com",
+      "deactivation-transfer-password",
+    );
+    const adminCookie = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
+    const admin = one(await database.db.select().from(humans).where(eq(humans.email, ADMIN_EMAIL)));
+    const personal = one(
+      await database.db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.personalOwnerHumanId, member.humanId)),
+    );
+    const project = await insertProject(personal.id, member.humanId);
+    const destination = await insertSharedWorkspace("Transfer Destination", admin.id);
+
+    const authorized = await postJson(
+      `/api/projects/${project.id}/transfer`,
+      { destinationWorkspaceId: destination.id },
+      member.cookie,
+    );
+    expect(authorized.status).toBe(201);
+    const authorization = TransferAuthorization.parse(await authorized.json());
+
+    const res = await postJson(`/api/admin/accounts/${member.humanId}/deactivate`, {}, adminCookie);
+    expect(res.status).toBe(200);
+
+    const [stored] = await database.db
+      .select()
+      .from(projectTransferAuthorizations)
+      .where(eq(projectTransferAuthorizations.id, authorization.authorizationId));
+    expect(stored?.status).toBe("revoked");
+    expect(stored?.revokedAt).not.toBeNull();
+    await expectProblem(
+      await postJson("/api/transfers/accept", { token: authorization.token }, adminCookie),
+      404,
+      "transfer_invalid",
     );
   });
 });

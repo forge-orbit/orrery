@@ -696,6 +696,31 @@ describe("personal-to-shared project transfer against real Postgres", () => {
     expect(await database.db.select().from(projectTransferAuthorizations)).toHaveLength(1);
   });
 
+  it("refuses acceptance when the personal owner is deactivated after authorizing", async () => {
+    const s = await source();
+    const dest = await createSharedWorkspace(s.cookie, "Deactivated Team", ADMIN_EMAIL);
+    const receiver = await insertHuman("deactivated-owner-receiver@example.com");
+    await addMembership(dest.workspaceId, receiver.id, true);
+    const receiverCookie = await sessionFor(receiver.id);
+    const authorization = await authorize(s.cookie, s.project.id, dest.workspaceId);
+
+    await database.db
+      .update(humans)
+      .set({ deactivatedAt: sql`statement_timestamp()` })
+      .where(eq(humans.id, s.humanId));
+
+    await expectProblem(
+      await accept(receiverCookie, authorization.token),
+      409,
+      "source_authority_lost",
+    );
+    const [stored] = await database.db
+      .select({ workspaceId: projects.workspaceId })
+      .from(projects)
+      .where(eq(projects.id, s.project.id));
+    expect(stored?.workspaceId).toBe(s.workspaceId);
+  });
+
   it("removes the project from source keys, rebuilds Manage and preserves identity and history", async () => {
     const s = await source();
     const dest = await createSharedWorkspace(s.cookie, "History Team", ADMIN_EMAIL);
