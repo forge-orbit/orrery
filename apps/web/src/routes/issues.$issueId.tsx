@@ -496,26 +496,20 @@ function IssuePage() {
           >
             Board
           </Link>,
-          <Text
-            key="identifier"
-            type="inherit"
-            color="inherit"
-            data-issue-identifier={issue.identifier}
-          >
-            {issue.identifier}
-          </Text>,
         ]}
         title={issue.title}
-        statusToken={
-          <Token
-            label={issueStatusLabels[issue.status]}
-            color={STATUS_COLORS[issue.status]}
-            size="sm"
-            data-issue-status={issue.status}
-          />
-        }
+        nonWrappingActions={!isNarrow}
         subtitle={
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+            <Token
+              label={issueStatusLabels[issue.status]}
+              color={STATUS_COLORS[issue.status]}
+              size="sm"
+              data-issue-status={issue.status}
+            />
+            <Text as="span" type="code" color="secondary" data-issue-identifier={issue.identifier}>
+              {issue.identifier}
+            </Text>
             <PriorityBadge priority={issue.priority} />
             {issue.assignee !== null && (
               <Stack
@@ -602,15 +596,6 @@ function IssuePage() {
                   isLoading={statusSubmitting}
                   label={toggleNextStatus === "done" ? "Close issue" : "Reopen issue"}
                   onClick={() => requestStatusChange(toggleNextStatus)}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  label="Move to Trash"
-                  isDisabled={activeSession !== undefined || trashing}
-                  data-trash-button=""
-                  onClick={() => setConfirmTrashOpen(true)}
                 />
               </>
             )}
@@ -961,6 +946,22 @@ function IssuePage() {
               initialOpen={inspector}
               initialSessionId={inspectorSession}
             />
+
+            {canContribute && (
+              <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
+                <Stack hAlign="start">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    label="Move to Trash"
+                    isDisabled={activeSession !== undefined || trashing}
+                    data-trash-button=""
+                    onClick={() => setConfirmTrashOpen(true)}
+                  />
+                </Stack>
+              </Section>
+            )}
           </Stack>
         );
 
@@ -982,9 +983,10 @@ function IssuePage() {
               <LayoutPanel
                 width={320}
                 padding={0}
-                isScrollable={false}
+                isScrollable
                 role="complementary"
                 label="Issue details"
+                data-issue-sidebar=""
               >
                 <Section variant="transparent" dividers={["start"]} padding={0}>
                   <Stack paddingInlineStart={6}>{inspectorColumn}</Stack>
