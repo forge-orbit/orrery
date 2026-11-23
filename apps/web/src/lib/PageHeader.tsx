@@ -1,7 +1,7 @@
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
-import { Stack } from "@astryxdesign/core/Stack";
+import { Stack, StackItem } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import type { ReactNode } from "react";
@@ -14,6 +14,12 @@ export interface PageHeaderProps {
   statusToken?: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
+  /**
+   * Keep the action buttons pinned to the top-right: long titles wrap on the
+   * left instead of pushing the actions onto a second row. Other pages keep
+   * the default centre-aligned, wrapping behaviour.
+   */
+  nonWrappingActions?: boolean;
 }
 
 export function PageHeader({
@@ -23,7 +29,42 @@ export function PageHeader({
   statusToken,
   subtitle,
   actions,
+  nonWrappingActions = false,
 }: PageHeaderProps) {
+  const titleBlock = (
+    <Stack gap={0.5}>
+      <Stack direction="horizontal" gap={2} align="center" wrap="wrap">
+        <Heading level={1} color="inherit">
+          {title}
+        </Heading>
+        {badge !== undefined &&
+          (typeof badge === "string" || typeof badge === "number" ? (
+            <Token label={String(badge)} color="gray" size="sm" />
+          ) : (
+            <Text as="span" type="code" color="secondary">
+              {badge}
+            </Text>
+          ))}
+        {statusToken}
+      </Stack>
+      {subtitle !== undefined && (
+        <Text as="p" display="block" type="supporting" color="secondary">
+          {subtitle}
+        </Text>
+      )}
+    </Stack>
+  );
+  const actionsBlock = actions !== undefined && (
+    <Stack
+      direction="horizontal"
+      gap={2}
+      align="center"
+      wrap={nonWrappingActions ? "nowrap" : "wrap"}
+    >
+      {actions}
+    </Stack>
+  );
+
   return (
     <Stack as="header" gap={2} data-page-header="">
       {breadcrumbs !== undefined && breadcrumbs.length > 0 && (
@@ -45,32 +86,23 @@ export function PageHeader({
           ))}
         </Stack>
       )}
-      <Stack direction="horizontal" justify="between" align="center" gap={3} wrap="wrap">
-        <Stack gap={0.5}>
-          <Stack direction="horizontal" gap={2} align="center" wrap="wrap">
-            <Heading level={1} color="inherit">
-              {title}
-            </Heading>
-            {badge !== undefined &&
-              (typeof badge === "string" || typeof badge === "number" ? (
-                <Token label={String(badge)} color="gray" size="sm" />
-              ) : (
-                <Text as="span" type="code" color="secondary">
-                  {badge}
-                </Text>
-              ))}
-            {statusToken}
-          </Stack>
-          {subtitle !== undefined && (
-            <Text as="p" display="block" type="supporting" color="secondary">
-              {subtitle}
-            </Text>
-          )}
-        </Stack>
-        {actions !== undefined && (
-          <Stack direction="horizontal" gap={2} align="center" wrap="wrap">
-            {actions}
-          </Stack>
+      <Stack
+        direction="horizontal"
+        justify="between"
+        align={nonWrappingActions ? "start" : "center"}
+        gap={3}
+        wrap={nonWrappingActions ? "nowrap" : "wrap"}
+      >
+        {nonWrappingActions ? (
+          <>
+            <StackItem size="fill">{titleBlock}</StackItem>
+            {actionsBlock && <StackItem size="static">{actionsBlock}</StackItem>}
+          </>
+        ) : (
+          <>
+            {titleBlock}
+            {actionsBlock}
+          </>
         )}
       </Stack>
       <Divider />

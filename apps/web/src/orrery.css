@@ -2,6 +2,7 @@
 
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
+@import "./styles/issue-detail.css";
 
 :root {
   --gutter: clamp(1rem, 3.5vw, 3.25rem);
