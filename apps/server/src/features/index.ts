@@ -10,7 +10,12 @@ import {
   type AttachmentSeams,
 } from "./attachments/index.ts";
 import { createAvatarsFeature, avatarsRoutes } from "./avatars/index.ts";
-import { createAgentsFeature, agentsRoutes, revokeMemberWorkspaceKeys } from "./agents/index.ts";
+import {
+  agentProjectAccessInTransaction,
+  createAgentsFeature,
+  agentsRoutes,
+  revokeMemberWorkspaceKeys,
+} from "./agents/index.ts";
 import { createDeactivationFeature, deactivationRoutes } from "./deactivation/index.ts";
 import type { AgentAuthenticator } from "./agents/index.ts";
 import type { IssueSessionGate, WorkSessionGate } from "./projects/index.ts";
@@ -166,6 +171,15 @@ export function createFeatures(
     projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
       projects.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
     projectAccessAtLeast,
+    agentProjectAccess: (tx, identity, workspaceId, projectId) =>
+      agentProjectAccessInTransaction(
+        tx,
+        (t, wid, hid, pids) => projects.projectAccessCeiling(t, wid, hid, pids),
+        projectAccessAtLeast,
+        identity,
+        workspaceId,
+        projectId,
+      ),
     log,
   });
   wiredAttachmentSeams = {

@@ -3,12 +3,20 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { Attachment, Problem, Project, type AgentIdentity } from "@orrery/contract";
+import {
+  Attachment,
+  Problem,
+  Project,
+  type AgentIdentity,
+  type ProjectAccessLevel,
+} from "@orrery/contract";
 import { eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import sharp from "sharp";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
+  agentApiKeyProjects,
+  agentApiKeys,
   agents,
   attachmentReferences,
   attachments,
@@ -17,7 +25,7 @@ import {
   storedObjects,
   workspaces,
 } from "../../db/schema.ts";
-import { createDb, type Database } from "../../platform/db.ts";
+import { createDb, type Database, type DbTransaction } from "../../platform/db.ts";
 import { createApp } from "../../platform/http.ts";
 import { createLogger } from "../../platform/log.ts";
 import { migrate } from "../../platform/migrate.ts";
@@ -25,6 +33,7 @@ import { sweepOrphanObjects } from "../../platform/object-sweep.ts";
 import { createLocalObjectStore, type ObjectStore } from "../../platform/storage.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
+import { agentProjectAccessInTransaction } from "../agents/index.ts";
 import { createProjectsFeature } from "../projects/index.ts";
 import { createAttachmentsFeature } from "./index.ts";
 
@@ -76,6 +85,13 @@ describe("project-scoped attachments", () => {
   let dataDir: string;
   let store: ObjectStore;
   let app: Hono;
+  let appWithStore: (override: ObjectStore) => Hono;
+  let agentProjectAccess: (
+    tx: DbTransaction,
+    identity: AgentIdentity,
+    workspaceId: string,
+    projectId: string,
+  ) => Promise<ProjectAccessLevel | null>;
   let adminCookie: string;
   let projectId: string;
   let workspaceId: string;
@@ -112,26 +128,46 @@ describe("project-scoped attachments", () => {
       },
       sessionGate: async () => true,
     });
-    const attachmentsFeature = createAttachmentsFeature({
-      db: database.db,
-      store,
-      maxAttachmentBytes: MAX_ATTACHMENT_BYTES,
-      sessionReader: accounts.sessionReader,
-      authenticate: async (request) => {
-        const token = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
-        return token === undefined ? null : (identities[token] ?? null);
-      },
-      projectAccessCeiling: (tx, targetWorkspaceId, humanId, projectIds) =>
-        projects.projectAccessCeiling(tx, targetWorkspaceId, humanId, projectIds),
-      projectAccessAtLeast: (actual, required) =>
-        ({ read: 1, contribute: 2, manage: 3 })[actual] >=
-        { read: 1, contribute: 2, manage: 3 }[required],
-    });
-    app = createApp({
-      features: [accounts, projects, attachmentsFeature],
-      publicUrl: PUBLIC_URL,
-      log: silentLogger,
-    });
+    agentProjectAccess = (
+      tx: DbTransaction,
+      identity: AgentIdentity,
+      targetWorkspaceId: string,
+      targetProjectId: string,
+    ) =>
+      agentProjectAccessInTransaction(
+        tx,
+        (t, wid, hid, pids) => projects.projectAccessCeiling(t, wid, hid, pids),
+        (actual, required) =>
+          ({ read: 1, contribute: 2, manage: 3 })[actual] >=
+          { read: 1, contribute: 2, manage: 3 }[required],
+        identity,
+        targetWorkspaceId,
+        targetProjectId,
+      );
+    const makeAttachments = (override: ObjectStore) =>
+      createAttachmentsFeature({
+        db: database.db,
+        store: override,
+        maxAttachmentBytes: MAX_ATTACHMENT_BYTES,
+        sessionReader: accounts.sessionReader,
+        authenticate: async (request) => {
+          const token = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
+          return token === undefined ? null : (identities[token] ?? null);
+        },
+        projectAccessCeiling: (tx, targetWorkspaceId, humanId, projectIds) =>
+          projects.projectAccessCeiling(tx, targetWorkspaceId, humanId, projectIds),
+        projectAccessAtLeast: (actual, required) =>
+          ({ read: 1, contribute: 2, manage: 3 })[actual] >=
+          { read: 1, contribute: 2, manage: 3 }[required],
+        agentProjectAccess,
+      });
+    appWithStore = (override) =>
+      createApp({
+        features: [accounts, projects, makeAttachments(override)],
+        publicUrl: PUBLIC_URL,
+        log: silentLogger,
+      });
+    app = appWithStore(store);
 
     const setup = await postJson(app, "/api/setup/admin", {
       secret: SECRET,
@@ -174,8 +210,38 @@ describe("project-scoped attachments", () => {
     };
     identities["read-key"] = {
       ...identities["contribute-key"],
+      keyId: randomUUID(),
       projects: [{ projectId, projectName: "Launch", level: "read" }],
     };
+    await database.db.insert(agentApiKeys).values([
+      {
+        id: identities["contribute-key"].keyId,
+        agentId,
+        workspaceId,
+        createdByHumanId: adminId,
+        validity: "90",
+        tokenHash: tokenHash("contribute-key"),
+        expiresAt: sql`now() + interval '90 days'`,
+      },
+      {
+        id: identities["read-key"].keyId,
+        agentId,
+        workspaceId,
+        createdByHumanId: adminId,
+        validity: "90",
+        tokenHash: tokenHash("read-key"),
+        expiresAt: sql`now() + interval '90 days'`,
+      },
+    ]);
+    await database.db.insert(agentApiKeyProjects).values([
+      {
+        id: randomUUID(),
+        keyId: identities["contribute-key"].keyId,
+        projectId,
+        level: "contribute",
+      },
+      { id: randomUUID(), keyId: identities["read-key"].keyId, projectId, level: "read" },
+    ]);
   });
 
   afterEach(async () => {
@@ -189,6 +255,7 @@ describe("project-scoped attachments", () => {
       await tx.execute(sql`delete from issues`);
       await tx.execute(sql`delete from knowledge_entries`);
       await tx.execute(sql`delete from project_access_grants`);
+      await tx.execute(sql`delete from agent_api_key_projects`);
       await tx.execute(sql`delete from projects`);
       await tx.execute(sql`delete from agent_api_keys`);
       await tx.execute(sql`delete from agents`);
@@ -530,6 +597,7 @@ describe("project-scoped attachments", () => {
               : null,
           projectAccessCeiling: async () => new Map(),
           projectAccessAtLeast: () => true,
+          agentProjectAccess,
         }),
       ],
       publicUrl: PUBLIC_URL,
@@ -569,6 +637,95 @@ describe("project-scoped attachments", () => {
     expect(await sweepPromise).toBe(1);
     expect(await store.head(key)).toBeNull();
     expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+    expect(await database.db.select().from(attachments)).toHaveLength(0);
+  });
+
+  it("refuses an agent upload when its key is revoked after authentication", async () => {
+    const revokingStore: ObjectStore = {
+      ...store,
+      async put(key, data, type) {
+        await database.db
+          .update(agentApiKeys)
+          .set({ revokedAt: sql`now()` })
+          .where(eq(agentApiKeys.id, identities["contribute-key"]!.keyId));
+        return store.put(key, data, type);
+      },
+    };
+    const png = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: { r: 7, g: 8, b: 9 } },
+    })
+      .png()
+      .toBuffer();
+    const response = await appWithStore(revokingStore).request(
+      `/api/projects/${projectId}/attachments`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer contribute-key" },
+        body: multipart(png, "revoked.png", "image/png"),
+      },
+    );
+    expect(response.status).toBe(401);
+    expect(Problem.parse(await response.json()).code).toBe("key_revoked");
+    expect(await database.db.select().from(attachments)).toHaveLength(0);
+    expect(
+      await database.db.select().from(storedObjects).where(eq(storedObjects.status, "active")),
+    ).toHaveLength(0);
+  });
+
+  it("refuses an agent upload when its project grant is removed after authentication", async () => {
+    const revokingStore: ObjectStore = {
+      ...store,
+      async put(key, data, type) {
+        await database.db
+          .delete(agentApiKeyProjects)
+          .where(eq(agentApiKeyProjects.keyId, identities["contribute-key"]!.keyId));
+        return store.put(key, data, type);
+      },
+    };
+    const png = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: { r: 7, g: 8, b: 9 } },
+    })
+      .png()
+      .toBuffer();
+    const response = await appWithStore(revokingStore).request(
+      `/api/projects/${projectId}/attachments`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer contribute-key" },
+        body: multipart(png, "ungranted.png", "image/png"),
+      },
+    );
+    expect(response.status).toBe(401);
+    expect(Problem.parse(await response.json()).code).toBe("insufficient_agent_access");
+    expect(await database.db.select().from(attachments)).toHaveLength(0);
+  });
+
+  it("refuses a personal-workspace upload when its human is deactivated after authentication", async () => {
+    const deactivatingStore: ObjectStore = {
+      ...store,
+      async put(key, data, type) {
+        await database.db
+          .update(humans)
+          .set({ deactivatedAt: sql`now()` })
+          .where(eq(humans.id, adminId));
+        return store.put(key, data, type);
+      },
+    };
+    const png = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: { r: 7, g: 8, b: 9 } },
+    })
+      .png()
+      .toBuffer();
+    const response = await appWithStore(deactivatingStore).request(
+      `/api/projects/${projectId}/attachments`,
+      {
+        method: "POST",
+        headers: { cookie: adminCookie },
+        body: multipart(png, "deactivated.png", "image/png"),
+      },
+    );
+    expect(response.status).toBe(401);
+    expect(Problem.parse(await response.json()).code).toBe("not_signed_in");
     expect(await database.db.select().from(attachments)).toHaveLength(0);
   });
 });

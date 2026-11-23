@@ -22,6 +22,8 @@ import { eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
+  agentApiKeyProjects,
+  agentApiKeys,
   agents,
   attachmentReferences,
   attachments,
@@ -30,13 +32,15 @@ import {
   storedObjects,
   workspaces,
 } from "../../db/schema.ts";
-import { createDb, type Database } from "../../platform/db.ts";
+import { createDb, type Database, type DbTransaction } from "../../platform/db.ts";
 import { createApp } from "../../platform/http.ts";
 import { createLogger } from "../../platform/log.ts";
 import { migrate } from "../../platform/migrate.ts";
 import { sweepOrphanObjects } from "../../platform/object-sweep.ts";
 import { createLocalObjectStore, type ObjectStore } from "../../platform/storage.ts";
+import { tokenHash } from "../../platform/tokens.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
+import { agentProjectAccessInTransaction } from "../agents/index.ts";
 import {
   attachmentHolderKey,
   createAttachmentsFeature,
@@ -131,6 +135,22 @@ describe("#179 attachment reference sync, metadata, grace sweep and Trash cleanu
       attachmentSeams: seams,
       log: silentLogger,
     });
+    const agentProjectAccess = (
+      tx: DbTransaction,
+      identity: AgentIdentity,
+      targetWorkspaceId: string,
+      targetProjectId: string,
+    ) =>
+      agentProjectAccessInTransaction(
+        tx,
+        (t, wid, hid, pids) => projects.projectAccessCeiling(t, wid, hid, pids),
+        (actual, required) =>
+          ({ read: 1, contribute: 2, manage: 3 })[actual] >=
+          { read: 1, contribute: 2, manage: 3 }[required],
+        identity,
+        targetWorkspaceId,
+        targetProjectId,
+      );
     attached = createAttachmentsFeature({
       db: database.db,
       store,
@@ -142,6 +162,7 @@ describe("#179 attachment reference sync, metadata, grace sweep and Trash cleanu
       projectAccessAtLeast: (actual, required) =>
         ({ read: 1, contribute: 2, manage: 3 })[actual] >=
         { read: 1, contribute: 2, manage: 3 }[required],
+      agentProjectAccess,
       log: silentLogger,
     });
     real = {
@@ -195,6 +216,21 @@ describe("#179 attachment reference sync, metadata, grace sweep and Trash cleanu
       validity: "90",
       projects: [{ projectId, projectName: "Reference project", level: "contribute" }],
     };
+    await database.db.insert(agentApiKeys).values({
+      id: identities[AGENT_KEY].keyId,
+      agentId,
+      workspaceId,
+      createdByHumanId: adminId,
+      validity: "90",
+      tokenHash: tokenHash(AGENT_KEY),
+      expiresAt: sql`now() + interval '90 days'`,
+    });
+    await database.db.insert(agentApiKeyProjects).values({
+      id: randomUUID(),
+      keyId: identities[AGENT_KEY].keyId,
+      projectId,
+      level: "contribute",
+    });
   });
 
   afterEach(async () => {
@@ -209,6 +245,7 @@ describe("#179 attachment reference sync, metadata, grace sweep and Trash cleanu
       await tx.execute(sql`delete from issues`);
       await tx.execute(sql`delete from knowledge_entries`);
       await tx.execute(sql`delete from project_access_grants`);
+      await tx.execute(sql`delete from agent_api_key_projects`);
       await tx.execute(sql`delete from projects`);
       await tx.execute(sql`delete from agent_api_keys`);
       await tx.execute(sql`delete from agents`);

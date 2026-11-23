@@ -5,7 +5,11 @@ import { createAgentsRest, routes } from "./rest.ts";
 import { type AgentsDeps, type AgentsService, createAgentsService } from "./service.ts";
 
 export { routes as agentsRoutes };
-export { AgentsError, revokeMemberWorkspaceKeys } from "./service.ts";
+export {
+  AgentsError,
+  agentProjectAccessInTransaction,
+  revokeMemberWorkspaceKeys,
+} from "./service.ts";
 export { isAgentError, readBearerToken } from "./auth.ts";
 export type { AgentAuthenticator } from "./auth.ts";
 export type { AgentsService, AgentsErrorKind } from "./service.ts";
