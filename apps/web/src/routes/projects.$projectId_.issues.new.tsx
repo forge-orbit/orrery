@@ -83,11 +83,14 @@ function NewIssuePage() {
     ...workspaceMembersQuery(project.workspaceId),
     enabled: canReadMembers,
   });
-  const { data: grantedHumanIds = [] } = useQuery({
+  const accessIds = useQuery({
     ...projectAccessHumanIdsQuery(projectId),
     enabled: canReadMembers,
   });
-  const withoutAccess = missingProjectAccessHumanIds(members, grantedHumanIds);
+  const withoutAccess =
+    accessIds.data === undefined
+      ? new Set<string>()
+      : missingProjectAccessHumanIds(members, accessIds.data);
   const { data: workspaceKeys = [] } = useQuery({
     ...workspaceAgentKeysQuery(project.workspaceId),
     enabled: workspace.kind === "shared" && workspace.isOwner,

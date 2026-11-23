@@ -92,7 +92,7 @@ const suggestHumans = createRoute({
   path: "/api/workspaces/{workspaceId}/human-suggestions",
   summary: "Known Humans to suggest when inviting someone to a shared workspace",
   description:
-    "The free-text email field stays authoritative: these are only suggestions, never a directory of the installation. System administrators may find any active Human not already in the workspace. Other owners, permission managers and delegated inviters may only find active Humans they already share another workspace with; strangers answer exactly like a query with no matches. Deactivated accounts and current members are never suggested.",
+    "The free-text email field stays authoritative: these are only suggestions, never a directory of the installation. System administrators may find any active Human not already in the workspace. Other owners and delegated inviters — the same authority required to send an invitation — may only find active Humans they already share another workspace with; strangers answer exactly like a query with no matches. Permission managers without invite authority are refused. Deactivated accounts and current members are never suggested.",
   request: { params: workspaceParams, query: HumanSuggestionsQuery },
   responses: {
     200: {

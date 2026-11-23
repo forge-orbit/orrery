@@ -969,11 +969,9 @@ export function createWorkspacesService({
             actor.humanId,
             "workspace_not_found",
           );
-          if (
-            !membership.isOwner &&
-            !membership.canManageMemberPermissions &&
-            !membership.canInviteMembers
-          ) {
+          // The same authority required to POST an invitation: an owner or a
+          // delegated inviter. Permission management alone is not enough.
+          if (!membership.isOwner && !membership.canInviteMembers) {
             throw new WorkspacesError("not_workspace_owner");
           }
 

@@ -323,6 +323,28 @@ test("grants access in the browser and shows Read without mutation controls", as
   for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
 });
 
+test("a project manager without member-directory access keeps the email field", async ({
+  page,
+}) => {
+  await page.goto("/signin");
+  await page.getByLabel("Email").fill(MEMBER_EMAIL);
+  await page.getByLabel("Password").fill(MEMBER_PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByText(`Signed in as ${MEMBER_EMAIL}.`)).toBeVisible();
+
+  await page.goto(`/projects/${memberProjectId}`);
+  await page.getByRole("tab", { name: "Settings" }).click();
+  const email = page.getByLabel("Email");
+  await expect(email).toBeVisible();
+  await expect(page.getByRole("button", { name: /Member/ })).toHaveCount(0);
+  await email.fill(COLLEAGUE_EMAIL);
+  await page.getByRole("button", { name: "Grant access" }).click();
+  await expect(page.locator(`[data-project-access-for="${COLLEAGUE_EMAIL}"]`)).toContainText(
+    "read",
+  );
+  for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
+});
+
 async function newContext(): Promise<APIRequestContext> {
   return request.newContext({ baseURL: baseUrl });
 }

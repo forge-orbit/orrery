@@ -7743,7 +7743,7 @@
     "/api/workspaces/{workspaceId}/human-suggestions": {
       "get": {
         "summary": "Known Humans to suggest when inviting someone to a shared workspace",
-        "description": "The free-text email field stays authoritative: these are only suggestions, never a directory of the installation. System administrators may find any active Human not already in the workspace. Other owners, permission managers and delegated inviters may only find active Humans they already share another workspace with; strangers answer exactly like a query with no matches. Deactivated accounts and current members are never suggested.",
+        "description": "The free-text email field stays authoritative: these are only suggestions, never a directory of the installation. System administrators may find any active Human not already in the workspace. Other owners and delegated inviters — the same authority required to send an invitation — may only find active Humans they already share another workspace with; strangers answer exactly like a query with no matches. Permission managers without invite authority are refused. Deactivated accounts and current members are never suggested.",
         "parameters": [
           {
             "schema": {
@@ -9244,7 +9244,7 @@
     "/api/projects/{projectId}/access/humans": {
       "get": {
         "summary": "The Humans who currently hold project access",
-        "description": "Read access is enough: the assignee picker uses these ids to warn that a workspace Member without a grant will not see the issue in My Work. Workspace owners have implicit access and are not listed. A caller without access to the project gets the same 404 as a missing project.",
+        "description": "Contribute access is enough: only someone who can assign issues needs the warning that a workspace Member without a grant will not see the issue in My Work. Workspace owners have implicit access and are not listed. A Reader is refused with insufficient_project_access; an outsider and a missing project both get 404.",
         "parameters": [
           {
             "schema": {
@@ -9280,6 +9280,16 @@
           },
           "401": {
             "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Read access is not enough to assign issues",
             "content": {
               "application/problem+json": {
                 "schema": {

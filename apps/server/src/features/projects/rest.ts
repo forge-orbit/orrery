@@ -170,7 +170,7 @@ const projectAccessHumanIds = createRoute({
   path: "/api/projects/{projectId}/access/humans",
   summary: "The Humans who currently hold project access",
   description:
-    "Read access is enough: the assignee picker uses these ids to warn that a workspace Member without a grant will not see the issue in My Work. Workspace owners have implicit access and are not listed. A caller without access to the project gets the same 404 as a missing project.",
+    "Contribute access is enough: only someone who can assign issues needs the warning that a workspace Member without a grant will not see the issue in My Work. Workspace owners have implicit access and are not listed. A Reader is refused with insufficient_project_access; an outsider and a missing project both get 404.",
   request: { params: projectParams },
   responses: {
     200: {
@@ -179,6 +179,7 @@ const projectAccessHumanIds = createRoute({
     },
     400: problem("The project id is invalid"),
     401: problem("Not signed in"),
+    403: problem("Read access is not enough to assign issues"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -1142,7 +1143,7 @@ export function createProjectsRest(
       const { projectId } = c.req.valid("param");
       return c.json(await service.projectAccessHumanIds(await sessionReader(c), projectId), 200);
     } catch (error) {
-      return failure(c, error, projectReadKinds);
+      return failure(c, error, projectWriteKinds);
     }
   });
 

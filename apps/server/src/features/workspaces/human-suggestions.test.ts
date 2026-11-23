@@ -4,7 +4,7 @@ import { HumanSuggestionsResponse, Problem, Workspace } from "@orrery/contract";
 import type { Hono } from "hono";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { browserSessions, humans, workspaceMemberships } from "../../db/schema.ts";
+import { browserSessions, humans, workspaceMemberships, workspaces } from "../../db/schema.ts";
 import { createDb, type Database } from "../../platform/db.ts";
 import { createApp } from "../../platform/http.ts";
 import { createLogger, type Logger } from "../../platform/log.ts";
@@ -248,10 +248,10 @@ describe("workspace human suggestions", () => {
     expect(adminView.map((suggestion) => suggestion.email)).toEqual(["stranger@example.com"]);
   });
 
-  it("restricts a permission manager to co-workspace Humans and hides deactivated ones", async () => {
+  it("restricts a delegated inviter to co-workspace Humans and hides deactivated ones", async () => {
     const { app, workspace, cookie: adminCookie } = await readyApp();
     const manager = await insertHuman({ email: "manager@example.com" });
-    await addMembership(workspace.id, manager.id, { canManageMemberPermissions: true });
+    await addMembership(workspace.id, manager.id, { canInviteMembers: true });
     const managerCookie = await sessionFor(manager.id);
 
     const second = await postJson(
@@ -280,6 +280,60 @@ describe("workspace human suggestions", () => {
     expect(await suggestionsFor(app, workspace.id, "outsider@example.com", managerCookie)).toEqual(
       [],
     );
+  });
+
+  it("refuses a permission manager who cannot invite, matching the invitation route", async () => {
+    const { app, workspace } = await readyApp();
+    const manager = await insertHuman({ email: "manager@example.com" });
+    await addMembership(workspace.id, manager.id, { canManageMemberPermissions: true });
+    const managerCookie = await sessionFor(manager.id);
+
+    const res = await getJson(
+      app,
+      `/api/workspaces/${workspace.id}/human-suggestions?q=anyone`,
+      managerCookie,
+    );
+    expect(res.status).toBe(403);
+    expect(Problem.parse(await res.clone().json())).toMatchObject({
+      status: 403,
+      code: "not_workspace_owner",
+    });
+  });
+
+  it("answers 404 for a personal workspace and for a caller with a suspended membership", async () => {
+    const { app, workspace, admin, cookie } = await readyApp();
+    const [personal] = await currentDatabase()
+      .db.select({ id: workspaces.id })
+      .from(workspaces)
+      .where(eq(workspaces.personalOwnerHumanId, admin.id));
+    if (personal === undefined) throw new Error("the administrator has no personal workspace");
+
+    const personalAttempt = await getJson(
+      app,
+      `/api/workspaces/${personal.id}/human-suggestions?q=anyone`,
+      cookie,
+    );
+    expect(personalAttempt.status).toBe(404);
+    expect(Problem.parse(await personalAttempt.clone().json())).toMatchObject({
+      status: 404,
+      code: "workspace_not_found",
+    });
+
+    const suspended = await insertHuman({ email: "suspended.caller@example.com" });
+    await addMembership(workspace.id, suspended.id, {
+      canInviteMembers: true,
+      suspended: true,
+    });
+    const suspendedAttempt = await getJson(
+      app,
+      `/api/workspaces/${workspace.id}/human-suggestions?q=anyone`,
+      await sessionFor(suspended.id),
+    );
+    expect(suspendedAttempt.status).toBe(404);
+    expect(Problem.parse(await suspendedAttempt.clone().json())).toMatchObject({
+      status: 404,
+      code: "workspace_not_found",
+    });
   });
 
   it("masks the workspace from non-members and anonymous callers, and refuses plain members", async () => {

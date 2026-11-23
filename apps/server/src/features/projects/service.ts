@@ -2168,7 +2168,7 @@ export function createProjectsService({
             tx,
             projectId,
             workActor,
-            ProjectAccessLevel.enum.read,
+            ProjectAccessLevel.enum.contribute,
           );
           if (project.workspaceKind === WorkspaceKind.enum.personal) return [];
           const rows = await tx

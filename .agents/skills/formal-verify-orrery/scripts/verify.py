@@ -2782,13 +2782,8 @@ def extract_code_facts() -> dict[str, Any]:
         and "readMembership(" in suggest_fn
         and '"workspace_not_found"' in suggest_fn
     )
-    m40_capability_gate = all(
-        token in suggest_fn
-        for token in (
-            "!membership.isOwner",
-            "!membership.canManageMemberPermissions",
-            "!membership.canInviteMembers",
-        )
+    m40_capability_gate = (
+        "!membership.isOwner" in suggest_fn and "!membership.canInviteMembers" in suggest_fn
     )
     m40_admin_branch = (
         "!account?.isSystemAdministrator" in suggest_fn
@@ -8510,7 +8505,15 @@ def check_m40(facts: dict[str, Any]) -> CheckResult:
         "contract/openapi.json",
     ]
     g = {key: value for key, value in facts.items() if key.startswith("m40_")}
-    callers = ("anonymous", "non_member", "plain_member", "owner", "permission_manager", "admin")
+    callers = (
+        "anonymous",
+        "non_member",
+        "plain_member",
+        "permission_manager",
+        "inviter",
+        "owner",
+        "admin",
+    )
     humans = ("peer", "stranger", "deactivated_peer", "member")
 
     def visible(caller: str, human: str) -> bool:
@@ -8526,10 +8529,11 @@ def check_m40(facts: dict[str, Any]) -> CheckResult:
             if human == "deactivated_peer":
                 return True
             return True
-        # An ordinary member has no invitation authority; a non-admin owner or
-        # permission manager may only meet Humans through a shared workspace, so
-        # removing the co-workspace predicate exposes installation strangers.
-        if caller == "plain_member" and g["m40_capability_gate"]:
+        # An ordinary member or a permission manager without invite authority has
+        # no suggestion rights; a non-admin owner or delegated inviter may only
+        # meet Humans through a shared workspace, so removing the co-workspace
+        # predicate exposes installation strangers.
+        if caller in ("plain_member", "permission_manager") and g["m40_capability_gate"]:
             return False
         if human == "member":
             return not g["m40_exclude_members"]
@@ -8569,11 +8573,11 @@ def check_m40(facts: dict[str, Any]) -> CheckResult:
                 return True, ""
             if not g["m40_bounded"]:
                 return False, "Suggestion result set is unbounded"
-            if caller == "plain_member":
+            if caller in ("plain_member", "permission_manager"):
                 if visible(caller, human):
-                    return False, f"Plain member saw {human} in the suggestion response"
+                    return False, f"{caller} without invite authority saw {human}"
                 return True, ""
-            if caller in ("owner", "permission_manager"):
+            if caller in ("owner", "inviter"):
                 if human in ("stranger", "deactivated_peer", "member") and visible(caller, human):
                     return False, f"Non-admin {caller} enumerated {human} on the installation"
                 if human == "peer" and not visible(caller, human):

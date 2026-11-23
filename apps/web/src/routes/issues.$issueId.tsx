@@ -319,11 +319,14 @@ function IssuePage() {
     ...workspaceMembersQuery(project.workspaceId),
     enabled: canReadMembers,
   });
-  const { data: grantedHumanIds = [] } = useQuery({
+  const accessIds = useQuery({
     ...projectAccessHumanIdsQuery(project.id),
     enabled: canReadMembers,
   });
-  const withoutAccess = missingProjectAccessHumanIds(membersQuery.data ?? [], grantedHumanIds);
+  const withoutAccess =
+    accessIds.data === undefined
+      ? new Set<string>()
+      : missingProjectAccessHumanIds(membersQuery.data ?? [], accessIds.data);
   const { data: myKeys } = useSuspenseQuery(agentKeysQuery(project.workspaceId));
   const workspaceKeys = useQuery({
     ...workspaceAgentKeysQuery(project.workspaceId),
