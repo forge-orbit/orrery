@@ -12,7 +12,7 @@ import {
   ProjectAccessEventType,
   WorkspaceKind,
 } from "@orrery/contract";
-import { and, eq, gt, inArray, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   agentApiKeyProjects,
@@ -329,6 +329,48 @@ async function liveWork(
       ),
     )
     .orderBy(issues.number);
+}
+
+// Agent API keys are workspace-scoped, so a source-workspace agent cannot work
+// the issue after the move. A human assignee stays only if they can access the
+// destination workspace as its personal owner or an active member.
+async function clearInvalidAssignees(
+  tx: DbTransaction,
+  projectId: string,
+  destination: WorkspaceRow,
+): Promise<void> {
+  const assigned = await tx
+    .select({
+      id: issues.id,
+      assigneeType: issues.assigneeType,
+      assigneeId: issues.assigneeId,
+    })
+    .from(issues)
+    .where(and(eq(issues.projectId, projectId), isNotNull(issues.assigneeId)));
+  const staleIds: string[] = [];
+  for (const issue of assigned) {
+    if (issue.assigneeType === "human" && issue.assigneeId !== null) {
+      if (destination.personalOwnerHumanId === issue.assigneeId) continue;
+      const [membership] = await tx
+        .select({ id: workspaceMemberships.id })
+        .from(workspaceMemberships)
+        .where(
+          and(
+            eq(workspaceMemberships.workspaceId, destination.id),
+            eq(workspaceMemberships.humanId, issue.assigneeId),
+            isNull(workspaceMemberships.suspendedAt),
+          ),
+        )
+        .limit(1);
+      if (membership !== undefined) continue;
+    }
+    staleIds.push(issue.id);
+  }
+  if (staleIds.length === 0) return;
+  await tx
+    .update(issues)
+    .set({ assigneeType: null, assigneeId: null, updatedAt: sql`statement_timestamp()` })
+    .where(inArray(issues.id, staleIds));
 }
 
 function toParty(workspace: WorkspaceRow) {
@@ -665,6 +707,9 @@ async function acceptInTransaction(
         );
     }
   }
+
+  // Assignees valid only in the source workspace must not travel with the project.
+  await clearInvalidAssignees(tx, auth.projectId, destination);
 
   await tx.delete(projectAccessGrants).where(eq(projectAccessGrants.projectId, auth.projectId));
   await tx.delete(agentApiKeyProjects).where(eq(agentApiKeyProjects.projectId, auth.projectId));

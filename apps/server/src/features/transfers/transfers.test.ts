@@ -4,19 +4,21 @@ import {
   AgentIdentity,
   CreateAgentKeyResponse,
   HistoryResponse,
+  Issue,
   Problem,
   Project,
   TransferAuthorization,
   TransferPreview,
   type HistoryEvent,
 } from "@orrery/contract";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   agentApiKeyProjects,
   browserSessions,
   humans,
+  issues as issuesTable,
   projectAccessEvents,
   projectAccessGrants,
   projectActivity,
@@ -1463,5 +1465,75 @@ describe("shared-to-shared project transfer against real Postgres", () => {
     expect(await getProject(sourceW1.cookie, sourceW1.project.id)).toMatchObject({
       workspaceId: destW2.workspaceId,
     });
+  });
+
+  it("clears assignments that are invalid in the destination so its agents can claim the issues", async () => {
+    const sourceW1 = await sharedSource("W1 Assignees");
+    const destinationOwner = await insertHuman("assignee-dest-owner@example.com");
+    const ownerCookie = await sessionFor(destinationOwner.id);
+    const destW2 = await createSharedWorkspace(
+      ownerCookie,
+      "W2 Assignees",
+      "assignee-dest-owner@example.com",
+    );
+
+    const sourceMember = await insertHuman("assignee-source@example.com");
+    await addMembership(sourceW1.workspaceId, sourceMember.id);
+    const destinationMember = await insertHuman("assignee-destination@example.com");
+    await addMembership(sourceW1.workspaceId, destinationMember.id);
+    await addMembership(destW2.workspaceId, destinationMember.id);
+
+    const sourceHumanIssue = await createIssue(
+      sourceW1.cookie,
+      sourceW1.project.id,
+      "Source human assignee",
+    );
+    const sourceAgentIssue = await createIssue(
+      sourceW1.cookie,
+      sourceW1.project.id,
+      "Source agent assignee",
+    );
+    const destinationHumanIssue = await createIssue(
+      sourceW1.cookie,
+      sourceW1.project.id,
+      "Destination human assignee",
+    );
+
+    const sourceSecret = await issueKey(sourceW1.cookie, sourceW1.workspaceId, sourceW1.project.id);
+    const sourceAgent = await identityFor(sourceSecret);
+    const assign = async (issueId: string, assignee: { type: "human" | "agent"; id: string }) => {
+      const res = await patchJson(`/api/issues/${issueId}`, { assignee }, sourceW1.cookie);
+      expect(res.status).toBe(200);
+    };
+    await assign(sourceHumanIssue, { type: "human", id: sourceMember.id });
+    await assign(sourceAgentIssue, { type: "agent", id: sourceAgent.agentId });
+    await assign(destinationHumanIssue, { type: "human", id: destinationMember.id });
+
+    const authorization = await authorize(sourceW1.cookie, sourceW1.project.id, destW2.workspaceId);
+    expect((await accept(ownerCookie, authorization.token)).status).toBe(200);
+
+    const rows = await database.db
+      .select({
+        id: issuesTable.id,
+        assigneeType: issuesTable.assigneeType,
+        assigneeId: issuesTable.assigneeId,
+      })
+      .from(issuesTable)
+      .where(inArray(issuesTable.id, [sourceHumanIssue, sourceAgentIssue, destinationHumanIssue]));
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.get(sourceHumanIssue)).toMatchObject({ assigneeType: null, assigneeId: null });
+    expect(byId.get(sourceAgentIssue)).toMatchObject({ assigneeType: null, assigneeId: null });
+    expect(byId.get(destinationHumanIssue)).toMatchObject({
+      assigneeType: "human",
+      assigneeId: destinationMember.id,
+    });
+
+    const detail = await getJson(`/api/issues/${sourceHumanIssue}`, ownerCookie);
+    expect(detail.status).toBe(200);
+    expect(Issue.parse(await detail.json()).assignee).toBeNull();
+
+    const destinationSecret = await issueKey(ownerCookie, destW2.workspaceId, sourceW1.project.id);
+    const session = await claimIssue(destinationSecret, sourceHumanIssue);
+    expect(session.issueId).toBe(sourceHumanIssue);
   });
 });
