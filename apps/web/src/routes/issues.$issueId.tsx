@@ -4,10 +4,9 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
-import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { Heading } from "@astryxdesign/core/Heading";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
-import { Layout, LayoutContent, LayoutPanel } from "@astryxdesign/core/Layout";
+import { Layout, LayoutPanel } from "@astryxdesign/core/Layout";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -147,7 +146,7 @@ function IssuePage() {
     enabled: workspace.kind === "shared" && workspace.isOwner,
   });
 
-  const [editOpen, setEditOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [confirmTrashOpen, setConfirmTrashOpen] = useState(false);
   const [statusError, setStatusError] = useState<string>();
   const [statusSubmitting, setStatusSubmitting] = useState(false);
@@ -390,13 +389,16 @@ function IssuePage() {
             />
             {canContribute && (
               <>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  label="Edit"
-                  onClick={() => setEditOpen(true)}
-                />
+                {!isEditing && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    label="Edit"
+                    data-issue-edit=""
+                    onClick={() => setIsEditing(true)}
+                  />
+                )}
                 <Button
                   type="button"
                   size="sm"
@@ -479,33 +481,85 @@ function IssuePage() {
       {(() => {
         const mainColumn = (
           <Stack gap={5}>
-            <Section variant="transparent" padding={0}>
-              <Stack gap={3}>
-                <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+            {isEditing ? (
+              <Section padding={4}>
+                <Stack gap={2} data-issue-editor="">
                   <Heading level={2} color="inherit">
-                    Description
+                    Edit issue
                   </Heading>
-                  {canContribute && issue.body === "" && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      label="Add description"
-                      onClick={() => setEditOpen(true)}
-                    />
+                  <TitleBodyForm
+                    key={issue.updatedAt}
+                    idPrefix="edit-issue"
+                    titleLabel="Title"
+                    bodyLabel="Body"
+                    bodyRows={15}
+                    submitLabel="Save issue"
+                    fallbackError="Could not save the issue."
+                    initialTitle={issue.title}
+                    initialBody={issue.body}
+                    mentionIssues={projectIssues}
+                    secondaryAction={
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        label="Cancel"
+                        onClick={() => setIsEditing(false)}
+                      />
+                    }
+                    onSubmit={async ({ title, body }) => {
+                      const updated = await updateIssue(issue.id, { title, body });
+                      queryClient.setQueryData<IssueDetail>(issueQuery(issue.id).queryKey, (old) =>
+                        old === undefined ? old : { ...old, ...updated },
+                      );
+                      await Promise.all([
+                        queryClient.invalidateQueries({
+                          queryKey: issuesQuery(issue.projectId).queryKey,
+                        }),
+                        queryClient.invalidateQueries({
+                          queryKey: projectActivityQuery(issue.projectId).queryKey,
+                        }),
+                      ]);
+                      setIsEditing(false);
+                      toast({ body: "Issue updated." });
+                    }}
+                  />
+                </Stack>
+              </Section>
+            ) : (
+              <Section variant="transparent" padding={0}>
+                <Stack gap={3}>
+                  <Stack
+                    direction="horizontal"
+                    gap={2}
+                    wrap="wrap"
+                    justify="between"
+                    align="center"
+                  >
+                    <Heading level={2} color="inherit">
+                      Description
+                    </Heading>
+                    {canContribute && issue.body === "" && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        label="Add description"
+                        onClick={() => setIsEditing(true)}
+                      />
+                    )}
+                  </Stack>
+                  {issue.body === "" ? (
+                    <Text as="p" display="block" type="supporting" color="secondary">
+                      No description yet.
+                    </Text>
+                  ) : (
+                    <Stack data-issue-body="">
+                      <Markdown issueRefs={projectIssues}>{issue.body}</Markdown>
+                    </Stack>
                   )}
                 </Stack>
-                {issue.body === "" ? (
-                  <Text as="p" display="block" type="supporting" color="secondary">
-                    No description yet.
-                  </Text>
-                ) : (
-                  <Stack data-issue-body="">
-                    <Markdown issueRefs={projectIssues}>{issue.body}</Markdown>
-                  </Stack>
-                )}
-              </Stack>
-            </Section>
+              </Section>
+            )}
 
             <Subtasks issue={issue} issues={projectIssues} canContribute={canContribute} />
 
@@ -769,50 +823,6 @@ function IssuePage() {
 
       {canContribute && (
         <>
-          <Drawer
-            isOpen={editOpen}
-            onOpenChange={setEditOpen}
-            side="end"
-            width="32rem"
-            label="Edit issue"
-          >
-            <Layout
-              height="fill"
-              header={<DrawerHeader title="Edit issue" onOpenChange={setEditOpen} hasDivider />}
-            >
-              <LayoutContent>
-                <TitleBodyForm
-                  key={issue.updatedAt}
-                  idPrefix="edit-issue"
-                  titleLabel="Title"
-                  bodyLabel="Body"
-                  bodyRows={10}
-                  submitLabel="Save issue"
-                  fallbackError="Could not save the issue."
-                  initialTitle={issue.title}
-                  initialBody={issue.body}
-                  mentionIssues={projectIssues}
-                  onSubmit={async ({ title, body }) => {
-                    const updated = await updateIssue(issue.id, { title, body });
-                    queryClient.setQueryData<IssueDetail>(issueQuery(issue.id).queryKey, (old) =>
-                      old === undefined ? old : { ...old, ...updated },
-                    );
-                    await Promise.all([
-                      queryClient.invalidateQueries({
-                        queryKey: issuesQuery(issue.projectId).queryKey,
-                      }),
-                      queryClient.invalidateQueries({
-                        queryKey: projectActivityQuery(issue.projectId).queryKey,
-                      }),
-                    ]);
-                    setEditOpen(false);
-                    toast({ body: "Issue updated." });
-                  }}
-                />
-              </LayoutContent>
-            </Layout>
-          </Drawer>
-
           <AlertDialog
             isOpen={confirmTrashOpen}
             onOpenChange={setConfirmTrashOpen}
@@ -1106,7 +1116,7 @@ function CommentForm({
           placeholder="Write a comment… Type # to reference an issue"
           value={body}
           onChange={setBody}
-          rows={4}
+          rows={7}
           required
           issues={issues}
         />

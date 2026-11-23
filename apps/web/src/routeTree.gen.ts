@@ -31,6 +31,7 @@ import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$
 import { Route as HistoryProjectProjectIdRouteImport } from './routes/history.project.$projectId'
 import { Route as HistoryWorkspaceWorkspaceIdRouteImport } from './routes/history.workspace.$workspaceId'
 import { Route as ProjectsProjectIdIssuesNewRouteImport } from './routes/projects.$projectId_.issues.new'
+import { Route as ProjectsProjectIdKnowledgeNewRouteImport } from './routes/projects.$projectId_.knowledge.new'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -144,6 +145,12 @@ const ProjectsProjectIdIssuesNewRoute =
     path: '/projects/$projectId/issues/new',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ProjectsProjectIdKnowledgeNewRoute =
+  ProjectsProjectIdKnowledgeNewRouteImport.update({
+    id: '/projects/$projectId_/knowledge/new',
+    path: '/projects/$projectId/knowledge/new',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -168,6 +175,7 @@ export interface FileRoutesByFullPath {
   '/history/project/$projectId': typeof HistoryProjectProjectIdRoute
   '/history/workspace/$workspaceId': typeof HistoryWorkspaceWorkspaceIdRoute
   '/projects/$projectId/issues/new': typeof ProjectsProjectIdIssuesNewRoute
+  '/projects/$projectId/knowledge/new': typeof ProjectsProjectIdKnowledgeNewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -192,6 +200,7 @@ export interface FileRoutesByTo {
   '/history/project/$projectId': typeof HistoryProjectProjectIdRoute
   '/history/workspace/$workspaceId': typeof HistoryWorkspaceWorkspaceIdRoute
   '/projects/$projectId/issues/new': typeof ProjectsProjectIdIssuesNewRoute
+  '/projects/$projectId/knowledge/new': typeof ProjectsProjectIdKnowledgeNewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -217,6 +226,7 @@ export interface FileRoutesById {
   '/history/project/$projectId': typeof HistoryProjectProjectIdRoute
   '/history/workspace/$workspaceId': typeof HistoryWorkspaceWorkspaceIdRoute
   '/projects/$projectId_/issues/new': typeof ProjectsProjectIdIssuesNewRoute
+  '/projects/$projectId_/knowledge/new': typeof ProjectsProjectIdKnowledgeNewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -243,6 +253,7 @@ export interface FileRouteTypes {
     | '/history/project/$projectId'
     | '/history/workspace/$workspaceId'
     | '/projects/$projectId/issues/new'
+    | '/projects/$projectId/knowledge/new'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -267,6 +278,7 @@ export interface FileRouteTypes {
     | '/history/project/$projectId'
     | '/history/workspace/$workspaceId'
     | '/projects/$projectId/issues/new'
+    | '/projects/$projectId/knowledge/new'
   id:
     | '__root__'
     | '/'
@@ -291,6 +303,7 @@ export interface FileRouteTypes {
     | '/history/project/$projectId'
     | '/history/workspace/$workspaceId'
     | '/projects/$projectId_/issues/new'
+    | '/projects/$projectId_/knowledge/new'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -316,6 +329,7 @@ export interface RootRouteChildren {
   HistoryProjectProjectIdRoute: typeof HistoryProjectProjectIdRoute
   HistoryWorkspaceWorkspaceIdRoute: typeof HistoryWorkspaceWorkspaceIdRoute
   ProjectsProjectIdIssuesNewRoute: typeof ProjectsProjectIdIssuesNewRoute
+  ProjectsProjectIdKnowledgeNewRoute: typeof ProjectsProjectIdKnowledgeNewRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -474,6 +488,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsProjectIdIssuesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/$projectId_/knowledge/new': {
+      id: '/projects/$projectId_/knowledge/new'
+      path: '/projects/$projectId/knowledge/new'
+      fullPath: '/projects/$projectId/knowledge/new'
+      preLoaderRoute: typeof ProjectsProjectIdKnowledgeNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -500,6 +521,7 @@ const rootRouteChildren: RootRouteChildren = {
   HistoryProjectProjectIdRoute: HistoryProjectProjectIdRoute,
   HistoryWorkspaceWorkspaceIdRoute: HistoryWorkspaceWorkspaceIdRoute,
   ProjectsProjectIdIssuesNewRoute: ProjectsProjectIdIssuesNewRoute,
+  ProjectsProjectIdKnowledgeNewRoute: ProjectsProjectIdKnowledgeNewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -210,13 +210,17 @@ test("runs the complete cycle in the browser", async ({ page }) => {
   await expect(page.locator("[data-issue-status]")).toHaveAttribute("data-issue-status", "todo");
 
   await page.getByRole("button", { name: "Edit" }).first().click();
+  await expect(page.locator("[data-issue-editor]")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Edit issue" })).toHaveCount(0);
+  await expect(page.locator("#edit-issue-body")).toHaveAttribute("rows", "15");
   await page.getByLabel("Title").fill("Browser issue edited");
   await page.getByLabel("Body").fill("Edited in the browser.");
   await page.getByRole("button", { name: "Save issue" }).click();
-  await expect(page.getByRole("dialog", { name: "Edit issue" })).toBeHidden();
+  await expect(page.locator("[data-issue-editor]")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Browser issue edited" })).toBeVisible();
   await expect(page.locator("[data-issue-body]")).toHaveText("Edited in the browser.");
 
+  await expect(page.locator("#issue-comment")).toHaveAttribute("rows", "7");
   await page.getByLabel("Comment").fill("A browser comment.");
   await page.getByRole("button", { name: "Add comment" }).click();
   await expect(page.getByText("A browser comment.")).toBeVisible();
@@ -230,7 +234,11 @@ test("runs the complete cycle in the browser", async ({ page }) => {
 
   await page.getByRole("link", { name: "Back to project" }).click();
   await page.getByRole("tab", { name: /Knowledge/ }).click();
-  await page.getByRole("button", { name: "New document" }).first().click();
+  await page.locator("[data-new-knowledge]").first().click();
+  await expect(page).toHaveURL(/\/projects\/[^/]+\/knowledge\/new$/);
+  await expect(page.getByRole("heading", { name: "New knowledge document" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "New knowledge document" })).toHaveCount(0);
+  await expect(page.locator("#new-knowledge-body")).toHaveAttribute("rows", "15");
   await page.getByLabel("Knowledge title").fill("Browser knowledge");
   await page.getByLabel("Markdown").fill("# Notes\n\nCreated in the browser.");
   await page.getByRole("button", { name: "Create knowledge" }).click();
@@ -239,9 +247,13 @@ test("runs the complete cycle in the browser", async ({ page }) => {
   await expect(page.locator("[data-knowledge-body]")).toContainText("Created in the browser.");
 
   await page.getByRole("button", { name: "Edit" }).click();
+  await expect(page.locator("[data-knowledge-editor]")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Edit knowledge" })).toHaveCount(0);
+  await expect(page.locator("#edit-knowledge-body")).toHaveAttribute("rows", "15");
   await page.getByLabel("Title").fill("Browser knowledge edited");
   await page.getByLabel("Markdown").fill("## Edited\n\nStill **Markdown**.");
   await page.getByRole("button", { name: "Save knowledge" }).click();
+  await expect(page.locator("[data-knowledge-editor]")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Browser knowledge edited" })).toBeVisible();
   await expect(page.locator("[data-knowledge-body]")).toContainText("Edited");
   await expect(page.locator("[data-knowledge-body]")).toContainText("Still Markdown.");

@@ -1,12 +1,9 @@
 import { Button } from "@astryxdesign/core/Button";
-import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
-import type { Issue, KnowledgeEntry } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -39,7 +36,9 @@ function KnowledgePage() {
   const { data: entry } = useSuspenseQuery(knowledgeEntryQuery(entryId));
   const { data: project } = useSuspenseQuery(projectQuery(entry.projectId));
   const { data: projectIssues = [] } = useQuery(issuesQuery(entry.projectId));
-  const [editOpen, setEditOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [isEditing, setIsEditing] = useState(false);
   const canContribute = project.accessLevel !== "read";
 
   return (
@@ -68,18 +67,61 @@ function KnowledgePage() {
           </>
         }
         actions={
-          canContribute ? (
+          canContribute && !isEditing ? (
             <Button
               type="button"
               size="sm"
               variant="secondary"
               label="Edit"
-              onClick={() => setEditOpen(true)}
+              data-knowledge-edit=""
+              onClick={() => setIsEditing(true)}
             />
           ) : undefined
         }
       />
-      {entry.body === "" ? (
+      {isEditing ? (
+        <Section padding={4}>
+          <Stack gap={2} data-knowledge-editor="">
+            <Text as="p" display="block" type="supporting">
+              Supports GitHub-flavored Markdown, Mermaid diagrams, and #issue references.
+            </Text>
+            <TitleBodyForm
+              key={entry.updatedAt}
+              idPrefix="edit-knowledge"
+              titleLabel="Title"
+              bodyLabel="Markdown"
+              bodyRows={15}
+              submitLabel="Save knowledge"
+              fallbackError="Could not save the entry."
+              initialTitle={entry.title}
+              initialBody={entry.body}
+              mentionIssues={projectIssues}
+              secondaryAction={
+                <Button
+                  type="button"
+                  variant="secondary"
+                  label="Cancel"
+                  onClick={() => setIsEditing(false)}
+                />
+              }
+              onSubmit={async ({ title, body }) => {
+                const updated = await updateKnowledgeEntry(entry.id, { title, body });
+                queryClient.setQueryData(knowledgeEntryQuery(entry.id).queryKey, updated);
+                await Promise.all([
+                  queryClient.invalidateQueries({
+                    queryKey: knowledgeEntriesQuery(entry.projectId).queryKey,
+                  }),
+                  queryClient.invalidateQueries({
+                    queryKey: projectActivityQuery(entry.projectId).queryKey,
+                  }),
+                ]);
+                setIsEditing(false);
+                toast({ body: "Knowledge document saved." });
+              }}
+            />
+          </Stack>
+        </Section>
+      ) : entry.body === "" ? (
         <Section padding={4}>
           <EmptyState
             title="No content yet"
@@ -93,7 +135,7 @@ function KnowledgePage() {
                   variant="primary"
                   size="sm"
                   label="Add content"
-                  onClick={() => setEditOpen(true)}
+                  onClick={() => setIsEditing(true)}
                 />
               ) : undefined
             }
@@ -106,82 +148,6 @@ function KnowledgePage() {
           </Stack>
         </Section>
       )}
-      {canContribute && (
-        <Drawer
-          isOpen={editOpen}
-          onOpenChange={setEditOpen}
-          side="end"
-          width="36rem"
-          label="Edit knowledge"
-        >
-          <Layout
-            height="fill"
-            header={
-              <DrawerHeader
-                title="Edit knowledge"
-                subtitle={project.name}
-                onOpenChange={setEditOpen}
-                hasDivider
-              />
-            }
-          >
-            <LayoutContent>
-              <EditKnowledgeForm
-                key={entry.updatedAt}
-                entry={entry}
-                issues={projectIssues}
-                onSaved={() => setEditOpen(false)}
-              />
-            </LayoutContent>
-          </Layout>
-        </Drawer>
-      )}
-    </Stack>
-  );
-}
-
-function EditKnowledgeForm({
-  entry,
-  issues,
-  onSaved,
-}: {
-  entry: KnowledgeEntry;
-  issues: Issue[];
-  onSaved: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const toast = useToast();
-
-  return (
-    <Stack gap={2}>
-      <Text as="p" display="block" type="supporting">
-        Supports GitHub-flavored Markdown, Mermaid diagrams, and #issue references.
-      </Text>
-      <TitleBodyForm
-        idPrefix="edit-knowledge"
-        titleLabel="Title"
-        bodyLabel="Markdown"
-        bodyRows={14}
-        submitLabel="Save knowledge"
-        fallbackError="Could not save the entry."
-        initialTitle={entry.title}
-        initialBody={entry.body}
-        mentionIssues={issues}
-        onSubmit={async ({ title, body }) => {
-          const updated = await updateKnowledgeEntry(entry.id, { title, body });
-          queryClient.setQueryData(knowledgeEntryQuery(entry.id).queryKey, updated);
-          await Promise.all([
-            queryClient.invalidateQueries({
-              queryKey: knowledgeEntriesQuery(entry.projectId).queryKey,
-            }),
-            queryClient.invalidateQueries({
-              queryKey: projectActivityQuery(entry.projectId).queryKey,
-            }),
-          ]);
-          onSaved();
-          toast({ body: "Knowledge document saved." });
-        }}
-      />
     </Stack>
   );
 }

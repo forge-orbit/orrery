@@ -1,9 +1,10 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Stack } from "@astryxdesign/core/Stack";
 import type { Issue } from "@orrery/contract";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useState } from "react";
 import { TextField } from "../../lib/fields.tsx";
 import { IssueMentionTextArea } from "./IssueMentionTextArea.tsx";
@@ -19,6 +20,10 @@ export interface TitleBodyFormProps {
   initialBody?: string;
   resetOnSuccess?: boolean;
   mentionIssues?: readonly Issue[];
+  /** When set, renders a "Create more" checkbox on creation forms. */
+  createMore?: { value: boolean; onChange: (value: boolean) => void };
+  /** An extra action, such as Cancel, shown beside the submit button. */
+  secondaryAction?: ReactNode;
   onSubmit: (values: { title: string; body: string }) => Promise<void>;
 }
 
@@ -33,6 +38,8 @@ export function TitleBodyForm({
   initialBody = "",
   resetOnSuccess = false,
   mentionIssues,
+  createMore,
+  secondaryAction,
   onSubmit,
 }: TitleBodyFormProps) {
   const [title, setTitle] = useState(initialTitle);
@@ -80,8 +87,16 @@ export function TitleBodyForm({
           rows={bodyRows}
           {...(mentionIssues !== undefined ? { issues: mentionIssues } : {})}
         />
+        {createMore !== undefined && (
+          <CheckboxInput
+            label="Create more"
+            description="Keep this page open and clear the fields for another entry."
+            value={createMore.value}
+            onChange={createMore.onChange}
+          />
+        )}
         {error !== undefined && <Banner status="error" role="alert" title={error} />}
-        <Stack direction="horizontal" hAlign="start">
+        <Stack direction="horizontal" hAlign="start" gap={2}>
           <Button
             type="submit"
             isDisabled={submitting}
@@ -89,6 +104,7 @@ export function TitleBodyForm({
             label={submitLabel}
             variant="primary"
           />
+          {secondaryAction}
         </Stack>
       </FormLayout>
     </form>
