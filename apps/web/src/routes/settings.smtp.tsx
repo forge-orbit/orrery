@@ -122,6 +122,7 @@ function SmtpForm({ settings }: { settings: SmtpSettingsResponse }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     if (invalidPortEntry || port === null || port < 1 || port > 65535) {
       setStatus(undefined);
       setError("Enter a port between 1 and 65535.");
@@ -309,6 +310,7 @@ function TestAndVerification({
 
   async function onVerify(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (verifying) return;
     setVerifying(true);
     setVerifyError(undefined);
     try {

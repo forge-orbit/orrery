@@ -22,7 +22,12 @@ import {
 import { createElement } from "react";
 import markDark from "../../../../assets/orrery-mark-dark.svg";
 import markLight from "../../../../assets/orrery-mark.svg";
-import { sessionQuery, setupStatusQuery, signOut } from "../features/accounts/index.ts";
+import {
+  type Session,
+  sessionQuery,
+  setupStatusQuery,
+  signOut,
+} from "../features/accounts/index.ts";
 import { installationInvitationsQuery } from "../features/invitations/index.ts";
 import { notificationUnreadCountQuery } from "../features/notifications/index.ts";
 import { workspacesQuery } from "../features/workspaces/index.ts";
@@ -625,10 +630,13 @@ function SidebarFooter({
   const logout = useMutation({
     mutationFn: signOut,
     onSuccess: async () => {
-      queryClient.clear();
+      // Mark the cached session signed out before navigating; clearing the cache
+      // now would make the sidebar and current route refetch as the session ends.
+      queryClient.setQueryData<Session>(sessionQuery.queryKey, { signedIn: false });
       onNavigate?.();
       toast({ body: "Signed out." });
       await navigate({ to: "/signin", replace: true });
+      queryClient.clear();
     },
     onError: (error) => {
       toast({ body: error.message, type: "error" });
