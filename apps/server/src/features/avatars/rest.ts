@@ -36,6 +36,7 @@ const putAvatar = createRoute({
     400: problem("The upload is missing or is not a valid image"),
     401: problem("No valid session"),
     403: problem("The account cannot change its photo"),
+    409: problem("The upload expired before it could be activated"),
     413: problem("The file is larger than 5 MB"),
     415: problem("The file type is not supported"),
   },
@@ -98,6 +99,7 @@ const statusFor = {
   payload_too_large: 413,
   avatar_not_found: 404,
   avatar_not_visible: 404,
+  avatar_upload_expired: 409,
 } as const satisfies Record<AvatarsErrorKind, ContentfulStatusCode>;
 
 function isKind<K extends readonly AvatarsErrorKind[]>(
@@ -126,6 +128,7 @@ const uploadKinds = [
   "unsupported_image_type",
   "invalid_image",
   "payload_too_large",
+  "avatar_upload_expired",
 ] as const;
 const removeKinds = ["not_signed_in", "account_deactivated"] as const;
 const readKinds = ["not_signed_in", "avatar_not_found", "avatar_not_visible"] as const;

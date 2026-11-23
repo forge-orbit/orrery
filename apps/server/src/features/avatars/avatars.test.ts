@@ -89,6 +89,15 @@ function failingPutStore(inner: ObjectStore, onPut?: (key: string) => void): Obj
   };
 }
 
+/** A one-shot gate for pausing one side of a race until the other side reaches a point. */
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 /** A backend that runs a hook between reserving the row and writing the bytes. */
 function putHookStore(inner: ObjectStore, hook: (key: string) => Promise<void>): ObjectStore {
   return {
@@ -241,6 +250,12 @@ describe("avatars", () => {
 
   const fetchAvatar = (humanId: string, query = "", session = adminCookie) =>
     app.request(`/api/humans/${humanId}/avatar${query}`, { headers: { cookie: session } });
+
+  const backdate = (key: string) =>
+    database.db
+      .update(storedObjects)
+      .set({ createdAt: sql`statement_timestamp() - interval '20 minutes'` })
+      .where(eq(storedObjects.key, key));
 
   it("accepts JPEG, PNG and WebP and normalizes each to a 256x256 WebP blob", async () => {
     for (const [format, type, filename] of [
@@ -849,6 +864,200 @@ describe("avatars", () => {
     expect(after.status).toBe(200);
     expect(after.headers.get("etag")).toBe(etag);
     expect(await database.db.select().from(storedObjects)).toHaveLength(1);
+  });
+
+  it("keeps an activated avatar's blob when the sweep claims its stale pending row before deleting the blob", async () => {
+    const putEntered = deferred<string>();
+    const allowPut = deferred();
+    const deleteEntered = deferred<string>();
+    const allowDelete = deferred();
+    let deleteCalls = 0;
+    install({
+      ...store,
+      async put(key, data, contentType) {
+        const meta = await store.put(key, data, contentType);
+        putEntered.resolve(key);
+        await allowPut.promise;
+        return meta;
+      },
+      async delete(key) {
+        deleteCalls++;
+        deleteEntered.resolve(key);
+        await allowDelete.promise;
+        return store.delete(key);
+      },
+    });
+
+    const uploadPromise = upload(multipart(await image("png"), "race.png", "image/png"));
+    const key = await putEntered.promise;
+    await backdate(key);
+
+    const sweepPromise = avatars.sweepOrphans();
+    await deleteEntered.promise;
+    // The sweep claimed the row before touching the blob.
+    const [claimed] = await database.db
+      .select()
+      .from(storedObjects)
+      .where(eq(storedObjects.key, key));
+    expect(claimed).toMatchObject({ status: "deleted" });
+    expect(claimed?.deletedAt).not.toBeNull();
+
+    // The upload now tries to activate the row the sweep already claimed.
+    allowPut.resolve();
+    const res = await uploadPromise;
+    expect(res.status).toBe(409);
+    expect(Problem.parse(await res.json())).toMatchObject({
+      status: 409,
+      code: "avatar_upload_expired",
+    });
+
+    allowDelete.resolve();
+    expect(await sweepPromise).toBe(1);
+    // The claimed row is selected once, so its blob is deleted exactly once.
+    expect(deleteCalls).toBe(1);
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+    expect(human?.avatarObjectId).toBeNull();
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+    expect(await store.head(key)).toBeNull();
+    expect((await fetchAvatar(adminId)).status).toBe(404);
+  });
+
+  it("refuses activation after the sweep deleted the blob but before it removed the row", async () => {
+    const putEntered = deferred<string>();
+    const allowPut = deferred();
+    const deleteEntered = deferred<string>();
+    const allowDelete = deferred();
+    install({
+      ...store,
+      async put(key, data, contentType) {
+        const meta = await store.put(key, data, contentType);
+        putEntered.resolve(key);
+        await allowPut.promise;
+        return meta;
+      },
+      async delete(key) {
+        // The blob is gone while the claimed row is still awaiting db.delete().
+        const deleted = await store.delete(key);
+        deleteEntered.resolve(key);
+        await allowDelete.promise;
+        return deleted;
+      },
+    });
+
+    const uploadPromise = upload(multipart(await image("png"), "race.png", "image/png"));
+    const key = await putEntered.promise;
+    await backdate(key);
+
+    const sweepPromise = avatars.sweepOrphans();
+    await deleteEntered.promise;
+    expect(await store.head(key)).toBeNull();
+
+    allowPut.resolve();
+    const res = await uploadPromise;
+    expect(res.status).toBe(409);
+    expect(Problem.parse(await res.json())).toMatchObject({
+      status: 409,
+      code: "avatar_upload_expired",
+    });
+
+    allowDelete.resolve();
+    expect(await sweepPromise).toBe(1);
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+    expect(human?.avatarObjectId).toBeNull();
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+    expect((await fetchAvatar(adminId)).status).toBe(404);
+  });
+
+  it("answers a clean Problem, not a 23503 crash, when the sweep finishes before activation", async () => {
+    const putEntered = deferred<string>();
+    const allowPut = deferred();
+    install({
+      ...store,
+      async put(key, data, contentType) {
+        const meta = await store.put(key, data, contentType);
+        putEntered.resolve(key);
+        await allowPut.promise;
+        return meta;
+      },
+    });
+
+    const uploadPromise = upload(multipart(await image("png"), "late.png", "image/png"));
+    const key = await putEntered.promise;
+    await backdate(key);
+    expect(await avatars.sweepOrphans()).toBe(1);
+
+    allowPut.resolve();
+    const res = await uploadPromise;
+    expect(res.status).toBe(409);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(Problem.parse(await res.json())).toMatchObject({
+      status: 409,
+      code: "avatar_upload_expired",
+    });
+
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+    const [human] = await database.db.select().from(humans).where(eq(humans.id, adminId));
+    expect(human?.avatarObjectId).toBeNull();
+    expect(await store.head(key)).toBeNull();
+  });
+
+  it("counts only rows actually reclaimed when a backend delete fails", async () => {
+    const bytes = Buffer.from("pending-blob");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const failingKey = `avatars/${adminId}/fails.webp`;
+    const okKey = `avatars/${adminId}/works.webp`;
+    for (const key of [failingKey, okKey]) {
+      await store.put(key, bytes, "image/webp");
+      await database.db.insert(storedObjects).values({
+        id: randomUUID(),
+        key,
+        status: "pending",
+        contentType: "image/webp",
+        byteSize: bytes.byteLength,
+        sha256,
+      });
+    }
+    await database.db.execute(
+      sql`update stored_objects set created_at = statement_timestamp() - interval '16 minutes'`,
+    );
+
+    install({
+      ...store,
+      async delete(key) {
+        if (key === failingKey) throw new Error("injected blob delete failure");
+        return store.delete(key);
+      },
+    });
+    expect(await avatars.sweepOrphans()).toBe(1);
+
+    const rows = await database.db.select().from(storedObjects);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ key: failingKey, status: "deleted" });
+    expect(rows[0]?.deletedAt).not.toBeNull();
+    expect(await store.head(failingKey)).not.toBeNull();
+    expect(await store.head(okKey)).toBeNull();
+
+    install(store);
+    expect(await avatars.sweepOrphans()).toBe(1);
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+  });
+
+  it("never claims an active avatar row even when its created_at is old", async () => {
+    const uploaded = await upload(multipart(await image("png"), "old.png", "image/png"));
+    const objectId = SessionResponse.parse(await uploaded.json()).avatarUrl?.split("v=")[1] ?? "";
+    const key = avatarKey(adminId, objectId);
+    await database.db.execute(
+      sql`update stored_objects set created_at = statement_timestamp() - interval '16 minutes' where key = ${key}`,
+    );
+
+    expect(await avatars.sweepOrphans()).toBe(0);
+    const [row] = await database.db
+      .select()
+      .from(storedObjects)
+      .where(eq(storedObjects.id, objectId));
+    expect(row).toMatchObject({ status: "active", deletedAt: null });
+    expect(await store.head(key)).not.toBeNull();
+    expect((await fetchAvatar(adminId, `?v=${objectId}`)).status).toBe(200);
   });
 
   it("reports storage health through /readyz alongside Postgres", async () => {

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { File } from "node:buffer";
 import { avatarUrlFor } from "@orrery/contract";
-import { and, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import sharp from "sharp";
 import {
@@ -26,7 +26,8 @@ export type AvatarsErrorKind =
   | "invalid_image"
   | "payload_too_large"
   | "avatar_not_found"
-  | "avatar_not_visible";
+  | "avatar_not_visible"
+  | "avatar_upload_expired";
 
 const messages: Record<AvatarsErrorKind, string> = {
   not_signed_in: "Sign in to manage your profile photo.",
@@ -37,6 +38,7 @@ const messages: Record<AvatarsErrorKind, string> = {
   payload_too_large: "The image must be 5 MB or smaller.",
   avatar_not_found: "This human has no profile photo.",
   avatar_not_visible: "No such profile photo.",
+  avatar_upload_expired: "This upload expired before it could be activated. Try again.",
 };
 
 export class AvatarsError extends Error {
@@ -141,13 +143,13 @@ export function avatarKey(humanId: string, objectId: string): string {
 type ObjectRow = { id: string; key: string };
 
 const isDeleted = sql`${storedObjects.status} = 'deleted'`;
-/** A `pending` row older than 15 minutes is assumed to belong to a crashed upload. */
-const isOrphan = sql`${isDeleted} or (${storedObjects.status} = 'pending' and ${storedObjects.createdAt} < statement_timestamp() - interval '15 minutes')`;
 
 /**
  * Delete the blob first and only hard-delete its metadata row once the blob is
  * gone. A failed backend delete leaves the row for the next sweep, so a transient
  * storage error can never turn into a lost audit trail or an untracked blob.
+ * Callers must claim the row (move it out of `pending`) before calling this, so
+ * an in-flight upload can never activate a row whose blob is being removed.
  */
 async function discardObject(
   db: PostgresJsDatabase,
@@ -161,11 +163,14 @@ async function discardObject(
     return false;
   }
   try {
-    await db.delete(storedObjects).where(and(eq(storedObjects.id, row.id), stillEligible));
+    const deleted = await db
+      .delete(storedObjects)
+      .where(and(eq(storedObjects.id, row.id), stillEligible))
+      .returning({ id: storedObjects.id });
+    return deleted.length > 0;
   } catch {
     return false;
   }
-  return true;
 }
 
 function etagMatches(ifNoneMatch: string | undefined, etag: string): boolean {
@@ -226,10 +231,18 @@ export function createAvatarsService({ db, store }: AvatarsDeps): AvatarsService
             throw new AvatarsError("account_deactivated");
           }
 
-          await tx
+          const [activated] = await tx
             .update(storedObjects)
             .set({ status: "active", deletedAt: null })
-            .where(eq(storedObjects.id, objectId));
+            .where(and(eq(storedObjects.id, objectId), eq(storedObjects.status, "pending")))
+            .returning({ id: storedObjects.id });
+          if (activated === undefined) {
+            // The sweep claimed (or removed) the row after store.put. Activating
+            // anyway would un-delete a claimed row or point the human at a row
+            // whose blob the sweep is deleting, and a hard-deleted row would be
+            // an unhandled 23503. Lose the race cleanly instead.
+            throw new AvatarsError("avatar_upload_expired");
+          }
           await tx.update(humans).set({ avatarObjectId: objectId }).where(eq(humans.id, humanId));
           if (human.avatarObjectId !== null && human.avatarObjectId !== objectId) {
             const [old] = await tx
@@ -288,14 +301,30 @@ export function createAvatarsService({ db, store }: AvatarsDeps): AvatarsService
     },
 
     async sweepOrphans() {
+      // Claim stale pending rows before touching any blob. This is the other
+      // half of upload()'s pending-only activation: exactly one of the two can
+      // win, so an avatar that goes live keeps its blob and a claimed row is
+      // never silently resurrected by a delayed upload.
+      await db
+        .update(storedObjects)
+        .set({ status: "deleted", deletedAt: sql`now()` })
+        .where(
+          and(
+            eq(storedObjects.status, "pending"),
+            lt(storedObjects.createdAt, sql`statement_timestamp() - interval '15 minutes'`),
+          ),
+        );
+      // The claim above moves stale pending rows into the deleted set, so one
+      // SELECT covers both them and rows already marked deleted by a failed
+      // immediate reclaim. Each row is handed to discardObject exactly once.
       const rows = await db
         .select({ id: storedObjects.id, key: storedObjects.key })
         .from(storedObjects)
-        .where(isOrphan)
+        .where(eq(storedObjects.status, "deleted"))
         .orderBy(storedObjects.id);
       let reclaimed = 0;
       for (const row of rows) {
-        if (await discardObject(db, store, row, isOrphan)) reclaimed++;
+        if (await discardObject(db, store, row, isDeleted)) reclaimed++;
       }
       return reclaimed;
     },

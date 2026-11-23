@@ -4989,6 +4989,16 @@
               }
             }
           },
+          "409": {
+            "description": "The upload expired before it could be activated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "413": {
             "description": "The file is larger than 5 MB",
             "content": {

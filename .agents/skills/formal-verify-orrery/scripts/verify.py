@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Orrery Formal Verification Model Checker (M1-M18).
+Orrery Formal Verification Model Checker (M1-M36).
 
 Extracts critical concurrency, locking, and state-transition guards directly from
 Orrery's server source and SQL migrations, then runs an exhaustive BFS finite-state
@@ -2549,6 +2549,55 @@ def extract_code_facts() -> dict[str, Any]:
         and "if (pruning) return;" in wh_index
     )
 
+    # M36: avatar upload / orphan-sweep claim-first lifecycle. Every guard is read
+    # from the service, its background scheduler, and the Problem route, so dropping
+    # a claim, a status predicate or the overlap guard flips the bounded model.
+    av_src = read_text("apps/server/src/features/avatars/service.ts")
+    av_index_src = read_text("apps/server/src/features/avatars/index.ts")
+    av_rest_src = read_text("apps/server/src/features/avatars/rest.ts")
+    av_discard_fn = slice_between(av_src, "async function discardObject(", "function etagMatches(")
+    av_upload_fn = slice_between(av_src, "async upload(humanId, data)", "async remove(humanId)")
+    av_sweep_fn = slice_between(av_src, "async sweepOrphans()", "async read(actor,")
+    av_activate = slice_between(av_upload_fn, ".update(storedObjects)", "await tx.update(humans)")
+    av_claim = slice_between(av_sweep_fn, ".update(storedObjects)", "const rows = await db")
+    av_sweeper = slice_between(av_index_src, "startBackgroundTasks: () => {", "\n  };\n}")
+
+    av_claim_at = av_sweep_fn.find(".update(storedObjects)")
+    av_discard_at = av_sweep_fn.find("discardObject(db, store")
+    av_blob_delete_at = av_discard_fn.find("await store.delete(row.key)")
+    av_row_delete_at = av_discard_fn.find(".delete(storedObjects)")
+    m36_sweep_claims_before_delete = (
+        av_claim_at >= 0
+        and av_discard_at > av_claim_at
+        and av_blob_delete_at >= 0
+        and av_row_delete_at > av_blob_delete_at
+        and 'status: "deleted"' in av_claim
+        and "deletedAt: sql`now()`" in av_claim
+        and 'eq(storedObjects.status, "pending")' in av_claim
+        and "statement_timestamp() - interval '15 minutes'" in av_claim
+        and "where(eq(storedObjects.status, \"deleted\"))" in av_sweep_fn
+        and ".orderBy(storedObjects.id)" in av_sweep_fn
+    )
+    m36_pending_only_activation = (
+        'eq(storedObjects.status, "pending")' in av_activate
+        and "returning({ id: storedObjects.id })" in av_activate
+    )
+    m36_zero_row_clean_error = (
+        "activated === undefined" in av_activate
+        and 'throw new AvatarsError("avatar_upload_expired")' in av_activate
+        and 'avatar_upload_expired: 409' in av_rest_src
+    )
+    m36_discard_returning_count = (
+        "returning({ id: storedObjects.id })" in av_discard_fn
+        and "deleted.length > 0" in av_discard_fn
+    )
+    m36_overlap_guard = (
+        "let sweeping = false" in av_sweeper
+        and "if (sweeping) return;" in av_sweeper
+        and ".finally(() => {" in av_sweeper
+        and "sweeping = false" in av_sweeper
+    )
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -2938,6 +2987,11 @@ def extract_code_facts() -> dict[str, Any]:
         "m35_ssrf_dns_pinned": m35_ssrf_dns_pinned,
         "m35_atomic_outbox_and_single_enqueue": m35_atomic_outbox_and_single_enqueue,
         "m35_worker_skip_locked_and_circuit_breaker": m35_worker_skip_locked_and_circuit_breaker,
+        "m36_sweep_claims_before_delete": m36_sweep_claims_before_delete,
+        "m36_pending_only_activation": m36_pending_only_activation,
+        "m36_zero_row_clean_error": m36_zero_row_clean_error,
+        "m36_discard_returning_count": m36_discard_returning_count,
+        "m36_overlap_guard": m36_overlap_guard,
     }
 
 
@@ -7552,6 +7606,183 @@ def check_m35(facts: dict[str, bool]) -> CheckResult:
     )
 
 
+def check_m36(facts: dict[str, bool]) -> CheckResult:
+    """Avatar upload racing the orphan sweep; the claim-first compare-and-swap.
+
+    State: (up, sweep, row, blob, human, stale, reported, violations)
+      up:    idle | reserved | put_done | committed | expired | fk_error
+      sweep: idle | selected | blob_deleted | delete_failed | done
+      row:   absent | pending | active | deleted
+    """
+    g = {
+        "m36_sweep_claims_before_delete": facts["m36_sweep_claims_before_delete"],
+        "m36_pending_only_activation": facts["m36_pending_only_activation"],
+        "m36_zero_row_clean_error": facts["m36_zero_row_clean_error"],
+        "m36_discard_returning_count": facts["m36_discard_returning_count"],
+        "m36_overlap_guard": facts["m36_overlap_guard"],
+    }
+    files = [
+        "apps/server/src/features/avatars/service.ts",
+        "apps/server/src/features/avatars/index.ts",
+        "apps/server/src/features/avatars/rest.ts",
+    ]
+    # (up, sweep, row, blob, human, stale, reported, violations)
+    init = ("idle", "idle", "absent", False, False, False, False, frozenset())
+
+    def bad(v: frozenset[str], name: str) -> frozenset[str]:
+        return v | {name}
+
+    def run(check_id: str) -> CheckResult:
+        def reserve(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if up == "idle":
+                return ("reserved", sw, "pending", False, False, False, False, v)
+            return state
+
+        def put_blob(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if up == "reserved":
+                return ("put_done", sw, row, True, human, stale, False, v)
+            return state
+
+        def clock(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if row == "pending" and not stale:
+                return (up, sw, row, blob, human, True, reported, v)
+            return state
+
+        def activate(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if up != "put_done":
+                return state
+            if row == "pending":
+                # Compare-and-swap wins: this is the live avatar and its blob stays.
+                return ("committed", sw, "active", blob, True, stale, reported, v)
+            # The sweep claimed or hard-deleted the row. Without the status guard
+            # the unconditional UPDATE un-deletes a claimed row; otherwise the
+            # guarded UPDATE matches nothing.
+            if not g["m36_pending_only_activation"] and row == "deleted":
+                return ("committed", sw, "active", blob, True, stale, reported, v)
+            if g["m36_zero_row_clean_error"]:
+                return ("expired", sw, row, blob, False, stale, reported, v)
+            # No zero-row check: humans.avatar_object_id is written anyway. An
+            # absent row raises the unhandled 23503 from the repro.
+            if row == "absent":
+                v = bad(v, "unhandled_fk_23503")
+            return ("fk_error", sw, row, blob, True, stale, reported, v)
+
+        def sweep_select(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if sw != "idle":
+                return state
+            if row == "deleted":
+                return (up, "selected", row, blob, human, stale, False, v)
+            if row == "pending" and stale:
+                new_row = "deleted" if g["m36_sweep_claims_before_delete"] else "pending"
+                return (up, "selected", new_row, blob, human, stale, False, v)
+            return state
+
+        def sweep_delete_blob(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if sw == "selected":
+                return (up, "blob_deleted", row, False, human, stale, reported, v)
+            return state
+
+        def sweep_delete_blob_fails(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if sw == "selected":
+                # store.delete threw: discardObject must report no reclamation.
+                reported_next = reported if g["m36_discard_returning_count"] else True
+                return (up, "delete_failed", row, blob, human, stale, reported_next, v)
+            return state
+
+        def sweep_delete_row(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if sw != "blob_deleted":
+                return state
+            if row == "deleted":
+                next_row = "absent"
+            elif not g["m36_sweep_claims_before_delete"] and row == "pending" and stale:
+                next_row = "absent"  # the old isOrphan predicate
+            else:
+                next_row = row
+            reported_next = next_row == "absent" if g["m36_discard_returning_count"] else True
+            return (up, "done", next_row, blob, human, stale, reported_next, v)
+
+        def second_tick(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if sw in ("selected", "blob_deleted", "delete_failed") and not g["m36_overlap_guard"]:
+                return (
+                    up, sw, row, blob, human, stale, reported,
+                    bad(v, "overlapping_sweep_started"),
+                )
+            return state
+
+        actions = [
+            ("upload reserves a pending stored_objects row", reserve),
+            ("upload writes the WebP blob with store.put", put_blob),
+            ("15 minutes pass in DB time", clock),
+            ("upload activates the object and sets humans.avatar_object_id", activate),
+            ("orphan sweep claims the stale pending row before store.delete", sweep_select),
+            ("sweep deletes the claimed blob", sweep_delete_blob),
+            ("blob backend delete fails, leaving the claimed row", sweep_delete_blob_fails),
+            ("sweep hard-deletes the metadata row and reports reclaimed", sweep_delete_row),
+            ("overlapping 60s background tick starts a second sweep", second_tick),
+        ]
+
+        def inv(state):
+            up, sw, row, blob, human, stale, reported, v = state
+            if v:
+                return False, f"avatar lifecycle invariant broken: {sorted(v)[0]}"
+            if human and not blob:
+                return False, "avatar lifecycle invariant broken: active_avatar_has_no_blob"
+            if human and row != "active":
+                return False, "avatar lifecycle invariant broken: avatar_points_at_non_active_row"
+            if up == "fk_error":
+                return False, "avatar lifecycle invariant broken: unhandled_fk_23503"
+            if sw in ("done", "delete_failed") and reported and row != "absent":
+                return False, "avatar lifecycle invariant broken: false_reclaimed_count"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Avatar Upload / Orphan Sweep Claim-First Lifecycle",
+            "An active avatar always keeps its blob: the sweep claims a stale pending row before store.delete, upload activates only a still-pending row and fails cleanly when the claim won, discardObject reports only rows it really deleted, and the background sweep cannot overlap itself",
+            "safety",
+            init,
+            lambda s: [(label, action(s)) for label, action in actions],
+            inv,
+            files,
+        )
+
+    result = run("M36")
+    if result.status != "verified":
+        return result
+
+    # Sensitivity: flip each extracted guard on its own. If any flip still passes,
+    # the model proves nothing and is reported as a failure.
+    for guard in [key for key in g if key.startswith("m36_")]:
+        saved = g[guard]
+        g[guard] = not saved
+        try:
+            naive = run(f"M36-naive-{guard}")
+        finally:
+            g[guard] = saved
+        if naive.status == "verified":
+            return CheckResult(
+                "M36", result.model, result.property_name, result.kind, "violated",
+                result.states_explored, result.transitions_explored,
+                f"model is not sensitive: flipping {guard} left the invariant intact",
+                [f"flip {guard}"], files,
+            )
+    return CheckResult(
+        "M36", result.model, result.property_name, result.kind, "verified",
+        result.states_explored, result.transitions_explored,
+        f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation",
+        [], files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -7591,6 +7822,7 @@ def main() -> None:
         check_m33(facts),
         check_m34(facts),
         check_m35(facts),
+        check_m36(facts),
     ]
 
     if "--json" in sys.argv:
