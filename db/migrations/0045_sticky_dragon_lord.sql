@@ -1,0 +1,1 @@
+ALTER TABLE "project_activity" ADD COLUMN "detail" jsonb;

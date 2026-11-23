@@ -111,6 +111,15 @@ export const issueCommentsQuery = (issueId: string) =>
       ),
   });
 
+export const issueActivityQuery = (issueId: string) =>
+  queryOptions({
+    queryKey: ["issues", issueId, "activity"],
+    queryFn: () =>
+      getJson(`/api/issues/${encodeURIComponent(issueId)}/activity`, (value) =>
+        ProjectActivityResponse.parse(value),
+      ),
+  });
+
 export const projectActivityQuery = (projectId: string) =>
   queryOptions({
     queryKey: ["projects", projectId, "activity"],

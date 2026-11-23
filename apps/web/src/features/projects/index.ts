@@ -30,7 +30,9 @@ export { ResourceLoadError } from "./LoadError.tsx";
 export { ProjectLabels } from "./ProjectLabels.tsx";
 export { completedSubtaskCount, Subtasks, subtasksOf } from "./Subtasks.tsx";
 export { TitleBodyForm } from "./TitleBodyForm.tsx";
+export { buildTimeline, groupLabelEvents, type TimelineEntry } from "./timeline.ts";
 export {
+  issueActivityQuery,
   issueBlockedByQuery,
   issueBlockingQuery,
   issueCommentsQuery,

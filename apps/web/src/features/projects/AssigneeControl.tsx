@@ -9,7 +9,7 @@ import { useState } from "react";
 import { HumanAvatar } from "../../lib/avatar.tsx";
 import { AgentAvatar } from "../../lib/harness.tsx";
 import { updateIssue } from "./commands.ts";
-import { issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
+import { issueActivityQuery, issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
 
 export type AssigneeCandidate = { value: string; label: string; assignee: Assignee };
 
@@ -46,6 +46,7 @@ export function AssigneeControl({
         queryClient.invalidateQueries({
           queryKey: projectActivityQuery(issue.projectId).queryKey,
         }),
+        queryClient.invalidateQueries({ queryKey: issueActivityQuery(issue.id).queryKey }),
       ]);
       toast({ body: chosen ? `Assigned to ${chosen.label}.` : "Assignee cleared." });
     } catch (cause) {

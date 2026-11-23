@@ -2242,40 +2242,6 @@
           "author"
         ]
       },
-      "CreateIssueCommentRequest": {
-        "type": "object",
-        "properties": {
-          "body": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 20000
-          }
-        },
-        "required": [
-          "body"
-        ]
-      },
-      "CreateIssueLinkRequest": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "$ref": "#/components/schemas/IssueLinkUrl"
-          },
-          "title": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "kind": {
-            "$ref": "#/components/schemas/IssueLinkKind"
-          }
-        },
-        "required": [
-          "url",
-          "title",
-          "kind"
-        ]
-      },
       "ProjectActivityResponse": {
         "type": "array",
         "items": {
@@ -2314,6 +2280,9 @@
           },
           "actor": {
             "$ref": "#/components/schemas/Actor"
+          },
+          "detail": {
+            "$ref": "#/components/schemas/IssueActivityDetail"
           }
         },
         "required": [
@@ -2324,7 +2293,8 @@
           "issueId",
           "knowledgeEntryId",
           "createdAt",
-          "actor"
+          "actor",
+          "detail"
         ]
       },
       "ProjectActivityType": {
@@ -2361,6 +2331,367 @@
           "issue_restored",
           "knowledge_created",
           "knowledge_edited"
+        ]
+      },
+      "IssueActivityDetail": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_edited"
+                ]
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "status"
+                          ]
+                        },
+                        "from": {
+                          "$ref": "#/components/schemas/IssueStatus"
+                        },
+                        "to": {
+                          "$ref": "#/components/schemas/IssueStatus"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "from",
+                        "to"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "priority"
+                          ]
+                        },
+                        "from": {
+                          "$ref": "#/components/schemas/IssuePriority"
+                        },
+                        "to": {
+                          "$ref": "#/components/schemas/IssuePriority"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "from",
+                        "to"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "assignee"
+                          ]
+                        },
+                        "from": {
+                          "$ref": "#/components/schemas/IssueAssignee"
+                        },
+                        "to": {
+                          "$ref": "#/components/schemas/IssueAssignee"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "from",
+                        "to"
+                      ]
+                    }
+                  ]
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "kind",
+              "changes"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "label_added"
+                ]
+              },
+              "label": {
+                "$ref": "#/components/schemas/ActivityLabel"
+              }
+            },
+            "required": [
+              "kind",
+              "label"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "label_removed"
+                ]
+              },
+              "label": {
+                "$ref": "#/components/schemas/ActivityLabel"
+              }
+            },
+            "required": [
+              "kind",
+              "label"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_closed"
+                ]
+              },
+              "from": {
+                "$ref": "#/components/schemas/IssueStatus"
+              },
+              "to": {
+                "$ref": "#/components/schemas/IssueStatus"
+              }
+            },
+            "required": [
+              "kind",
+              "from",
+              "to"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_reopened"
+                ]
+              },
+              "from": {
+                "$ref": "#/components/schemas/IssueStatus"
+              },
+              "to": {
+                "$ref": "#/components/schemas/IssueStatus"
+              }
+            },
+            "required": [
+              "kind",
+              "from",
+              "to"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "parent_changed"
+                ]
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "from",
+              "to"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_dependency_added"
+                ]
+              },
+              "issueId": {
+                "type": "string"
+              },
+              "blockedByIssueId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "issueId",
+              "blockedByIssueId",
+              "title"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_dependency_removed"
+                ]
+              },
+              "issueId": {
+                "type": "string"
+              },
+              "blockedByIssueId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "issueId",
+              "blockedByIssueId",
+              "title"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_link_added"
+                ]
+              },
+              "linkId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "linkId",
+              "url",
+              "title"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_link_removed"
+                ]
+              },
+              "linkId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "linkId",
+              "url",
+              "title"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ActivityLabel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color"
+        ]
+      },
+      "CreateIssueCommentRequest": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          }
+        },
+        "required": [
+          "body"
+        ]
+      },
+      "CreateIssueLinkRequest": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "$ref": "#/components/schemas/IssueLinkUrl"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IssueLinkKind"
+          }
+        },
+        "required": [
+          "url",
+          "title",
+          "kind"
         ]
       },
       "KnowledgeEntriesResponse": {
@@ -9795,6 +10126,66 @@
           },
           "403": {
             "description": "Read access cannot comment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No issue with this id is accessible to the caller",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/issues/{issueId}/activity": {
+      "get": {
+        "summary": "An issue's lifecycle activity",
+        "description": "Read access is enough. Lists this issue's structured lifecycle events in the order they happened, each with its actor and, for events recorded after #178, structured detail. Historical rows without detail keep their summary. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "issueId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The issue's activity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectActivityResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The issue id is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
             "content": {
               "application/problem+json": {
                 "schema": {

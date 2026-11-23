@@ -316,6 +316,13 @@
       "when": 1795358865767,
       "tag": "0044_opposite_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1795406424784,
+      "tag": "0045_sticky_dragon_lord",
+      "breakpoints": true
     }
   ]
 }

@@ -522,6 +522,53 @@ export type UpdateKnowledgeEntryRequest = z.infer<typeof UpdateKnowledgeEntryReq
 
 
 
+export const ActivityLabel = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    color: z.string(),
+  })
+  .meta({ id: "ActivityLabel" });
+export type ActivityLabel = z.infer<typeof ActivityLabel>;
+
+const ActivityChange = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("status"), from: IssueStatus, to: IssueStatus }),
+  z.object({ kind: z.literal("priority"), from: IssuePriority, to: IssuePriority }),
+  z.object({ kind: z.literal("assignee"), from: IssueAssignee, to: IssueAssignee }),
+]);
+
+const ActivityIssueReference = z.object({
+  issueId: z.string(),
+  blockedByIssueId: z.string(),
+  title: z.string(),
+});
+
+const ActivityLinkReference = z.object({
+  linkId: z.string(),
+  url: z.string(),
+  title: z.string(),
+});
+
+export const IssueActivityDetail = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("issue_edited"), changes: z.array(ActivityChange).min(1) }),
+    z.object({ kind: z.literal("label_added"), label: ActivityLabel }),
+    z.object({ kind: z.literal("label_removed"), label: ActivityLabel }),
+    z.object({ kind: z.literal("issue_closed"), from: IssueStatus, to: IssueStatus }),
+    z.object({ kind: z.literal("issue_reopened"), from: IssueStatus, to: IssueStatus }),
+    z.object({
+      kind: z.literal("parent_changed"),
+      from: z.string().nullable(),
+      to: z.string().nullable(),
+    }),
+    z.object({ kind: z.literal("issue_dependency_added"), ...ActivityIssueReference.shape }),
+    z.object({ kind: z.literal("issue_dependency_removed"), ...ActivityIssueReference.shape }),
+    z.object({ kind: z.literal("issue_link_added"), ...ActivityLinkReference.shape }),
+    z.object({ kind: z.literal("issue_link_removed"), ...ActivityLinkReference.shape }),
+  ])
+  .meta({ id: "IssueActivityDetail" });
+export type IssueActivityDetail = z.infer<typeof IssueActivityDetail>;
+
 export const ProjectActivity = z
   .object({
     id: z.string(),
@@ -532,6 +579,8 @@ export const ProjectActivity = z
     knowledgeEntryId: z.string().nullable(),
     createdAt: Timestamp,
     actor: Actor,
+    /** Structured lifecycle details; null for activity recorded before #178. */
+    detail: IssueActivityDetail.nullable(),
   })
   .meta({ id: "ProjectActivity" });
 export type ProjectActivity = z.infer<typeof ProjectActivity>;
