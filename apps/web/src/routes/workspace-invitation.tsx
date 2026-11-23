@@ -145,12 +145,15 @@ function Invitation({ token }: { token: string }) {
   const switchAccount = useMutation({
     mutationFn: signOut,
     onSuccess: async () => {
-      queryClient.clear();
+      // Update the session in place so the destination route sees the signed-out state.
+      // Clearing the cache here would make this route's mounted queries refetch first.
+      queryClient.setQueryData<Session>(sessionQuery.queryKey, { signedIn: false });
       await navigate({
         to: "/signin",
         search: { next: `/workspace-invitation?token=${token}` },
         replace: true,
       });
+      queryClient.clear();
     },
     onError: (cause) => {
       toast({ body: cause.message, type: "error" });
@@ -406,6 +409,7 @@ function NewAccountForm({ token }: { token: string }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -417,7 +421,6 @@ function NewAccountForm({ token }: { token: string }) {
         return;
       }
 
-      queryClient.clear();
       const session: Session = {
         signedIn: true,
         email: account.email,
@@ -428,7 +431,10 @@ function NewAccountForm({ token }: { token: string }) {
       };
       queryClient.setQueryData(sessionQuery.queryKey, session);
       await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey });
-      await navigate({ to: "/" });
+      await navigate({ to: "/", replace: true });
+      // The invitation was consumed by registration. Drop it only after the
+      // invitation route and its suspense observers have unmounted.
+      queryClient.removeQueries({ queryKey: workspaceInvitationPreviewQuery(token).queryKey });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Registration failed.");
       setPassword("");

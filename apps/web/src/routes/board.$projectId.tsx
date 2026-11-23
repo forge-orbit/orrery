@@ -30,7 +30,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   completedSubtaskCount,
-  issueBlockedByQuery,
   issueQuery,
   issuesQuery,
   issueStatusLabels,
@@ -639,10 +638,7 @@ function BoardCard({
   onMove: (status: IssueStatus) => void;
   onInspect: (sessionId: string) => void;
 }) {
-  const { data: blockers = [] } = useQuery({
-    ...issueBlockedByQuery(issue.id),
-    refetchInterval: 15_000,
-  });
+  const blockers = issue.blockedByIds;
   const state = issue.needsInput
     ? "needs-input"
     : session?.status === "active" && session.stopRequested
@@ -720,7 +716,7 @@ function BoardCard({
                   label={`Blocked by ${blockers.length}`}
                   color="red"
                   size="sm"
-                  data-blocked-by={blockers.map((blocker) => blocker.id).join(",")}
+                  data-blocked-by={blockers.join(",")}
                 />
               )}
               {issue.labels.map((label) => (

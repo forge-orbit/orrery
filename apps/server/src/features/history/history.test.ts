@@ -27,9 +27,13 @@ import { migrate } from "../../platform/migrate.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
 import { createAgentsFeature, revokeMemberWorkspaceKeys } from "../agents/index.ts";
-import { createProjectsFeature, projectAccessAtLeast } from "../projects/index.ts";
+import {
+  createProjectsFeature,
+  projectAccessAtLeast,
+  projectAccessCeilingInTransaction,
+} from "../projects/index.ts";
 import { createWorkspacesFeature } from "../workspaces/index.ts";
-import { createHistoryFeature } from "./index.ts";
+import { createHistoryFeature, createHistoryService } from "./index.ts";
 
 const SECRET = "correct horse battery staple staple";
 const ADMIN_EMAIL = "admin@example.com";
@@ -575,6 +579,39 @@ describe("history visibility against real Postgres", () => {
       404,
       "project_not_found",
     );
+  });
+
+  it("reads project access and activity inside one repeatable-read snapshot", async () => {
+    const s = await readyScenario();
+    const service = createHistoryService({
+      db: database.db,
+      projectAccessCeiling: async (tx, workspaceId, humanId, projectIds) => {
+        const ceiling = await projectAccessCeilingInTransaction(
+          tx,
+          workspaceId,
+          humanId,
+          projectIds,
+        );
+        // Commit a concurrent purge after this transaction has taken its snapshot
+        // but before the activity and access reads. A split read would observe the
+        // deletion; the single repeatable-read transaction must still see both.
+        await database.sql`delete from project_activity where project_id = ${s.project.id}`;
+        await database.sql`delete from project_access_events where project_id = ${s.project.id}`;
+        return ceiling;
+      },
+    });
+
+    const events = await service.projectHistory(
+      {
+        humanId: s.admin.id,
+        email: s.admin.email,
+        isSystemAdministrator: false,
+        emailVerifiedAt: new Date(),
+      },
+      s.project.id,
+    );
+    expect(events.some((event) => event.kind === "project_activity")).toBe(true);
+    expect(events.some((event) => event.kind === "project_access")).toBe(true);
   });
 
   it("lets a personal workspace owner read their credential events and refuses everyone else", async () => {

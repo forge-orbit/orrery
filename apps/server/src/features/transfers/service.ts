@@ -126,15 +126,15 @@ async function lockOwnershipWrites(tx: DbTransaction): Promise<void> {
 }
 
 async function bumpGuards(tx: DbTransaction, ids: readonly string[]): Promise<void> {
-  for (const workspaceId of ids.toSorted()) {
-    await tx
-      .insert(workspaceOwnershipGuards)
-      .values({ workspaceId, version: 0 })
-      .onConflictDoUpdate({
-        target: workspaceOwnershipGuards.workspaceId,
-        set: { version: sql`${workspaceOwnershipGuards.version} + 1` },
-      });
-  }
+  const workspaceIds = ids.toSorted();
+  if (workspaceIds.length === 0) return;
+  await tx
+    .insert(workspaceOwnershipGuards)
+    .values(workspaceIds.map((workspaceId) => ({ workspaceId, version: 0 })))
+    .onConflictDoUpdate({
+      target: workspaceOwnershipGuards.workspaceId,
+      set: { version: sql`${workspaceOwnershipGuards.version} + 1` },
+    });
 }
 
 async function readPersonalProject(
@@ -347,22 +347,37 @@ async function clearInvalidAssignees(
     })
     .from(issues)
     .where(and(eq(issues.projectId, projectId), isNotNull(issues.assigneeId)));
+  const humanAssigneeIds = new Set<string>();
+  for (const issue of assigned) {
+    if (issue.assigneeType !== "human" || issue.assigneeId === null) continue;
+    if (issue.assigneeId === destination.personalOwnerHumanId) continue;
+    humanAssigneeIds.add(issue.assigneeId);
+  }
+  const validHumanIds = new Set<string>();
+  if (destination.personalOwnerHumanId !== null) {
+    validHumanIds.add(destination.personalOwnerHumanId);
+  }
+  if (humanAssigneeIds.size > 0) {
+    const memberships = await tx
+      .select({ humanId: workspaceMemberships.humanId })
+      .from(workspaceMemberships)
+      .where(
+        and(
+          eq(workspaceMemberships.workspaceId, destination.id),
+          inArray(workspaceMemberships.humanId, [...humanAssigneeIds]),
+          isNull(workspaceMemberships.suspendedAt),
+        ),
+      );
+    for (const membership of memberships) validHumanIds.add(membership.humanId);
+  }
   const staleIds: string[] = [];
   for (const issue of assigned) {
-    if (issue.assigneeType === "human" && issue.assigneeId !== null) {
-      if (destination.personalOwnerHumanId === issue.assigneeId) continue;
-      const [membership] = await tx
-        .select({ id: workspaceMemberships.id })
-        .from(workspaceMemberships)
-        .where(
-          and(
-            eq(workspaceMemberships.workspaceId, destination.id),
-            eq(workspaceMemberships.humanId, issue.assigneeId),
-            isNull(workspaceMemberships.suspendedAt),
-          ),
-        )
-        .limit(1);
-      if (membership !== undefined) continue;
+    if (
+      issue.assigneeType === "human" &&
+      issue.assigneeId !== null &&
+      validHumanIds.has(issue.assigneeId)
+    ) {
+      continue;
     }
     staleIds.push(issue.id);
   }
@@ -789,28 +804,32 @@ async function acceptInTransaction(
     .where(eq(questions.projectId, auth.projectId));
 
   const recipients = await manageRecipients(tx, destination.id, acceptorHumanId);
-  for (const recipient of recipients) {
-    await tx.insert(projectAccessGrants).values({
-      id: randomUUID(),
-      projectId: auth.projectId,
-      humanId: recipient.humanId,
-      level: "manage",
-      grantedByHumanId: acceptorHumanId,
-      createdAt: sql`statement_timestamp()`,
-      updatedAt: sql`statement_timestamp()`,
-    });
-    await tx.insert(projectAccessEvents).values({
-      id: randomUUID(),
-      projectId: auth.projectId,
+  if (recipients.length > 0) {
+    await tx.insert(projectAccessGrants).values(
+      recipients.map((recipient) => ({
+        id: randomUUID(),
+        projectId: auth.projectId,
+        humanId: recipient.humanId,
+        level: "manage" as const,
+        grantedByHumanId: acceptorHumanId,
+        createdAt: sql`statement_timestamp()`,
+        updatedAt: sql`statement_timestamp()`,
+      })),
+    );
+    await tx.insert(projectAccessEvents).values(
+      recipients.map((recipient) => ({
+        id: randomUUID(),
+        projectId: auth.projectId,
 
-      workspaceId: destination.id,
-      actorHumanId: acceptorHumanId,
-      subjectHumanId: recipient.humanId,
-      type: ProjectAccessEventType.enum.project_access_granted,
-      level: "manage",
-      previousLevel: null,
-      createdAt: sql`statement_timestamp()`,
-    });
+        workspaceId: destination.id,
+        actorHumanId: acceptorHumanId,
+        subjectHumanId: recipient.humanId,
+        type: ProjectAccessEventType.enum.project_access_granted,
+        level: "manage" as const,
+        previousLevel: null,
+        createdAt: sql`statement_timestamp()`,
+      })),
+    );
   }
 
   await tx

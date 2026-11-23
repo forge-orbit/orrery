@@ -170,6 +170,7 @@ export function ProjectLabels({
 
   async function onCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -187,6 +188,7 @@ export function ProjectLabels({
 
   async function onUpdate(event: FormEvent<HTMLFormElement>, label: ProjectLabel) {
     event.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError(undefined);
     try {

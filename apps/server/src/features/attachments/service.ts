@@ -376,25 +376,47 @@ function holderConditions(holders: readonly AttachmentHolder[]) {
   );
 }
 
-async function referenceCount(tx: DbTransaction, attachmentId: string): Promise<number> {
-  const [row] = await tx
-    .select({ count: sql<number>`count(*)::int` })
-    .from(attachmentReferences)
-    .where(eq(attachmentReferences.attachmentId, attachmentId));
-  return row?.count ?? 0;
-}
-
 /**
- * Delete the attachment row and mark its blob deleted in one transaction. The
- * reference rows cascade with the attachment, and the shared orphan sweep can
- * then remove the blob and stored_objects row with no FK violations.
+ * Delete the attachment rows with no remaining references and mark their blobs
+ * deleted. Reference rows cascade with each attachment, and the shared orphan
+ * sweep can then remove the blob and stored_objects row with no FK violations.
  */
-async function reclaim(tx: DbTransaction, row: { id: string; objectId: string }): Promise<void> {
-  await tx.delete(attachments).where(eq(attachments.id, row.id));
+async function reclaimMany(
+  tx: DbTransaction,
+  candidates: readonly { id: string; objectId: string }[],
+): Promise<number> {
+  if (candidates.length === 0) return 0;
+  // Re-verify under the row locks: a save that won the race already cleared
+  // unreferenced_at and inserted its reference row.
+  const remaining = await tx
+    .selectDistinct({ id: attachmentReferences.attachmentId })
+    .from(attachmentReferences)
+    .where(
+      inArray(
+        attachmentReferences.attachmentId,
+        candidates.map((row) => row.id),
+      ),
+    );
+  const referenced = new Set(remaining.map((row) => row.id));
+  const reclaimable = candidates.filter((row) => !referenced.has(row.id));
+  if (reclaimable.length === 0) return 0;
+
+  await tx.delete(attachments).where(
+    inArray(
+      attachments.id,
+      reclaimable.map((row) => row.id),
+    ),
+  );
   await tx
     .update(storedObjects)
     .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
-    .where(and(eq(storedObjects.id, row.objectId), eq(storedObjects.status, "active")));
+    .where(
+      and(
+        inArray(storedObjects.id, [...new Set(reclaimable.map((row) => row.objectId))]),
+        eq(storedObjects.status, "active"),
+      ),
+    );
+  return reclaimable.length;
 }
 
 export function createAttachmentsService({
@@ -727,11 +749,7 @@ export function createAttachmentsService({
         .orderBy(attachments.id)
         .for("update", { of: attachments });
       await tx.delete(attachmentReferences).where(or(...conditions));
-      const candidates = [...new Map(rows.map((row) => [row.id, row])).values()];
-      for (const row of candidates) {
-        if ((await referenceCount(tx, row.id)) > 0) continue;
-        await reclaim(tx, row);
-      }
+      await reclaimMany(tx, [...new Map(rows.map((row) => [row.id, row])).values()]);
     },
 
     async sweepUnreferenced() {
@@ -747,15 +765,7 @@ export function createAttachmentsService({
           )
           .orderBy(attachments.id)
           .for("update");
-        let reclaimed = 0;
-        for (const row of rows) {
-          // Re-verify under the row lock: a save that won the race already
-          // cleared unreferenced_at and inserted its reference row.
-          if ((await referenceCount(tx, row.id)) > 0) continue;
-          await reclaim(tx, row);
-          reclaimed++;
-        }
-        return reclaimed;
+        return reclaimMany(tx, rows);
       });
     },
   };

@@ -172,6 +172,7 @@ function CreateWorkspaceForm({ onCreated }: { onCreated: () => void }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -239,6 +240,7 @@ function InstallationInvitations() {
 
   async function onInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (inviting) return;
     setInviting(true);
     setInviteError(undefined);
     try {

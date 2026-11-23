@@ -462,21 +462,24 @@ function IssuePage() {
   }
 
   async function onDelete() {
+    if (trashing) return;
     setTrashing(true);
     setTrashError(undefined);
     try {
       await deleteIssue(issue.id);
       setConfirmTrashOpen(false);
+      toast({ body: `Moved ${issue.identifier} to trash.` });
+      // Leave the issue route before dropping its cached queries: while this page
+      // is mounted, any invalidation or removal makes it refetch the deleted issue.
+      await navigate({ to: "/projects/$projectId", params: { projectId: issue.projectId } });
       queryClient.removeQueries({ queryKey: issueQuery(issue.id).queryKey });
+      queryClient.removeQueries({ queryKey: issueActivityQuery(issue.id).queryKey });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issuesQuery(issue.projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectTrashQuery(issue.projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: readyWorkQuery(issue.projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(issue.projectId).queryKey }),
-        queryClient.invalidateQueries({ queryKey: issueActivityQuery(issue.id).queryKey }),
       ]);
-      toast({ body: `Moved ${issue.identifier} to trash.` });
-      await navigate({ to: "/projects/$projectId", params: { projectId: issue.projectId } });
     } catch (cause) {
       setConfirmTrashOpen(false);
       const msg = cause instanceof Error ? cause.message : "Could not move the issue to trash.";
@@ -1065,7 +1068,7 @@ function Blockers({
 
   async function onAdd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (selected === "") return;
+    if (selected === "" || submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -1291,6 +1294,7 @@ function CommentForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -1353,6 +1357,7 @@ function LinkForm({ issueId, projectId }: { issueId: string; projectId: string }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {

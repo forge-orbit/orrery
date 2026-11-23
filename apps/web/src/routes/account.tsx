@@ -126,9 +126,14 @@ function ProfileSection({
 
   const mutation = useMutation({
     mutationFn: updateProfile,
-    onSuccess: async () => {
-      setDraftDisplayName(null);
-      setDraftHandle(null);
+    onSuccess: async (_updated, submitted) => {
+      // Keep drafts typed while the request was in flight.
+      setDraftDisplayName((current) =>
+        current !== null && current.trim() === (submitted.displayName ?? "") ? null : current,
+      );
+      setDraftHandle((current) =>
+        current !== null && current === submitted.handle ? null : current,
+      );
       setSavedMessage("Profile saved.");
       toast({ body: "Profile saved." });
       await queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey });
@@ -170,6 +175,7 @@ function ProfileSection({
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (mutation.isPending) return;
     setSavedMessage(null);
     const trimmed = currentDisplayName.trim();
     mutation.mutate({
@@ -179,6 +185,7 @@ function ProfileSection({
   }
 
   async function onPhotoChange(files: File | File[] | null) {
+    if (removeMutation.isPending) return;
     const file = Array.isArray(files) ? (files[0] ?? null) : files;
     setSelectedFile(file);
     setUploadError(null);
@@ -222,6 +229,7 @@ function ProfileSection({
             label="Profile photo"
             value={selectedFile}
             onChange={(files) => {
+              if (removeMutation.isPending) return;
               setSelectedFile(Array.isArray(files) ? (files[0] ?? null) : files);
               setUploadError(null);
             }}
@@ -229,6 +237,8 @@ function ProfileSection({
             accept="image/jpeg,image/png,image/webp"
             maxSize={5 * 1024 * 1024}
             description="JPEG, PNG or WebP, up to 5 MB. Stored as a 256×256 square with metadata removed."
+            isDisabled={removeMutation.isPending}
+            disabledMessage="Wait for the current photo to be removed."
             isLoading={avatarMutation.isPending}
             width="min(100%, 28rem)"
             {...(uploadError === null
@@ -242,6 +252,7 @@ function ProfileSection({
                 size="sm"
                 variant="secondary"
                 label={removeMutation.isPending ? "Removing…" : "Remove photo"}
+                isDisabled={removeMutation.isPending || avatarMutation.isPending}
                 isLoading={removeMutation.isPending}
                 onClick={() => removeMutation.mutate()}
               />
@@ -332,6 +343,7 @@ function PasswordSection() {
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (mutation.isPending) return;
     setSavedMessage(null);
     if (newPassword !== confirmPassword) {
       setClientError("New passwords do not match.");
@@ -440,9 +452,12 @@ function SessionSection() {
   const logout = useMutation({
     mutationFn: signOut,
     onSuccess: async () => {
-      queryClient.clear();
+      // Mark the cached session signed out before navigating; clearing the cache
+      // now would make this page's mounted queries refetch against a dead session.
+      queryClient.setQueryData<Session>(sessionQuery.queryKey, { signedIn: false });
       toast({ body: "Signed out." });
       await navigate({ to: "/signin", replace: true });
+      queryClient.clear();
     },
     onError: (error) => {
       toast({ body: error.message, type: "error" });

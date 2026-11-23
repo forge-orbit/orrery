@@ -525,30 +525,29 @@ export function createHistoryService({ db, projectAccessCeiling }: HistoryDeps):
 
     async projectHistory(account, projectId) {
       const actor = requireAccount(account);
-      const [project] = await db
-        .select({ id: projects.id, workspaceId: projects.workspaceId, name: projects.name })
-        .from(projects)
-        .where(eq(projects.id, projectId))
-        .limit(1);
-      if (project === undefined) throw new HistoryError("project_not_found");
-
-      const level = await db.transaction(
+      return db.transaction(
         async (tx) => {
+          const [project] = await tx
+            .select({ id: projects.id, workspaceId: projects.workspaceId, name: projects.name })
+            .from(projects)
+            .where(eq(projects.id, projectId))
+            .limit(1);
+          if (project === undefined) throw new HistoryError("project_not_found");
+
           const ceiling = await projectAccessCeiling(tx, project.workspaceId, actor.humanId, [
             projectId,
           ]);
-          return ceiling.get(projectId) ?? null;
+          const level = ceiling.get(projectId) ?? null;
+          if (level === null) throw new HistoryError("project_not_found");
+
+          const events = await loadProjectActivity(tx, projectId, project.name);
+          if (projectAccessAtLeast(level, ProjectAccessLevel.enum.manage)) {
+            events.push(...(await loadProjectAccessEvents(tx, project.workspaceId, [projectId])));
+          }
+          return sortNewestFirst(events);
         },
         { isolationLevel: "repeatable read", accessMode: "read only" },
       );
-
-      if (level === null) throw new HistoryError("project_not_found");
-
-      const events = await loadProjectActivity(db, projectId, project.name);
-      if (projectAccessAtLeast(level, ProjectAccessLevel.enum.manage)) {
-        events.push(...(await loadProjectAccessEvents(db, project.workspaceId, [projectId])));
-      }
-      return sortNewestFirst(events);
     },
 
     async installationHistory(account) {

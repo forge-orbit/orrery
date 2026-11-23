@@ -543,6 +543,7 @@ function ProjectSettings({ project }: { project: Project }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -695,6 +696,7 @@ function ProjectAccess({ projectId }: { projectId: string }) {
 
   async function onGrant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError(undefined);
     try {

@@ -29,8 +29,9 @@ import { tokenHash } from "../../platform/tokens.ts";
 import {
   createAccountsFeature,
   accountByEmail,
+  hashPassword,
   invalidateAccountSessions,
-  setAccountPassword,
+  setAccountPasswordHash,
 } from "../accounts/index.ts";
 import { createHistoryFeature } from "../history/index.ts";
 import {
@@ -42,7 +43,11 @@ import {
 import { createRecoveryFeature } from "../recovery/index.ts";
 import type { OutgoingMail } from "../settings/index.ts";
 import { createSessionsFeature, type SessionsService } from "../work-sessions/index.ts";
-import { createAgentsFeature, type AgentAuthenticator } from "./index.ts";
+import {
+  createAgentsFeature,
+  revokeMemberWorkspaceKeys,
+  type AgentAuthenticator,
+} from "./index.ts";
 import { createAgentsService } from "./service.ts";
 
 const SECRET = "correct horse battery staple staple";
@@ -272,7 +277,9 @@ async function makeRotationApp() {
         db: database.db,
         accounts: {
           accountByEmail: (email, tx) => accountByEmail(tx ?? database.db, email),
-          setPassword: (humanId, password, tx) => setAccountPassword(tx, humanId, password),
+          hashPassword: (password) => hashPassword(password),
+          setPasswordHash: (humanId, passwordHash, tx) =>
+            setAccountPasswordHash(tx, humanId, passwordHash),
           invalidateBrowserSessions: (humanId, tx) => invalidateAccountSessions(tx, humanId),
         },
         deliver: async (mail) => {
@@ -329,6 +336,32 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
     },
     (error: unknown) => error,
   );
+}
+
+function createGate() {
+  let release!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { opened, release: () => release() };
+}
+
+async function waitForLockWait(queryPattern: string, minimum = 1) {
+  await expect
+    .poll(
+      async () => {
+        const [row] = await database.sql<{ count: number }[]>`
+          select count(*)::int as count
+          from pg_stat_activity
+          where wait_event_type = 'Lock'
+            and query ilike ${queryPattern}
+            and pid <> pg_backend_pid()
+        `;
+        return row?.count ?? 0;
+      },
+      { timeout: 10_000, interval: 25 },
+    )
+    .toBeGreaterThanOrEqual(minimum);
 }
 
 function humanActor(humanId: string, email: string) {
@@ -624,6 +657,50 @@ describe("workspace-scoped agent API keys", () => {
       ),
     ).rejects.toMatchObject({ kind: "workspace_not_found" });
     expect(await database.db.select().from(agentApiKeys)).toHaveLength(0);
+  });
+
+  it("refuses workspace key administration to a deactivated owner, even with a stale session identity", async () => {
+    const app = await makeApp();
+    await bootstrapAdmin(app);
+    const adminCookie = await cookieFor(app, ADMIN_EMAIL, ADMIN_PASSWORD);
+    const [admin] = await database.db.select().from(humans).where(eq(humans.email, ADMIN_EMAIL));
+    if (admin === undefined) throw new Error("the admin was not found");
+    const workspace = await sharedWorkspace("Deactivated owner team", admin.id);
+    const p = await project(workspace.id, "Owned project", admin.id);
+    const agentId = await makeAgent(app, adminCookie, "owner-bot");
+    const issued = await issueKey(app, adminCookie, {
+      agentId,
+      workspaceId: workspace.id,
+      projects: [{ projectId: p.id, level: "read" }],
+    });
+
+    await database.db
+      .update(humans)
+      .set({ deactivatedAt: sql`now()` })
+      .where(eq(humans.id, admin.id));
+
+    const service = createAgentsService({
+      db: database.db,
+      projectAccessCeiling: async () => new Map([[p.id, "manage" as const]]),
+      projectAccessAtLeast: () => true,
+    });
+    const staleAccount = {
+      humanId: admin.id,
+      email: admin.email,
+      isSystemAdministrator: admin.isSystemAdministrator,
+      emailVerifiedAt: admin.emailVerifiedAt,
+    };
+    await expect(service.workspaceKeys(staleAccount, workspace.id)).rejects.toMatchObject({
+      kind: "not_workspace_owner",
+    });
+    await expect(
+      service.ownerRevokeKey(staleAccount, workspace.id, issued.key.id),
+    ).rejects.toMatchObject({ kind: "not_workspace_owner" });
+    const [stored] = await database.db
+      .select()
+      .from(agentApiKeys)
+      .where(eq(agentApiKeys.id, issued.key.id));
+    expect(stored?.revokedAt).toBeNull();
   });
 
   it("creates an agent, issues a 90-day key by default, and authenticates REST as that agent", async () => {
@@ -943,6 +1020,106 @@ describe("workspace-scoped agent API keys", () => {
     });
     for (const event of events) expect(JSON.stringify(event)).not.toContain(teamKey.secret);
   });
+
+  it("records every key when a removed member has more than one workspace key", async () => {
+    const app = await makeApp();
+    await bootstrapAdmin(app);
+    const [admin] = await database.db.select().from(humans).where(eq(humans.email, ADMIN_EMAIL));
+    if (admin === undefined) throw new Error("the admin was not found");
+    const team = await sharedWorkspace("Batch revocation team", admin.id);
+    const member = await insertHuman(MEMBER_EMAIL);
+    const memberCookie = await createSession(member.id);
+    await membership(team.id, member.id);
+    const p = await project(team.id, "Batch project", admin.id);
+    await grant(p.id, member.id, "read");
+    const agentId = await makeAgent(app, memberCookie, "batch-bot");
+    const first = await issueKey(app, memberCookie, {
+      agentId,
+      workspaceId: team.id,
+      projects: [{ projectId: p.id, level: "read" }],
+    });
+    const second = await issueKey(app, memberCookie, {
+      agentId,
+      workspaceId: team.id,
+      validity: "7",
+      projects: [{ projectId: p.id, level: "read" }],
+    });
+
+    await database.db.transaction((tx) =>
+      revokeMemberWorkspaceKeys(tx, team.id, member.id, admin.id),
+    );
+
+    const keys = await database.db
+      .select()
+      .from(agentApiKeys)
+      .where(eq(agentApiKeys.workspaceId, team.id));
+    expect(keys).toHaveLength(2);
+    expect(keys.every((key) => key.revokedAt !== null)).toBe(true);
+    const events = await database.db
+      .select()
+      .from(agentKeyEvents)
+      .where(eq(agentKeyEvents.type, "agent_key_revoked"));
+    expect(events.map((event) => event.keyId).toSorted()).toEqual(
+      [first.key.id, second.key.id].toSorted(),
+    );
+    expect(events.every((event) => event.actorHumanId === admin.id)).toBe(true);
+  });
+
+  it("serializes key revocation with ownership writes", async () => {
+    const app = await makeApp();
+    await bootstrapAdmin(app);
+    const adminCookie = await cookieFor(app, ADMIN_EMAIL, ADMIN_PASSWORD);
+    const [admin] = await database.db.select().from(humans).where(eq(humans.email, ADMIN_EMAIL));
+    if (admin === undefined) throw new Error("the admin was not found");
+    const team = await sharedWorkspace("Revocation lock team", admin.id);
+    const member = await insertHuman(MEMBER_EMAIL);
+    const memberCookie = await createSession(member.id);
+    await membership(team.id, member.id);
+    const memberPersonal = await personalWorkspace(member.id);
+    const teamProject = await project(team.id, "Team lock project", admin.id);
+    await grant(teamProject.id, member.id, "read");
+    const ownProject = await project(memberPersonal.id, "Own lock project", member.id);
+    const agentId = await makeAgent(app, memberCookie, "revocation-lock-bot");
+    const teamKey = await issueKey(app, memberCookie, {
+      agentId,
+      workspaceId: team.id,
+      projects: [{ projectId: teamProject.id, level: "read" }],
+    });
+    const ownKey = await issueKey(app, memberCookie, {
+      agentId,
+      workspaceId: memberPersonal.id,
+      projects: [{ projectId: ownProject.id, level: "manage" }],
+    });
+
+    const acquired = createGate();
+    const release = createGate();
+    const holder = database.sql.begin(async (tx) => {
+      await tx`select lock_workspace_ownership_writes()`;
+      acquired.release();
+      await release.opened;
+    });
+    await acquired.opened;
+
+    const ownerRevoking = deleteRequest(
+      app,
+      `/api/workspaces/${team.id}/agent-keys/${teamKey.key.id}`,
+      adminCookie,
+    );
+    const selfRevoking = deleteRequest(app, `/api/agents/keys/${ownKey.key.id}`, memberCookie);
+    try {
+      await waitForLockWait("%lock_workspace_ownership_writes%", 2);
+      const keys = await database.db.select().from(agentApiKeys);
+      expect(keys.filter((key) => key.revokedAt === null)).toHaveLength(2);
+    } finally {
+      release.release();
+      await holder;
+    }
+    const [ownerRes, selfRes] = await Promise.all([ownerRevoking, selfRevoking]);
+    expect(ownerRes.status).toBe(204);
+    expect(selfRes.status).toBe(204);
+    const keys = await database.db.select().from(agentApiKeys);
+    expect(keys.every((key) => key.revokedAt !== null)).toBe(true);
+  }, 20_000);
 
   it("refuses a key project grant from another workspace at the database", async () => {
     const app = await makeApp();
@@ -1418,6 +1595,55 @@ describe("workspace-scoped agent API keys", () => {
         expect(JSON.stringify(event)).not.toContain(source.secret);
         expect(JSON.stringify(event)).not.toContain(replacement.secret);
       }
+    });
+
+    it("serializes rotation with a revocation that holds the source row", async () => {
+      const app = await makeApp();
+      await bootstrapAdmin(app);
+      const cookie = await cookieFor(app, ADMIN_EMAIL, ADMIN_PASSWORD);
+      const [admin] = await database.db.select().from(humans).where(eq(humans.email, ADMIN_EMAIL));
+      if (admin === undefined) throw new Error("the admin was not found");
+      const workspace = await personalWorkspaceOf(admin.id);
+      const p = await project(workspace.id, "Locked rotation", admin.id);
+      const agentId = await makeAgent(app, cookie, "locked-rotation-bot");
+      const source = await issueKey(app, cookie, {
+        agentId,
+        workspaceId: workspace.id,
+        projects: [{ projectId: p.id, level: "read" }],
+      });
+
+      const acquired = createGate();
+      const release = createGate();
+      const holder = database.sql.begin(async (tx) => {
+        await tx`select id from agent_api_keys where id = ${source.key.id} for update`;
+        acquired.release();
+        await release.opened;
+        await tx`
+          update agent_api_keys
+          set revoked_at = statement_timestamp(), revoked_by_human_id = ${admin.id}
+          where id = ${source.key.id}
+        `;
+      });
+      await acquired.opened;
+
+      try {
+        const rotating = postJson(app, `/api/agents/keys/${source.key.id}/rotate`, {}, cookie);
+        await waitForLockWait('%from "agent_api_keys"%for update%');
+        release.release();
+        const res = await rotating;
+        await holder;
+        await expectProblem(res, 409, "source_key_revoked");
+      } finally {
+        release.release();
+        await holder.catch(() => {});
+      }
+
+      const keys = await database.db.select().from(agentApiKeys);
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toMatchObject({ id: source.key.id });
+      expect(keys[0]?.revokedAt).not.toBeNull();
+      const events = await database.db.select().from(agentKeyEvents);
+      expect(events.some((event) => event.type === "agent_key_rotated")).toBe(false);
     });
 
     it("keeps each key's expiry independent of the other key's deadline", async () => {

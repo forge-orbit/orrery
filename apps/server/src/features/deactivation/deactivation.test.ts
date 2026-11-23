@@ -13,7 +13,7 @@ import {
   TransferAuthorization,
   WorkspacesResponse,
 } from "@orrery/contract";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -33,6 +33,7 @@ import {
   workSessions,
   workspaceInvitations,
   workspaceMemberships,
+  workspaceOwnershipGuards,
   workspaces,
 } from "../../db/schema.ts";
 import { loadConfig } from "../../platform/config.ts";
@@ -453,6 +454,107 @@ describe("account deactivation and reactivation (#38)", () => {
         ),
     );
     expect(reactivatedEvent.actorHumanId).toBe(admin.id);
+  });
+
+  it("records every revoked key and grant and bumps every affected workspace guard", async () => {
+    const member = await createHuman("deactivation-batch@example.com", "batch-password");
+    const adminCookie = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
+    const admin = one(await database.db.select().from(humans).where(eq(humans.email, ADMIN_EMAIL)));
+
+    const firstWorkspace = await insertSharedWorkspace("Batch shared one", admin.id);
+    const secondWorkspace = await insertSharedWorkspace("Batch shared two", admin.id);
+    await database.db.insert(workspaceMemberships).values(
+      [firstWorkspace.id, secondWorkspace.id].map((workspaceId) => ({
+        id: randomUUID(),
+        workspaceId,
+        humanId: member.humanId,
+        isOwner: false,
+      })),
+    );
+    await database.db
+      .update(workspaceOwnershipGuards)
+      .set({ version: 5 })
+      .where(
+        inArray(workspaceOwnershipGuards.workspaceId, [firstWorkspace.id, secondWorkspace.id]),
+      );
+
+    const firstProject = await insertProject(firstWorkspace.id, admin.id);
+    const secondProject = await insertProject(secondWorkspace.id, admin.id);
+    await database.db.insert(projectAccessGrants).values([
+      {
+        id: randomUUID(),
+        projectId: firstProject.id,
+        humanId: member.humanId,
+        level: ProjectAccessLevel.enum.read,
+        grantedByHumanId: admin.id,
+      },
+      {
+        id: randomUUID(),
+        projectId: secondProject.id,
+        humanId: member.humanId,
+        level: ProjectAccessLevel.enum.manage,
+        grantedByHumanId: admin.id,
+      },
+    ]);
+
+    const firstAgent = await insertAgentWithKey(member.humanId, firstWorkspace.id);
+    const secondAgent = await insertAgentWithKey(member.humanId, secondWorkspace.id);
+
+    const res = await postJson(`/api/admin/accounts/${member.humanId}/deactivate`, {}, adminCookie);
+    expect(res.status).toBe(200);
+
+    const keys = await database.db
+      .select()
+      .from(agentApiKeys)
+      .where(inArray(agentApiKeys.agentId, [firstAgent.agent.id, secondAgent.agent.id]));
+    expect(keys).toHaveLength(2);
+    expect(keys.every((key) => key.revokedAt !== null && key.revokedByHumanId === admin.id)).toBe(
+      true,
+    );
+    const keyEvents = await database.db
+      .select()
+      .from(agentKeyEvents)
+      .where(
+        inArray(
+          agentKeyEvents.keyId,
+          keys.map((key) => key.id),
+        ),
+      );
+    expect(keyEvents.map((event) => event.keyId).toSorted()).toEqual(
+      keys.map((key) => key.id).toSorted(),
+    );
+    expect(
+      keyEvents.every(
+        (event) => event.type === "agent_key_revoked" && event.actorHumanId === admin.id,
+      ),
+    ).toBe(true);
+
+    expect(
+      await database.db
+        .select()
+        .from(projectAccessGrants)
+        .where(eq(projectAccessGrants.humanId, member.humanId)),
+    ).toEqual([]);
+    const accessEvents = await database.db
+      .select()
+      .from(projectAccessEvents)
+      .where(eq(projectAccessEvents.subjectHumanId, member.humanId));
+    expect(accessEvents.map((event) => event.projectId).toSorted()).toEqual(
+      [firstProject.id, secondProject.id].toSorted(),
+    );
+    expect(accessEvents.every((event) => event.type === "project_access_revoked")).toBe(true);
+
+    const guards = await database.db
+      .select()
+      .from(workspaceOwnershipGuards)
+      .where(
+        inArray(workspaceOwnershipGuards.workspaceId, [firstWorkspace.id, secondWorkspace.id]),
+      );
+    expect(guards).toHaveLength(2);
+    expect(guards.every((guard) => guard.version === 7)).toBe(true);
+    expect(guards.map((guard) => guard.workspaceId).toSorted()).toEqual(
+      [firstWorkspace.id, secondWorkspace.id].toSorted(),
+    );
   });
 
   it("allows deactivating a sole owner and keeps the workspace eligible for recovery", async () => {

@@ -5,7 +5,12 @@ import { type AccountsDeps, createAccountsService } from "./service.ts";
 
 export { routes as accountsRoutes };
 export { createAccountsService, startupWarnings } from "./service.ts";
-export { accountByEmail, invalidateAccountSessions, setAccountPassword } from "./service.ts";
+export {
+  accountByEmail,
+  hashPassword,
+  invalidateAccountSessions,
+  setAccountPasswordHash,
+} from "./service.ts";
 export type { AccountsService, SessionPolicy, SessionAccount } from "./service.ts";
 export { createSessionReader, toSessionResponse, type SessionReader } from "./rest.ts";
 
@@ -15,7 +20,8 @@ export interface AccountsFeature extends Feature {
   createInvitedHuman: AccountsService["createInvitedHuman"];
   emailRegistered: AccountsService["emailRegistered"];
   accountByEmail: AccountsService["accountByEmail"];
-  setPassword: AccountsService["setPassword"];
+  hashPassword: AccountsService["hashPassword"];
+  setPasswordHash: AccountsService["setPasswordHash"];
   invalidateBrowserSessions: AccountsService["invalidateBrowserSessions"];
 }
 
@@ -29,7 +35,9 @@ export function createAccountsFeature(deps: AccountsDeps): AccountsFeature {
     createInvitedHuman: (input, tx) => service.createInvitedHuman(input, tx),
     emailRegistered: (email, tx) => service.emailRegistered(email, tx),
     accountByEmail: (email, tx) => service.accountByEmail(email, tx),
-    setPassword: (humanId, password, tx) => service.setPassword(humanId, password, tx),
+    hashPassword: (password) => service.hashPassword(password),
+    setPasswordHash: (humanId, passwordHash, tx) =>
+      service.setPasswordHash(humanId, passwordHash, tx),
     invalidateBrowserSessions: (humanId, tx) => service.invalidateBrowserSessions(humanId, tx),
   };
 }

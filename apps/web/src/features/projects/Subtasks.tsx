@@ -47,6 +47,7 @@ export function Subtasks({
 
   async function onCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError(undefined);
     try {

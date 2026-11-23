@@ -4,6 +4,7 @@ import { Stack } from "@astryxdesign/core/Stack";
 import { useToast } from "@astryxdesign/core/Toast";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { useState } from "react";
 import { sessionQuery } from "../features/accounts/index.ts";
 import {
   markAllNotificationsRead,
@@ -47,6 +48,7 @@ function NotificationsPage() {
   const feed = useInfiniteQuery(notificationsPageQuery(unreadOnly));
   const { data: polledUnreadCount } = useQuery(notificationUnreadCountQuery);
   const unreadCount = feed.data?.pages[0]?.unreadCount ?? polledUnreadCount ?? 0;
+  const [pendingReadIds, setPendingReadIds] = useState<ReadonlySet<string>>(new Set());
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: notificationsQueryKey });
@@ -67,15 +69,31 @@ function NotificationsPage() {
   });
   const readAll = useMutation({ mutationFn: markAllNotificationsRead, onSuccess: invalidate });
 
-  function onRead(id: string) {
-    queryClient.setQueryData<number>(notificationUnreadCountQuery.queryKey, (current) =>
-      Math.max(0, (current ?? unreadCount) - 1),
-    );
-    // The Link handles navigation; marking read happens in the background.
-    readOne.mutate(id);
+  async function onRead(id: string) {
+    if (pendingReadIds.has(id)) return;
+    setPendingReadIds((current) => new Set(current).add(id));
+    try {
+      // Stop the 15s poll from overwriting the optimistic decrement below.
+      await queryClient.cancelQueries({ queryKey: notificationUnreadCountQuery.queryKey });
+      queryClient.setQueryData<number>(notificationUnreadCountQuery.queryKey, (current) =>
+        Math.max(0, (current ?? unreadCount) - 1),
+      );
+      // The Link handles navigation; marking read happens in the background.
+      await readOne.mutateAsync(id);
+    } catch {
+      // readOne reports its own error and refetches the authoritative count.
+    } finally {
+      setPendingReadIds((current) => {
+        if (!current.has(id)) return current;
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
   }
 
   async function onMarkAll() {
+    if (readAll.isPending) return;
     try {
       const result = await readAll.mutateAsync();
       toast({
@@ -160,7 +178,11 @@ function NotificationsPage() {
             />
           ) : (
             <>
-              <NotificationsList notifications={notifications} onRead={onRead} />
+              <NotificationsList
+                notifications={notifications}
+                onRead={onRead}
+                pendingReadIds={pendingReadIds}
+              />
               {(feed.isFetchNextPageError || feed.hasNextPage) && (
                 <Stack gap={2} hAlign="center" paddingBlockStart={4}>
                   {feed.isFetchNextPageError ? (

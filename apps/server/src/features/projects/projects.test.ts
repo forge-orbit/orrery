@@ -847,6 +847,12 @@ describe("projects", () => {
       .where(eq(issueDependencies.issueId, downstream.id));
     expect(rows).toHaveLength(1);
 
+    const listed = await getJson(app, `/api/projects/${project.id}/issues`, adminCookie);
+    const listedDownstream = IssuesResponse.parse(await listed.json()).find(
+      (issue) => issue.id === downstream.id,
+    );
+    expect(listedDownstream?.blockedByIds).toEqual([blocker.id]);
+
     const blockedBy = await getJson(app, `/api/issues/${downstream.id}/blocked-by`, adminCookie);
     expect(blockedBy.status).toBe(200);
     expect(IssuesResponse.parse(await blockedBy.json()).map((issue) => issue.id)).toEqual([

@@ -79,7 +79,10 @@ export interface RecoveryAccountAccess {
     isSystemAdministrator: boolean;
     deactivatedAt: Date | null;
   } | null>;
-  setPassword(humanId: string, password: string, tx: DbTransaction): Promise<void>;
+
+  /** Hashing runs before the transaction so scrypt never holds a connection. */
+  hashPassword(password: string): Promise<string>;
+  setPasswordHash(humanId: string, passwordHash: string, tx: DbTransaction): Promise<void>;
   invalidateBrowserSessions(humanId: string, tx: DbTransaction): Promise<void>;
 }
 
@@ -104,10 +107,10 @@ async function changePasswordAndSignOut(
   tx: DbTransaction,
   accounts: RecoveryAccountAccess,
   humanId: string,
-  password: string,
+  passwordHash: string,
   type: "password_reset_completed" | "local_recovery_completed",
 ) {
-  await accounts.setPassword(humanId, password, tx);
+  await accounts.setPasswordHash(humanId, passwordHash, tx);
   await accounts.invalidateBrowserSessions(humanId, tx);
   await tx
     .update(passwordResetTokens)
@@ -156,34 +159,60 @@ export function createRecoveryService({
     },
 
     async confirmReset(token, password) {
+      // Hash before opening the transaction: scrypt is slow and must not pin a
+      // connection or extend the row locks below.
+      const passwordHash = await accounts.hashPassword(password);
+      const presentedHash = tokenHash(token);
+
       await db.transaction(async (tx) => {
+        // Find the token's owner without locking the token. Every reset path
+        // locks humans first and only then mutates password_reset_tokens, so
+        // two valid tokens for one human cannot deadlock on each other.
+        const [candidate] = await tx
+          .select({ humanId: passwordResetTokens.humanId })
+          .from(passwordResetTokens)
+          .where(
+            and(
+              eq(passwordResetTokens.tokenHash, presentedHash),
+              isNull(passwordResetTokens.usedAt),
+              gt(passwordResetTokens.expiresAt, sql`now()`),
+            ),
+          )
+          .limit(1);
+        if (candidate === undefined) throw new RecoveryError("reset_token_invalid");
+
+        const [account] = await tx
+          .select({ deactivatedAt: humans.deactivatedAt })
+          .from(humans)
+          .where(eq(humans.id, candidate.humanId))
+          .limit(1)
+          .for("update");
+        if (account === undefined || account.deactivatedAt !== null) {
+          throw new RecoveryError("account_deactivated");
+        }
+
+        // Redeem the presented token again under the human lock. A concurrent
+        // confirmation either committed first (which marked this token used)
+        // or waits here behind us.
         const redeemed = await tx
           .update(passwordResetTokens)
           .set({ usedAt: sql`now()` })
           .where(
             and(
-              eq(passwordResetTokens.tokenHash, tokenHash(token)),
+              eq(passwordResetTokens.tokenHash, presentedHash),
+              eq(passwordResetTokens.humanId, candidate.humanId),
               isNull(passwordResetTokens.usedAt),
               gt(passwordResetTokens.expiresAt, sql`now()`),
             ),
           )
           .returning({ humanId: passwordResetTokens.humanId });
-        const [row] = redeemed;
-        if (row === undefined) throw new RecoveryError("reset_token_invalid");
+        if (redeemed.length === 0) throw new RecoveryError("reset_token_invalid");
 
-        const [account] = await tx
-          .select({ deactivatedAt: humans.deactivatedAt })
-          .from(humans)
-          .where(eq(humans.id, row.humanId))
-          .limit(1);
-        if (account === undefined || account.deactivatedAt !== null) {
-          throw new RecoveryError("account_deactivated");
-        }
         await changePasswordAndSignOut(
           tx,
           accounts,
-          row.humanId,
-          password,
+          candidate.humanId,
+          passwordHash,
           "password_reset_completed",
         );
       });
@@ -191,9 +220,22 @@ export function createRecoveryService({
     },
 
     async localRecover(email, password) {
+      const passwordHash = await accounts.hashPassword(password);
       const recoveredEmail = await db.transaction(async (tx) => {
-        const account = await accounts.accountByEmail(email, tx);
-        if (account === null) throw new RecoveryError("account_not_found");
+        // Lock the human before touching reset tokens, matching confirmReset's
+        // order so the two paths serialize instead of deadlocking.
+        const [account] = await tx
+          .select({
+            humanId: humans.id,
+            email: humans.email,
+            isSystemAdministrator: humans.isSystemAdministrator,
+            deactivatedAt: humans.deactivatedAt,
+          })
+          .from(humans)
+          .where(eq(humans.email, email))
+          .limit(1)
+          .for("update");
+        if (account === undefined) throw new RecoveryError("account_not_found");
 
         if (account.deactivatedAt !== null) throw new RecoveryError("account_deactivated");
         if (!account.isSystemAdministrator) {
@@ -203,7 +245,7 @@ export function createRecoveryService({
           tx,
           accounts,
           account.humanId,
-          password,
+          passwordHash,
           "local_recovery_completed",
         );
         return account.email;
