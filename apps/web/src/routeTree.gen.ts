@@ -30,6 +30,7 @@ import { Route as TrashProjectIdRouteImport } from './routes/trash.$projectId'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
 import { Route as HistoryProjectProjectIdRouteImport } from './routes/history.project.$projectId'
 import { Route as HistoryWorkspaceWorkspaceIdRouteImport } from './routes/history.workspace.$workspaceId'
+import { Route as ProjectsProjectIdIssuesNewRouteImport } from './routes/projects.$projectId_.issues.new'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -137,6 +138,12 @@ const HistoryWorkspaceWorkspaceIdRoute =
     path: '/history/workspace/$workspaceId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ProjectsProjectIdIssuesNewRoute =
+  ProjectsProjectIdIssuesNewRouteImport.update({
+    id: '/projects/$projectId_/issues/new',
+    path: '/projects/$projectId/issues/new',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -160,6 +167,7 @@ export interface FileRoutesByFullPath {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/history/project/$projectId': typeof HistoryProjectProjectIdRoute
   '/history/workspace/$workspaceId': typeof HistoryWorkspaceWorkspaceIdRoute
+  '/projects/$projectId/issues/new': typeof ProjectsProjectIdIssuesNewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -183,6 +191,7 @@ export interface FileRoutesByTo {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/history/project/$projectId': typeof HistoryProjectProjectIdRoute
   '/history/workspace/$workspaceId': typeof HistoryWorkspaceWorkspaceIdRoute
+  '/projects/$projectId/issues/new': typeof ProjectsProjectIdIssuesNewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -207,6 +216,7 @@ export interface FileRoutesById {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/history/project/$projectId': typeof HistoryProjectProjectIdRoute
   '/history/workspace/$workspaceId': typeof HistoryWorkspaceWorkspaceIdRoute
+  '/projects/$projectId_/issues/new': typeof ProjectsProjectIdIssuesNewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -232,6 +242,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/history/project/$projectId'
     | '/history/workspace/$workspaceId'
+    | '/projects/$projectId/issues/new'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -255,6 +266,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/history/project/$projectId'
     | '/history/workspace/$workspaceId'
+    | '/projects/$projectId/issues/new'
   id:
     | '__root__'
     | '/'
@@ -278,6 +290,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/history/project/$projectId'
     | '/history/workspace/$workspaceId'
+    | '/projects/$projectId_/issues/new'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -302,6 +315,7 @@ export interface RootRouteChildren {
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
   HistoryProjectProjectIdRoute: typeof HistoryProjectProjectIdRoute
   HistoryWorkspaceWorkspaceIdRoute: typeof HistoryWorkspaceWorkspaceIdRoute
+  ProjectsProjectIdIssuesNewRoute: typeof ProjectsProjectIdIssuesNewRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -453,6 +467,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HistoryWorkspaceWorkspaceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/$projectId_/issues/new': {
+      id: '/projects/$projectId_/issues/new'
+      path: '/projects/$projectId/issues/new'
+      fullPath: '/projects/$projectId/issues/new'
+      preLoaderRoute: typeof ProjectsProjectIdIssuesNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -478,6 +499,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspacesWorkspaceIdRoute: WorkspacesWorkspaceIdRoute,
   HistoryProjectProjectIdRoute: HistoryProjectProjectIdRoute,
   HistoryWorkspaceWorkspaceIdRoute: HistoryWorkspaceWorkspaceIdRoute,
+  ProjectsProjectIdIssuesNewRoute: ProjectsProjectIdIssuesNewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

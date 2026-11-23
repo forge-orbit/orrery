@@ -37,7 +37,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import {
-  CreateIssueForm,
   createKnowledgeEntry,
   IssuePriorityControls,
   issuesQuery,
@@ -149,8 +148,8 @@ function ProjectPage() {
   const runsById = new Map(runs.map((run) => [run.id, run]));
   const canContribute = project.accessLevel !== "read";
   const canManage = project.accessLevel === "manage";
+  const navigate = useNavigate();
   const [tab, setTab] = useState<ProjectTab>("issues");
-  const [newIssueOpen, setNewIssueOpen] = useState(false);
   const [newKnowledgeOpen, setNewKnowledgeOpen] = useState(false);
   const activeTab: ProjectTab = tab === "settings" && !canManage ? "issues" : tab;
 
@@ -226,7 +225,12 @@ function ProjectPage() {
                 label="New issue"
                 variant="primary"
                 size="sm"
-                onClick={() => setNewIssueOpen(true)}
+                onClick={() =>
+                  void navigate({
+                    to: "/projects/$projectId/issues/new",
+                    params: { projectId: project.id },
+                  })
+                }
               />
             )}
           </>
@@ -287,7 +291,12 @@ function ProjectPage() {
                     <Button
                       label="New issue"
                       variant="primary"
-                      onClick={() => setNewIssueOpen(true)}
+                      onClick={() =>
+                        void navigate({
+                          to: "/projects/$projectId/issues/new",
+                          params: { projectId: project.id },
+                        })
+                      }
                     />
                   ) : undefined
                 }
@@ -519,32 +528,6 @@ function ProjectPage() {
             {project.workspaceKind === "shared" && <ProjectAccess projectId={project.id} />}
           </Stack>
         </section>
-      )}
-
-      {canContribute && (
-        <Drawer
-          isOpen={newIssueOpen}
-          onOpenChange={setNewIssueOpen}
-          purpose="form"
-          label="New issue"
-          width="28rem"
-        >
-          <Layout
-            height="auto"
-            header={
-              <DrawerHeader
-                title="New issue"
-                subtitle={project.name}
-                onOpenChange={setNewIssueOpen}
-                hasDivider
-              />
-            }
-          >
-            <LayoutContent>
-              <CreateIssueForm projectId={project.id} />
-            </LayoutContent>
-          </Layout>
-        </Drawer>
       )}
 
       {canContribute && (

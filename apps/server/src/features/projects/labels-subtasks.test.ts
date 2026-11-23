@@ -9,7 +9,15 @@ import {
 import { eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { humans, issueLabels, issues, projects, workspaces } from "../../db/schema.ts";
+import {
+  agentApiKeys,
+  agents,
+  humans,
+  issueLabels,
+  issues,
+  projects,
+  workspaces,
+} from "../../db/schema.ts";
 import { createDb, type Database } from "../../platform/db.ts";
 import { rootCause } from "../../platform/errors.ts";
 import { createApp } from "../../platform/http.ts";
@@ -17,6 +25,7 @@ import { createLogger } from "../../platform/log.ts";
 import { migrate } from "../../platform/migrate.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
 import { createProjectsFeature, ProjectsError, type WorkActor } from "./index.ts";
+import { createProjectsMcp } from "./mcp.ts";
 
 const SECRET = "correct horse battery staple staple";
 const EMAIL = "admin@example.com";
@@ -58,6 +67,21 @@ async function problemOf(res: Response, status: number, code: string) {
   expect(res.status).toBe(status);
   expect(res.headers.get("content-type")).toBe("application/problem+json");
   expect(await res.json()).toMatchObject({ status, code });
+}
+
+type ToolRegistrar = Parameters<ReturnType<typeof createProjectsMcp>>[0];
+
+function isToolRegistrar(value: unknown): value is ToolRegistrar {
+  return typeof value === "object" && value !== null && "registerTool" in value;
+}
+
+async function adminHumanId(): Promise<string> {
+  const [row] = await database.db
+    .select({ id: humans.id })
+    .from(humans)
+    .where(eq(humans.email, EMAIL));
+  if (row === undefined) throw new Error("the administrator was not found");
+  return row.id;
 }
 
 async function kindOf(promise: Promise<unknown>): Promise<string> {
@@ -151,6 +175,8 @@ afterEach(async () => {
     await tx.execute(sql`delete from project_labels`);
     await tx.execute(sql`delete from issues`);
     await tx.execute(sql`delete from projects`);
+    await tx.execute(sql`delete from agent_api_keys`);
+    await tx.execute(sql`delete from agents`);
   });
 });
 
@@ -514,5 +540,192 @@ describe("one-level subtasks (#97)", () => {
       (value): value is string => value !== null && value !== undefined,
     );
     expect(storedParents.every((id) => parents.get(id) === null)).toBe(true);
+  });
+});
+
+async function labelId(projectId: string, name: string, color = "#ff0000") {
+  const res = await post(`/api/projects/${projectId}/labels`, { name, color });
+  expect(res.status).toBe(201);
+  return text(field(await res.json(), "id"), "the label id");
+}
+
+async function nextIssueNumber(projectId: string) {
+  const [row] = await database.db
+    .select({ nextIssueNumber: projects.nextIssueNumber })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  return row!.nextIssueNumber;
+}
+
+async function issueCount(projectId: string) {
+  const [row] = await database.db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(issues)
+    .where(eq(issues.projectId, projectId));
+  return row!.count;
+}
+
+describe("atomic issue creation (#175)", () => {
+  it("creates the issue, its assignee and its labels in one REST request", async () => {
+    const pid = await project();
+    const bug = await labelId(pid, "Bug");
+    const ui = await labelId(pid, "UI", "#0000ff");
+    const humanId = await adminHumanId();
+
+    const created = await issue(pid, {
+      title: "Triage on create",
+      body: "Filed with its metadata.",
+      status: "in_progress",
+      priority: "high",
+      assignee: { type: "human", id: humanId },
+      labelIds: [bug, ui, bug],
+    });
+    expect(created).toMatchObject({
+      status: "in_progress",
+      priority: "high",
+      assignee: { humanId },
+    });
+    expect(created.labels.map((label) => label.id).toSorted()).toEqual([bug, ui].toSorted());
+
+    const [row] = await database.db.select().from(issues).where(eq(issues.id, created.id));
+    expect(row).toMatchObject({ assigneeType: "human", assigneeId: humanId });
+    const attached = await database.db
+      .select({ labelId: issueLabels.labelId })
+      .from(issueLabels)
+      .where(eq(issueLabels.issueId, created.id));
+    expect(attached.map((entry) => entry.labelId).toSorted()).toEqual([bug, ui].toSorted());
+
+    const events = ProjectActivityResponse.parse(
+      await (await get(`/api/projects/${pid}/activity`)).json(),
+    );
+    expect(events.filter((event) => event.type === "issue_label_added")).toHaveLength(2);
+    expect(events.map((event) => event.type)).toContain("issue_created");
+  });
+
+  it("rejects a foreign label or an unknown assignee without creating a partial issue", async () => {
+    const pid = await project();
+    const other = await project("Other", "OTH2");
+    const foreign = await labelId(other, "Foreign");
+    const before = await issueCount(pid);
+    const number = await nextIssueNumber(pid);
+
+    await problemOf(
+      await post(`/api/projects/${pid}/issues`, {
+        title: "Foreign label",
+        labelIds: [foreign],
+      }),
+      404,
+      "label_not_found",
+    );
+    expect(await issueCount(pid)).toBe(before);
+    expect(await nextIssueNumber(pid)).toBe(number);
+
+    await problemOf(
+      await post(`/api/projects/${pid}/issues`, {
+        title: "Unknown assignee",
+        assignee: { type: "human", id: randomUUID() },
+      }),
+      404,
+      "assignee_not_found",
+    );
+    expect(await issueCount(pid)).toBe(before);
+    expect(await nextIssueNumber(pid)).toBe(number);
+    expect(
+      await kindOf(service.createIssue(actor, pid, { title: "Service", labelIds: [foreign] })),
+    ).toBe("label_not_found");
+  });
+
+  it("accepts an agent assignee and label ids over MCP with the same validation", async () => {
+    const pid = await project();
+    const label = await labelId(pid, "MCP label");
+    const other = await project("Other", "OTH2");
+    const foreign = await labelId(other, "Foreign");
+    const agentId = randomUUID();
+    await database.db.insert(agents).values({
+      id: agentId,
+      humanId: await adminHumanId(),
+      name: `triage-${agentId}`,
+    });
+    await database.db.insert(agentApiKeys).values({
+      id: randomUUID(),
+      agentId,
+      workspaceId,
+      createdByHumanId: await adminHumanId(),
+      validity: "90",
+      tokenHash: `test-hash-${agentId}`,
+    });
+    const identity = {
+      agentId,
+      name: "triage-bot",
+      humanId: await adminHumanId(),
+      keyId: randomUUID(),
+      workspaceId,
+      validity: "90" as const,
+      projects: [{ projectId: pid, projectName: "Labels", level: "contribute" as const }],
+    };
+    const handlers = new Map<
+      string,
+      (args: Record<string, unknown>) => Promise<{
+        structuredContent?: Record<string, unknown>;
+        isError?: boolean;
+      }>
+    >();
+    // The tool registrar only calls registerTool; a capturing stub is enough here.
+    const rawServer = {
+      registerTool: (
+        name: string,
+        _config: unknown,
+        handler: (args: Record<string, unknown>) => Promise<{
+          structuredContent?: Record<string, unknown>;
+          isError?: boolean;
+        }>,
+      ) => {
+        handlers.set(name, handler);
+      },
+    };
+    if (!isToolRegistrar(rawServer)) throw new Error("the tool registrar stub is invalid");
+    createProjectsMcp(service, async () => identity)(
+      rawServer,
+      new Request("http://orrery.test/mcp"),
+    );
+    const create = handlers.get("create_issue");
+    if (create === undefined) throw new Error("create_issue was not registered");
+
+    const created = await create({
+      projectId: pid,
+      title: "MCP atomic issue",
+      labelIds: [label],
+      assignee: { type: "agent", id: agentId },
+    });
+    expect(created.isError).not.toBe(true);
+    const createdIssue = created.structuredContent?.issue;
+    expect(createdIssue).toMatchObject({ title: "MCP atomic issue", labels: [{ id: label }] });
+    expect(field(createdIssue, "assignee")).toMatchObject({ agentId });
+
+    const before = await issueCount(pid);
+    const numberBefore = await nextIssueNumber(pid);
+    const rejected = await create({
+      projectId: pid,
+      title: "MCP cross-project label",
+      labelIds: [foreign],
+    });
+    expect(rejected).toMatchObject({
+      isError: true,
+      structuredContent: { code: "label_not_found" },
+    });
+    expect(await issueCount(pid)).toBe(before);
+    expect(await nextIssueNumber(pid)).toBe(numberBefore);
+
+    const badAssignee = await create({
+      projectId: pid,
+      title: "MCP unknown assignee",
+      assignee: { type: "human", id: randomUUID() },
+    });
+    expect(badAssignee).toMatchObject({
+      isError: true,
+      structuredContent: { code: "assignee_not_found" },
+    });
+    expect(await issueCount(pid)).toBe(before);
+    expect(await nextIssueNumber(pid)).toBe(numberBefore);
   });
 });
