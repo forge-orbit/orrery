@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { HTTPException } from "hono/http-exception";
 import type { Feature } from "./feature.ts";
 import { errorSummary } from "./errors.ts";
@@ -51,6 +52,13 @@ export function createApp({ features, publicUrl, log, webDist }: AppOptions) {
   app.route("/mcp", createMcpApp(features, publicUrl));
 
   if (webDist) {
+    app.use("/assets/*", compress());
+    app.use("/assets/*", async (c, next) => {
+      await next();
+      if (c.res.status === 200) {
+        c.res.headers.set("cache-control", "public, max-age=31536000, immutable");
+      }
+    });
     app.use("/*", serveStatic({ root: webDist }));
 
     const index = readFile(join(webDist, "index.html"), "utf8");
