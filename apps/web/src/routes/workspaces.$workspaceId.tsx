@@ -541,12 +541,14 @@ function WorkspaceMembers({
       : permissionDraft.capabilities;
   const editableCapabilities =
     editingMember === undefined ? [] : changeableCapabilities(workspace, editingMember, ownEmail);
-  const hasPermissionChanges =
-    editingMember !== undefined &&
-    editableCapabilities.some((capability) => {
-      const value = draftCapabilities?.[capability];
-      return value !== undefined && value !== editingMember[capability];
-    });
+  const pendingChanges: UpdateWorkspaceMemberRequest = {};
+  for (const capability of editableCapabilities) {
+    const value = draftCapabilities?.[capability];
+    if (value !== undefined && value !== editingMember?.[capability]) {
+      pendingChanges[capability] = value;
+    }
+  }
+  const hasPermissionChanges = Object.keys(pendingChanges).length > 0;
   const savingPermissions = editingMember !== undefined && updating === editingMember.humanId;
 
   function openPermissions(member: WorkspaceMember) {
@@ -587,20 +589,12 @@ function WorkspaceMembers({
   }
 
   async function onSavePermissions() {
-    if (editingMember === undefined) return;
-    const changes: UpdateWorkspaceMemberRequest = {};
-    for (const capability of editableCapabilities) {
-      const value = draftCapabilities?.[capability];
-      if (value !== undefined && value !== editingMember[capability]) {
-        changes[capability] = value;
-      }
-    }
-    if (Object.keys(changes).length === 0) return;
+    if (editingMember === undefined || !hasPermissionChanges) return;
 
     setUpdating(editingMember.humanId);
     setError(undefined);
     try {
-      await updateWorkspaceMember(workspaceId, editingMember.humanId, changes);
+      await updateWorkspaceMember(workspaceId, editingMember.humanId, pendingChanges);
       closePermissions();
       await refresh();
       toast({ body: "Member permissions updated." });
@@ -776,54 +770,60 @@ function WorkspaceMembers({
             }
           >
             <LayoutContent>
-              <Stack gap={3}>
-                <Text as="p" display="block" type="supporting">
-                  Changes are saved when you select Save permissions. You can only delegate
-                  permissions you hold yourself.
-                </Text>
-                <Stack gap={2}>
-                  {editableCapabilities.map((capability) => (
-                    <Stack key={capability} gap={0.5} data-capability-control={capability}>
-                      <CheckboxInput
-                        label={capabilityLabels[capability]}
-                        value={draftCapabilities?.[capability] ?? editingMember[capability]}
-                        isDisabled={savingPermissions}
-                        onChange={(checked) =>
-                          setPermissionDraft((current) => ({
-                            humanId: editingMember.humanId,
-                            capabilities: {
-                              ...(current?.humanId === editingMember.humanId
-                                ? current.capabilities
-                                : {}),
-                              [capability]: checked,
-                            },
-                          }))
-                        }
-                      />
-                      <Text type="supporting" color="secondary">
-                        {capabilityDescriptions[capability]}
-                      </Text>
-                    </Stack>
-                  ))}
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void onSavePermissions();
+                }}
+              >
+                <Stack gap={3}>
+                  <Text as="p" display="block" type="supporting">
+                    Changes are saved when you select Save permissions. You can only delegate
+                    permissions you hold yourself.
+                  </Text>
+                  <Stack gap={2}>
+                    {editableCapabilities.map((capability) => (
+                      <Stack key={capability} gap={0.5} data-capability-control={capability}>
+                        <CheckboxInput
+                          label={capabilityLabels[capability]}
+                          value={draftCapabilities?.[capability] ?? editingMember[capability]}
+                          isDisabled={savingPermissions}
+                          onChange={(checked) =>
+                            setPermissionDraft((current) => ({
+                              humanId: editingMember.humanId,
+                              capabilities: {
+                                ...(current?.humanId === editingMember.humanId
+                                  ? current.capabilities
+                                  : {}),
+                                [capability]: checked,
+                              },
+                            }))
+                          }
+                        />
+                        <Text type="supporting" color="secondary">
+                          {capabilityDescriptions[capability]}
+                        </Text>
+                      </Stack>
+                    ))}
+                  </Stack>
+                  <Stack direction="horizontal" hAlign="start" gap={2}>
+                    <Button
+                      type="submit"
+                      label="Save permissions"
+                      variant="primary"
+                      isDisabled={!hasPermissionChanges || savingPermissions}
+                      isLoading={savingPermissions}
+                    />
+                    <Button
+                      type="button"
+                      label="Cancel"
+                      variant="secondary"
+                      isDisabled={savingPermissions}
+                      onClick={closePermissions}
+                    />
+                  </Stack>
                 </Stack>
-                <Stack direction="horizontal" hAlign="start" gap={2}>
-                  <Button
-                    type="button"
-                    label="Save permissions"
-                    variant="primary"
-                    isDisabled={!hasPermissionChanges || savingPermissions}
-                    isLoading={savingPermissions}
-                    onClick={() => void onSavePermissions()}
-                  />
-                  <Button
-                    type="button"
-                    label="Cancel"
-                    variant="secondary"
-                    isDisabled={savingPermissions}
-                    onClick={closePermissions}
-                  />
-                </Stack>
-              </Stack>
+              </form>
             </LayoutContent>
           </Layout>
         )}
