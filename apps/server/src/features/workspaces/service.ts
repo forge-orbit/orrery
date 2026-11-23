@@ -10,6 +10,7 @@ import {
   type CreateWorkspaceRequest,
   type InvitationSummary,
   type InviteWorkspaceMemberRequest,
+  type SessionResponse,
   type Workspace,
   type WorkspaceCapability,
   type WorkspaceInvitation,
@@ -22,7 +23,7 @@ import type { DbTransaction } from "../../platform/db.ts";
 import { errorNameAndCode, uniqueConstraintName } from "../../platform/errors.ts";
 import type { Logger } from "../../platform/log.ts";
 import { tokenHash } from "../../platform/tokens.ts";
-import type { SessionAccount } from "../accounts/index.ts";
+import { toSessionResponse, type SessionAccount } from "../accounts/index.ts";
 import { canResendInvitation, supersedeTargetForPending } from "../invitations/index.ts";
 import { renderEmail, type OutgoingMail } from "../settings/index.ts";
 import {
@@ -572,7 +573,7 @@ export interface WorkspacesDeps {
   createInvitedHuman: (
     input: { email: string; password: string },
     tx: DbTransaction,
-  ) => Promise<{ humanId: string }>;
+  ) => Promise<{ humanId: string; handle: string }>;
   markEmailVerified: (humanId: string, tx: DbTransaction) => Promise<void>;
 
   deliver: (mail: OutgoingMail) => Promise<void>;
@@ -631,10 +632,7 @@ export interface WorkspacesService {
   declineInvitation(input: { token: string }): Promise<void>;
   previewInvitation(token: string): Promise<WorkspaceInvitationPreview>;
   acceptInvitation(account: SessionAccount | null, token: string): Promise<Workspace>;
-  registerThroughInvitation(input: {
-    token: string;
-    password: string;
-  }): Promise<{ email: string; emailVerified: true; avatarUrl: null }>;
+  registerThroughInvitation(input: { token: string; password: string }): Promise<SessionResponse>;
   appointOwner(
     account: SessionAccount | null,
     workspaceId: string,
@@ -1490,7 +1488,7 @@ export function createWorkspacesService({
     },
 
     async registerThroughInvitation(input) {
-      const email = await db.transaction(async (tx) => {
+      const registered = await db.transaction(async (tx) => {
         const invitation = await redeemWorkspaceInvitation(tx, input.token);
 
         const [existing] = await tx
@@ -1500,11 +1498,14 @@ export function createWorkspacesService({
           .limit(1);
         if (existing !== undefined) throw new WorkspacesError("account_exists");
 
+        let handle = "";
         try {
-          const { humanId } = await createInvitedHuman(
+          const created = await createInvitedHuman(
             { email: invitation.email, password: input.password },
             tx,
           );
+          const { humanId } = created;
+          handle = created.handle;
           await markEmailVerified(humanId, tx);
           await tx.insert(workspaceMemberships).values({
             id: randomUUID(),
@@ -1527,9 +1528,15 @@ export function createWorkspacesService({
           }
           throw error;
         }
-        return invitation.email;
+        return { email: invitation.email, handle };
       });
-      return { email, emailVerified: true as const, avatarUrl: null };
+      return toSessionResponse({
+        email: registered.email,
+        handle: registered.handle,
+        displayName: null,
+        emailVerifiedAt: new Date(),
+        avatarUrl: null,
+      });
     },
 
     async appointOwner(account, workspaceId, humanId) {

@@ -317,6 +317,7 @@ function TestAndVerification({
       const session: Session = {
         signedIn: true,
         email: account.email,
+        handle: account.handle,
         displayName: prev?.signedIn ? prev.displayName : null,
         emailVerified: account.emailVerified,
         avatarUrl: account.avatarUrl,

@@ -74,7 +74,8 @@ export type AccountsErrorKind =
   | "invalid_secret"
   | "setup_complete"
   | "invalid_credentials"
-  | "invalid_current_password";
+  | "invalid_current_password"
+  | "handle_taken";
 
 const messages = {
   setup_unavailable:
@@ -83,6 +84,7 @@ const messages = {
   setup_complete: "Initial setup is already complete.",
   invalid_credentials: "Invalid email or password.",
   invalid_current_password: "Current password is incorrect.",
+  handle_taken: "That handle is already in use.",
 } as const satisfies Record<AccountsErrorKind, string>;
 
 export class AccountsError extends Error {
@@ -125,9 +127,21 @@ export async function invalidateAccountSessions(runner: AccountRunner, humanId: 
   await runner.delete(browserSessions).where(eq(browserSessions.humanId, humanId));
 }
 
+/** Mirrors the Postgres handle derivation for callers that supply only an email. */
+export function deriveHandleFromEmail(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  const base = local
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return base.length >= 2 ? base.slice(0, 39) : "user";
+}
+
 export interface SessionAccount {
   humanId: string;
   email: string;
+  handle?: string | undefined;
   displayName?: string | null;
   isSystemAdministrator: boolean;
   emailVerifiedAt: Date | null;
@@ -137,6 +151,7 @@ export interface SessionAccount {
 export const sessionAccountFrom = (row: {
   humanId: string;
   email: string;
+  handle?: string | undefined;
   displayName?: string | null;
   isSystemAdministrator: boolean;
   emailVerifiedAt: Date | null;
@@ -144,6 +159,7 @@ export const sessionAccountFrom = (row: {
 }): SessionAccount => ({
   humanId: row.humanId,
   email: row.email,
+  handle: row.handle,
   displayName: row.displayName ?? null,
   isSystemAdministrator: row.isSystemAdministrator,
   emailVerifiedAt: row.emailVerifiedAt,
@@ -185,7 +201,7 @@ export interface AccountsService {
   createInvitedHuman(
     input: { email: string; password: string },
     tx: DbTransaction,
-  ): Promise<{ humanId: string }>;
+  ): Promise<{ humanId: string; handle: string }>;
 
   emailRegistered(email: string, tx?: DbTransaction): Promise<boolean>;
 
@@ -207,19 +223,23 @@ async function insertHumanWithPersonalWorkspace(
   tx: DbTransaction,
   input: { id: string; email: string; passwordHash: string; isSystemAdministrator?: boolean },
 ) {
-  await tx.insert(humans).values({
-    id: input.id,
-    email: input.email,
-    passwordHash: input.passwordHash,
+  const [inserted] = await tx
+    .insert(humans)
+    .values({
+      id: input.id,
+      email: input.email,
+      passwordHash: input.passwordHash,
 
-    ...(input.isSystemAdministrator === true ? { isSystemAdministrator: true } : {}),
-  });
+      ...(input.isSystemAdministrator === true ? { isSystemAdministrator: true } : {}),
+    })
+    .returning({ handle: humans.handle });
   await tx.insert(workspaces).values({
     id: randomUUID(),
     kind: WorkspaceKind.enum.personal,
     name: "Personal",
     personalOwnerHumanId: input.id,
   });
+  return inserted?.handle ?? "";
 }
 
 export function createAccountsService({
@@ -305,6 +325,7 @@ export function createAccountsService({
         .select({
           humanId: humans.id,
           email: humans.email,
+          handle: humans.handle,
           displayName: humans.displayName,
           isSystemAdministrator: humans.isSystemAdministrator,
           emailVerifiedAt: humans.emailVerifiedAt,
@@ -321,26 +342,50 @@ export function createAccountsService({
           ),
         )
         .limit(1);
-      return row === undefined ? null : sessionAccountFrom(row);
+      return row === undefined
+        ? null
+        : sessionAccountFrom({ ...row, handle: row.handle ?? undefined });
     },
 
     async updateProfile(humanId: string, input: UpdateProfileRequest) {
-      const [row] = await db
-        .update(humans)
-        .set({ displayName: input.displayName })
-        .where(and(eq(humans.id, humanId), isNull(humans.deactivatedAt)))
-        .returning({
-          humanId: humans.id,
-          email: humans.email,
-          displayName: humans.displayName,
-          isSystemAdministrator: humans.isSystemAdministrator,
-          emailVerifiedAt: humans.emailVerifiedAt,
-          avatarObjectId: humans.avatarObjectId,
-        });
+      let row:
+        | {
+            humanId: string;
+            email: string;
+            handle: string | null;
+            displayName: string | null;
+            isSystemAdministrator: boolean;
+            emailVerifiedAt: Date | null;
+            avatarObjectId: string | null;
+          }
+        | undefined;
+      try {
+        [row] = await db
+          .update(humans)
+          .set({
+            displayName: input.displayName,
+            ...(input.handle === undefined ? {} : { handle: input.handle }),
+          })
+          .where(and(eq(humans.id, humanId), isNull(humans.deactivatedAt)))
+          .returning({
+            humanId: humans.id,
+            email: humans.email,
+            handle: humans.handle,
+            displayName: humans.displayName,
+            isSystemAdministrator: humans.isSystemAdministrator,
+            emailVerifiedAt: humans.emailVerifiedAt,
+            avatarObjectId: humans.avatarObjectId,
+          });
+      } catch (error) {
+        if (uniqueConstraintName(error) === "humans_handle_unique") {
+          throw new AccountsError("handle_taken");
+        }
+        throw error;
+      }
       if (row === undefined) {
         throw new AccountsError("invalid_credentials");
       }
-      return sessionAccountFrom(row);
+      return sessionAccountFrom({ ...row, handle: row.handle ?? undefined });
     },
 
     async changePassword(
@@ -388,12 +433,12 @@ export function createAccountsService({
       await tx.execute(sql`select pg_advisory_xact_lock(61683815, hashtext(${input.email}))`);
       const humanId = randomUUID();
       const passwordHash = await hashPassword(input.password);
-      await insertHumanWithPersonalWorkspace(tx, {
+      const handle = await insertHumanWithPersonalWorkspace(tx, {
         id: humanId,
         email: input.email,
         passwordHash,
       });
-      return { humanId };
+      return { humanId, handle };
     },
 
     async emailRegistered(email: string, tx?: DbTransaction) {

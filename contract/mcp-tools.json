@@ -108,6 +108,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -147,6 +157,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -280,6 +294,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -319,6 +343,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -542,6 +570,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -581,6 +619,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -852,6 +894,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -891,6 +943,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -1331,6 +1387,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -1370,6 +1436,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -1721,6 +1791,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -1760,6 +1840,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -1931,6 +2015,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -1970,6 +2064,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -2089,6 +2187,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -2128,6 +2236,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -2245,6 +2357,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -2284,6 +2406,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -2518,6 +2644,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -2557,6 +2693,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -2820,6 +2960,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -2859,6 +3009,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -3014,6 +3168,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -3053,6 +3217,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -3293,6 +3461,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -3332,6 +3510,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -3595,6 +3777,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -3634,6 +3826,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -3800,6 +3996,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -3839,6 +4045,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -3973,6 +4183,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -4012,6 +4232,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -4185,6 +4409,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -4224,6 +4458,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -4424,6 +4662,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -4463,6 +4711,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -4922,6 +5174,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -4961,6 +5223,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -5101,6 +5367,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -5140,6 +5416,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -5295,6 +5575,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -5334,6 +5624,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -5488,6 +5782,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -5527,6 +5831,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",
@@ -7516,6 +7824,16 @@
                 }
               ]
             },
+            "handle": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Handle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agentId": {
               "type": [
                 "string",
@@ -7555,6 +7873,10 @@
           "type": "string",
           "format": "email",
           "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+        },
+        "Handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$"
         },
         "AvatarUrl": {
           "type": "string",

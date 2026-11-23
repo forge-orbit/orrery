@@ -51,6 +51,7 @@ import {
   groupLabelEvents,
   PRIORITY_LABELS,
   LabelPill,
+  MentionMarkdown,
   PriorityBadge,
   projectActivityQuery,
   projectLabelsQuery,
@@ -78,7 +79,6 @@ import { TextField } from "../lib/fields.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
 import { quoteReply } from "../lib/markdown-toolbar.ts";
-import { Markdown } from "../lib/Markdown.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
 import { formatCompactDateTime, formatFullDateTime, relativeTime } from "../lib/time.ts";
 
@@ -185,11 +185,13 @@ function ActorAvatar({ actor }: { actor: Actor }) {
 
 function TimelineRow({
   entry,
+  projectId,
   projectIssues,
   canContribute,
   onQuoteReply,
 }: {
   entry: TimelineEntry;
+  projectId: string;
   projectIssues: Issue[];
   canContribute: boolean;
   onQuoteReply: (comment: IssueComment) => void;
@@ -219,7 +221,9 @@ function TimelineRow({
               </Text>
             </Stack>
             <Stack data-comment-body="">
-              <Markdown issueRefs={projectIssues}>{entry.comment.body}</Markdown>
+              <MentionMarkdown projectId={projectId} issueRefs={projectIssues}>
+                {entry.comment.body}
+              </MentionMarkdown>
             </Stack>
             {canContribute && (
               <Stack hAlign="start">
@@ -753,7 +757,9 @@ function IssuePage() {
                     </Text>
                   ) : (
                     <Stack data-issue-body="">
-                      <Markdown issueRefs={projectIssues}>{issue.body}</Markdown>
+                      <MentionMarkdown projectId={issue.projectId} issueRefs={projectIssues}>
+                        {issue.body}
+                      </MentionMarkdown>
                     </Stack>
                   )}
                 </Stack>
@@ -853,6 +859,7 @@ function IssuePage() {
                       <TimelineRow
                         key={entry.id}
                         entry={entry}
+                        projectId={issue.projectId}
                         projectIssues={projectIssues}
                         canContribute={canContribute}
                         onQuoteReply={onQuoteReply}

@@ -18,7 +18,11 @@ import { createHistoryFeature, historyRoutes } from "./history/index.ts";
 import { createInboxFeature, inboxRoutes } from "./inbox/index.ts";
 import { createInvitationsFeature, invitationsRoutes } from "./invitations/index.ts";
 import { createMyWorkFeature, myWorkRoutes } from "./my-work/index.ts";
-import { createNotificationsFeature, notificationsRoutes } from "./notifications/index.ts";
+import {
+  createNotificationsFeature,
+  notificationsRoutes,
+  type NotifyActivity,
+} from "./notifications/index.ts";
 import { createOwnershipFeature, ownershipRoutes } from "./ownership/index.ts";
 import { createProjectsFeature, projectAccessAtLeast, projectsRoutes } from "./projects/index.ts";
 import { createRecoveryFeature, recoveryRoutes } from "./recovery/index.ts";
@@ -98,6 +102,13 @@ export function createFeatures(
     if (dueQuestionIssueIds === undefined) throw new Error("question deadline is not wired");
     return dueQuestionIssueIds();
   };
+  // Notifications is built after projects, but issue and comment writes must
+  // deliver mention notifications inside their own transaction.
+  let wiredNotifyActivity: NotifyActivity | undefined;
+  const notifyActivity: NotifyActivity = (tx, input) => {
+    if (wiredNotifyActivity === undefined) throw new Error("mention notifications are not wired");
+    return wiredNotifyActivity(tx, input);
+  };
   // Attachments is built after projects (it needs the project access gate), but
   // saving a holder must sync references inside that holder's transaction.
   let wiredAttachmentSeams: AttachmentSeams | undefined;
@@ -125,6 +136,7 @@ export function createFeatures(
 
     evaluateQuestionDeadline: evaluateDeadline,
     onActivity: webhooks.enqueueForActivity,
+    notifyActivity,
     attachmentSeams,
     log,
   });
@@ -171,6 +183,7 @@ export function createFeatures(
     projectAccessAtLeast,
     log,
   });
+  wiredNotifyActivity = notifications.notifyActivity;
 
   const sessions = createSessionsFeature({
     db: database.db,

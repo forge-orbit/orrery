@@ -71,6 +71,7 @@ function RegisterPage() {
       const session: Session = {
         signedIn: true,
         email: account.email,
+        handle: account.handle,
         displayName: null,
         emailVerified: account.emailVerified,
         avatarUrl: null,

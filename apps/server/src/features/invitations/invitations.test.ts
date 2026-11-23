@@ -568,7 +568,7 @@ describe("invitations", () => {
         db: database.db,
         publicUrl: PUBLIC_URL,
         emailRegistered: async () => false,
-        createInvitedHuman: async (input) => ({ humanId: input.email }),
+        createInvitedHuman: async (input) => ({ humanId: input.email, handle: "test-handle" }),
         markEmailVerified: async () => {},
         deliver: async () => {},
       });
@@ -706,7 +706,13 @@ describe("invitations", () => {
         password: INVITEE_PASSWORD,
       });
       expect(ok.status).toBe(200);
-      expect(await ok.json()).toEqual({ email: INVITEE, emailVerified: true, avatarUrl: null });
+      expect(await ok.json()).toEqual({
+        email: INVITEE,
+        handle: "member",
+        displayName: null,
+        emailVerified: true,
+        avatarUrl: null,
+      });
     });
 
     it("records requests without the invitation token", async () => {
@@ -753,6 +759,8 @@ describe("invitations", () => {
       expect(res.status).toBe(200);
       expect(SessionResponse.parse(await res.json())).toEqual({
         email: INVITEE,
+        handle: "member",
+        displayName: null,
         emailVerified: true,
         avatarUrl: null,
       });
@@ -790,6 +798,7 @@ describe("invitations", () => {
       const session = await app.request("/api/auth/session", { headers: { cookie: cookie ?? "" } });
       expect(await session.json()).toEqual({
         email: INVITEE,
+        handle: "member",
         displayName: null,
         emailVerified: true,
         avatarUrl: null,
@@ -816,7 +825,13 @@ describe("invitations", () => {
         password: INVITEE_PASSWORD,
       });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ email: INVITEE, emailVerified: true, avatarUrl: null });
+      expect(await res.json()).toEqual({
+        email: INVITEE,
+        handle: "member",
+        displayName: null,
+        emailVerified: true,
+        avatarUrl: null,
+      });
 
       const [human] = await database.db.select().from(humans).where(eq(humans.email, INVITEE));
       expect(human?.emailVerifiedAt).not.toBeNull();
@@ -929,6 +944,8 @@ describe("invitations", () => {
       expect(valid.status).toBe(200);
       expect(await valid.json()).toEqual({
         email: "still.valid@example.com",
+        handle: "still-valid",
+        displayName: null,
         emailVerified: true,
         avatarUrl: null,
       });

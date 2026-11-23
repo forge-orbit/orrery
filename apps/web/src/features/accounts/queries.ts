@@ -11,6 +11,7 @@ export type Session =
   | {
       signedIn: true;
       email: string;
+      handle: string;
       displayName: string | null;
       emailVerified: boolean;
       avatarUrl: string | null;
@@ -27,6 +28,7 @@ export const sessionQuery = queryOptions({
     return {
       signedIn: true,
       email: account.email,
+      handle: account.handle,
       displayName: account.displayName ?? null,
       emailVerified: account.emailVerified,
       avatarUrl: account.avatarUrl,

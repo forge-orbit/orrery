@@ -6,10 +6,13 @@ import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
+import { Token } from "@astryxdesign/core/Token";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
+import type { MentionActor } from "@orrery/contract";
 import { useQuery } from "@tanstack/react-query";
 import mermaid from "mermaid";
 import { createElement, type ReactNode, useId } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useResolvedAppearance } from "./appearance.tsx";
 import { Link } from "./Link.tsx";
@@ -82,6 +85,61 @@ function createIssueRefPlugin(issueRefs: readonly IssueReference[]) {
       } else if (cursor < text.length) {
         next.push({ type: "text", value: text.slice(cursor) });
       }
+    }
+    parent.children = next;
+  }
+
+  return () => (tree: MdastNode) => {
+    transformChildren(tree);
+  };
+}
+
+const SKIP_MENTION_PARENTS = new Set(["link", "linkReference", "code", "inlineCode", "definition"]);
+const MENTION_PATTERN = /(?<![\w/.@+-])@([a-z0-9][a-z0-9-]{0,38})/gi;
+
+export const mentionUrl = (actor: MentionActor): string =>
+  `/mentions/${actor.type}/${encodeURIComponent(actor.id)}`;
+
+function createMentionPlugin(actors: readonly MentionActor[]) {
+  const byToken = new Map<string, MentionActor>();
+  for (const actor of actors) {
+    byToken.set(
+      actor.type === "human" ? `@${actor.handle.toLowerCase()}` : `@${actor.slug.toLowerCase()}`,
+      actor,
+    );
+  }
+
+  function transformChildren(parent: MdastNode) {
+    if (!Array.isArray(parent.children) || SKIP_MENTION_PARENTS.has(parent.type)) return;
+    const next: MdastNode[] = [];
+    for (const child of parent.children) {
+      if (child.type !== "text" || typeof child.value !== "string") {
+        transformChildren(child);
+        next.push(child);
+        continue;
+      }
+      const text = child.value;
+      MENTION_PATTERN.lastIndex = 0;
+      let cursor = 0;
+      let matched = false;
+      for (const match of text.matchAll(MENTION_PATTERN)) {
+        const start = match.index;
+        const raw = match[0];
+        const actor = byToken.get(raw.toLowerCase());
+        if (actor === undefined) continue;
+        matched = true;
+        if (start > cursor) next.push({ type: "text", value: text.slice(cursor, start) });
+        const label = actor.type === "human" ? (actor.displayName ?? actor.handle) : actor.name;
+        next.push({
+          type: "link",
+          url: mentionUrl(actor),
+          title: `${label} — ${actor.type === "agent" ? "Agent" : "Human"}`,
+          children: [{ type: "text", value: raw }],
+        });
+        cursor = start + raw.length;
+      }
+      if (!matched) next.push(child);
+      else if (cursor < text.length) next.push({ type: "text", value: text.slice(cursor) });
     }
     parent.children = next;
   }
@@ -246,6 +304,27 @@ const components: Components = {
         </Text>
       );
     }
+    const mentionMatch = /^\/mentions\/(human|agent)\/([^/]+)$/.exec(href);
+    if (mentionMatch?.[1] !== undefined && mentionMatch[2] !== undefined) {
+      const kind = mentionMatch[1];
+      const label =
+        typeof children === "string"
+          ? children
+          : Array.isArray(children)
+            ? children.filter((part) => typeof part === "string").join("")
+            : "";
+      return (
+        <Tooltip content={title ?? label}>
+          <Token
+            label={label}
+            color={kind === "agent" ? "orange" : "blue"}
+            size="sm"
+            data-mention=""
+            data-mention-kind={kind}
+          />
+        </Tooltip>
+      );
+    }
     const issueMatch = /^\/issues\/([0-9a-f-]+)$/i.exec(href);
     if (issueMatch?.[1] !== undefined) {
       return (
@@ -285,14 +364,19 @@ const components: Components = {
 export function Markdown({
   children,
   issueRefs,
+  mentionActors,
 }: {
   children: string;
   issueRefs?: readonly IssueReference[];
+  mentionActors?: readonly MentionActor[];
 }) {
-  const plugins =
-    issueRefs !== undefined && issueRefs.length > 0
-      ? [remarkGfm, createIssueRefPlugin(issueRefs)]
-      : [remarkGfm];
+  const plugins: NonNullable<Options["remarkPlugins"]> = [remarkGfm];
+  if (issueRefs !== undefined && issueRefs.length > 0) {
+    plugins.push(createIssueRefPlugin(issueRefs));
+  }
+  if (mentionActors !== undefined && mentionActors.length > 0) {
+    plugins.push(createMentionPlugin(mentionActors));
+  }
   return (
     <Stack gap={2} data-markdown="">
       <ReactMarkdown remarkPlugins={plugins} components={components} urlTransform={safeUrl}>

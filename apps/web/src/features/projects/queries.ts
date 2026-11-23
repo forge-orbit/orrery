@@ -2,6 +2,7 @@ import {
   IssueCommentsResponse,
   IssueDetail,
   IssuesResponse,
+  MentionCandidatesResponse,
   KnowledgeEntriesResponse,
   KnowledgeEntry,
   Project,
@@ -64,6 +65,15 @@ export const issuesQuery = (projectId: string) =>
     queryFn: () =>
       getJson(`/api/projects/${encodeURIComponent(projectId)}/issues`, (value) =>
         IssuesResponse.parse(value),
+      ),
+  });
+
+export const mentionCandidatesQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: ["projects", projectId, "mention-candidates"],
+    queryFn: () =>
+      getJson(`/api/projects/${encodeURIComponent(projectId)}/mention-candidates`, (value) =>
+        MentionCandidatesResponse.parse(value),
       ),
   });
 

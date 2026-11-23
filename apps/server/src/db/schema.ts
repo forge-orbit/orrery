@@ -75,6 +75,13 @@ export const humans = pgTable(
   {
     id: text("id").primaryKey(),
     email: text("email").notNull().unique(),
+    /**
+     * GitHub-style unique handle. The backfill migration makes this NOT NULL and
+     * installs a BEFORE INSERT trigger that derives it from the email local part
+     * (with -2, -3, … collision suffixes), so legacy and directly-seeded rows are
+     * covered even though Drizzle's builder still permits omitting it.
+     */
+    handle: text("handle").$type<string>(),
     displayName: text("display_name"),
     passwordHash: text("password_hash").notNull(),
     emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
@@ -89,6 +96,11 @@ export const humans = pgTable(
   },
   (t) => [
     check("humans_email_normalized", sql`${t.email} = lower(btrim(${t.email}))`),
+    check(
+      "humans_handle_valid",
+      sql`${t.handle} ~ '^[a-z0-9][a-z0-9-]*[a-z0-9]$' and char_length(${t.handle}) between 2 and 39`,
+    ),
+    uniqueIndex("humans_handle_unique").on(sql`lower(${t.handle})`),
     check(
       "humans_display_name_valid",
       sql`${t.displayName} is null or (btrim(${t.displayName}) <> '' and char_length(${t.displayName}) <= 120)`,

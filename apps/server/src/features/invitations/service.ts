@@ -1,13 +1,13 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { InvitationDelivery, InvitationStatus } from "@orrery/contract";
-import type { InstallationInvitation, InvitationSummary } from "@orrery/contract";
+import type { InstallationInvitation, InvitationSummary, SessionResponse } from "@orrery/contract";
 import { and, desc, eq, gt, gte, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DbTransaction } from "../../platform/db.ts";
 import { errorNameAndCode, uniqueConstraintName } from "../../platform/errors.ts";
 import type { Logger } from "../../platform/log.ts";
 import { tokenHash } from "../../platform/tokens.ts";
-import type { SessionAccount } from "../accounts/index.ts";
+import { toSessionResponse, type SessionAccount } from "../accounts/index.ts";
 import { renderEmail, type OutgoingMail } from "../settings/index.ts";
 import { invitations, humans } from "../../db/schema.ts";
 import { canResendInvitation, supersedeTargetForPending } from "./state-machine.ts";
@@ -197,7 +197,7 @@ export interface InvitationsServiceDeps {
   createInvitedHuman: (
     input: { email: string; password: string },
     tx: DbTransaction,
-  ) => Promise<{ humanId: string }>;
+  ) => Promise<{ humanId: string; handle: string }>;
   markEmailVerified: (humanId: string, tx: DbTransaction) => Promise<void>;
 
   deliver: (mail: OutgoingMail) => Promise<void>;
@@ -219,10 +219,7 @@ export interface InvitationsService {
     invitationId: string,
   ): Promise<InvitationSummary>;
   declineInstallation(input: { token: string }): Promise<void>;
-  registerInstallation(input: {
-    token: string;
-    password: string;
-  }): Promise<{ email: string; emailVerified: true; avatarUrl: null }>;
+  registerInstallation(input: { token: string; password: string }): Promise<SessionResponse>;
 }
 
 export function createInvitationsService({
@@ -471,7 +468,7 @@ export function createInvitationsService({
 
     async registerInstallation(input) {
       const hash = tokenHash(input.token);
-      const email = await db.transaction(async (tx) => {
+      const registered = await db.transaction(async (tx) => {
         const [target] = await tx
           .select({ email: invitations.email })
           .from(invitations)
@@ -505,21 +502,29 @@ export function createInvitationsService({
           throw new InvitationsError("inviter_not_authorized");
         }
 
+        let handle = "";
         try {
-          const { humanId } = await createInvitedHuman(
+          const created = await createInvitedHuman(
             { email: row.email, password: input.password },
             tx,
           );
-          await markEmailVerified(humanId, tx);
+          handle = created.handle;
+          await markEmailVerified(created.humanId, tx);
         } catch (error) {
           if (uniqueConstraintName(error) === "humans_email_unique") {
             throw new InvitationsError("account_exists");
           }
           throw error;
         }
-        return row.email;
+        return { email: row.email, handle };
       });
-      return { email, emailVerified: true as const, avatarUrl: null };
+      return toSessionResponse({
+        email: registered.email,
+        handle: registered.handle,
+        displayName: null,
+        emailVerifiedAt: new Date(),
+        avatarUrl: null,
+      });
     },
   };
 }

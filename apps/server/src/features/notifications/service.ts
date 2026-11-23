@@ -60,6 +60,8 @@ export interface ActivityNotificationInput {
   summary: string;
   actorHumanId?: string | null;
   actorAgentId?: string | null;
+  /** Handles struck from a Markdown body; only Humans with live Read access are notified. */
+  mentionHandles?: readonly string[];
 }
 
 /**
@@ -196,8 +198,27 @@ export function createNotificationsService(deps: NotificationsDeps): Notificatio
     ) {
       recipients.add(issue.createdByHumanId);
     }
+    if (input.mentionHandles !== undefined && input.mentionHandles.length > 0) {
+      const handles = [...new Set(input.mentionHandles.map((handle) => handle.toLowerCase()))];
+      const mentioned = await tx
+        .select({ id: humans.id })
+        .from(humans)
+        .where(and(inArray(sql`lower(${humans.handle})`, handles), isNull(humans.deactivatedAt)));
+      for (const { id } of mentioned) recipients.add(id);
+    }
+    // Never notify the human who caused the event, even when they mentioned themselves.
     if (input.actorHumanId !== null && input.actorHumanId !== undefined) {
       recipients.delete(input.actorHumanId);
+    }
+    if (input.actorAgentId !== null && input.actorAgentId !== undefined) {
+      const [owner] = await tx
+        .select({ humanId: agents.humanId })
+        .from(agents)
+        .where(eq(agents.id, input.actorAgentId))
+        .limit(1);
+      if (owner !== undefined && input.mentionHandles !== undefined) {
+        recipients.delete(owner.humanId);
+      }
     }
     if (recipients.size === 0) return;
 

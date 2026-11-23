@@ -14,7 +14,11 @@ import { createProjectsMcp } from "./mcp.ts";
 import { createProjectsRest, routes } from "./rest.ts";
 
 export { routes as projectsRoutes };
-export { projectAccessAtLeast } from "./service.ts";
+export {
+  createProjectsService,
+  projectAccessAtLeast,
+  projectAccessCeilingInTransaction,
+} from "./service.ts";
 export { ProjectsError } from "./service.ts";
 export type {
   IssueSessionGate,
