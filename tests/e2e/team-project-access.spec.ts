@@ -385,7 +385,9 @@ async function ensureAdminVerified() {
     data: { token },
   });
   expect(verified.status()).toBe(200);
-  expect(await verified.json()).toEqual({
+  // #183 adds handle and displayName to the session; keep checking the fields this
+  // test cares about without pinning the whole response shape.
+  expect(await verified.json()).toMatchObject({
     email: ADMIN_EMAIL,
     emailVerified: true,
     avatarUrl: null,
