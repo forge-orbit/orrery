@@ -21,12 +21,7 @@ import {
   issueQuestionsQuery,
   QuestionDetails,
 } from "../features/inbox/index.ts";
-import {
-  IssueMentionTextArea,
-  issueQuery,
-  issuesQuery,
-  projectQuery,
-} from "../features/projects/index.ts";
+import { IssueMentionTextArea, issuesQuery } from "../features/projects/index.ts";
 import { workspaceRunsQuery } from "../features/runs/index.ts";
 import { ApiProblemError } from "../lib/api.ts";
 import { Link } from "../lib/Link.tsx";
@@ -148,8 +143,6 @@ function QuestionList({
 }
 
 function QuestionCard({ question }: { question: Question }) {
-  const { data: issue } = useQuery(issueQuery(question.issueId));
-  const { data: project } = useQuery(projectQuery(question.projectId));
   const { data: runs = [] } = useQuery(workspaceRunsQuery(question.workspaceId));
   const run = runs.find((entry) => entry.id === question.runId);
   const pending = isPendingQuestion(question);
@@ -167,13 +160,11 @@ function QuestionCard({ question }: { question: Question }) {
               color="primary"
             >
               <Stack as="span" direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-                {project !== undefined && issue !== undefined && (
-                  <Text as="span" type="code" color="secondary">
-                    {project.key}-{issue.number}
-                  </Text>
-                )}
+                <Text as="span" type="code" color="secondary">
+                  {question.projectKey}-{question.issueNumber}
+                </Text>
                 <Text as="span" type="body" weight="semibold" color="primary">
-                  {issue?.title ?? "View issue"}
+                  {question.issueTitle}
                 </Text>
               </Stack>
             </Link>
@@ -184,7 +175,7 @@ function QuestionCard({ question }: { question: Question }) {
             )}
           </Stack>
           <QuestionDetails question={question} />
-          {pending && project !== undefined && project.accessLevel !== "read" && (
+          {pending && question.canAnswer && (
             <>
               <Divider />
               <AnswerForm question={question} />
@@ -199,7 +190,11 @@ function QuestionCard({ question }: { question: Question }) {
 function AnswerForm({ question }: { question: Question }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { data: projectIssues = [] } = useQuery(issuesQuery(question.projectId));
+  const [mentionsEnabled, setMentionsEnabled] = useState(false);
+  const { data: projectIssues = [] } = useQuery({
+    ...issuesQuery(question.projectId),
+    enabled: mentionsEnabled,
+  });
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
@@ -239,11 +234,16 @@ function AnswerForm({ question }: { question: Question }) {
           id={`answer-${question.id}`}
           htmlName="answer"
           value={answer}
-          onChange={setAnswer}
+          onChange={(next) => {
+            setMentionsEnabled(true);
+            setAnswer(next);
+          }}
           rows={3}
           required
           issues={projectIssues}
           projectId={question.projectId}
+          mentionsEnabled={mentionsEnabled}
+          onFocus={() => setMentionsEnabled(true)}
         />
         {error !== undefined && <Banner status="error" role="alert" title={error} />}
         <Stack hAlign="start">

@@ -106,11 +106,20 @@ export interface InboxService {
 
 type QuestionRow = typeof questions.$inferSelect;
 type QuestionView = Omit<QuestionRow, "sessionId"> & { effectiveStatus?: string };
+type QuestionIssueInfo = {
+  number: number;
+  title: string;
+  projectKey: string;
+  canAnswer: boolean;
+};
 
 const questionColumns = {
   id: questions.id,
   issueId: questions.issueId,
+  issueNumber: issues.number,
+  issueTitle: issues.title,
   projectId: questions.projectId,
+  projectKey: projects.key,
   workspaceId: questions.workspaceId,
   agentId: questions.agentId,
   runId: questions.runId,
@@ -131,12 +140,15 @@ const questionColumns = {
 
 const iso = (value: Date | null) => value?.toISOString() ?? null;
 
-function toQuestion(row: QuestionView): Question {
+function toQuestion(row: QuestionView, issue: QuestionIssueInfo): Question {
   const status = QuestionStatus.parse(row.effectiveStatus ?? row.status);
   return {
     id: row.id,
     issueId: row.issueId,
+    issueNumber: issue.number,
+    issueTitle: issue.title,
     projectId: row.projectId,
+    projectKey: issue.projectKey,
     workspaceId: row.workspaceId,
     agentId: row.agentId,
     runId: row.runId,
@@ -154,6 +166,7 @@ function toQuestion(row: QuestionView): Question {
     followUpAt: iso(row.followUpAt),
     resolvedAt: iso(row.resolvedAt),
     createdAt: row.createdAt.toISOString(),
+    canAnswer: issue.canAnswer,
   };
 }
 
@@ -290,7 +303,7 @@ async function requireAccess(
   missing: "issue_not_found" | "project_not_found" | "question_not_found",
 ) {
   const [project] = await tx
-    .select({ id: projects.id, workspaceId: projects.workspaceId })
+    .select({ id: projects.id, workspaceId: projects.workspaceId, key: projects.key })
     .from(projects)
     .where(eq(projects.id, projectId))
     .limit(1);
@@ -319,7 +332,7 @@ async function requireAccess(
   if (!deps.projectAccessAtLeast(effective, required)) {
     throw new InboxError("insufficient_access");
   }
-  return project;
+  return { project, level: effective };
 }
 
 function requireAgent(actor: AgentActor | null): AgentIdentity {
@@ -494,7 +507,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
       const outcome = await db.transaction(async (tx) => {
         const issue = await lockIssue(tx, input.issueId);
         await evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity);
-        await requireAccess(
+        const access = await requireAccess(
           tx,
           actor,
           issue.projectId,
@@ -580,7 +593,12 @@ export function createInboxService(deps: InboxDeps): InboxService {
           .where(eq(agents.id, identity.agentId))
           .limit(1);
         return {
-          question: toQuestion(created),
+          question: toQuestion(created, {
+            number: issue.number,
+            title: issue.title,
+            projectKey: access.project.key,
+            canAnswer: false,
+          }),
           ownerEmail: owner?.email ?? null,
           agentName: owner?.name ?? identity.agentId,
           issueTitle: issue.title,
@@ -636,7 +654,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
           .limit(1);
         if (found === undefined) throw new InboxError("question_not_found");
         const issue = await lockIssue(tx, found.issueId);
-        await requireAccess(
+        const access = await requireAccess(
           tx,
           actor,
           issue.projectId,
@@ -644,6 +662,13 @@ export function createInboxService(deps: InboxDeps): InboxService {
           deps,
           "question_not_found",
         );
+        const questionView = (row: QuestionView) =>
+          toQuestion(row, {
+            number: issue.number,
+            title: issue.title,
+            projectKey: access.project.key,
+            canAnswer: true,
+          });
 
         await evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity);
         const freshRow = async () => {
@@ -671,7 +696,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
         const row = await freshRow();
         const answerAction = decideQuestionAnswer(row.status, row.followUp !== null);
         if (answerAction === "already_resolved") throw new InboxError("question_resolved");
-        if (answerAction === "record_follow_up") return toQuestion(await followUp());
+        if (answerAction === "record_follow_up") return questionView(await followUp());
         questionMachine.assertTransition(row.status, "answered");
 
         const resolveAnswered = () =>
@@ -701,7 +726,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
         if (answered === undefined) {
           await evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity);
           const retried = await freshRow();
-          if (retried.status === "fallback_used") return toQuestion(await followUp());
+          if (retried.status === "fallback_used") return questionView(await followUp());
           if (retried.status === "answered") throw new InboxError("question_resolved");
           if (retried.status === "paused" || retried.status === "open") {
             const [resolved] = await resolveAnswered();
@@ -758,7 +783,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
           noNotify,
           deps.onActivity,
         );
-        return toQuestion(answered);
+        return questionView(answered);
       });
     },
 
@@ -801,6 +826,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
           }
 
           const readable: string[] = [];
+          const answerable = new Set<string>();
           for (const [workspaceId, projectIds] of candidateProjects) {
             const ceiling = await deps.projectAccessCeiling(tx, workspaceId, humanId, projectIds);
             for (const projectId of projectIds) {
@@ -810,6 +836,9 @@ export function createInboxService(deps: InboxDeps): InboxService {
                 deps.projectAccessAtLeast(level, ProjectAccessLevel.enum.read)
               ) {
                 readable.push(projectId);
+                if (deps.projectAccessAtLeast(level, ProjectAccessLevel.enum.contribute)) {
+                  answerable.add(projectId);
+                }
               }
             }
           }
@@ -830,7 +859,14 @@ export function createInboxService(deps: InboxDeps): InboxService {
             )
             .orderBy(desc(questions.createdAt))
             .limit(200);
-          return rows.map(toQuestion);
+          return rows.map((row) =>
+            toQuestion(row, {
+              number: row.issueNumber,
+              title: row.issueTitle,
+              projectKey: row.projectKey,
+              canAnswer: answerable.has(row.projectId),
+            }),
+          );
         },
         { accessMode: "read only" },
       );
@@ -841,12 +877,12 @@ export function createInboxService(deps: InboxDeps): InboxService {
       return db.transaction(
         async (tx) => {
           const [issue] = await tx
-            .select({ projectId: issues.projectId })
+            .select({ projectId: issues.projectId, number: issues.number, title: issues.title })
             .from(issues)
             .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
             .limit(1);
           if (issue === undefined) throw new InboxError("issue_not_found");
-          await requireAccess(
+          const access = await requireAccess(
             tx,
             actorArg,
             issue.projectId,
@@ -854,6 +890,9 @@ export function createInboxService(deps: InboxDeps): InboxService {
             deps,
             "issue_not_found",
           );
+          const canAnswer =
+            actorArg.kind === "human" &&
+            deps.projectAccessAtLeast(access.level, ProjectAccessLevel.enum.contribute);
           const rows = await tx
             .select(questionColumns)
             .from(questions)
@@ -861,7 +900,14 @@ export function createInboxService(deps: InboxDeps): InboxService {
             .innerJoin(projects, eq(projects.id, questions.projectId))
             .where(eq(questions.issueId, issueId))
             .orderBy(desc(questions.createdAt));
-          return rows.map(toQuestion);
+          return rows.map((row) =>
+            toQuestion(row, {
+              number: issue.number,
+              title: issue.title,
+              projectKey: access.project.key,
+              canAnswer,
+            }),
+          );
         },
         { accessMode: "read only" },
       );

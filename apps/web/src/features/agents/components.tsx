@@ -766,6 +766,7 @@ function ActiveSessions({
                   issueId={session.issueId}
                   projectId={session.projectId}
                   canContribute={canContribute}
+                  session={session}
                 />
               </TableCell>
               <TableCell>

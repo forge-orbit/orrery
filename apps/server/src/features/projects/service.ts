@@ -426,6 +426,7 @@ const labelAgentCreator = alias(agents, "label_agent_creator");
 
 const dependencyHumanCreator = alias(humans, "dependency_human_creator");
 const dependencyAgentCreator = alias(agents, "dependency_agent_creator");
+const blockerIssue = alias(issues, "blocker_issue");
 
 const projectColumns = {
   id: projects.id,
@@ -763,7 +764,7 @@ function toProjectGrant(row: ProjectGrantRow): ProjectAccessGrant {
   };
 }
 
-function toIssue(row: IssueRow, labels: ProjectLabel[] = []): Issue {
+function toIssue(row: IssueRow, labels: ProjectLabel[] = [], blockedByIds: string[] = []): Issue {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -783,6 +784,7 @@ function toIssue(row: IssueRow, labels: ProjectLabel[] = []): Issue {
     effectiveFallbackPolicy: row.fallbackPolicyOverride ?? row.projectFallbackPolicy,
     parentIssueId: row.parentIssueId,
     labels,
+    blockedByIds,
     createdBy: actorFromRow(
       row.createdByHumanId,
       row.createdByEmail,
@@ -1139,6 +1141,34 @@ async function loadLabelsForIssues(
 
 async function loadIssueLabels(tx: DbTransaction, issueId: string): Promise<ProjectLabel[]> {
   const grouped = await loadLabelsForIssues(tx, [issueId]);
+  return grouped.get(issueId) ?? [];
+}
+
+async function loadBlockedByIdsForIssues(
+  tx: DbTransaction,
+  issueIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const grouped = new Map<string, string[]>();
+  if (issueIds.length === 0) return grouped;
+  const rows = await tx
+    .select({
+      issueId: issueDependencies.issueId,
+      blockedByIssueId: issueDependencies.blockedByIssueId,
+    })
+    .from(issueDependencies)
+    .innerJoin(blockerIssue, eq(blockerIssue.id, issueDependencies.blockedByIssueId))
+    .where(and(inArray(issueDependencies.issueId, [...issueIds]), isNull(blockerIssue.deletedAt)))
+    .orderBy(issueDependencies.issueId, issueDependencies.blockedByIssueId);
+  for (const row of rows) {
+    const list = grouped.get(row.issueId) ?? [];
+    list.push(row.blockedByIssueId);
+    grouped.set(row.issueId, list);
+  }
+  return grouped;
+}
+
+async function loadBlockedByIds(tx: DbTransaction, issueId: string): Promise<string[]> {
+  const grouped = await loadBlockedByIdsForIssues(tx, [issueId]);
   return grouped.get(issueId) ?? [];
 }
 
@@ -1921,7 +1951,13 @@ export function createProjectsService({
           tx,
           rows.map((row) => row.id),
         );
-        return rows.map((row) => toIssue(row, labels.get(row.id) ?? []));
+        const blockedBy = await loadBlockedByIdsForIssues(
+          tx,
+          rows.map((row) => row.id),
+        );
+        return rows.map((row) =>
+          toIssue(row, labels.get(row.id) ?? [], blockedBy.get(row.id) ?? []),
+        );
       },
       { accessMode: "read only" },
     );
@@ -2195,7 +2231,11 @@ export function createProjectsService({
           throw new ProjectsError("insufficient_project_access");
         }
         if (current.fallbackPolicyOverride === override) {
-          return toIssue(current, await loadIssueLabels(tx, issueId));
+          return toIssue(
+            current,
+            await loadIssueLabels(tx, issueId),
+            await loadBlockedByIds(tx, issueId),
+          );
         }
         const [updated] = await tx
           .update(issues)
@@ -2216,6 +2256,7 @@ export function createProjectsService({
         return toIssue(
           { ...current, fallbackPolicyOverride: updated.fallbackPolicyOverride },
           await loadIssueLabels(tx, issueId),
+          await loadBlockedByIds(tx, issueId),
         );
       });
     },
@@ -2477,8 +2518,9 @@ export function createProjectsService({
         async (tx) => {
           const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.read);
           const labels = await loadIssueLabels(tx, issueId);
+          const blockedByIds = await loadBlockedByIds(tx, issueId);
           return {
-            ...toIssue(issue, labels),
+            ...toIssue(issue, labels, blockedByIds),
             links: await loadIssueLinks(tx, issueId),
             attachments: await metadataFor(tx, "issue", issueId),
           };
@@ -2571,6 +2613,7 @@ export function createProjectsService({
         return toIssue(
           { ...current, updatedAt: restored.updatedAt },
           await loadIssueLabels(tx, issueId),
+          await loadBlockedByIds(tx, issueId),
         );
       });
     },
@@ -2902,6 +2945,7 @@ export function createProjectsService({
           updatedBy: author,
           fallbackPolicyOverride: null,
           effectiveFallbackPolicy: project.fallbackPolicy,
+          blockedByIds: [],
         };
       });
     },
@@ -3019,6 +3063,7 @@ export function createProjectsService({
               closedAt: currentClosedAt,
             },
             await loadIssueLabels(tx, issueId),
+            await loadBlockedByIds(tx, issueId),
           );
         }
 
@@ -3152,6 +3197,7 @@ export function createProjectsService({
           updatedBy: actorForWrite(actor),
           fallbackPolicyOverride: current.fallbackPolicyOverride,
           effectiveFallbackPolicy: current.fallbackPolicyOverride ?? current.projectFallbackPolicy,
+          blockedByIds: await loadBlockedByIds(tx, issueId),
         };
       });
     },
@@ -3934,7 +3980,13 @@ export function createProjectsService({
             },
           });
         }
-        return { ...toIssue(issue, await loadIssueLabels(tx, issueId)) };
+        return {
+          ...toIssue(
+            issue,
+            await loadIssueLabels(tx, issueId),
+            await loadBlockedByIds(tx, issueId),
+          ),
+        };
       });
     },
 
@@ -3972,7 +4024,13 @@ export function createProjectsService({
             },
           });
         }
-        return { ...toIssue(issue, await loadIssueLabels(tx, issueId)) };
+        return {
+          ...toIssue(
+            issue,
+            await loadIssueLabels(tx, issueId),
+            await loadBlockedByIds(tx, issueId),
+          ),
+        };
       });
     },
   };

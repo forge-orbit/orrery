@@ -332,6 +332,9 @@ describe("questions against real Postgres", () => {
 
     expect(question.status).toBe("open");
     expect(question.proposedFallback).toBe("Use v1");
+    expect(question.issueNumber).toBe(issue.number);
+    expect(question.issueTitle).toBe(issue.title);
+    expect(question.canAnswer).toBe(false);
     expect(await isNeedsInput(issue.id)).toBe(true);
     expect(delivered).toHaveLength(1);
     expect(delivered[0]?.to).toBe(f.email);
@@ -342,6 +345,8 @@ describe("questions against real Postgres", () => {
     );
     expect(kindOf(agentAnswer)).toBe("agents_cannot_answer");
     expect((await database.db.select().from(questionRows))[0]?.status).toBe("open");
+    const listed = (await inbox.list(await humanActor(f))).find((row) => row.id === question.id);
+    expect(listed?.canAnswer).toBe(true);
   });
 
   it("resolves exactly once when two humans answer concurrently", async () => {
