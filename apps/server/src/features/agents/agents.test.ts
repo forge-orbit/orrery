@@ -29,8 +29,9 @@ import { tokenHash } from "../../platform/tokens.ts";
 import {
   createAccountsFeature,
   accountByEmail,
+  hashPassword,
   invalidateAccountSessions,
-  setAccountPassword,
+  setAccountPasswordHash,
 } from "../accounts/index.ts";
 import { createHistoryFeature } from "../history/index.ts";
 import {
@@ -272,7 +273,9 @@ async function makeRotationApp() {
         db: database.db,
         accounts: {
           accountByEmail: (email, tx) => accountByEmail(tx ?? database.db, email),
-          setPassword: (humanId, password, tx) => setAccountPassword(tx, humanId, password),
+          hashPassword: (password) => hashPassword(password),
+          setPasswordHash: (humanId, passwordHash, tx) =>
+            setAccountPasswordHash(tx, humanId, passwordHash),
           invalidateBrowserSessions: (humanId, tx) => invalidateAccountSessions(tx, humanId),
         },
         deliver: async (mail) => {

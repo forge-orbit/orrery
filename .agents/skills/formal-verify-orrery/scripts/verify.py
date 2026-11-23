@@ -777,7 +777,7 @@ def extract_code_facts() -> dict[str, Any]:
     rec_cli_src = read_text("apps/server/src/recovery-cli.ts")
     rec_request_fn = slice_between(rec_src, "async requestReset(email)", "async confirmReset(token, password)")
     rec_confirm_fn = slice_between(rec_src, "async confirmReset(token, password)", "async localRecover(email, password)")
-    rec_local_fn = slice_between(rec_src, "async localRecover(email, password)", "}")
+    rec_local_fn = slice_between(rec_src, "async localRecover(email, password)", "\n    },")
     rec_change_fn = slice_between(rec_src, "async function changePasswordAndSignOut(", "export function createRecoveryService")
     rec_tokens_table = slice_between(schema_src := read_text("apps/server/src/db/schema.ts"), "export const passwordResetTokens = pgTable(", "export const accountRecoveryEventTypes =")
     rec_events_table = slice_between(schema_src, "export const accountRecoveryEvents = pgTable(", "export const invitations = pgTable(")
@@ -847,7 +847,7 @@ def extract_code_facts() -> dict[str, Any]:
         ".update(passwordResetTokens)" in rec_change_fn
         and "isNull(passwordResetTokens.usedAt)" in rec_change_fn
     )
-    account_by_email_fn = slice_between(acc_src, "export async function accountByEmail(", "export async function setAccountPassword(")
+    account_by_email_fn = slice_between(acc_src, "export async function accountByEmail(", "export async function setAccountPasswordHash(")
     m15_admin_only_local = (
         "isSystemAdministrator: humans.isSystemAdministrator" in account_by_email_fn
         and "!account.isSystemAdministrator" in rec_local_fn

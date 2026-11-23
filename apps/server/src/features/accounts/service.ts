@@ -29,7 +29,7 @@ const scryptAsync = (
     scrypt(password, salt, keylen, options, (error, key) => (error ? reject(error) : resolve(key)));
   });
 
-async function hashPassword(password: string): Promise<string> {
+export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
   const hash = await scryptAsync(password, salt, SCRYPT.keylen, SCRYPT);
   return [
@@ -118,8 +118,11 @@ export async function accountByEmail(runner: AccountRunner, email: string) {
   return row ?? null;
 }
 
-export async function setAccountPassword(runner: AccountRunner, humanId: string, password: string) {
-  const passwordHash = await hashPassword(password);
+export async function setAccountPasswordHash(
+  runner: AccountRunner,
+  humanId: string,
+  passwordHash: string,
+) {
   await runner.update(humans).set({ passwordHash }).where(eq(humans.id, humanId));
 }
 
@@ -215,7 +218,8 @@ export interface AccountsService {
     isSystemAdministrator: boolean;
     deactivatedAt: Date | null;
   } | null>;
-  setPassword(humanId: string, password: string, tx: DbTransaction): Promise<void>;
+  hashPassword(password: string): Promise<string>;
+  setPasswordHash(humanId: string, passwordHash: string, tx: DbTransaction): Promise<void>;
   invalidateBrowserSessions(humanId: string, tx: DbTransaction): Promise<void>;
 }
 
@@ -307,11 +311,33 @@ export function createAccountsService({
       }
 
       const token = randomBytes(32).toString("base64url");
-      await db.insert(browserSessions).values({
-        id: randomUUID(),
-        humanId: human.id,
-        tokenHash: tokenHash(token),
-        expiresAt: sql`now() + make_interval(secs => ${sessionPolicy.maxAgeSeconds})`,
+      await db.transaction(async (tx) => {
+        // Verification above reads a snapshot. Lock the row and re-check the
+        // state that made those credentials valid before minting a session, so
+        // a concurrent password change or deactivation cannot leave a live
+        // session for credentials that no longer work.
+        const [current] = await tx
+          .select({ id: humans.id })
+          .from(humans)
+          .where(
+            and(
+              eq(humans.id, human.id),
+              eq(humans.passwordHash, human.passwordHash),
+              isNull(humans.deactivatedAt),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (current === undefined) {
+          throw new AccountsError("invalid_credentials");
+        }
+
+        await tx.insert(browserSessions).values({
+          id: randomUUID(),
+          humanId: human.id,
+          tokenHash: tokenHash(token),
+          expiresAt: sql`now() + make_interval(secs => ${sessionPolicy.maxAgeSeconds})`,
+        });
       });
       return { token, email: input.email };
     },
@@ -412,7 +438,38 @@ export function createAccountsService({
       const nextHash = await hashPassword(input.newPassword);
       const currentHash = tokenHash(currentSessionToken);
       await db.transaction(async (tx) => {
-        await tx.update(humans).set({ passwordHash: nextHash }).where(eq(humans.id, humanId));
+        // The password check used a snapshot taken before scrypt ran. Confirm
+        // the session the caller presented is still live, then swap the hash
+        // only if the account is active and no other password change won first.
+        const [session] = await tx
+          .select({ id: browserSessions.id })
+          .from(browserSessions)
+          .where(
+            and(
+              eq(browserSessions.tokenHash, currentHash),
+              eq(browserSessions.humanId, humanId),
+              gt(browserSessions.expiresAt, sql`now()`),
+            ),
+          )
+          .limit(1);
+        if (session === undefined) {
+          throw new AccountsError("invalid_current_password");
+        }
+
+        const [updated] = await tx
+          .update(humans)
+          .set({ passwordHash: nextHash })
+          .where(
+            and(
+              eq(humans.id, humanId),
+              isNull(humans.deactivatedAt),
+              eq(humans.passwordHash, human.passwordHash),
+            ),
+          )
+          .returning({ id: humans.id });
+        if (updated === undefined) {
+          throw new AccountsError("invalid_current_password");
+        }
 
         await tx
           .delete(browserSessions)
@@ -455,8 +512,12 @@ export function createAccountsService({
       return accountByEmail(tx ?? db, email);
     },
 
-    async setPassword(humanId: string, password: string, tx: DbTransaction) {
-      await setAccountPassword(tx, humanId, password);
+    async hashPassword(password: string) {
+      return hashPassword(password);
+    },
+
+    async setPasswordHash(humanId: string, passwordHash: string, tx: DbTransaction) {
+      await setAccountPasswordHash(tx, humanId, passwordHash);
     },
 
     async invalidateBrowserSessions(humanId: string, tx: DbTransaction) {

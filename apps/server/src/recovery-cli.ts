@@ -1,8 +1,9 @@
 import { Email, NewPassword } from "@orrery/contract";
 import {
   accountByEmail,
+  hashPassword,
   invalidateAccountSessions,
-  setAccountPassword,
+  setAccountPasswordHash,
 } from "./features/accounts/index.ts";
 import { createRecoveryService, RecoveryError } from "./features/recovery/index.ts";
 import { loadConfig } from "./platform/config.ts";
@@ -35,7 +36,9 @@ const recovery = createRecoveryService({
   db: database.db,
   accounts: {
     accountByEmail: (address, tx) => accountByEmail(tx ?? database.db, address),
-    setPassword: (humanId, newPassword, tx) => setAccountPassword(tx, humanId, newPassword),
+    hashPassword: (value) => hashPassword(value),
+    setPasswordHash: (humanId, passwordHash, tx) =>
+      setAccountPasswordHash(tx, humanId, passwordHash),
     invalidateBrowserSessions: (humanId, tx) => invalidateAccountSessions(tx, humanId),
   },
 
