@@ -201,8 +201,8 @@ export function quoteReply(comment: string, draft = ""): string {
 }
 
 /** Temporary Markdown marker shown while an attachment uploads. */
-export function attachmentPlaceholder(filename: string): string {
-  return `![Uploading ${filename}...]()`;
+export function attachmentPlaceholder(filename: string, token = ""): string {
+  return token === "" ? `![Uploading ${filename}...]()` : `![Uploading ${filename} #${token}...]()`;
 }
 
 /** The final Markdown for an uploaded image or downloadable file. */

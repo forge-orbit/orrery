@@ -16,7 +16,7 @@ CREATE TABLE "attachments" (
 	"byte_size" integer NOT NULL,
 	"uploaded_by_human_id" text,
 	"uploaded_by_agent_id" text,
-	"unreferenced_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"unreferenced_at" timestamp with time zone DEFAULT now(),
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "attachments_uploaded_by_actor" CHECK (("attachments"."uploaded_by_human_id" is not null) <> ("attachments"."uploaded_by_agent_id" is not null)),
 	CONSTRAINT "attachments_byte_size_positive" CHECK ("attachments"."byte_size" > 0),

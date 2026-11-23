@@ -95,6 +95,11 @@ export function IssueMentionTextArea({
   const [uploading, setUploading] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const valueRef = useRef(value);
+  const uploadSequence = useRef(0);
+  // Mirror the controlled value so an in-flight upload never overwrites an
+  // external reset (Create more, Quote reply, or a parent-driven edit).
+  // eslint-disable-next-line react/refs -- intentional: synchronous mirror of a controlled prop.
+  valueRef.current = value;
   const [lastFocusSignal, setLastFocusSignal] = useState(focusSignal);
   if (focusSignal !== lastFocusSignal) {
     setLastFocusSignal(focusSignal);
@@ -154,7 +159,7 @@ export function IssueMentionTextArea({
     if (projectId === undefined || files === null) return;
     const el = activeRef.current;
     for (const file of Array.from(files)) {
-      const uploadPlaceholder = attachmentPlaceholder(file.name);
+      const uploadPlaceholder = attachmentPlaceholder(file.name, String(++uploadSequence.current));
       const start = el?.selectionStart ?? valueRef.current.length;
       const end = el?.selectionEnd ?? valueRef.current.length;
       setDraft(

@@ -97,7 +97,7 @@ test("paste, drop, and click each upload an attachment that renders inline only 
   const body = page.locator("#new-issue-body");
 
   await dispatchFiles(page, "#new-issue-body", "paste", "pasted.png");
-  await expect(body).toHaveValue(/!\[Uploading pasted\.png\.\.\.\]/);
+  await expect(body).toHaveValue(/!\[Uploading pasted\.png(?: #\d+)?\.\.\.\]/);
   await expect(body).toHaveValue(
     new RegExp(`!\\[pasted\\.png\\]\\(/api/projects/${projectId}/attachments/[0-9a-f-]+\\)`),
   );

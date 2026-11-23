@@ -112,6 +112,21 @@ const uploadKinds = [
   "payload_too_large",
   "attachment_upload_expired",
 ] as const;
+/** RFC 6266: an ASCII fallback plus a UTF-8 extended filename keeps headers ByteString-safe. */
+export function contentDisposition(filename: string, inline: boolean): string {
+  const ascii = Array.from(filename)
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code >= 32 && code <= 126 && char !== '"' && char !== "\\" ? char : "_";
+    })
+    .join("");
+  const encoded = encodeURIComponent(filename).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 const downloadKinds = [
   "not_signed_in",
   "project_not_found",
@@ -158,12 +173,11 @@ export function createAttachmentsRest(
     try {
       const { projectId, attachmentId } = c.req.valid("param");
       const served = await service.download(await workActor(c), projectId, attachmentId);
-      const safeName = served.filename.replace(/["\\\r\n]/g, "_");
       return new Response(new Uint8Array(served.data), {
         status: 200,
         headers: {
           "content-type": served.contentType,
-          "content-disposition": `${served.inline ? "inline" : "attachment"}; filename="${safeName}"`,
+          "content-disposition": contentDisposition(served.filename, served.inline),
           "content-length": String(served.data.byteLength),
           "cache-control": served.inline
             ? "private, max-age=31536000, immutable"

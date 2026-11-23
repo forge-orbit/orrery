@@ -109,6 +109,33 @@ const INLINE_TYPES: ReadonlySet<string> = new Set([
   "image/gif",
 ]);
 
+/** MIME hints are resolved directly, so extensionless clipboard files still work. */
+const MIME_TYPES: Record<string, UploadFormat> = {
+  "image/png": "image/png",
+  "image/jpeg": "image/jpeg",
+  "image/webp": "image/webp",
+  "image/gif": "image/gif",
+  "application/pdf": "application/pdf",
+  "text/plain": "text/plain",
+  "text/markdown": "text/markdown",
+  "text/x-markdown": "text/markdown",
+  "text/csv": "text/csv",
+  "text/x-log": "text/x-log",
+  "text/x-patch": "text/x-patch",
+  "text/x-diff": "text/x-patch",
+  "application/x-patch": "text/x-patch",
+  "application/json": "application/json",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/zip": "application/zip",
+  "application/gzip": "application/gzip",
+  "image/svg+xml": "image/svg+xml",
+};
+
 /** Declared MIME is only a hint: the bytes decide what the upload really is. */
 const EXTENSION_TYPES: Record<string, UploadFormat> = {
   png: "image/png",
@@ -209,9 +236,11 @@ function isSvg(bytes: Buffer): boolean {
 
 function declaredFormat(filename: string, declared: string): UploadFormat | null {
   const normalized = declared.toLowerCase().split(";")[0]?.trim() ?? "";
-  if (Object.hasOwn(EXTENSION_TYPES, normalized)) return EXTENSION_TYPES[normalized] ?? null;
+  // An extension refines generic browser MIMEs (e.g. .log sent as text/plain);
+  // when there is no extension, the declared MIME must carry the format.
   const extension = filename.includes(".") ? (filename.split(".").pop() ?? "").toLowerCase() : "";
-  return EXTENSION_TYPES[extension] ?? null;
+  if (Object.hasOwn(EXTENSION_TYPES, extension)) return EXTENSION_TYPES[extension] ?? null;
+  return MIME_TYPES[normalized] ?? null;
 }
 
 export function matchesMagic(bytes: Buffer, format: UploadFormat): boolean {
@@ -240,7 +269,11 @@ export function matchesMagic(bytes: Buffer, format: UploadFormat): boolean {
     }
   }
   if (ZIP_TYPES.has(format)) {
-    const zip = bytes.length >= 4 && bytes.toString("ascii", 0, 2) === "PK";
+    const signature = bytes.subarray(0, 4);
+    const zip =
+      signature.equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) ||
+      signature.equals(Buffer.from([0x50, 0x4b, 0x05, 0x06])) ||
+      signature.equals(Buffer.from([0x50, 0x4b, 0x07, 0x08]));
     const entry = ZIP_ENTRIES[format];
     return zip && (entry === undefined || bytes.includes(Buffer.from(entry)));
   }
@@ -338,6 +371,9 @@ export function createAttachmentsService({
 
     async upload(actor, projectId, file) {
       if (actor === null) throw new AttachmentsError("not_signed_in");
+      // Authorize before buffering bytes or running sharp, so read-only, revoked,
+      // and cross-project callers never make the server decode their payload.
+      await db.transaction((tx) => requireAccess(tx, actor, projectId, "contribute"));
       if (!(file instanceof File)) throw new AttachmentsError("invalid_upload");
       const filename = sanitizeFilename(file.name);
       const original = Buffer.from(await file.arrayBuffer());
@@ -351,7 +387,6 @@ export function createAttachmentsService({
       if (!matchesMagic(original, format)) throw new AttachmentsError("unsupported_file_type");
 
       const data = inline ? await normalizeImage(original, format) : original;
-      await db.transaction((tx) => requireAccess(tx, actor, projectId, "contribute"));
       const uploadedByHumanId = actor.kind === "human" ? actor.account.humanId : null;
       const uploadedByAgentId = actor.kind === "agent" ? actor.identity.agentId : null;
 

@@ -1,3 +1,4 @@
+import { isAttachmentUrl } from "@orrery/contract";
 import { describe, expect, it } from "vitest";
 import {
   attachmentMarkdown,
@@ -138,6 +139,7 @@ describe("attachment markdown helpers", () => {
   it("replaces only the matching upload placeholder", () => {
     const placeholder = attachmentPlaceholder("shot.png");
     expect(placeholder).toBe("![Uploading shot.png...]()");
+    expect(attachmentPlaceholder("shot.png", "7")).toBe("![Uploading shot.png #7...]()");
     expect(
       replaceAttachmentPlaceholder(`before ${placeholder} after`, placeholder, "![shot.png](/url)"),
     ).toEqual({
@@ -146,5 +148,15 @@ describe("attachment markdown helpers", () => {
       selectionEnd: 24,
     });
     expect(replaceAttachmentPlaceholder("unchanged", placeholder, "x").value).toBe("unchanged");
+  });
+});
+
+describe("isAttachmentUrl", () => {
+  it("accepts only well-formed Orrery project attachment URLs", () => {
+    expect(isAttachmentUrl("/api/projects/abc-123/attachments/def_456")).toBe(true);
+    expect(isAttachmentUrl("/api/projects/../attachments/..")).toBe(false);
+    expect(isAttachmentUrl("/api/projects/a/../attachments/b")).toBe(false);
+    expect(isAttachmentUrl("/api/projects/a/attachments/b?x=1")).toBe(false);
+    expect(isAttachmentUrl("https://example.com/api/projects/a/attachments/b")).toBe(false);
   });
 });

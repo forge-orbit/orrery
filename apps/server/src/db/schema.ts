@@ -1157,8 +1157,8 @@ export const attachments = pgTable(
     byteSize: integer("byte_size").notNull(),
     uploadedByHumanId: text("uploaded_by_human_id").references(() => humans.id),
     uploadedByAgentId: text("uploaded_by_agent_id").references(() => agents.id),
-    /** Set at upload; #179 starts a 24-hour grace sweep when the last reference drops. */
-    unreferencedAt: timestamp("unreferenced_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Set at upload; cleared to NULL when bound by #179, and set again when the last reference drops. */
+    unreferencedAt: timestamp("unreferenced_at", { withTimezone: true }).defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

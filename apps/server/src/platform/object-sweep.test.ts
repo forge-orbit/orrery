@@ -56,26 +56,34 @@ describe("shared stored_objects orphan sweep", () => {
   }
 
   it("reclaims stale pending objects from every feature prefix in one pass", async () => {
+    const staleAvatarKey = `avatars/${randomUUID()}/${randomUUID()}.webp`;
+    const staleAttachmentKey = `attachments/${randomUUID()}/${randomUUID()}.bin`;
     const staleAvatar = await reserve(
-      `avatars/${randomUUID()}/${randomUUID()}.webp`,
+      staleAvatarKey,
       sql`statement_timestamp() - interval '16 minutes'`,
     );
     const staleAttachment = await reserve(
-      `attachments/${randomUUID()}/${randomUUID()}.bin`,
+      staleAttachmentKey,
       sql`statement_timestamp() - interval '20 minutes'`,
     );
-    const fresh = await reserve(`attachments/${randomUUID()}/${randomUUID()}.bin`);
+    const freshKey = `attachments/${randomUUID()}/${randomUUID()}.bin`;
+    const fresh = await reserve(freshKey);
+    expect(await store.head(staleAvatarKey)).not.toBeNull();
+    expect(await store.head(staleAttachmentKey)).not.toBeNull();
 
     expect(await sweepOrphanObjects(database.db, store)).toBe(2);
 
-    expect(
-      await database.db.select().from(storedObjects).where(eq(storedObjects.id, fresh)),
-    ).toHaveLength(1);
+    const [freshRow] = await database.db
+      .select()
+      .from(storedObjects)
+      .where(eq(storedObjects.id, fresh));
+    expect(freshRow).toMatchObject({ status: "pending", key: freshKey });
+    expect(await store.head(freshKey)).not.toBeNull();
     expect(
       await database.db.select().from(storedObjects).where(eq(storedObjects.status, "deleted")),
     ).toHaveLength(0);
-    expect(await store.head(`avatars/stale`)).toBeNull();
-    expect(await store.head(`attachments/stale`)).toBeNull();
+    expect(await store.head(staleAvatarKey)).toBeNull();
+    expect(await store.head(staleAttachmentKey)).toBeNull();
 
     for (const id of [staleAvatar, staleAttachment]) {
       const [row] = await database.db.select().from(storedObjects).where(eq(storedObjects.id, id));

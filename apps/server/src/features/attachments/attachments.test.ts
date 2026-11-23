@@ -412,6 +412,82 @@ describe("project-scoped attachments", () => {
     ).toHaveLength(0);
   });
 
+  it("serves a Unicode filename with an RFC 5987 Content-Disposition", async () => {
+    const pdf = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n");
+    const response = await upload(multipart(pdf, "résumé-日本語.pdf", "application/pdf"), {
+      cookie: adminCookie,
+    });
+    expect(response.status).toBe(201);
+    const metadata = Attachment.parse(await response.json());
+    const served = await download(metadata.id, { cookie: adminCookie });
+    expect(served.status).toBe(200);
+    const disposition = served.headers.get("content-disposition") ?? "";
+    expect(disposition).toContain("attachment;");
+    expect(disposition).toContain("filename*=UTF-8''");
+    expect(disposition).toContain(encodeURIComponent("résumé-日本語.pdf"));
+  });
+
+  it("accepts an extensionless upload with a valid MIME type and magic bytes", async () => {
+    const png = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: { r: 4, g: 5, b: 6 } },
+    })
+      .png()
+      .toBuffer();
+    const form = new FormData();
+    form.set("file", new File([new Uint8Array(png)], "clipboard", { type: "image/png" }));
+    const response = await upload(form, { cookie: adminCookie });
+    expect(response.status).toBe(201);
+    expect(Attachment.parse(await response.json())).toMatchObject({
+      contentType: "image/png",
+      inline: true,
+      filename: "clipboard",
+    });
+  });
+
+  it("authorizes before decoding bytes or sniffing magic numbers", async () => {
+    const garbage = Buffer.from("not a valid image, not a valid document");
+    const readOnly = await upload(multipart(garbage, "fake.png", "image/png"), {
+      token: "read-key",
+    });
+    expect(readOnly.status).toBe(403);
+    expect(Problem.parse(await readOnly.json()).code).toBe("insufficient_project_access");
+
+    const crossProject = await upload(multipart(garbage, "fake.png", "image/png"), {
+      project: randomUUID(),
+      cookie: adminCookie,
+    });
+    expect(crossProject.status).toBe(404);
+    expect(Problem.parse(await crossProject.json()).code).toBe("project_not_found");
+
+    const badZip = Buffer.concat([Buffer.from("PKxx"), Buffer.from("word/document.xml")]);
+    const rejected = await upload(
+      multipart(
+        badZip,
+        "broken.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ),
+      { cookie: adminCookie },
+    );
+    expect(rejected.status).toBe(415);
+  });
+
+  it("allows unreferenced_at to be cleared when a reference binds an attachment", async () => {
+    const txt = Buffer.from("bind me\n");
+    const uploaded = await upload(multipart(txt, "bind.txt", "text/plain"), {
+      cookie: adminCookie,
+    });
+    const metadata = Attachment.parse(await uploaded.json());
+    await database.db
+      .update(attachments)
+      .set({ unreferencedAt: null })
+      .where(eq(attachments.id, metadata.id));
+    const [row] = await database.db
+      .select({ unreferencedAt: attachments.unreferencedAt })
+      .from(attachments)
+      .where(eq(attachments.id, metadata.id));
+    expect(row?.unreferencedAt).toBeNull();
+  });
+
   it("loses a claim-first race cleanly and reclaims the orphaned blob", async () => {
     const putEntered = deferred<string>();
     const allowPut = deferred();

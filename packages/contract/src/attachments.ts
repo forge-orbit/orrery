@@ -37,5 +37,5 @@ export const attachmentUrlFor = (projectId: string, attachmentId: string): strin
 
 /** True only for Orrery attachment URLs; arbitrary external image URLs stay inert text. */
 export function isAttachmentUrl(url: string): boolean {
-  return /^\/api\/projects\/[^/?#]+\/attachments\/[^/?#]+$/i.test(url);
+  return /^\/api\/projects\/[A-Za-z0-9_-]+\/attachments\/[A-Za-z0-9_-]+$/.test(url);
 }
