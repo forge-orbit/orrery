@@ -13,21 +13,41 @@ import { TextField } from "../lib/fields.tsx";
 import { Link } from "../lib/Link.tsx";
 
 const INVITATION_NEXT = /^\/workspace-invitation\?token=([A-Za-z0-9_-]+)$/;
+const DISALLOWED_NEXT_PATHS = new Set([
+  "/",
+  "/setup",
+  "/signin",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/workspace-invitation",
+]);
 
 function invitationTokenFrom(next: string | undefined): string | undefined {
   if (next === undefined) return undefined;
   return INVITATION_NEXT.exec(next)?.[1];
 }
 
+function safeNextPath(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (INVITATION_NEXT.test(value)) return value;
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return undefined;
+  try {
+    const parsed = new URL(value, "http://orrery.local");
+    if (parsed.origin !== "http://orrery.local") return undefined;
+    const normalizedPath = parsed.pathname.replace(/\/+$/, "") || "/";
+    if (DISALLOWED_NEXT_PATHS.has(normalizedPath)) return undefined;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return undefined;
+  }
+}
+
 export const Route = createFileRoute("/signin")({
   staticData: { accessPage: true },
-  validateSearch: (search: Record<string, unknown>) => {
-    const next =
-      typeof search.next === "string" && INVITATION_NEXT.test(search.next)
-        ? search.next
-        : undefined;
-    return next === undefined ? {} : { next };
-  },
+  validateSearch: (search: Record<string, unknown>): { next?: string | undefined } => ({
+    next: safeNextPath(search.next),
+  }),
   beforeLoad: async ({ context }) => {
     const session = await context.queryClient.fetchQuery(sessionQuery);
     if (session.signedIn) throw redirect({ to: "/" });
@@ -53,9 +73,12 @@ function SignInPage() {
 
       queryClient.clear();
       await queryClient.fetchQuery(sessionQuery);
-      const token = invitationTokenFrom(next);
+      const safeNext = safeNextPath(next);
+      const token = invitationTokenFrom(safeNext);
       if (token !== undefined) {
         await navigate({ to: "/workspace-invitation", search: { token } });
+      } else if (safeNext !== undefined) {
+        await navigate({ href: safeNext, replace: true });
       } else {
         await navigate({ to: "/" });
       }

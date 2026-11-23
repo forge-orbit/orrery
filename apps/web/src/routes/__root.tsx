@@ -40,9 +40,19 @@ declare module "@tanstack/react-router" {
   }
 }
 
+const PUBLIC_ACCESS_PATHS = new Set([
+  "/setup",
+  "/signin",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/workspace-invitation",
+]);
+
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ context, location }) => {
-    if (location.pathname.replace(/\/+$/, "") === "/setup") return;
+    const pathname = location.pathname.replace(/\/+$/, "") || "/";
+    if (pathname === "/setup") return;
     let status: { setupComplete: boolean };
     try {
       status = await context.queryClient.ensureQueryData(setupStatusQuery);
@@ -51,6 +61,20 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     }
     if (!status.setupComplete) {
       throw redirect({ to: "/setup", replace: true });
+    }
+    if (PUBLIC_ACCESS_PATHS.has(pathname)) return;
+    let session: { signedIn: boolean };
+    try {
+      session = await context.queryClient.ensureQueryData(sessionQuery);
+    } catch {
+      return;
+    }
+    if (!session.signedIn) {
+      throw redirect({
+        to: "/signin",
+        search: pathname === "/" ? {} : { next: location.href },
+        replace: true,
+      });
     }
   },
   component: RootLayout,
