@@ -189,6 +189,8 @@ test("registers a new email into a workspace without a duplicate account", async
   expect(registered.status()).toBe(200);
   expect(await registered.json()).toEqual({
     email: NEW_EMAIL,
+    handle: expect.any(String),
+    displayName: null,
     emailVerified: true,
     avatarUrl: null,
   });
