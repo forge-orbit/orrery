@@ -6,7 +6,7 @@ import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
-import { Layout, LayoutContent, LayoutPanel } from "@astryxdesign/core/Layout";
+import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from "@astryxdesign/core/Layout";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -497,135 +497,126 @@ function IssuePage() {
     }
   }
 
-  const issueHeader = (
-    <Stack gap={5}>
-      <PageHeader
-        breadcrumbs={[
-          <Link
-            key="project"
-            to="/projects/$projectId"
-            params={{ projectId: issue.projectId }}
-            color="secondary"
-            weight="medium"
-          >
-            Back to project
-          </Link>,
-          <Link
-            key="board"
-            to="/board/$projectId"
-            params={{ projectId: issue.projectId }}
-            color="secondary"
-            weight="medium"
-          >
-            Board
-          </Link>,
-        ]}
-        title={issue.title}
-        nonWrappingActions={!isNarrow}
-        subtitle={
-          <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-            <Token
-              label={issueStatusLabels[issue.status]}
-              color={STATUS_COLORS[issue.status]}
-              size="sm"
-              data-issue-status={issue.status}
-            />
-            <Text as="span" type="code" color="secondary" data-issue-identifier={issue.identifier}>
-              {issue.identifier}
-            </Text>
-            <PriorityBadge priority={issue.priority} />
-            {issue.assignee !== null && (
-              <Stack
-                as="span"
-                direction="horizontal"
-                gap={1}
-                vAlign="center"
-                data-issue-assignee=""
-              >
-                {issue.assignee.agentId !== undefined ? (
-                  <AgentAvatar
-                    name={issue.assignee.displayName}
-                    harness={
-                      activeSession?.agentId === issue.assignee.agentId
-                        ? activeRun?.harness
-                        : undefined
-                    }
-                    size={14}
-                  />
-                ) : (
-                  <HumanAvatar
-                    name={issue.assignee.displayName}
-                    avatarUrl={issue.assignee.avatarUrl}
-                    size="xsm"
-                    tooltip={false}
-                  />
-                )}
+  const pageHeader = (
+    <PageHeader
+      hasDivider={isNarrow}
+      breadcrumbs={[
+        <Link
+          key="project"
+          to="/projects/$projectId"
+          params={{ projectId: issue.projectId }}
+          color="secondary"
+          weight="medium"
+        >
+          Back to project
+        </Link>,
+        <Link
+          key="board"
+          to="/board/$projectId"
+          params={{ projectId: issue.projectId }}
+          color="secondary"
+          weight="medium"
+        >
+          Board
+        </Link>,
+      ]}
+      title={issue.title}
+      nonWrappingActions={!isNarrow}
+      subtitle={
+        <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+          <Token
+            label={issueStatusLabels[issue.status]}
+            color={STATUS_COLORS[issue.status]}
+            size="sm"
+            data-issue-status={issue.status}
+          />
+          <Text as="span" type="code" color="secondary" data-issue-identifier={issue.identifier}>
+            {issue.identifier}
+          </Text>
+          <PriorityBadge priority={issue.priority} />
+          {issue.assignee !== null && (
+            <Stack as="span" direction="horizontal" gap={1} vAlign="center" data-issue-assignee="">
+              {issue.assignee.agentId !== undefined ? (
+                <AgentAvatar
+                  name={issue.assignee.displayName}
+                  harness={
+                    activeSession?.agentId === issue.assignee.agentId
+                      ? activeRun?.harness
+                      : undefined
+                  }
+                  size={14}
+                />
+              ) : (
+                <HumanAvatar
+                  name={issue.assignee.displayName}
+                  avatarUrl={issue.assignee.avatarUrl}
+                  size="xsm"
+                  tooltip={false}
+                />
+              )}
+              <Text type="supporting" color="primary" weight="medium">
+                {issue.assignee.displayName}
+              </Text>
+            </Stack>
+          )}
+          {activeSession !== undefined &&
+            activeRun !== undefined &&
+            issue.assignee?.agentId !== activeSession.agentId && (
+              <Stack as="span" direction="horizontal" gap={1} vAlign="center" data-working-agent="">
+                <AgentAvatar name={activeRun.agentName} harness={activeRun.harness} size={14} />
                 <Text type="supporting" color="primary" weight="medium">
-                  {issue.assignee.displayName}
+                  {activeRun.agentName}
                 </Text>
               </Stack>
             )}
-            {activeSession !== undefined &&
-              activeRun !== undefined &&
-              issue.assignee?.agentId !== activeSession.agentId && (
-                <Stack
-                  as="span"
-                  direction="horizontal"
-                  gap={1}
-                  vAlign="center"
-                  data-working-agent=""
-                >
-                  <AgentAvatar name={activeRun.agentName} harness={activeRun.harness} size={14} />
-                  <Text type="supporting" color="primary" weight="medium">
-                    {activeRun.agentName}
-                  </Text>
-                </Stack>
-              )}
-            <Text type="supporting" color="secondary">
-              Created by {issue.createdBy.displayName} · Updated{" "}
-              <time dateTime={issue.updatedAt} title={formatFullDateTime(issue.updatedAt)}>
-                {relativeTime(issue.updatedAt)}
-              </time>{" "}
-              by {issue.updatedBy.displayName}
-            </Text>
-          </Stack>
-        }
-        actions={
-          <>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              label="Copy link"
-              onClick={() => void onCopyLink()}
-            />
-            {canContribute && (
-              <>
-                {!isEditing && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    label="Edit"
-                    data-issue-edit=""
-                    onClick={() => setIsEditing(true)}
-                  />
-                )}
+          <Text type="supporting" color="secondary">
+            Created by {issue.createdBy.displayName} · Updated{" "}
+            <time dateTime={issue.updatedAt} title={formatFullDateTime(issue.updatedAt)}>
+              {relativeTime(issue.updatedAt)}
+            </time>{" "}
+            by {issue.updatedBy.displayName}
+          </Text>
+        </Stack>
+      }
+      actions={
+        <>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            label="Copy link"
+            onClick={() => void onCopyLink()}
+          />
+          {canContribute && (
+            <>
+              {!isEditing && (
                 <Button
                   type="button"
                   size="sm"
                   variant="secondary"
-                  isDisabled={statusSubmitting}
-                  isLoading={statusSubmitting}
-                  label={toggleNextStatus === "done" ? "Close issue" : "Reopen issue"}
-                  onClick={() => requestStatusChange(toggleNextStatus)}
+                  label="Edit"
+                  data-issue-edit=""
+                  onClick={() => setIsEditing(true)}
                 />
-              </>
-            )}
-          </>
-        }
-      />
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                isDisabled={statusSubmitting}
+                isLoading={statusSubmitting}
+                label={toggleNextStatus === "done" ? "Close issue" : "Reopen issue"}
+                onClick={() => requestStatusChange(toggleNextStatus)}
+              />
+            </>
+          )}
+        </>
+      }
+    />
+  );
 
+  const banners = (
+    <>
       {statusError !== undefined && (
         <Banner
           status="error"
@@ -680,7 +671,7 @@ function IssuePage() {
           description="End the session before moving this issue to trash."
         />
       )}
-    </Stack>
+    </>
   );
 
   const mainColumn = (
@@ -986,10 +977,12 @@ function IssuePage() {
       <Layout
         contentWidth="78rem"
         padding={6}
+        header={!isNarrow && <LayoutHeader hasDivider>{pageHeader}</LayoutHeader>}
         content={
           <LayoutContent isScrollable>
             <Stack gap={5}>
-              {issueHeader}
+              {isNarrow && pageHeader}
+              {banners}
               {mainColumn}
               {isNarrow && (
                 <>
@@ -1004,7 +997,6 @@ function IssuePage() {
           !isNarrow && (
             <LayoutPanel
               width={320}
-              padding={6}
               hasDivider
               isScrollable
               role="complementary"

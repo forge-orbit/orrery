@@ -478,7 +478,12 @@ function ProjectPage() {
                     {knowledge.map((entry) => (
                       <TableRow key={entry.id} data-knowledge-id={entry.id}>
                         <TableCell>
-                          <Link to="/knowledge/$entryId" params={{ entryId: entry.id }}>
+                          <Link
+                            to="/knowledge/$entryId"
+                            params={{ entryId: entry.id }}
+                            color="primary"
+                            weight="medium"
+                          >
                             {entry.title}
                           </Link>
                         </TableCell>

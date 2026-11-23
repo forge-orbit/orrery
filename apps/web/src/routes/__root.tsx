@@ -1,6 +1,7 @@
-import { Badge } from "@astryxdesign/core/Badge";
 import { AppShell } from "@astryxdesign/core/AppShell";
+import { Badge } from "@astryxdesign/core/Badge";
 import { Card } from "@astryxdesign/core/Card";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { IconButton } from "@astryxdesign/core/IconButton";
@@ -566,45 +567,69 @@ function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
       {workspaces.length > 0 && (
         <>
           <Divider />
-          <SideNavSection title="Your workspaces">
-            {workspaces.map((workspace) => (
-              <SideNavItem
-                key={workspace.id}
-                label={workspace.name}
-                href={`/workspaces/${workspace.id}`}
-                icon={
-                  workspace.kind === "personal" ? NavPersonalWorkspaceIcon : NavSharedWorkspaceIcon
-                }
-                isSelected={pathname === `/workspaces/${workspace.id}`}
-                size="sm"
-                {...clickProp}
-              />
-            ))}
-          </SideNavSection>
+          <Collapsible
+            defaultIsOpen
+            trigger={
+              <Stack paddingInlineStart={2}>
+                <Text type="supporting" weight="medium" color="secondary">
+                  Your workspaces
+                </Text>
+              </Stack>
+            }
+          >
+            <SideNavSection title="Your workspaces" isHeaderHidden>
+              {workspaces.map((workspace) => (
+                <SideNavItem
+                  key={workspace.id}
+                  label={workspace.name}
+                  href={`/workspaces/${workspace.id}`}
+                  icon={
+                    workspace.kind === "personal"
+                      ? NavPersonalWorkspaceIcon
+                      : NavSharedWorkspaceIcon
+                  }
+                  isSelected={pathname === `/workspaces/${workspace.id}`}
+                  size="sm"
+                  {...clickProp}
+                />
+              ))}
+            </SideNavSection>
+          </Collapsible>
         </>
       )}
 
       {isAdmin && (
         <>
           <Divider />
-          <SideNavSection title="Admin">
-            <SideNavItem
-              label="SMTP settings"
-              href="/settings/smtp"
-              icon={NavMailIcon}
-              isSelected={pathname.startsWith("/settings/smtp")}
-              size="sm"
-              {...clickProp}
-            />
-            <SideNavItem
-              label="Installation history"
-              href="/history/installation"
-              icon="clock"
-              isSelected={pathname.startsWith("/history/installation")}
-              size="sm"
-              {...clickProp}
-            />
-          </SideNavSection>
+          <Collapsible
+            defaultIsOpen
+            trigger={
+              <Stack paddingInlineStart={2}>
+                <Text type="supporting" weight="medium" color="secondary">
+                  Admin
+                </Text>
+              </Stack>
+            }
+          >
+            <SideNavSection title="Admin" isHeaderHidden>
+              <SideNavItem
+                label="SMTP settings"
+                href="/settings/smtp"
+                icon={NavMailIcon}
+                isSelected={pathname.startsWith("/settings/smtp")}
+                size="sm"
+                {...clickProp}
+              />
+              <SideNavItem
+                label="Installation history"
+                href="/history/installation"
+                icon="clock"
+                isSelected={pathname.startsWith("/history/installation")}
+                size="sm"
+                {...clickProp}
+              />
+            </SideNavSection>
+          </Collapsible>
         </>
       )}
     </Stack>
