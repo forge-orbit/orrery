@@ -683,6 +683,61 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
         skipCircuitBreaker: true,
       };
     }
+    if (delivery.event !== "webhook.test") {
+      if (!hook.allEvents && !hook.events.includes(delivery.event)) {
+        return {
+          ok: false,
+          error: "webhook_out_of_scope",
+          terminal: true,
+          skipCircuitBreaker: true,
+        };
+      }
+      if (delivery.activityId === null) {
+        return {
+          ok: false,
+          error: "webhook_out_of_scope",
+          terminal: true,
+          skipCircuitBreaker: true,
+        };
+      }
+      const [target] = await db
+        .select({
+          projectId: projects.id,
+          workspaceId: projects.workspaceId,
+        })
+        .from(projectActivity)
+        .innerJoin(projects, eq(projects.id, projectActivity.projectId))
+        .where(eq(projectActivity.id, delivery.activityId))
+        .limit(1);
+      if (target === undefined || target.workspaceId !== hook.workspaceId) {
+        return {
+          ok: false,
+          error: "project_transferred",
+          terminal: true,
+          skipCircuitBreaker: true,
+        };
+      }
+      if (!hook.allProjects) {
+        const [inScope] = await db
+          .select({ projectId: webhookProjects.projectId })
+          .from(webhookProjects)
+          .where(
+            and(
+              eq(webhookProjects.webhookId, hook.id),
+              eq(webhookProjects.projectId, target.projectId),
+            ),
+          )
+          .limit(1);
+        if (inScope === undefined) {
+          return {
+            ok: false,
+            error: "webhook_out_of_scope",
+            terminal: true,
+            skipCircuitBreaker: true,
+          };
+        }
+      }
+    }
     if (encryptionKey === undefined) return { ok: false, error: "webhook_secret_unreadable" };
     const secret = decryptSecret(encryptionKey, hook.secretEncrypted);
     if (secret === undefined) return { ok: false, error: "webhook_secret_unreadable" };
@@ -713,9 +768,17 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
     durationMs: number,
   ): Promise<void> => {
     const safeDurationMs = Math.max(0, Math.round(durationMs));
+    const leaseMatches =
+      delivery.lockedUntil === null
+        ? and(eq(webhookDeliveries.id, delivery.id), eq(webhookDeliveries.status, "delivering"))
+        : and(
+            eq(webhookDeliveries.id, delivery.id),
+            eq(webhookDeliveries.status, "delivering"),
+            eq(webhookDeliveries.lockedUntil, delivery.lockedUntil),
+          );
     await db.transaction(async (tx) => {
       if (result.ok) {
-        await tx
+        const [updatedDelivery] = await tx
           .update(webhookDeliveries)
           .set({
             status: "delivered",
@@ -725,7 +788,9 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
             lastDurationMs: safeDurationMs,
             lastError: null,
           })
-          .where(eq(webhookDeliveries.id, delivery.id));
+          .where(leaseMatches)
+          .returning({ id: webhookDeliveries.id });
+        if (updatedDelivery === undefined) return;
         await tx
           .update(webhooks)
           .set({ consecutiveFailures: 0 })
@@ -742,7 +807,7 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
         exhausted || delay === null
           ? delivery.nextAttemptAt
           : sql`statement_timestamp() + make_interval(secs => ${delay / 1000})`;
-      await tx
+      const [updatedDelivery] = await tx
         .update(webhookDeliveries)
         .set({
           status: exhausted ? "failed" : "pending",
@@ -752,7 +817,9 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
           lastDurationMs: safeDurationMs,
           lastError: sanitizeError(result.error),
         })
-        .where(eq(webhookDeliveries.id, delivery.id));
+        .where(leaseMatches)
+        .returning({ id: webhookDeliveries.id });
+      if (updatedDelivery === undefined) return;
 
       // Synthetic test deliveries and disabled-webhook cancellations never drive the circuit breaker.
       if (!exhausted || delivery.event === "webhook.test" || result.skipCircuitBreaker === true) {
@@ -1043,15 +1110,16 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
         const result: typeof due = [];
         for (const row of due) {
           const attemptCount = row.status === "pending" ? row.attemptCount + 1 : row.attemptCount;
-          await tx
+          const [claimedRow] = await tx
             .update(webhookDeliveries)
             .set({
               status: "delivering",
               attemptCount,
-              lockedUntil: sql`statement_timestamp() + interval '2 minutes'`,
+              lockedUntil: sql`date_trunc('milliseconds', statement_timestamp() + interval '2 minutes')`,
             })
-            .where(eq(webhookDeliveries.id, row.id));
-          result.push({ ...row, attemptCount });
+            .where(eq(webhookDeliveries.id, row.id))
+            .returning();
+          if (claimedRow !== undefined) result.push(claimedRow);
         }
         return result;
       });
