@@ -1,7 +1,9 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import { Layout, LayoutPanel } from "@astryxdesign/core/Layout";
 import { MultiSelector } from "@astryxdesign/core/MultiSelector";
@@ -106,6 +108,7 @@ function NewIssuePage() {
   const [createMore, setCreateMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
+  const isNarrow = useMediaQuery("(max-width: 62rem)");
 
   const candidates: AssigneeCandidate[] = [];
   const seenHumans = new Set<string>();
@@ -356,24 +359,31 @@ function NewIssuePage() {
         ]}
         title="New issue"
         badge={project.key}
-        subtitle={`Create an issue in ${project.name}`}
       />
-      <Layout
-        height="auto"
-        padding={0}
-        content={<Stack paddingInlineEnd={6}>{main}</Stack>}
-        end={
-          <LayoutPanel
-            width={320}
-            padding={0}
-            isScrollable={false}
-            role="complementary"
-            label="Issue triage"
-          >
-            <Stack paddingInlineStart={6}>{rail}</Stack>
-          </LayoutPanel>
-        }
-      />
+      {isNarrow ? (
+        <Stack gap={4}>
+          {main}
+          <Divider />
+          {rail}
+        </Stack>
+      ) : (
+        <Layout
+          height="auto"
+          padding={0}
+          content={<Stack paddingInlineEnd={6}>{main}</Stack>}
+          end={
+            <LayoutPanel
+              width={320}
+              padding={0}
+              isScrollable={false}
+              role="complementary"
+              label="Issue triage"
+            >
+              <Stack paddingInlineStart={6}>{rail}</Stack>
+            </LayoutPanel>
+          }
+        />
+      )}
     </Stack>
   );
 }
