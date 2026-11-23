@@ -20,6 +20,8 @@ export interface TitleBodyFormProps {
   initialBody?: string;
   resetOnSuccess?: boolean;
   mentionIssues?: readonly Issue[];
+  /** Project whose attachment endpoint receives files dropped into the editor. */
+  projectId?: string;
   /** When set, renders a "Create more" checkbox on creation forms. */
   createMore?: { value: boolean; onChange: (value: boolean) => void };
   /** An extra action, such as Cancel, shown beside the submit button. */
@@ -38,6 +40,7 @@ export function TitleBodyForm({
   initialBody = "",
   resetOnSuccess = false,
   mentionIssues,
+  projectId,
   createMore,
   secondaryAction,
   onSubmit,
@@ -86,6 +89,7 @@ export function TitleBodyForm({
           onChange={setBody}
           rows={bodyRows}
           {...(mentionIssues !== undefined ? { issues: mentionIssues } : {})}
+          {...(projectId !== undefined ? { projectId } : {})}
         />
         {createMore !== undefined && (
           <CheckboxInput

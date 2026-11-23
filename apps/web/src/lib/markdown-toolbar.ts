@@ -199,3 +199,29 @@ export function quoteReply(comment: string, draft = ""): string {
   const separator = draft.endsWith("\n\n") ? "" : draft.endsWith("\n") ? "\n" : "\n\n";
   return `${draft}${separator}${quoted}\n\n`;
 }
+
+/** Temporary Markdown marker shown while an attachment uploads. */
+export function attachmentPlaceholder(filename: string): string {
+  return `![Uploading ${filename}...]()`;
+}
+
+/** The final Markdown for an uploaded image or downloadable file. */
+export function attachmentMarkdown(filename: string, url: string, inline: boolean): string {
+  const label = filename.replace(/[[\]()]/g, "_");
+  return inline ? `![${label}](${url})` : `[${label}](${url})`;
+}
+
+/** Swap an upload placeholder for the final Markdown without disturbing other text. */
+export function replaceAttachmentPlaceholder(
+  value: string,
+  placeholder: string,
+  replacement: string,
+): TextSelectionEdit {
+  const at = value.indexOf(placeholder);
+  if (at < 0) {
+    return { value, selectionStart: value.length, selectionEnd: value.length };
+  }
+  const nextValue = `${value.slice(0, at)}${replacement}${value.slice(at + placeholder.length)}`;
+  const cursor = at + replacement.length;
+  return { value: nextValue, selectionStart: cursor, selectionEnd: cursor };
+}

@@ -85,6 +85,7 @@ function NewKnowledgePage() {
               fallbackError="Could not create the entry."
               resetOnSuccess
               mentionIssues={projectIssues}
+              projectId={projectId}
               createMore={{ value: createMore, onChange: setCreateMore }}
               secondaryAction={
                 <Button variant="secondary" label="Cancel" href={`/projects/${projectId}`} />

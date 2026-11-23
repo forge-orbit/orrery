@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { File } from "node:buffer";
 import { avatarUrlFor } from "@orrery/contract";
-import { and, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import sharp from "sharp";
 import {
@@ -10,6 +10,12 @@ import {
   storedObjects,
   workspaceMemberships,
 } from "../../db/schema.ts";
+import {
+  discardObject,
+  isDeleted,
+  type ObjectRow,
+  sweepOrphanObjects,
+} from "../../platform/object-sweep.ts";
 import type { ObjectStore } from "../../platform/storage.ts";
 import type { SessionAccount } from "../accounts/index.ts";
 
@@ -140,39 +146,6 @@ export function avatarKey(humanId: string, objectId: string): string {
   return `avatars/${humanId}/${objectId}.webp`;
 }
 
-type ObjectRow = { id: string; key: string };
-
-const isDeleted = sql`${storedObjects.status} = 'deleted'`;
-
-/**
- * Delete the blob first and only hard-delete its metadata row once the blob is
- * gone. A failed backend delete leaves the row for the next sweep, so a transient
- * storage error can never turn into a lost audit trail or an untracked blob.
- * Callers must claim the row (move it out of `pending`) before calling this, so
- * an in-flight upload can never activate a row whose blob is being removed.
- */
-async function discardObject(
-  db: PostgresJsDatabase,
-  store: ObjectStore,
-  row: ObjectRow,
-  stillEligible: SQL,
-): Promise<boolean> {
-  try {
-    await store.delete(row.key);
-  } catch {
-    return false;
-  }
-  try {
-    const deleted = await db
-      .delete(storedObjects)
-      .where(and(eq(storedObjects.id, row.id), stillEligible))
-      .returning({ id: storedObjects.id });
-    return deleted.length > 0;
-  } catch {
-    return false;
-  }
-}
-
 function etagMatches(ifNoneMatch: string | undefined, etag: string): boolean {
   if (ifNoneMatch === undefined) return false;
   return ifNoneMatch
@@ -300,33 +273,10 @@ export function createAvatarsService({ db, store }: AvatarsDeps): AvatarsService
       if (removed.row !== null) await discardObject(db, store, removed.row, isDeleted);
     },
 
+    // The shared platform sweep covers both avatars and attachments; the
+    // claim-first guarantee is identical for every stored_objects consumer.
     async sweepOrphans() {
-      // Claim stale pending rows before touching any blob. This is the other
-      // half of upload()'s pending-only activation: exactly one of the two can
-      // win, so an avatar that goes live keeps its blob and a claimed row is
-      // never silently resurrected by a delayed upload.
-      await db
-        .update(storedObjects)
-        .set({ status: "deleted", deletedAt: sql`now()` })
-        .where(
-          and(
-            eq(storedObjects.status, "pending"),
-            lt(storedObjects.createdAt, sql`statement_timestamp() - interval '15 minutes'`),
-          ),
-        );
-      // The claim above moves stale pending rows into the deleted set, so one
-      // SELECT covers both them and rows already marked deleted by a failed
-      // immediate reclaim. Each row is handed to discardObject exactly once.
-      const rows = await db
-        .select({ id: storedObjects.id, key: storedObjects.key })
-        .from(storedObjects)
-        .where(eq(storedObjects.status, "deleted"))
-        .orderBy(storedObjects.id);
-      let reclaimed = 0;
-      for (const row of rows) {
-        if (await discardObject(db, store, row, isDeleted)) reclaimed++;
-      }
-      return reclaimed;
+      return sweepOrphanObjects(db, store);
     },
 
     async read(actor, humanId, version, ifNoneMatch) {

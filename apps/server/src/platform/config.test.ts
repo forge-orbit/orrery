@@ -42,6 +42,17 @@ describe("loadConfig: object storage", () => {
     );
   });
 
+  it("defaults the attachment size cap to 25 MB and accepts a configured byte count", () => {
+    expect(loadConfig(baseEnv).ORRERY_MAX_ATTACHMENT_BYTES).toBe(25 * 1024 * 1024);
+    expect(
+      loadConfig({ ...baseEnv, ORRERY_MAX_ATTACHMENT_BYTES: "1048576" })
+        .ORRERY_MAX_ATTACHMENT_BYTES,
+    ).toBe(1024 * 1024);
+    expect(() => loadConfig({ ...baseEnv, ORRERY_MAX_ATTACHMENT_BYTES: "0" })).toThrow(
+      /ORRERY_MAX_ATTACHMENT_BYTES/,
+    );
+  });
+
   const s3Env = {
     ...baseEnv,
     ORRERY_STORAGE_DRIVER: "s3" as const,

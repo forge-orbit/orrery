@@ -1,5 +1,6 @@
 import { Card } from "@astryxdesign/core/Card";
 import { Divider } from "@astryxdesign/core/Divider";
+import { FileInput } from "@astryxdesign/core/FileInput";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -23,8 +24,12 @@ import {
   Table2,
 } from "lucide-react";
 import { useRef, useState, type RefObject } from "react";
+import { uploadAttachment } from "../attachments/index.ts";
+import { ApiProblemError } from "../../lib/api.ts";
 import { TextAreaField } from "../../lib/fields.tsx";
 import {
+  attachmentMarkdown,
+  attachmentPlaceholder,
   continueListOnEnter,
   insertCode,
   insertCodeBlock,
@@ -33,6 +38,7 @@ import {
   insertTable,
   pasteUrlOverSelection,
   prefixLines,
+  replaceAttachmentPlaceholder,
   wrapSelection,
   type TextSelectionEdit,
 } from "../../lib/markdown-toolbar.ts";
@@ -58,6 +64,8 @@ export interface IssueMentionTextAreaProps {
   required?: boolean;
   placeholder?: string;
   issues?: readonly Issue[];
+  /** Project that receives pasted, dropped, or picked files. Omit for detached composers. */
+  projectId?: string;
   /** Focused by a parent action such as "Quote reply". */
   inputRef?: RefObject<HTMLTextAreaElement | null>;
   /** Increment to bring the editor back to write mode before focusing it. */
@@ -76,13 +84,17 @@ export function IssueMentionTextArea({
   required,
   placeholder,
   issues = EMPTY_ISSUES,
+  projectId,
   inputRef,
   focusSignal = 0,
 }: IssueMentionTextAreaProps) {
   const [mode, setMode] = useState<"write" | "preview">("write");
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const valueRef = useRef(value);
   const [lastFocusSignal, setLastFocusSignal] = useState(focusSignal);
   if (focusSignal !== lastFocusSignal) {
     setLastFocusSignal(focusSignal);
@@ -108,7 +120,7 @@ export function IssueMentionTextArea({
   const activeIndex = matches.length === 0 ? 0 : Math.min(selectedIndex, matches.length - 1);
 
   function commitEdit(edit: TextSelectionEdit) {
-    onChange(edit.value);
+    setDraft(edit.value);
     setDismissedAt(null);
     setSelectedIndex(0);
     requestAnimationFrame(() => {
@@ -128,15 +140,65 @@ export function IssueMentionTextArea({
 
   function insertMention(target: Issue) {
     if (mention === null) return;
-    onChange(`${value.slice(0, mention.start)}#${target.number} `);
+    setDraft(`${value.slice(0, mention.start)}#${target.number} `);
     setDismissedAt(null);
     setSelectedIndex(0);
+  }
+
+  function setDraft(next: string) {
+    valueRef.current = next;
+    onChange(next);
+  }
+
+  async function uploadFiles(files: FileList | File[] | null) {
+    if (projectId === undefined || files === null) return;
+    const el = activeRef.current;
+    for (const file of Array.from(files)) {
+      const uploadPlaceholder = attachmentPlaceholder(file.name);
+      const start = el?.selectionStart ?? valueRef.current.length;
+      const end = el?.selectionEnd ?? valueRef.current.length;
+      setDraft(
+        `${valueRef.current.slice(0, start)}${uploadPlaceholder}\n${valueRef.current.slice(end)}`,
+      );
+      setUploading((count) => count + 1);
+      setUploadError(null);
+      try {
+        const uploaded = await uploadAttachment(projectId, file);
+        const edit = replaceAttachmentPlaceholder(
+          valueRef.current,
+          uploadPlaceholder,
+          attachmentMarkdown(file.name, uploaded.downloadUrl, uploaded.inline),
+        );
+        setDraft(edit.value);
+      } catch (error) {
+        const edit = replaceAttachmentPlaceholder(valueRef.current, uploadPlaceholder, "");
+        setDraft(edit.value);
+        setUploadError(
+          error instanceof ApiProblemError
+            ? error.problem.title
+            : error instanceof Error
+              ? error.message
+              : "The file could not be attached.",
+        );
+      } finally {
+        setUploading((count) => count - 1);
+      }
+    }
   }
 
   return (
     <Stack
       width="100%"
       gap={1.5}
+      data-attachment-dropzone={projectId === undefined ? "off" : "on"}
+      onDragOver={(event) => {
+        if (projectId !== undefined) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (projectId === undefined) return;
+        event.preventDefault();
+        void uploadFiles(event.dataTransfer.files);
+      }}
       onKeyDown={(event) => {
         if (mode !== "write") return;
 
@@ -404,11 +466,16 @@ export function IssueMentionTextArea({
                 htmlName={htmlName}
                 value={value}
                 onChange={(next) => {
-                  onChange(next);
+                  setDraft(next);
                   setDismissedAt(null);
                   setSelectedIndex(0);
                 }}
                 onPaste={(event) => {
+                  if (projectId !== undefined && event.clipboardData.files.length > 0) {
+                    event.preventDefault();
+                    void uploadFiles(event.clipboardData.files);
+                    return;
+                  }
                   const el = activeRef.current;
                   if (el === null) return;
                   const pasted = event.clipboardData.getData("text");
@@ -445,6 +512,27 @@ export function IssueMentionTextArea({
             </Stack>
           )}
         </Stack>
+
+        {mode === "write" && projectId !== undefined && (
+          <Stack padding={2} data-attach-bar="">
+            <FileInput
+              label="Add files"
+              isLabelHidden
+              value={null}
+              isMultiple
+              mode="input"
+              accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.txt,.log,.md,.json,.csv,.patch,.diff,.docx,.xlsx,.pptx,.zip,.gz,.svg"
+              placeholder="Paste, drop, or click to add files"
+              isLoading={uploading > 0}
+              onChange={(files) =>
+                void uploadFiles(files === null ? null : Array.isArray(files) ? files : [files])
+              }
+              {...(uploadError === null
+                ? {}
+                : { status: { type: "error" as const, message: uploadError } })}
+            />
+          </Stack>
+        )}
       </Card>
 
       {matches.length > 0 && (

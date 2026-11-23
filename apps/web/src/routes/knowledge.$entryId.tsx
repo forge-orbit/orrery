@@ -96,6 +96,7 @@ function KnowledgePage() {
               initialTitle={entry.title}
               initialBody={entry.body}
               mentionIssues={projectIssues}
+              projectId={entry.projectId}
               secondaryAction={
                 <Button
                   type="button"

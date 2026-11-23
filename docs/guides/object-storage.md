@@ -25,6 +25,7 @@ bucket later becomes unreachable.
 | --- | --- | --- |
 | `ORRERY_STORAGE_DRIVER` | `local` | `local` or `s3`. |
 | `ORRERY_DATA_DIR` | `data` | Local data root; blobs go in its `objects/` child. Compose fixes this to `/app/data`. |
+| `ORRERY_MAX_ATTACHMENT_BYTES` | `26214400` | Maximum size of a downloadable attachment in bytes (25 MB). Inline images are always capped at 10 MB. |
 | `ORRERY_S3_ENDPOINT` | — | Required for `s3`: `http(s)://host:port`. Use `http://rustfs:9000` in Compose, `http://localhost:9000` for `pnpm dev`. |
 | `ORRERY_S3_BUCKET` | — | Required for `s3`: bucket that already exists. |
 | `ORRERY_S3_REGION` | `us-east-1` | Signing region (`auto` works for Cloudflare R2). |

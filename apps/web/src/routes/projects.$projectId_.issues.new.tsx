@@ -199,6 +199,7 @@ function NewIssuePage() {
             onChange={setBody}
             rows={15}
             issues={issues}
+            projectId={projectId}
           />
         </Stack>
         {error !== undefined && <Banner status="error" role="alert" title={error} />}

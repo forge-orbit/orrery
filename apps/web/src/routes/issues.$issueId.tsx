@@ -693,6 +693,7 @@ function IssuePage() {
                     initialTitle={issue.title}
                     initialBody={issue.body}
                     mentionIssues={projectIssues}
+                    projectId={issue.projectId}
                     secondaryAction={
                       <Button
                         type="button"
@@ -1301,6 +1302,7 @@ function CommentForm({
           rows={7}
           required
           issues={issues}
+          projectId={projectId}
           inputRef={inputRef}
           focusSignal={focusSignal}
         />

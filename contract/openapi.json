@@ -266,6 +266,57 @@
         },
         "description": "A JPEG, PNG or WebP image of at most 5 MB."
       },
+      "Attachment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "inline": {
+            "type": "boolean"
+          },
+          "downloadUrl": {
+            "type": "string"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "filename",
+          "contentType",
+          "byteSize",
+          "inline",
+          "downloadUrl",
+          "createdAt"
+        ]
+      },
+      "Timestamp": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "AttachmentUploadRequest": {
+        "type": "object",
+        "properties": {
+          "file": {}
+        },
+        "description": "One image (10 MB) or downloadable file (25 MB by default)."
+      },
       "AccountStatus": {
         "type": "object",
         "properties": {
@@ -276,7 +327,17 @@
             "$ref": "#/components/schemas/Email"
           },
           "deactivatedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "isSystemAdministrator": {
             "type": "boolean"
@@ -288,13 +349,6 @@
           "deactivatedAt",
           "isSystemAdministrator"
         ]
-      },
-      "Timestamp": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "format": "date-time"
       },
       "InstallationDirectoryResponse": {
         "type": "array",
@@ -355,7 +409,17 @@
             "type": "boolean"
           },
           "suspendedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "accountDeactivated": {
             "type": "boolean"
@@ -502,10 +566,30 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "expiresAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "revokedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "revokedByHumanId": {
             "type": [
@@ -1692,7 +1776,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "closedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdBy": {
             "$ref": "#/components/schemas/Actor"
@@ -1987,7 +2081,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "closedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdBy": {
             "$ref": "#/components/schemas/Actor"
@@ -3162,10 +3266,30 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "endedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "lastHeartbeatAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "agentName": {
             "type": "string"
@@ -3282,7 +3406,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "endedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -3325,13 +3459,33 @@
             "type": "string"
           },
           "progressUpdatedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopRequested": {
             "type": "boolean"
           },
           "stopRequestedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopReason": {
             "type": [
@@ -3367,7 +3521,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "endedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -3740,13 +3904,33 @@
             "type": "string"
           },
           "progressUpdatedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopRequested": {
             "type": "boolean"
           },
           "stopRequestedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopReason": {
             "type": [
@@ -3782,7 +3966,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "endedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "projectId": {
             "type": "string"
@@ -3870,7 +4064,17 @@
             ]
           },
           "answeredAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "followUp": {
             "type": [
@@ -3885,10 +4089,30 @@
             ]
           },
           "followUpAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "resolvedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -4014,7 +4238,17 @@
             "type": "string"
           },
           "readAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -4245,7 +4479,17 @@
             "type": "string"
           },
           "stopRequestedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopReason": {
             "type": [
@@ -4660,7 +4904,17 @@
             "minimum": 0
           },
           "disabledAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "disabledReason": {
             "type": [
@@ -4733,7 +4987,17 @@
             "minimum": 0
           },
           "disabledAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "disabledReason": {
             "type": [
@@ -4899,7 +5163,17 @@
             ]
           },
           "deliveredAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -5476,6 +5750,208 @@
           },
           "404": {
             "description": "No such visible avatar",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/attachments": {
+      "post": {
+        "summary": "Upload a project-scoped attachment",
+        "description": "A Human with Contribute/Manage access or an Agent with an effective Contribute/Manage grant uploads one multipart file. Magic bytes are sniffed, inline raster images are re-encoded without EXIF, and the pending-to-active promotion plus the attachments row commit before the downloadUrl is returned.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachmentUploadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The uploaded attachment metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attachment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The upload is missing or is not a valid image",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or agent key",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot contribute to this project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No accessible project with this id",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The upload expired before it could be activated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The file is larger than the configured limit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file type is not supported",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/attachments/{attachmentId}": {
+      "get": {
+        "summary": "Download a project-scoped attachment",
+        "description": "Requires project Read access for a Human session or Agent API key. Inline images are served with immutable caching; every other file (including SVG) is forced to a download with X-Content-Type-Options: nosniff.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "attachmentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The attachment bytes",
+            "headers": {
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or agent key",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot read this project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such attachment in this project",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -323,6 +323,13 @@
       "when": 1795406424784,
       "tag": "0045_sticky_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1795410386256,
+      "tag": "0046_premium_hannibal_king",
+      "breakpoints": true
     }
   ]
 }

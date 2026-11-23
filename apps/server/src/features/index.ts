@@ -4,6 +4,7 @@ import type { Feature } from "../platform/feature.ts";
 import type { Logger } from "../platform/log.ts";
 import { createObjectStore, type ObjectStore } from "../platform/storage.ts";
 import { createAccountsFeature, accountsRoutes } from "./accounts/index.ts";
+import { createAttachmentsFeature, attachmentsRoutes } from "./attachments/index.ts";
 import { createAvatarsFeature, avatarsRoutes } from "./avatars/index.ts";
 import { createAgentsFeature, agentsRoutes, revokeMemberWorkspaceKeys } from "./agents/index.ts";
 import { createDeactivationFeature, deactivationRoutes } from "./deactivation/index.ts";
@@ -122,6 +123,17 @@ export function createFeatures(
     log,
   });
 
+  const attachments = createAttachmentsFeature({
+    db: database.db,
+    store: storage,
+    maxAttachmentBytes: config.ORRERY_MAX_ATTACHMENT_BYTES,
+    sessionReader: accounts.sessionReader,
+    authenticate: agentAuthenticator,
+    projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
+      projects.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
+    projectAccessAtLeast,
+  });
+
   const notifications = createNotificationsFeature({
     db: database.db,
     sessionReader: accounts.sessionReader,
@@ -171,6 +183,7 @@ export function createFeatures(
     createSystemFeature({ ping: database.ping, checkStorage: () => storage.checkHealth() }),
     accounts,
     avatars,
+    attachments,
 
     createDeactivationFeature({ db: database.db, sessionReader: accounts.sessionReader }),
 
@@ -260,6 +273,7 @@ export const routes = [
   ...systemRoutes,
   ...accountsRoutes,
   ...avatarsRoutes,
+  ...attachmentsRoutes,
   ...deactivationRoutes,
   ...ownershipRoutes,
   ...agentsRoutes,

@@ -243,6 +243,7 @@ function AnswerForm({ question }: { question: Question }) {
           rows={3}
           required
           issues={projectIssues}
+          projectId={question.projectId}
         />
         {error !== undefined && <Banner status="error" role="alert" title={error} />}
         <Stack hAlign="start">

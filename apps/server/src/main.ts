@@ -8,6 +8,7 @@ import { createDb } from "./platform/db.ts";
 import { createApp } from "./platform/http.ts";
 import { createLogger } from "./platform/log.ts";
 import { migrate } from "./platform/migrate.ts";
+import { startObjectSweeps } from "./platform/object-sweep.ts";
 import { createObjectStore } from "./platform/storage.ts";
 import { version } from "./platform/version.ts";
 
@@ -35,6 +36,8 @@ if (!storageHealth.ok) {
 
 const features = createFeatures(database, config, log, storage);
 
+// One shared claim-first sweep reclaims blobs for every stored_objects consumer.
+startObjectSweeps(database.db, storage, log);
 for (const feature of features) feature.startBackgroundTasks?.();
 
 const app = createApp({

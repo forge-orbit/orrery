@@ -2553,14 +2553,18 @@ def extract_code_facts() -> dict[str, Any]:
     # from the service, its background scheduler, and the Problem route, so dropping
     # a claim, a status predicate or the overlap guard flips the bounded model.
     av_src = read_text("apps/server/src/features/avatars/service.ts")
-    av_index_src = read_text("apps/server/src/features/avatars/index.ts")
     av_rest_src = read_text("apps/server/src/features/avatars/rest.ts")
-    av_discard_fn = slice_between(av_src, "async function discardObject(", "function etagMatches(")
+    sweep_src = read_text("apps/server/src/platform/object-sweep.ts")
+    av_discard_fn = slice_between(
+        sweep_src, "export async function discardObject(", "export async function sweepOrphanObjects("
+    )
     av_upload_fn = slice_between(av_src, "async upload(humanId, data)", "async remove(humanId)")
-    av_sweep_fn = slice_between(av_src, "async sweepOrphans()", "async read(actor,")
+    av_sweep_fn = slice_between(
+        sweep_src, "export async function sweepOrphanObjects(", "export function startObjectSweeps("
+    )
     av_activate = slice_between(av_upload_fn, ".update(storedObjects)", "await tx.update(humans)")
     av_claim = slice_between(av_sweep_fn, ".update(storedObjects)", "const rows = await db")
-    av_sweeper = slice_between(av_index_src, "startBackgroundTasks: () => {", "\n  };\n}")
+    av_sweeper = slice_between(sweep_src, "export function startObjectSweeps(")
 
     av_claim_at = av_sweep_fn.find(".update(storedObjects)")
     av_discard_at = av_sweep_fn.find("discardObject(db, store")
@@ -2633,6 +2637,42 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m37_problem_details = (
         '"assignee_not_found"' in issue_create_kinds and '"label_not_found"' in issue_create_kinds
+    )
+
+    # --- M38 (#177): project attachment upload claim-first activation + references ---
+    att_src = read_text("apps/server/src/features/attachments/service.ts")
+    att_rest_src = read_text("apps/server/src/features/attachments/rest.ts")
+    att_schema_src = read_text("apps/server/src/db/schema.ts")
+    att_upload_fn = slice_between(
+        att_src, "async upload(actor, projectId, file)", "async download(actor, projectId, attachmentId)"
+    )
+    att_tx_fn = slice_between(att_upload_fn, "db.transaction(async (tx)", "} catch (error)")
+    att_refs_table = slice_between(
+        att_schema_src, "export const attachmentReferences = pgTable(", "const projectActivityTypesSql"
+    )
+    m38_pending_only_activation = (
+        'eq(storedObjects.status, "pending")' in att_tx_fn
+        and "returning({ id: storedObjects.id })" in att_tx_fn
+    )
+    m38_attachment_row_in_tx = (
+        ".insert(attachments)" in att_tx_fn
+        and "unreferencedAt: sql`now()`" in att_tx_fn
+    )
+    m38_zero_row_clean_error = (
+        "activated === undefined" in att_tx_fn
+        and 'throw new AttachmentsError("attachment_upload_expired")' in att_tx_fn
+        and "attachment_upload_expired: 409" in att_rest_src
+    )
+    m38_unique_reference = (
+        'uniqueIndex("one_reference_per_holder_attachment")' in att_refs_table
+        and re.search(
+            r"\.on\(\s*t\.holderType,\s*t\.holderId,\s*t\.attachmentId,?\s*\)",
+            att_refs_table,
+        )
+        is not None
+    )
+    m38_reference_cascade = (
+        '.references(() => attachments.id, { onDelete: "cascade" })' in att_refs_table
     )
 
     return {
@@ -3035,6 +3075,11 @@ def extract_code_facts() -> dict[str, Any]:
         "m37_contract_surface": m37_contract_surface,
         "m37_mcp_surface": m37_mcp_surface,
         "m37_problem_details": m37_problem_details,
+        "m38_pending_only_activation": m38_pending_only_activation,
+        "m38_attachment_row_in_tx": m38_attachment_row_in_tx,
+        "m38_zero_row_clean_error": m38_zero_row_clean_error,
+        "m38_unique_reference": m38_unique_reference,
+        "m38_reference_cascade": m38_reference_cascade,
     }
 
 
@@ -7666,7 +7711,7 @@ def check_m36(facts: dict[str, bool]) -> CheckResult:
     }
     files = [
         "apps/server/src/features/avatars/service.ts",
-        "apps/server/src/features/avatars/index.ts",
+        "apps/server/src/platform/object-sweep.ts",
         "apps/server/src/features/avatars/rest.ts",
     ]
     # (up, sweep, row, blob, human, stale, reported, violations)
@@ -7903,6 +7948,139 @@ def check_m37(facts: dict[str, bool]) -> CheckResult:
     )
 
 
+
+def check_m38(facts: dict[str, bool]) -> CheckResult:
+    """#177: attachment upload races the shared sweep; references are unique and cascading.
+
+    State: (up, obj, blob, att, refs, violations)
+      up:  idle | reserved | put_done | committed | expired | fk_error | cleaned
+      obj: absent | pending | active | deleted
+    """
+    g = {k: facts[k] for k in facts if k.startswith("m38_")}
+    files = [
+        "apps/server/src/features/attachments/service.ts",
+        "apps/server/src/features/attachments/rest.ts",
+        "apps/server/src/db/schema.ts",
+        "apps/server/src/platform/object-sweep.ts",
+    ]
+    init = ("idle", "absent", False, False, (), frozenset())
+
+    def bad(v: frozenset[str], name: str) -> frozenset[str]:
+        return v | {name}
+
+    def run(check_id: str) -> CheckResult:
+        def reserve(state):
+            up, obj, blob, att, refs, v = state
+            return ("reserved", "pending", False, False, (), v) if up == "idle" else state
+
+        def put_blob(state):
+            up, obj, blob, att, refs, v = state
+            return ("put_done", obj, True, att, refs, v) if up == "reserved" else state
+
+        def sweep_claims(state):
+            up, obj, blob, att, refs, v = state
+            if obj == "pending":
+                return (up, "deleted", blob, att, refs, v)
+            return state
+
+        def activate(state):
+            up, obj, blob, att, refs, v = state
+            if up != "put_done":
+                return state
+            if obj == "pending":
+                return ("committed", "active", blob, True, refs, v)
+            if not g["m38_pending_only_activation"] and obj == "deleted":
+                # An unconditional UPDATE un-deletes a row the sweep already claimed.
+                return ("committed", "active", blob, True, refs, bad(v, "claimed_row_undeleted"))
+            if g["m38_pending_only_activation"] and not g["m38_zero_row_clean_error"]:
+                # The guarded UPDATE matched nothing, but no zero-row check means
+                # the attachments INSERT runs against a claimed/absent object.
+                return ("fk_error", obj, blob, True, refs, bad(v, "unhandled_fk_23503"))
+            if not g["m38_attachment_row_in_tx"]:
+                # Promotion commits but no attachments row is paired with it.
+                return ("committed", obj, blob, False, refs, bad(v, "active_blob_without_attachment"))
+            return ("expired", obj, blob, False, refs, v)
+
+        def bind(state):
+            up, obj, blob, att, refs, v = state
+            if not att:
+                return state
+            duplicate = bool(refs)
+            if duplicate:
+                if not g["m38_unique_reference"]:
+                    return (up, obj, blob, att, refs + ("holder",), bad(v, "duplicate_reference_counted_twice"))
+                return state  # the unique index absorbs the duplicate URL
+            return (up, obj, blob, att, refs + ("holder",), v)
+
+        def delete_attachment(state):
+            up, obj, blob, att, refs, v = state
+            if not att:
+                return state
+            keep_refs = refs if not g["m38_reference_cascade"] else ()
+            if keep_refs:
+                v = bad(v, "orphan_reference_row")
+            return ("cleaned", obj, blob, False, keep_refs, v)
+
+        actions = [
+            ("upload reserves a pending stored_objects row", reserve),
+            ("upload writes the blob with store.put", put_blob),
+            ("the shared sweep claims the stale pending row", sweep_claims),
+            ("upload promotes pending and inserts the attachments row", activate),
+            ("save binds an attachment URL twice in one body", bind),
+            ("save deletes the attachment row", delete_attachment),
+        ]
+        init_state = init
+
+        def inv(state):
+            up, obj, blob, att, refs, v = state
+            if v:
+                return False, f"attachment lifecycle invariant broken: {sorted(v)[0]}"
+            if up == "committed" and not (blob and att):
+                return False, "attachment lifecycle invariant broken: active_upload_without_blob_or_row"
+            if up == "fk_error":
+                return False, "attachment lifecycle invariant broken: unhandled_fk_23503"
+            if len(refs) > 1:
+                return False, "attachment lifecycle invariant broken: duplicate_reference_rows"
+            if not att and refs:
+                return False, "attachment lifecycle invariant broken: orphan_reference_rows"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Project Attachment Upload & Reference Lifecycle (#177)",
+            "An upload only yields a downloadUrl when pending-to-active promotion and the attachments row commit together; a sweep that won the claim returns a clean Problem, and every holder binds an attachment at most once with cascading reference cleanup",
+            "safety",
+            init_state,
+            lambda s: [(label, action(s)) for label, action in actions],
+            inv,
+            files,
+        )
+
+    result = run("M38")
+    if result.status != "verified":
+        return result
+    for guard in [key for key in g if key.startswith("m38_")]:
+        saved = g[guard]
+        g[guard] = not saved
+        try:
+            naive = run(f"M38-naive-{guard}")
+        finally:
+            g[guard] = saved
+        if naive.status == "verified":
+            return CheckResult(
+                "M38", result.model, result.property_name, result.kind, "violated",
+                result.states_explored, result.transitions_explored,
+                f"model is not sensitive: flipping {guard} left the invariant intact",
+                [f"flip {guard}"], files,
+            )
+    return CheckResult(
+        "M38", result.model, result.property_name, result.kind, "verified",
+        result.states_explored, result.transitions_explored,
+        f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation",
+        [], files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -7944,6 +8122,7 @@ def main() -> None:
         check_m35(facts),
         check_m36(facts),
         check_m37(facts),
+        check_m38(facts),
     ]
 
     if "--json" in sys.argv:
