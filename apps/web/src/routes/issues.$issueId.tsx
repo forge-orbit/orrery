@@ -49,7 +49,9 @@ import {
   issuesQuery,
   issueStatusLabels,
   groupLabelEvents,
+  missingProjectAccessHumanIds,
   PRIORITY_LABELS,
+  projectAccessHumanIdsQuery,
   LabelPill,
   PriorityBadge,
   projectActivityQuery,
@@ -317,6 +319,14 @@ function IssuePage() {
     ...workspaceMembersQuery(project.workspaceId),
     enabled: canReadMembers,
   });
+  const accessIds = useQuery({
+    ...projectAccessHumanIdsQuery(project.id),
+    enabled: canReadMembers,
+  });
+  const withoutAccess =
+    accessIds.data === undefined
+      ? new Set<string>()
+      : missingProjectAccessHumanIds(membersQuery.data ?? [], accessIds.data);
   const { data: myKeys } = useSuspenseQuery(agentKeysQuery(project.workspaceId));
   const workspaceKeys = useQuery({
     ...workspaceAgentKeysQuery(project.workspaceId),
@@ -357,6 +367,7 @@ function IssuePage() {
         value: `human:${actor.humanId}`,
         label: `Human · ${actor.email ?? actor.displayName}`,
         assignee: { type: "human" as const, id: actor.humanId },
+        noProjectAccess: withoutAccess.has(actor.humanId),
       });
     }
   }
@@ -367,6 +378,7 @@ function IssuePage() {
       value: `human:${member.humanId}`,
       label: `Human · ${member.email}`,
       assignee: { type: "human" as const, id: member.humanId },
+      noProjectAccess: withoutAccess.has(member.humanId),
     });
   }
   const seen = new Set<string>();

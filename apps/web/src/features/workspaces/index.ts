@@ -11,6 +11,7 @@ export {
   updateWorkspaceMember,
 } from "./commands.ts";
 export {
+  humanSuggestionsQuery,
   workspaceInvitationPreviewQuery,
   workspaceInvitationsQuery,
   workspaceMembersQuery,

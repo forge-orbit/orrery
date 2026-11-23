@@ -1643,6 +1643,7 @@ export interface ProjectsService {
     account: SessionAccount | null,
     projectId: string,
   ): Promise<ProjectAccessGrant[]>;
+  projectAccessHumanIds(account: SessionAccount | null, projectId: string): Promise<string[]>;
   setProjectAccess(
     account: SessionAccount | null,
     projectId: string,
@@ -2153,6 +2154,42 @@ export function createProjectsService({
             )
             .orderBy(projectAccessGrants.createdAt, projectAccessGrants.humanId);
           return rows.map(toProjectGrant);
+        },
+        { accessMode: "read only" },
+      );
+    },
+
+    async projectAccessHumanIds(account, projectId) {
+      const actor = requireAccount(account);
+      const workActor: WorkActor = { kind: "human", account: actor };
+      return db.transaction(
+        async (tx) => {
+          const project = await requireProject(
+            tx,
+            projectId,
+            workActor,
+            ProjectAccessLevel.enum.contribute,
+          );
+          if (project.workspaceKind === WorkspaceKind.enum.personal) return [];
+          const rows = await tx
+            .select({ humanId: projectAccessGrants.humanId })
+            .from(projectAccessGrants)
+            .innerJoin(
+              workspaceMemberships,
+              and(
+                eq(workspaceMemberships.workspaceId, project.workspaceId),
+                eq(workspaceMemberships.humanId, projectAccessGrants.humanId),
+              ),
+            )
+            .where(
+              and(
+                eq(projectAccessGrants.projectId, projectId),
+                isNull(workspaceMemberships.suspendedAt),
+                eq(workspaceMemberships.isOwner, false),
+              ),
+            )
+            .orderBy(projectAccessGrants.humanId);
+          return rows.map((row) => row.humanId);
         },
         { accessMode: "read only" },
       );
