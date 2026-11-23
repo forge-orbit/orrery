@@ -6,7 +6,7 @@ import type { DbTransaction } from "../../platform/db.ts";
 import { errorNameAndCode } from "../../platform/errors.ts";
 import type { Logger } from "../../platform/log.ts";
 import { tokenHash } from "../../platform/tokens.ts";
-import type { OutgoingMail } from "../settings/index.ts";
+import { renderEmail, type OutgoingMail } from "../settings/index.ts";
 
 const RESET_TTL_SECONDS = 60 * 60;
 
@@ -18,18 +18,29 @@ export const LOCAL_RECOVERY_MESSAGE =
   "The password was changed locally. All browser sessions for that account were signed out.";
 
 function resetMail(email: string, token: string, publicUrl: string): OutgoingMail {
+  const url = `${publicUrl}/reset-password?token=${token}`;
   return {
     to: email,
     subject: "Reset your Orrery password",
     text: [
       `A password reset was requested for ${email}.`,
       "",
-      `Choose a new password: ${publicUrl}/reset-password?token=${token}`,
+      `Choose a new password: ${url}`,
       "",
       "This link works once and is valid for one hour. Opening it changes nothing; the password is set by the page it opens.",
       "",
       "If you did not ask for this, ignore the email. Your password has not changed.",
     ].join("\n"),
+    html: renderEmail({
+      preheader: `Reset the password for ${email}.`,
+      heading: "Reset your password",
+      paragraphs: [
+        `A password reset was requested for ${email}. Use the button below to choose a new password.`,
+      ],
+      action: { label: "Reset password", url },
+      footnote:
+        "This link works once and expires in 1 hour. If you did not ask for a reset, ignore this email and your password will stay the same.",
+    }),
   };
 }
 

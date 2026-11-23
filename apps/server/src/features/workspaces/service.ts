@@ -24,7 +24,7 @@ import type { Logger } from "../../platform/log.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import type { SessionAccount } from "../accounts/index.ts";
 import { canResendInvitation, supersedeTargetForPending } from "../invitations/index.ts";
-import type { OutgoingMail } from "../settings/index.ts";
+import { renderEmail, type OutgoingMail } from "../settings/index.ts";
 import {
   humans,
   projectAccessGrants,
@@ -104,6 +104,7 @@ function invitationMail(
   token: string,
   publicUrl: string,
 ): OutgoingMail {
+  const url = `${publicUrl}/workspace-invitation?token=${token}`;
   return {
     to: email,
     subject: "Your Orrery workspace invitation",
@@ -112,7 +113,7 @@ function invitationMail(
       "",
       "Follow the link to see the invitation:",
       "",
-      `${publicUrl}/workspace-invitation?token=${token}`,
+      url,
       "",
       "If you already have an Orrery account, sign in with this address and accept.",
       "If you are new, choose a password there to create your account, personal workspace, and membership.",
@@ -121,6 +122,17 @@ function invitationMail(
       "",
       "If you did not expect this invitation, ignore it.",
     ].join("\n"),
+    html: renderEmail({
+      preheader: `Join "${workspaceName}" on Orrery as ${email}.`,
+      heading: `Join "${workspaceName}" on Orrery`,
+      paragraphs: [
+        `You have been invited to join the "${workspaceName}" workspace as ${email}.`,
+        "If you already have an Orrery account, sign in to accept. If you're new, you can create your account from the invitation page.",
+      ],
+      action: { label: "View invitation", url },
+      footnote:
+        "This link is valid for 7 days. Opening it changes nothing until you accept. If you did not expect this invitation, ignore this email.",
+    }),
   };
 }
 

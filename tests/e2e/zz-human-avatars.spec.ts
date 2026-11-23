@@ -109,7 +109,7 @@ async function verificationToken(): Promise<string | undefined> {
     if (!Array.isArray(to) || !to.some((entry) => field(entry, "Address") === ADMIN_EMAIL)) {
       continue;
     }
-    return text.match(/Single-use token, valid for 24 hours:\r?\n\r?\n([A-Za-z0-9_-]+)/)?.[1];
+    return text.match(/\/settings\/smtp\?token=([A-Za-z0-9_-]+)/)?.[1];
   }
   return undefined;
 }

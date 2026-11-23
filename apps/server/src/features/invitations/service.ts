@@ -8,7 +8,7 @@ import { errorNameAndCode, uniqueConstraintName } from "../../platform/errors.ts
 import type { Logger } from "../../platform/log.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import type { SessionAccount } from "../accounts/index.ts";
-import type { OutgoingMail } from "../settings/index.ts";
+import { renderEmail, type OutgoingMail } from "../settings/index.ts";
 import { invitations, humans } from "../../db/schema.ts";
 import { canResendInvitation, supersedeTargetForPending } from "./state-machine.ts";
 
@@ -49,6 +49,7 @@ export class InvitationsError extends Error {
 }
 
 function invitationMail(email: string, token: string, publicUrl: string): OutgoingMail {
+  const url = `${publicUrl}/register?token=${token}`;
   return {
     to: email,
     subject: "Your Orrery invitation",
@@ -57,12 +58,22 @@ function invitationMail(email: string, token: string, publicUrl: string): Outgoi
       "",
       "Follow the link and choose a password to register:",
       "",
-      `${publicUrl}/register?token=${token}`,
+      url,
       "",
       "The link is valid for seven days. Opening it changes nothing; choosing a password completes your registration.",
       "",
       "If you did not expect this invitation, ignore it.",
     ].join("\n"),
+    html: renderEmail({
+      preheader: `You have been invited to join Orrery as ${email}.`,
+      heading: "You're invited to Orrery",
+      paragraphs: [
+        `You have been invited to join this Orrery installation as ${email}. Choose a password to finish setting up your account.`,
+      ],
+      action: { label: "Accept invitation", url },
+      footnote:
+        "This link is valid for 7 days. Opening it changes nothing until you set a password. If you did not expect this invitation, ignore this email.",
+    }),
   };
 }
 

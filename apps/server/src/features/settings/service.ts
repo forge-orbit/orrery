@@ -10,18 +10,21 @@ import { and, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { emailVerificationTokens, instanceSettings } from "../../db/schema.ts";
 import { decryptSecret, encryptSecret } from "../../platform/secrets.ts";
+import { ORRERY_LOGO_CID, ORRERY_LOGO_PNG, renderEmail } from "./template.ts";
 
 export interface SmtpMail {
   from: string;
   to: string;
   subject: string;
   text: string;
+  html?: string;
 }
 
 export interface OutgoingMail {
   to: string;
   subject: string;
   text: string;
+  html?: string;
 }
 
 export type SmtpSender = (settings: SmtpSettings, mail: SmtpMail) => Promise<void>;
@@ -190,23 +193,36 @@ function deliveryFailureKind(error: unknown): SettingsErrorKind {
   return "smtp_send_failed";
 }
 
-function verificationEmail(email: string, token: string, publicUrl: string): SmtpMail["text"] {
+function verificationEmail(
+  email: string,
+  token: string,
+  publicUrl: string,
+): { text: string; html: string } {
   const verifyUrl = `${publicUrl}/settings/smtp?token=${encodeURIComponent(token)}`;
-  return [
-    `Confirm that ${email} belongs to you.`,
-    "",
-    "Open this link to verify your address (valid for 24 hours):",
-    "",
-    verifyUrl,
-    "",
-    "Single-use token, valid for 24 hours:",
-    "",
-    token,
-    "",
-    `Opening the link only pre-fills the form — nothing is verified until you click Verify email (or POST the token to ${publicUrl}/api/settings/email-verification).`,
-    "",
-    "If you did not expect this email, ignore it.",
-  ].join("\n");
+  return {
+    text: [
+      `Confirm that ${email} belongs to you.`,
+      "",
+      "Open this link to verify your address:",
+      "",
+      verifyUrl,
+      "",
+      "Or paste this code into SMTP settings:",
+      "",
+      token,
+      "",
+      "This link works once and expires in 24 hours. If you did not expect this email, ignore it.",
+    ].join("\n"),
+    html: renderEmail({
+      preheader: `Confirm that ${email} belongs to you.`,
+      heading: "Verify your email address",
+      paragraphs: [`Confirm that ${email} belongs to you to complete SMTP setup on Orrery.`],
+      action: { label: "Verify email", url: verifyUrl },
+      code: { label: "Or paste this code in SMTP settings", value: token },
+      footnote:
+        "This link works once and expires in 24 hours. If you did not expect this email, you can safely ignore it.",
+    }),
+  };
 }
 
 function requireAdministrator(account: SessionAccount | null): SessionAccount {
@@ -303,11 +319,13 @@ export function createSettingsService({
         tokenHash: tokenHash(token),
         expiresAt: sql`now() + make_interval(secs => ${VERIFICATION_TTL_SECONDS})`,
       });
+      const rendered = verificationEmail(admin.email, token, publicUrl);
       const mail: SmtpMail = {
         from: settings.from,
         to: admin.email,
         subject: "Verify your Orrery email",
-        text: verificationEmail(admin.email, token, publicUrl),
+        text: rendered.text,
+        html: rendered.html,
       };
 
       try {
@@ -407,11 +425,25 @@ export const sendWithSmtp: SmtpSender = async (settings, mail) => {
     socketTimeout: 20_000,
   });
   try {
+    const attachments =
+      mail.html !== undefined && mail.html.includes(`cid:${ORRERY_LOGO_CID}`)
+        ? [
+            {
+              filename: "orrery-logo.png",
+              content: ORRERY_LOGO_PNG,
+              cid: ORRERY_LOGO_CID,
+              contentDisposition: "inline" as const,
+              contentType: "image/png",
+            },
+          ]
+        : undefined;
     await transport.sendMail({
       from: settings.from,
       to: mail.to,
       subject: mail.subject,
       text: mail.text,
+      ...(mail.html === undefined ? {} : { html: mail.html }),
+      ...(attachments === undefined ? {} : { attachments }),
     });
   } finally {
     transport.close();

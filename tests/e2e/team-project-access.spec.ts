@@ -342,7 +342,7 @@ async function ensureAdminVerified() {
   await expect.poll(async () => verificationMessageText(), { timeout: 15_000 }).toBeTruthy();
   const text = await verificationMessageText();
   if (text === undefined) throw new Error("the catcher never received the verification email");
-  const token = text.match(/Single-use token, valid for 24 hours:\r?\n\r?\n([A-Za-z0-9_-]+)/)?.[1];
+  const token = text.match(/\/settings\/smtp\?token=([A-Za-z0-9_-]+)/)?.[1];
   if (token === undefined) throw new Error("the verification email carried no token");
   await recordSecret(token);
 
