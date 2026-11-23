@@ -820,6 +820,131 @@ describe("retry, circuit breaker, test events, and maintenance", () => {
     expect(updated.disabledReason).toBe("consecutive_failures");
     expect(updated.enabled).toBe(false);
   });
+
+  it("cancels queued and reclaimed source webhook deliveries when a project is transferred", async () => {
+    const owner = await insertHuman();
+    const source = await personalWorkspace(owner.id);
+    const destination = await sharedWorkspace("transfer-stale-dest", owner.id, true);
+    const project = await insertProject(source.id, "STAL", owner.id);
+    const receiver = await startReceiver();
+    try {
+      const wildcardHook = await createHook(humanActor(owner.id), source.id, {
+        url: receiver.url,
+        allProjects: true,
+      });
+      const scopedHook = await createHook(humanActor(owner.id), source.id, {
+        url: receiver.url,
+        allProjects: false,
+        projectIds: [project.id],
+      });
+
+      await insertActivity(project.id, owner.id);
+      const pendingBeforeTransfer = await database.db.select().from(webhookDeliveries);
+      expect(pendingBeforeTransfer).toHaveLength(2);
+
+      // Also simulate a delivery already in `delivering` (stale lease) when the transfer runs,
+      // so drain() reclaims it after the transfer and must still block it at attempt time.
+      const reclaimedTarget = pendingBeforeTransfer.find((d) => d.webhookId === wildcardHook.id)!;
+      await database.db
+        .update(webhookDeliveries)
+        .set({
+          status: "delivering",
+          attemptCount: 1,
+          lockedUntil: sql`statement_timestamp() - interval '1 minute'`,
+        })
+        .where(eq(webhookDeliveries.id, reclaimedTarget.id));
+
+      await transfers.complete(
+        {
+          humanId: owner.id,
+          email: owner.email,
+          isSystemAdministrator: false,
+          emailVerifiedAt: new Date(),
+        },
+        project.id,
+        destination.id,
+      );
+
+      // The pending row was cancelled immediately inside transfers.complete().
+      const [scopedRowAfterTransfer] = await database.db
+        .select()
+        .from(webhookDeliveries)
+        .where(eq(webhookDeliveries.webhookId, scopedHook.id));
+      expect(scopedRowAfterTransfer?.status).toBe("failed");
+      expect(scopedRowAfterTransfer?.lastError).toBe("project_transferred");
+
+      // Reclaiming and draining the previously in-flight row must also fail without POSTing.
+      await service.drain();
+      expect(receiver.received).toHaveLength(0);
+
+      const allDeliveries = await database.db.select().from(webhookDeliveries);
+      expect(allDeliveries).toHaveLength(2);
+      for (const row of allDeliveries) {
+        expect(row.status).toBe("failed");
+        expect(row.lastError).toBe("project_transferred");
+      }
+      const hooksAfter = await database.db
+        .select()
+        .from(webhooks)
+        .where(eq(webhooks.workspaceId, source.id));
+      for (const hook of hooksAfter) {
+        expect(hook.consecutiveFailures).toBe(0);
+      }
+    } finally {
+      await receiver.close();
+    }
+  });
+
+  it("stops delivering queued deliveries after webhook project or event scope is narrowed", async () => {
+    const owner = await insertHuman();
+    const ws = await personalWorkspace(owner.id);
+    const projectA = await insertProject(ws.id, "SCA1", owner.id);
+    const projectB = await insertProject(ws.id, "SCB1", owner.id);
+    const receiver = await startReceiver();
+    try {
+      const projectScoped = await createHook(humanActor(owner.id), ws.id, {
+        url: receiver.url,
+        allProjects: false,
+        projectIds: [projectA.id],
+        allEvents: true,
+      });
+      const eventScoped = await createHook(humanActor(owner.id), ws.id, {
+        url: receiver.url,
+        allProjects: true,
+        allEvents: false,
+        events: ["project_renamed"],
+      });
+
+      await insertActivity(projectA.id, owner.id);
+      expect(await database.db.select().from(webhookDeliveries)).toHaveLength(2);
+
+      await service.update(humanActor(owner.id), ws.id, projectScoped.id, {
+        projectIds: [projectB.id],
+      });
+      await service.update(humanActor(owner.id), ws.id, eventScoped.id, {
+        events: ["issue_created"],
+      });
+
+      await service.drain();
+      expect(receiver.received).toHaveLength(0);
+
+      const rows = await database.db.select().from(webhookDeliveries);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.status).toBe("failed");
+        expect(row.lastError).toBe("webhook_out_of_scope");
+      }
+      const hooksAfter = await database.db
+        .select()
+        .from(webhooks)
+        .where(eq(webhooks.workspaceId, ws.id));
+      for (const hook of hooksAfter) {
+        expect(hook.consecutiveFailures).toBe(0);
+      }
+    } finally {
+      await receiver.close();
+    }
+  });
 });
 
 describe("hardening: DNS pinning, IPv6 SSRF, truncated responses, scope validation, work-sessions, and REST", () => {

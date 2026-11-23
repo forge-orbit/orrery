@@ -20,9 +20,11 @@ import {
   issues,
   projectAccessEvents,
   projectAccessGrants,
+  projectActivity,
   projectTransferAuthorizations,
   projects,
   questions,
+  webhookDeliveries,
   webhookProjects,
   webhooks,
   workSessions,
@@ -668,14 +670,37 @@ async function acceptInTransaction(
   await tx.delete(agentApiKeyProjects).where(eq(agentApiKeyProjects.projectId, auth.projectId));
   // Keep the source workspace's webhook scopes from widening: remove the transferred
   // project from their explicit project lists but leave all_projects untouched.
+  const sourceWebhookIds = tx
+    .select({ id: webhooks.id })
+    .from(webhooks)
+    .where(eq(webhooks.workspaceId, source.id));
   await tx
     .delete(webhookProjects)
     .where(
       and(
         eq(webhookProjects.projectId, auth.projectId),
+        inArray(webhookProjects.webhookId, sourceWebhookIds),
+      ),
+    );
+  // Cancel pending outbox deliveries for this project on source-workspace webhooks so
+  // events queued before the transfer cannot leak to the source workspace afterward.
+  await tx
+    .update(webhookDeliveries)
+    .set({
+      status: "failed",
+      lockedUntil: null,
+      lastError: "project_transferred",
+    })
+    .where(
+      and(
+        eq(webhookDeliveries.status, "pending"),
+        inArray(webhookDeliveries.webhookId, sourceWebhookIds),
         inArray(
-          webhookProjects.webhookId,
-          tx.select({ id: webhooks.id }).from(webhooks).where(eq(webhooks.workspaceId, source.id)),
+          webhookDeliveries.activityId,
+          tx
+            .select({ id: projectActivity.id })
+            .from(projectActivity)
+            .where(eq(projectActivity.projectId, auth.projectId)),
         ),
       ),
     );
