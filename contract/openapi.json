@@ -1888,6 +1888,17 @@
           "sortOrder": {
             "$ref": "#/components/schemas/IssueSortOrder"
           },
+          "assignee": {
+            "$ref": "#/components/schemas/Assignee"
+          },
+          "labelIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
           "parentIssueId": {
             "type": [
               "string",
@@ -1904,6 +1915,33 @@
       "IssueBody": {
         "type": "string",
         "maxLength": 100000
+      },
+      "Assignee": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/AssigneeType"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      },
+      "AssigneeType": {
+        "type": "string",
+        "enum": [
+          "human",
+          "agent"
+        ]
       },
       "IssueDetail": {
         "type": "object",
@@ -2087,33 +2125,6 @@
             "maxLength": 200
           }
         }
-      },
-      "Assignee": {
-        "type": [
-          "object",
-          "null"
-        ],
-        "properties": {
-          "type": {
-            "$ref": "#/components/schemas/AssigneeType"
-          },
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          }
-        },
-        "required": [
-          "type",
-          "id"
-        ]
-      },
-      "AssigneeType": {
-        "type": "string",
-        "enum": [
-          "human",
-          "agent"
-        ]
       },
       "ProjectLabelsResponse": {
         "type": "array",
@@ -8383,7 +8394,7 @@
       },
       "post": {
         "summary": "Create an issue in a project",
-        "description": "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
+        "description": "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. Optional `assignee` (a human or agent in the workspace) and `labelIds` (labels in the project) are validated and applied in the same transaction as the issue, so an invalid value creates nothing. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
         "parameters": [
           {
             "schema": {
@@ -8448,7 +8459,7 @@
             }
           },
           "404": {
-            "description": "No project or parent issue with this id is accessible to the caller",
+            "description": "No project, parent issue, assignee, or label with this id is accessible to the caller",
             "content": {
               "application/problem+json": {
                 "schema": {

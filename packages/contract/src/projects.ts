@@ -398,6 +398,8 @@ export const CreateIssueRequest = z
     priority: IssuePriority.optional(),
     sortOrder: IssueSortOrder.optional(),
     
+    assignee: Assignee.nullable().optional(),
+    labelIds: z.array(z.string().trim().min(1).max(200)).optional(),
     
     parentIssueId: z.string().trim().min(1).max(200).nullable().optional(),
   })

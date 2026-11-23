@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
 import {
   Assignee,
   type Assignee as AssigneeShape,
@@ -27,6 +28,9 @@ const sortOrder = (value: unknown): number | undefined =>
 const assignee = (value: unknown): AssigneeShape | null | undefined =>
   value === undefined ? undefined : value === null ? null : Assignee.parse(value);
 
+const labelIds = (value: unknown): string[] | undefined =>
+  value === undefined ? undefined : z.array(z.string().min(1)).parse(value);
+
 const parentIssueId = (value: unknown): string | null | undefined =>
   value === undefined ? undefined : value === null ? null : str(value, "parentIssueId");
 
@@ -51,6 +55,8 @@ export function createProjectsMcp(service: ProjectsService, authenticate: AgentA
         status: args.status === undefined ? undefined : IssueStatus.parse(args.status),
         priority: priority(args.priority),
         sortOrder: sortOrder(args.sortOrder),
+        assignee: assignee(args.assignee),
+        labelIds: labelIds(args.labelIds),
         parentIssueId: parentIssueId(args.parentIssueId),
       }),
     }),

@@ -1095,6 +1095,21 @@ async function loadIssueLabels(tx: DbTransaction, issueId: string): Promise<Proj
   return grouped.get(issueId) ?? [];
 }
 
+async function requireProjectLabels(
+  tx: DbTransaction,
+  projectId: string,
+  labelIds: ReadonlySet<string>,
+): Promise<{ id: string; name: string }[]> {
+  if (labelIds.size === 0) return [];
+  const rows = await tx
+    .select({ id: projectLabels.id, name: projectLabels.name })
+    .from(projectLabels)
+    .where(and(eq(projectLabels.projectId, projectId), inArray(projectLabels.id, [...labelIds])))
+    .orderBy(projectLabels.name, projectLabels.id);
+  if (rows.length !== labelIds.size) throw new ProjectsError("label_not_found");
+  return rows;
+}
+
 async function requireLabel(
   tx: DbTransaction,
   labelId: string,
@@ -2464,6 +2479,13 @@ export function createProjectsService({
           .returning({ number: sql<number>`${projects.nextIssueNumber} - 1` });
         if (counter === undefined) throw new ProjectsError("project_not_found");
 
+        const resolvedAssignee =
+          input.assignee === undefined || input.assignee === null
+            ? null
+            : await validateAssignee(tx, project.workspaceId, input.assignee);
+        const requestedLabelIds = new Set(input.labelIds ?? []);
+        const labels = await requireProjectLabels(tx, projectId, requestedLabelIds);
+
         const id = randomUUID();
 
         const status = input.status ?? IssueStatus.enum.todo;
@@ -2487,6 +2509,8 @@ export function createProjectsService({
             closedAt: isTerminalIssueStatus(status) ? sql`statement_timestamp()` : null,
             priority: input.priority ?? IssuePriority.enum.none,
             sortOrder: input.sortOrder ?? counter.number * ISSUE_SORT_STEP,
+            assigneeType: input.assignee?.type ?? null,
+            assigneeId: input.assignee?.id ?? null,
             createdByHumanId: humanIdOf(actor),
             createdByAgentId: agentIdOf(actor),
             updatedByHumanId: humanIdOf(actor),
@@ -2515,6 +2539,16 @@ export function createProjectsService({
           issueId: id,
           summary: input.title,
         });
+        for (const label of labels) {
+          await tx.insert(issueLabels).values({ issueId: id, labelId: label.id });
+          await recordActivity(tx, {
+            projectId,
+            type: "issue_label_added",
+            actor,
+            issueId: id,
+            summary: `${input.title} labelled ${label.name}`,
+          });
+        }
         const author = actorForWrite(actor);
         return {
           id: created.id,
@@ -2527,9 +2561,9 @@ export function createProjectsService({
           priority: created.priority,
           sortOrder: created.sortOrder,
           needsInput: false,
-          assignee: null,
+          assignee: resolvedAssignee,
           parentIssueId,
-          labels: [],
+          labels: await loadIssueLabels(tx, id),
           createdAt: created.createdAt.toISOString(),
           updatedAt: created.updatedAt.toISOString(),
           closedAt: created.closedAt === null ? null : created.closedAt.toISOString(),

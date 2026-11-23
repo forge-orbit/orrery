@@ -253,7 +253,7 @@ const createIssue = createRoute({
   path: "/api/projects/{projectId}/issues",
   summary: "Create an issue in a project",
   description:
-    "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
+    "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. Optional `assignee` (a human or agent in the workspace) and `labelIds` (labels in the project) are validated and applied in the same transaction as the issue, so an invalid value creates nothing. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
   request: {
     params: projectParams,
     body: { required: true, content: { "application/json": { schema: CreateIssueRequest } } },
@@ -268,7 +268,9 @@ const createIssue = createRoute({
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
     403: problem("Read access cannot create an issue"),
-    404: problem("No project or parent issue with this id is accessible to the caller"),
+    404: problem(
+      "No project, parent issue, assignee, or label with this id is accessible to the caller",
+    ),
     409: problem("The parent already has a parent, or has subtasks of its own"),
   },
 });
@@ -955,6 +957,8 @@ const trashListKinds = [
 const issueCreateKinds = [
   ...projectWriteKinds,
   "issue_not_found",
+  "assignee_not_found",
+  "label_not_found",
   "self_parent",
   "cross_project_parent",
   "subtask_depth_exceeded",
