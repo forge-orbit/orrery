@@ -22,8 +22,9 @@ setting and updates when it changes. The browser saves an explicit choice on tha
   links at the same level. Show settings and access controls according to the user's project level.
 - **Board** uses a simple page heading with workspace and project links in the breadcrumb. Keep
   the six issue statuses in fixed order when filtering for issues that need input or are ready
-  to claim. The New issue and session drawers keep the board in view. An open question links
-  directly to the Inbox. On narrow screens the board scrolls horizontally within the page.
+  to claim. "New issue" opens the dedicated `/projects/$projectId/issues/new` page while the
+  session inspector stays in its board drawer. An open question links directly to the Inbox.
+  On narrow screens the board scrolls horizontally within the page.
 - **Issue detail** places the description and discussion in the main column and the session
   inspector alongside them. On narrow screens the inspector stacks above the issue content.
   Keep session progress, run metadata, and activity distinct from issue comments.

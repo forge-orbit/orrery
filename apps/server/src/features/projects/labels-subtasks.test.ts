@@ -703,6 +703,7 @@ describe("atomic issue creation (#175)", () => {
     expect(field(createdIssue, "assignee")).toMatchObject({ agentId });
 
     const before = await issueCount(pid);
+    const numberBefore = await nextIssueNumber(pid);
     const rejected = await create({
       projectId: pid,
       title: "MCP cross-project label",
@@ -713,5 +714,18 @@ describe("atomic issue creation (#175)", () => {
       structuredContent: { code: "label_not_found" },
     });
     expect(await issueCount(pid)).toBe(before);
+    expect(await nextIssueNumber(pid)).toBe(numberBefore);
+
+    const badAssignee = await create({
+      projectId: pid,
+      title: "MCP unknown assignee",
+      assignee: { type: "human", id: randomUUID() },
+    });
+    expect(badAssignee).toMatchObject({
+      isError: true,
+      structuredContent: { code: "assignee_not_found" },
+    });
+    expect(await issueCount(pid)).toBe(before);
+    expect(await nextIssueNumber(pid)).toBe(numberBefore);
   });
 });

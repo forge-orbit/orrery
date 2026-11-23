@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/server";
-import { z } from "zod";
 import {
   Assignee,
   type Assignee as AssigneeShape,
+  CreateIssueRequest,
   IssueLinkKind,
   IssuePriority,
   IssueStatus,
@@ -29,7 +29,7 @@ const assignee = (value: unknown): AssigneeShape | null | undefined =>
   value === undefined ? undefined : value === null ? null : Assignee.parse(value);
 
 const labelIds = (value: unknown): string[] | undefined =>
-  value === undefined ? undefined : z.array(z.string().min(1)).parse(value);
+  value === undefined ? undefined : CreateIssueRequest.shape.labelIds.parse(value);
 
 const parentIssueId = (value: unknown): string | null | undefined =>
   value === undefined ? undefined : value === null ? null : str(value, "parentIssueId");

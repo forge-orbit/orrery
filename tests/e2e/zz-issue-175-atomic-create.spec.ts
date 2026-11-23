@@ -135,6 +135,8 @@ test("Create more keeps the triage fields and toasts a link to each created issu
   await page.getByRole("combobox", { name: "Labels" }).click();
   await page.getByRole("option", { name: "Batch label", exact: true }).click();
   await page.keyboard.press("Escape");
+  await page.getByRole("combobox", { name: "Assignee" }).click();
+  await page.getByRole("option", { name: `Human · ${ADMIN_EMAIL}`, exact: true }).click();
   await page.getByLabel("Create more").check();
 
   await page.getByLabel("Issue title").fill("First batch issue");
@@ -150,6 +152,9 @@ test("Create more keeps the triage fields and toasts a link to each created issu
   await expect(page.locator("[data-new-issue-body] textarea")).toHaveValue("");
   await expect(page.getByRole("combobox", { name: "Status" })).toContainText("In progress");
   await expect(page.getByRole("combobox", { name: "Priority" })).toContainText("Urgent");
+  await expect(page.getByRole("combobox", { name: "Assignee" })).toContainText(
+    `Human · ${ADMIN_EMAIL}`,
+  );
   await expect(page.getByLabel("Create more")).toBeChecked();
   await expect(page.getByRole("combobox", { name: "Labels" })).toContainText("Batch label");
 
@@ -158,8 +163,16 @@ test("Create more keeps the triage fields and toasts a link to each created issu
   await page.getByRole("button", { name: "Create issue" }).click();
   await expect(page.locator("[data-new-issue-created-link]").last()).toHaveText(/-2$/);
   const issues = await api.get(`/api/projects/${projectId}/issues`);
-  const titles = asArray(await issues.json()).map((issue) => field(issue, "title"));
-  expect(titles).toEqual(expect.arrayContaining(["First batch issue", "Second batch issue"]));
+  const batchIssues = asArray(await issues.json()).filter((issue) =>
+    ["First batch issue", "Second batch issue"].includes(String(field(issue, "title"))),
+  );
+  expect(batchIssues.map((issue) => field(issue, "title"))).toEqual([
+    "First batch issue",
+    "Second batch issue",
+  ]);
+  for (const issue of batchIssues) {
+    expect(field(field(issue, "assignee"), "email")).toBe(ADMIN_EMAIL);
+  }
   expect(firstIdentifier).toBeTruthy();
 });
 

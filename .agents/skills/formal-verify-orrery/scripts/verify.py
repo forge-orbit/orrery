@@ -2549,7 +2549,7 @@ def extract_code_facts() -> dict[str, Any]:
         and "if (pruning) return;" in wh_index
     )
 
-    # --- M36 (#175): atomic issue creation with optional assignee and labels ---
+    # --- M37 (#175): atomic issue creation with optional assignee and labels ---
     create_issue_fn = slice_between(
         proj_src, "async createIssue(actorArg, projectId, input)", "async updateIssue(actorArg, issueId, input)"
     )
@@ -2561,28 +2561,28 @@ def extract_code_facts() -> dict[str, Any]:
     )
     create_issue_mcp = slice_between(mcp_src, "create_issue: async (actor, args)", "update_issue: async")
     issue_create_kinds = slice_between(proj_rest_src, "const issueCreateKinds =", "] as const;")
-    m36_single_transaction = "db.transaction(async (tx)" in create_issue_fn
-    m36_assignee_in_tx = (
+    m37_single_transaction = "db.transaction(async (tx)" in create_issue_fn
+    m37_assignee_in_tx = (
         "validateAssignee(tx, project.workspaceId, input.assignee)" in create_issue_fn
         and "assigneeType: input.assignee?.type ?? null" in create_issue_fn
         and "assigneeId: input.assignee?.id ?? null" in create_issue_fn
         and "assignee: resolvedAssignee" in create_issue_fn
     )
-    m36_labels_in_tx = (
+    m37_labels_in_tx = (
         "requireProjectLabels(tx, projectId, requestedLabelIds)" in create_issue_fn
         and "tx.insert(issueLabels)" in create_issue_fn
         and 'throw new ProjectsError("label_not_found")' in require_project_labels_fn
         and "eq(projectLabels.projectId, projectId)" in require_project_labels_fn
         and "rows.length !== labelIds.size" in require_project_labels_fn
     )
-    m36_contract_surface = (
+    m37_contract_surface = (
         "assignee: Assignee.nullable().optional()" in create_issue_contract
         and "labelIds: z.array(" in create_issue_contract
     )
-    m36_mcp_surface = (
+    m37_mcp_surface = (
         "assignee(args.assignee)" in create_issue_mcp and "labelIds(args.labelIds)" in create_issue_mcp
     )
-    m36_problem_details = (
+    m37_problem_details = (
         '"assignee_not_found"' in issue_create_kinds and '"label_not_found"' in issue_create_kinds
     )
 
@@ -2975,12 +2975,12 @@ def extract_code_facts() -> dict[str, Any]:
         "m35_ssrf_dns_pinned": m35_ssrf_dns_pinned,
         "m35_atomic_outbox_and_single_enqueue": m35_atomic_outbox_and_single_enqueue,
         "m35_worker_skip_locked_and_circuit_breaker": m35_worker_skip_locked_and_circuit_breaker,
-        "m36_single_transaction": m36_single_transaction,
-        "m36_assignee_in_tx": m36_assignee_in_tx,
-        "m36_labels_in_tx": m36_labels_in_tx,
-        "m36_contract_surface": m36_contract_surface,
-        "m36_mcp_surface": m36_mcp_surface,
-        "m36_problem_details": m36_problem_details,
+        "m37_single_transaction": m37_single_transaction,
+        "m37_assignee_in_tx": m37_assignee_in_tx,
+        "m37_labels_in_tx": m37_labels_in_tx,
+        "m37_contract_surface": m37_contract_surface,
+        "m37_mcp_surface": m37_mcp_surface,
+        "m37_problem_details": m37_problem_details,
     }
 
 
@@ -7595,14 +7595,14 @@ def check_m35(facts: dict[str, bool]) -> CheckResult:
     )
 
 
-def check_m36(facts: dict[str, bool]) -> CheckResult:
+def check_m37(facts: dict[str, bool]) -> CheckResult:
     """#175: optional assignee and labels are validated inside the creation transaction.
 
     State: (issue_count, labels, assignee, violations). A rejected request must leave
     both the issue count and its local number untouched; a successful one must carry
     only same-project labels and a valid workspace assignee.
     """
-    g = {k: facts[k] for k in facts if k.startswith("m36_")}
+    g = {k: facts[k] for k in facts if k.startswith("m37_")}
 
     def bad(v: frozenset[str], reason: str) -> frozenset[str]:
         return v | {reason}
@@ -7610,23 +7610,23 @@ def check_m36(facts: dict[str, bool]) -> CheckResult:
     def create(target: str, labels: tuple[str, ...]):
         def step(state):
             count, attached, assignee, v = state
-            if not (g["m36_contract_surface"] and g["m36_mcp_surface"]):
+            if not (g["m37_contract_surface"] and g["m37_mcp_surface"]):
                 v = bad(v, "creation_fields_not_representable")
-            if not g["m36_problem_details"]:
+            if not g["m37_problem_details"]:
                 v = bad(v, "invalid_triage_not_problem_details")
-            if not g["m36_single_transaction"]:
+            if not g["m37_single_transaction"]:
                 # A failure after the insert or counter update leaves a partial issue.
                 v = bad(v, "triage_applied_outside_transaction")
             foreign = any(label not in ("a", "b") for label in labels)
             bad_assignee = target not in ("none", "human", "agent")
-            if foreign and not g["m36_labels_in_tx"]:
+            if foreign and not g["m37_labels_in_tx"]:
                 return (min(2, count + 1), frozenset(labels), target, bad(v, "foreign_label_accepted"))
-            if bad_assignee and not g["m36_assignee_in_tx"]:
+            if bad_assignee and not g["m37_assignee_in_tx"]:
                 return (min(2, count + 1), frozenset(labels), target, bad(v, "unknown_assignee_accepted"))
             if foreign or bad_assignee:
                 # The validated transaction rolls back: no issue and no number consumed.
                 return state
-            if len(labels) != len(set(labels)) and not g["m36_labels_in_tx"]:
+            if len(labels) != len(set(labels)) and not g["m37_labels_in_tx"]:
                 v = bad(v, "duplicate_label_rows")
             return (min(2, count + 1), frozenset(labels), target, v)
 
@@ -7655,7 +7655,7 @@ def check_m36(facts: dict[str, bool]) -> CheckResult:
         return True, ""
 
     return bfs_check(
-        "M36",
+        "M37",
         "Atomic Issue Creation with Triage (#175)",
         "create_issue accepts optional assignee and labelIds on REST and MCP; all values are validated in one transaction so an invalid value returns Problem Details without creating a partial issue or consuming its number",
         "safety",
@@ -7711,7 +7711,7 @@ def main() -> None:
         check_m33(facts),
         check_m34(facts),
         check_m35(facts),
-        check_m36(facts),
+        check_m37(facts),
     ]
 
     if "--json" in sys.argv:
