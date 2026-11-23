@@ -45,10 +45,9 @@ function safeNextPath(value: unknown): string | undefined {
 
 export const Route = createFileRoute("/signin")({
   staticData: { accessPage: true },
-  validateSearch: (search: Record<string, unknown>) => {
-    const next = safeNextPath(search.next);
-    return next === undefined ? {} : { next };
-  },
+  validateSearch: (search: Record<string, unknown>): { next?: string | undefined } => ({
+    next: safeNextPath(search.next),
+  }),
   beforeLoad: async ({ context }) => {
     const session = await context.queryClient.fetchQuery(sessionQuery);
     if (session.signedIn) throw redirect({ to: "/" });
@@ -74,11 +73,12 @@ function SignInPage() {
 
       queryClient.clear();
       await queryClient.fetchQuery(sessionQuery);
-      const token = invitationTokenFrom(next);
+      const safeNext = safeNextPath(next);
+      const token = invitationTokenFrom(safeNext);
       if (token !== undefined) {
         await navigate({ to: "/workspace-invitation", search: { token } });
-      } else if (next !== undefined) {
-        await navigate({ href: next, replace: true });
+      } else if (safeNext !== undefined) {
+        await navigate({ href: safeNext, replace: true });
       } else {
         await navigate({ to: "/" });
       }
