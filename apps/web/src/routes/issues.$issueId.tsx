@@ -16,6 +16,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
 import {
+  type Actor,
   type Issue,
   type IssueComment,
   type IssueDetail,
@@ -176,6 +177,13 @@ function describeActivity(activity: ProjectActivity): string {
   }
 }
 
+function ActorAvatar({ actor }: { actor: Actor }) {
+  if (actor.agentId != null) return <AgentAvatar name={actor.displayName} size={16} />;
+  return (
+    <HumanAvatar name={actor.displayName} avatarUrl={actor.avatarUrl} size="xsm" tooltip={false} />
+  );
+}
+
 function TimelineRow({
   entry,
   projectIssues,
@@ -194,12 +202,7 @@ function TimelineRow({
           <Stack gap={2}>
             <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" vAlign="center">
               <Stack direction="horizontal" gap={1.5} vAlign="center">
-                <HumanAvatar
-                  name={entry.comment.author.displayName}
-                  avatarUrl={entry.comment.author.avatarUrl}
-                  size="xsm"
-                  tooltip={false}
-                />
+                <ActorAvatar actor={entry.comment.author} />
                 <Text type="body" weight="semibold" color="primary">
                   {entry.comment.author.displayName}
                 </Text>
@@ -247,12 +250,7 @@ function TimelineRow({
         data-actor-id={entry.actor.humanId ?? entry.actor.agentId ?? ""}
       >
         <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
-          <HumanAvatar
-            name={entry.actor.displayName}
-            avatarUrl={entry.actor.avatarUrl}
-            size="xsm"
-            tooltip={false}
-          />
+          <ActorAvatar actor={entry.actor} />
           <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
             <Text type="body" weight="semibold" color="primary">
               {entry.actor.displayName}
@@ -282,12 +280,7 @@ function TimelineRow({
       data-activity-type={entry.activity.type}
     >
       <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
-        <HumanAvatar
-          name={entry.activity.actor.displayName}
-          avatarUrl={entry.activity.actor.avatarUrl}
-          size="xsm"
-          tooltip={false}
-        />
+        <ActorAvatar actor={entry.activity.actor} />
         <Text type="body" weight="semibold" color="primary">
           {entry.activity.actor.displayName}
         </Text>

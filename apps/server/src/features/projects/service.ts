@@ -2750,7 +2750,7 @@ export function createProjectsService({
             detail: {
               kind: "parent_changed",
               from: current.parentIssueId,
-              to: requestedParent ?? current.parentIssueId,
+              to: requestedParent === undefined ? current.parentIssueId : requestedParent,
             },
           });
         }

@@ -1,25 +1,29 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import {
+  Agent,
+  CreateAgentKeyResponse,
   Issue,
   IssueCommentsResponse,
   IssueLink,
+  Problem,
   Project,
   ProjectActivityResponse,
   ProjectLabel,
-  type AgentIdentity,
   type IssueActivityDetail,
   type ProjectActivity,
 } from "@orrery/contract";
 import { and, eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { humans, projectActivity, workspaces } from "../../db/schema.ts";
+import { browserSessions, humans, projectActivity, workspaces } from "../../db/schema.ts";
 import { createDb, type Database } from "../../platform/db.ts";
 import { createApp } from "../../platform/http.ts";
 import { createLogger } from "../../platform/log.ts";
 import { migrate } from "../../platform/migrate.ts";
+import { tokenHash } from "../../platform/tokens.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
+import { createAgentsFeature, type AgentAuthenticator } from "../agents/index.ts";
 import { createProjectsFeature } from "./index.ts";
 
 const SECRET = "correct horse battery staple staple";
@@ -52,6 +56,10 @@ async function deleteRequest(app: Hono, path: string, cookie: string) {
   return app.request(path, { method: "DELETE", headers: { cookie } });
 }
 
+async function getWithBearer(app: Hono, path: string, secret: string) {
+  return app.request(path, { headers: { authorization: `Bearer ${secret}` } });
+}
+
 async function cookieFor(app: Hono, email: string, password: string) {
   const res = await postJson(app, "/api/auth/login", { email, password });
   expect(res.status).toBe(200);
@@ -71,6 +79,35 @@ async function issueActivity(app: Hono, cookie: string, issueId: string) {
 
 function detailOf(event: ProjectActivity): IssueActivityDetail | null {
   return event.detail;
+}
+
+async function issueKeySecret(
+  app: Hono,
+  cookie: string,
+  workspaceId: string,
+  projectId: string,
+  level: "read" | null,
+) {
+  const agentRes = await postJson(
+    app,
+    "/api/agents",
+    { name: `timeline-agent-${randomUUID()}` },
+    cookie,
+  );
+  expect(agentRes.status).toBe(201);
+  const agent = Agent.parse(await agentRes.json());
+  const keyRes = await postJson(
+    app,
+    "/api/agents/keys",
+    {
+      agentId: agent.id,
+      workspaceId,
+      projects: level === null ? [] : [{ projectId, level }],
+    },
+    cookie,
+  );
+  expect(keyRes.status).toBe(201);
+  return CreateAgentKeyResponse.parse(await keyRes.json()).secret;
 }
 
 async function createProject(app: Hono, cookie: string, workspaceId: string) {
@@ -109,6 +146,8 @@ describe("issue activity timeline", () => {
   afterEach(async () => {
     await database.db.transaction(async (tx) => {
       await tx.execute(sql`delete from project_activity`);
+      await tx.execute(sql`delete from agent_key_events`);
+      await tx.execute(sql`delete from agent_api_key_projects`);
       await tx.execute(sql`delete from agent_api_keys`);
       await tx.execute(sql`delete from agents`);
       await tx.execute(sql`delete from issue_dependencies`);
@@ -140,22 +179,36 @@ describe("issue activity timeline", () => {
       setupSecret: SECRET,
       publicUrl: PUBLIC_URL,
     });
+    let authenticator: AgentAuthenticator | undefined;
     const projectsFeature = createProjectsFeature({
       db: database.db,
       sessionReader: accounts.sessionReader,
-      agentAuthenticator: async () => null,
+      agentAuthenticator: (request) => {
+        if (authenticator === undefined) throw new Error("agent authenticator is not wired");
+        return authenticator(request);
+      },
       sessionGate: async () => true,
     });
+    const agentsFeature = createAgentsFeature({
+      db: database.db,
+      sessionReader: accounts.sessionReader,
+      projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
+        projectsFeature.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
+      projectAccessAtLeast: (actual, required) =>
+        ["read", "contribute", "manage"].indexOf(actual) >=
+        ["read", "contribute", "manage"].indexOf(required),
+    });
+    authenticator = agentsFeature.authenticator;
     const app = createApp({
-      features: [accounts, projectsFeature],
+      features: [accounts, projectsFeature, agentsFeature],
       publicUrl: PUBLIC_URL,
       log: silentLogger,
     });
-    return { app, projects: projectsFeature };
+    return { app };
   }
 
   async function readyApp() {
-    const { app, projects: projectsFeature } = makeApp();
+    const { app } = makeApp();
     expect(
       (
         await postJson(app, "/api/setup/admin", {
@@ -176,7 +229,7 @@ describe("issue activity timeline", () => {
       .where(eq(workspaces.personalOwnerHumanId, admin.id));
     if (workspace === undefined) throw new Error("the personal workspace was not found");
     const cookie = await cookieFor(app, EMAIL, PASSWORD);
-    return { app, projects: projectsFeature, admin, workspaceId: workspace.id, cookie };
+    return { app, admin, workspaceId: workspace.id, cookie };
   }
 
   it("records structured details for label, status, priority, assignee and parent changes", async () => {
@@ -414,43 +467,114 @@ describe("issue activity timeline", () => {
     expect(comment[0]?.body).toBe("Only on the first issue");
   });
 
-  it("requires Read access and returns a Problem for anonymous or missing issues", async () => {
-    const { app, projects: projectsFeature, cookie, workspaceId } = await readyApp();
+  async function nonMemberCookie() {
+    const token = randomBytes(32).toString("base64url");
+    const [human] = await database.db
+      .insert(humans)
+      .values({
+        id: randomUUID(),
+        email: `outsider-${randomUUID()}@example.com`,
+        passwordHash: "scrypt$anything",
+        emailVerifiedAt: sql`now()`,
+      })
+      .returning();
+    if (human === undefined) throw new Error("the outsider was not created");
+    await database.db.insert(browserSessions).values({
+      id: randomUUID(),
+      humanId: human.id,
+      tokenHash: tokenHash(token),
+      expiresAt: sql`now() + interval '1 hour'`,
+    });
+    return `orrery_session=${token}`;
+  }
+
+  it("records a null destination detail when the parent issue is cleared", async () => {
+    const { app, cookie, workspaceId } = await readyApp();
+    const project = await createProject(app, cookie, workspaceId);
+    const issue = await createIssue(app, cookie, project.id);
+    const parent = await createIssue(app, cookie, project.id, "Parent issue");
+
+    expect(
+      (await patchJson(app, `/api/issues/${issue.id}`, { parentIssueId: parent.id }, cookie))
+        .status,
+    ).toBe(200);
+    expect(
+      (await patchJson(app, `/api/issues/${issue.id}`, { parentIssueId: null }, cookie)).status,
+    ).toBe(200);
+
+    const events = await issueActivity(app, cookie, issue.id);
+    expect(
+      events.filter((event) => event.type === "issue_parent_changed").map((event) => event.detail),
+    ).toEqual([
+      { kind: "parent_changed", from: null, to: parent.id },
+      { kind: "parent_changed", from: parent.id, to: null },
+    ]);
+  });
+
+  it("returns a Problem for anonymous, missing and trashed issues", async () => {
+    const { app, cookie, workspaceId } = await readyApp();
     const project = await createProject(app, cookie, workspaceId);
     const issue = await createIssue(app, cookie, project.id);
 
     const anonymous = await getJson(app, `/api/issues/${issue.id}/activity`);
     expect(anonymous.status).toBe(401);
     expect(anonymous.headers.get("content-type")).toBe("application/problem+json");
+    expect(Problem.parse(await anonymous.json())).toMatchObject({ status: 401 });
 
     const missing = await getJson(app, `/api/issues/${randomUUID()}/activity`, cookie);
     expect(missing.status).toBe(404);
     expect(missing.headers.get("content-type")).toBe("application/problem+json");
+    expect(Problem.parse(await missing.json())).toMatchObject({
+      status: 404,
+      code: "issue_not_found",
+    });
 
-    const identity: AgentIdentity = {
-      agentId: randomUUID(),
-      name: "reader",
-      humanId: "nobody",
-      keyId: randomUUID(),
-      workspaceId,
-      validity: "90",
-      projects: [{ projectId: project.id, projectName: project.name, level: "read" }],
-    };
-    await expect(
-      projectsFeature.service.listIssueActivity({ kind: "agent", identity }, issue.id),
-    ).resolves.toHaveLength(1);
+    expect((await deleteRequest(app, `/api/issues/${issue.id}`, cookie)).status).toBe(204);
+    const trashed = await getJson(app, `/api/issues/${issue.id}/activity`, cookie);
+    expect(trashed.status).toBe(404);
+    expect(trashed.headers.get("content-type")).toBe("application/problem+json");
+    expect(Problem.parse(await trashed.json())).toMatchObject({
+      status: 404,
+      code: "issue_not_found",
+    });
+  });
 
-    const withoutGrant: AgentIdentity = {
-      ...identity,
-      agentId: randomUUID(),
-      projects: [],
-    };
-    await expect(
-      projectsFeature.service.listIssueActivity(
-        { kind: "agent", identity: withoutGrant },
-        issue.id,
-      ),
-    ).rejects.toMatchObject({ kind: "issue_not_found" });
+  it("returns 404 to a non-member human over HTTP", async () => {
+    const { app, cookie, workspaceId } = await readyApp();
+    const project = await createProject(app, cookie, workspaceId);
+    const issue = await createIssue(app, cookie, project.id);
+
+    const outsider = await getJson(
+      app,
+      `/api/issues/${issue.id}/activity`,
+      await nonMemberCookie(),
+    );
+    expect(outsider.status).toBe(404);
+    expect(outsider.headers.get("content-type")).toBe("application/problem+json");
+    expect(Problem.parse(await outsider.json())).toMatchObject({
+      status: 404,
+      code: "issue_not_found",
+    });
+  });
+
+  it("enforces agent key project access over HTTP", async () => {
+    const { app, cookie, workspaceId } = await readyApp();
+    const project = await createProject(app, cookie, workspaceId);
+    const issue = await createIssue(app, cookie, project.id);
+
+    const readSecret = await issueKeySecret(app, cookie, workspaceId, project.id, "read");
+    const allowed = await getWithBearer(app, `/api/issues/${issue.id}/activity`, readSecret);
+    expect(allowed.status).toBe(200);
+    expect(ProjectActivityResponse.parse(await allowed.json())).toHaveLength(1);
+
+    const unscopedSecret = await issueKeySecret(app, cookie, workspaceId, project.id, null);
+    const denied = await getWithBearer(app, `/api/issues/${issue.id}/activity`, unscopedSecret);
+    expect(denied.status).toBe(404);
+    expect(denied.headers.get("content-type")).toBe("application/problem+json");
+    expect(Problem.parse(await denied.json())).toMatchObject({
+      status: 404,
+      code: "issue_not_found",
+    });
   });
 
   it("falls back to the summary for historical activity rows without detail", async () => {
