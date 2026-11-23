@@ -186,6 +186,7 @@ export async function projectAccessCeilingInTransaction(
   const ceiling = new Map<string, ProjectAccessLevel | null>();
   if (projectIds.length === 0) return ceiling;
 
+  const uniqueProjectIds = [...new Set(projectIds)];
   const [workspace] = await tx
     .select({
       kind: workspaces.kind,
@@ -205,23 +206,28 @@ export async function projectAccessCeilingInTransaction(
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
 
-  for (const projectId of projectIds) {
-    if (workspace === undefined) {
-      ceiling.set(projectId, null);
-      continue;
-    }
-    const [row] = await tx
-      .select({ workspaceId: projects.workspaceId, grantLevel: projectAccessGrants.level })
-      .from(projects)
-      .leftJoin(
-        projectAccessGrants,
-        and(
-          eq(projectAccessGrants.projectId, projects.id),
-          eq(projectAccessGrants.humanId, humanId),
-        ),
-      )
-      .where(eq(projects.id, projectId))
-      .limit(1);
+  if (workspace === undefined) {
+    for (const projectId of uniqueProjectIds) ceiling.set(projectId, null);
+    return ceiling;
+  }
+
+  const rows = await tx
+    .select({
+      id: projects.id,
+      workspaceId: projects.workspaceId,
+      grantLevel: projectAccessGrants.level,
+    })
+    .from(projects)
+    .leftJoin(
+      projectAccessGrants,
+      and(eq(projectAccessGrants.projectId, projects.id), eq(projectAccessGrants.humanId, humanId)),
+    )
+    .where(inArray(projects.id, uniqueProjectIds));
+
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const workspaceKind = WorkspaceKind.parse(workspace.kind);
+  for (const projectId of uniqueProjectIds) {
+    const row = rowsById.get(projectId);
     if (row === undefined || row.workspaceId !== workspaceId) {
       ceiling.set(projectId, null);
       continue;
@@ -230,7 +236,7 @@ export async function projectAccessCeilingInTransaction(
       projectId,
       resolveAccessLevel(
         {
-          workspaceKind: WorkspaceKind.parse(workspace.kind),
+          workspaceKind,
           personalOwnerHumanId: workspace.personalOwnerHumanId,
           membershipIsOwner: workspace.membershipIsOwner,
           grantLevel: row.grantLevel === null ? null : ProjectAccessLevel.parse(row.grantLevel),
@@ -1298,7 +1304,8 @@ async function validateAssignee(
           ),
         ),
       )
-      .limit(1);
+      .limit(1)
+      .for("share");
     if (key === undefined) throw new ProjectsError("assignee_not_found");
     const [owner] = await tx
       .select({ id: humans.id })
@@ -1459,30 +1466,36 @@ async function insertActivityRow(
   }
 }
 
-async function recordAccessEvent(
-  tx: DbTransaction,
-  input: {
-    projectId: string;
+type AccessEventInput = {
+  projectId: string;
 
-    workspaceId: string;
-    actorHumanId: string;
-    subjectHumanId: string;
-    type: ProjectAccessEventType;
-    level: ProjectAccessLevel | null;
-    previousLevel: ProjectAccessLevel | null;
-  },
-) {
-  await tx.insert(projectAccessEvents).values({
-    id: randomUUID(),
-    projectId: input.projectId,
-    workspaceId: input.workspaceId,
-    actorHumanId: input.actorHumanId,
-    subjectHumanId: input.subjectHumanId,
-    type: input.type,
-    level: input.level,
-    previousLevel: input.previousLevel,
-    createdAt: sql`statement_timestamp()`,
-  });
+  workspaceId: string;
+  actorHumanId: string;
+  subjectHumanId: string;
+  type: ProjectAccessEventType;
+  level: ProjectAccessLevel | null;
+  previousLevel: ProjectAccessLevel | null;
+};
+
+async function recordAccessEvents(tx: DbTransaction, inputs: readonly AccessEventInput[]) {
+  if (inputs.length === 0) return;
+  await tx.insert(projectAccessEvents).values(
+    inputs.map((input) => ({
+      id: randomUUID(),
+      projectId: input.projectId,
+      workspaceId: input.workspaceId,
+      actorHumanId: input.actorHumanId,
+      subjectHumanId: input.subjectHumanId,
+      type: input.type,
+      level: input.level,
+      previousLevel: input.previousLevel,
+      createdAt: sql`statement_timestamp()`,
+    })),
+  );
+}
+
+async function recordAccessEvent(tx: DbTransaction, input: AccessEventInput) {
+  await recordAccessEvents(tx, [input]);
 }
 
 async function revokeMemberProjectAccessInTransaction(
@@ -1509,8 +1522,9 @@ async function revokeMemberProjectAccessInTransaction(
       grants.map((grant) => grant.id),
     ),
   );
-  for (const grant of grants) {
-    await recordAccessEvent(tx, {
+  await recordAccessEvents(
+    tx,
+    grants.map((grant) => ({
       projectId: grant.projectId,
       workspaceId,
       actorHumanId,
@@ -1518,8 +1532,8 @@ async function revokeMemberProjectAccessInTransaction(
       type: ProjectAccessEventType.enum.project_access_revoked,
       level: null,
       previousLevel: ProjectAccessLevel.parse(grant.level),
-    });
-  }
+    })),
+  );
 }
 
 async function applyInvitationGrantsInTransaction(
@@ -1545,57 +1559,74 @@ async function applyInvitationGrantsInTransaction(
   );
   if (invalid.length > 0) return invalid;
 
-  for (const offer of offered) {
-    const [current] = await tx
-      .select({ level: projectAccessGrants.level })
-      .from(projectAccessGrants)
-      .where(
-        and(
-          eq(projectAccessGrants.projectId, offer.projectId),
-          eq(projectAccessGrants.humanId, humanId),
-        ),
-      )
-      .limit(1);
-    const currentLevel = current === undefined ? null : ProjectAccessLevel.parse(current.level);
+  const existing = await tx
+    .select({ projectId: projectAccessGrants.projectId, level: projectAccessGrants.level })
+    .from(projectAccessGrants)
+    .where(
+      and(
+        inArray(projectAccessGrants.projectId, projectIds),
+        eq(projectAccessGrants.humanId, humanId),
+      ),
+    );
+  const levelByProject = new Map(
+    existing.map((grant) => [grant.projectId, ProjectAccessLevel.parse(grant.level)]),
+  );
 
+  const planned: {
+    projectId: string;
+    nextLevel: ProjectAccessLevel;
+    currentLevel: ProjectAccessLevel | null;
+  }[] = [];
+  for (const offer of offered) {
+    const currentLevel = levelByProject.get(offer.projectId) ?? null;
     const nextLevel =
       currentLevel === null || ACCESS_RANK[offer.level] > ACCESS_RANK[currentLevel]
         ? offer.level
         : currentLevel;
     if (nextLevel === currentLevel) continue;
+    planned.push({ projectId: offer.projectId, nextLevel, currentLevel });
+    levelByProject.set(offer.projectId, nextLevel);
+  }
+  if (planned.length === 0) return [];
 
-    await tx
-      .insert(projectAccessGrants)
-      .values({
+  const finalLevels = new Map<string, ProjectAccessLevel>();
+  for (const grant of planned) finalLevels.set(grant.projectId, grant.nextLevel);
+  await tx
+    .insert(projectAccessGrants)
+    .values(
+      [...finalLevels].map(([projectId, level]) => ({
         id: randomUUID(),
-        projectId: offer.projectId,
+        projectId,
         humanId,
-        level: nextLevel,
+        level,
         grantedByHumanId,
         createdAt: sql`statement_timestamp()`,
         updatedAt: sql`statement_timestamp()`,
-      })
-      .onConflictDoUpdate({
-        target: [projectAccessGrants.projectId, projectAccessGrants.humanId],
-        set: {
-          level: nextLevel,
-          grantedByHumanId,
-          updatedAt: sql`statement_timestamp()`,
-        },
-      });
-    await recordAccessEvent(tx, {
-      projectId: offer.projectId,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [projectAccessGrants.projectId, projectAccessGrants.humanId],
+      set: {
+        level: sql`excluded.level`,
+        grantedByHumanId,
+        updatedAt: sql`statement_timestamp()`,
+      },
+    });
+  await recordAccessEvents(
+    tx,
+    planned.map((grant) => ({
+      projectId: grant.projectId,
       workspaceId,
       actorHumanId: grantedByHumanId,
       subjectHumanId: humanId,
       type:
-        currentLevel === null
+        grant.currentLevel === null
           ? ProjectAccessEventType.enum.project_access_granted
           : ProjectAccessEventType.enum.project_access_level_changed,
-      level: nextLevel,
-      previousLevel: currentLevel,
-    });
-  }
+      level: grant.nextLevel,
+      previousLevel: grant.currentLevel,
+    })),
+  );
   return [];
 }
 
@@ -2134,7 +2165,16 @@ export function createProjectsService({
       const actor = requireAccount(account);
       const workActor: WorkActor = { kind: "human", account: actor };
       return db.transaction(async (tx) => {
-        await tx.select({ id: issues.id }).from(issues).where(eq(issues.id, issueId)).for("update");
+        const [target] = await tx
+          .select({ projectId: issues.projectId })
+          .from(issues)
+          .where(eq(issues.id, issueId))
+          .limit(1);
+        // Lock projects before issues, matching transfers.accept and
+        // setProjectFallbackPolicy: the override is compared with the project
+        // fallback policy, which must not change concurrently.
+        if (target !== undefined) await lockProjectForMutation(tx, target.projectId);
+        await lockIssueForMutation(tx, issueId);
 
         await evaluateQuestionDeadline?.(tx, issueId);
 
@@ -2562,30 +2602,30 @@ export function createProjectsService({
         // from issue 2 (A < B) and AB-BA deadlock against a save. One batch call
         // locks all candidates in a single ascending id order.
         const attachmentHolders: { holderType: "issue" | "comment"; holderId: string }[] = [];
-        for (const row of expired) {
+        if (expiredIds.length > 0) {
           // Comments are hard-deleted, so collect their holder ids before the
           // rows vanish. References from both the issue and its comments have to
           // be dropped before the zero-reference check.
           const comments = await tx
             .select({ id: issueComments.id })
             .from(issueComments)
-            .where(eq(issueComments.issueId, row.id));
-          await tx.delete(issueComments).where(eq(issueComments.issueId, row.id));
+            .where(inArray(issueComments.issueId, expiredIds));
+          await tx.delete(issueComments).where(inArray(issueComments.issueId, expiredIds));
           attachmentHolders.push(
-            { holderType: "issue", holderId: row.id },
+            ...expiredIds.map((issueId) => ({ holderType: "issue" as const, holderId: issueId })),
             ...comments.map((comment) => ({
               holderType: "comment" as const,
               holderId: comment.id,
             })),
           );
-          await tx.delete(issueLinks).where(eq(issueLinks.issueId, row.id));
-          await tx.delete(issueLabels).where(eq(issueLabels.issueId, row.id));
+          await tx.delete(issueLinks).where(inArray(issueLinks.issueId, expiredIds));
+          await tx.delete(issueLabels).where(inArray(issueLabels.issueId, expiredIds));
           await tx
             .delete(issueDependencies)
             .where(
               or(
-                eq(issueDependencies.issueId, row.id),
-                eq(issueDependencies.blockedByIssueId, row.id),
+                inArray(issueDependencies.issueId, expiredIds),
+                inArray(issueDependencies.blockedByIssueId, expiredIds),
               ),
             );
           await tx
@@ -2598,7 +2638,7 @@ export function createProjectsService({
               assigneeId: null,
               purgedAt: sql`statement_timestamp()`,
             })
-            .where(eq(issues.id, row.id));
+            .where(inArray(issues.id, expiredIds));
         }
         if (attachmentSeams !== undefined && attachmentHolders.length > 0) {
           await attachmentSeams.purgeHolders(tx, attachmentHolders);
@@ -2619,19 +2659,21 @@ export function createProjectsService({
       return db.transaction(
         async (tx) => {
           const project = await requireProject(tx, projectId, actor, ProjectAccessLevel.enum.read);
-          const [workspace] = await tx
-            .select({
-              kind: workspaces.kind,
-              personalOwnerHumanId: workspaces.personalOwnerHumanId,
-            })
-            .from(workspaces)
-            .where(eq(workspaces.id, project.workspaceId))
-            .limit(1);
+          const workspaceKind = WorkspaceKind.parse(project.workspaceKind);
+          const personalOwnerHumanId = project.personalOwnerHumanId;
 
-          const memberIds = await tx
-            .select({ id: humans.id })
+          const humanRows = await tx
+            .select({
+              id: humans.id,
+              email: humans.email,
+              handle: humans.handle,
+              displayName: humans.displayName,
+              avatarObjectId: humans.avatarObjectId,
+              membershipIsOwner: workspaceMemberships.isOwner,
+              grantLevel: projectAccessGrants.level,
+            })
             .from(humans)
-            .innerJoin(
+            .leftJoin(
               workspaceMemberships,
               and(
                 eq(workspaceMemberships.workspaceId, project.workspaceId),
@@ -2639,39 +2681,49 @@ export function createProjectsService({
                 isNull(workspaceMemberships.suspendedAt),
               ),
             )
-            .where(isNull(humans.deactivatedAt));
-          const candidateIds = new Set(memberIds.map((row) => row.id));
-          if (
-            workspace?.kind === WorkspaceKind.enum.personal &&
-            workspace.personalOwnerHumanId !== null
-          ) {
-            candidateIds.add(workspace.personalOwnerHumanId);
+            .leftJoin(
+              projectAccessGrants,
+              and(
+                eq(projectAccessGrants.projectId, projectId),
+                eq(projectAccessGrants.humanId, humans.id),
+              ),
+            )
+            .where(
+              and(
+                isNull(humans.deactivatedAt),
+                personalOwnerHumanId === null
+                  ? isNotNull(workspaceMemberships.id)
+                  : or(isNotNull(workspaceMemberships.id), eq(humans.id, personalOwnerHumanId)),
+              ),
+            );
+
+          // The same rows cover every agent owner: a shared-workspace owner must
+          // hold an active membership, and a personal project only admits its
+          // personal owner, so an owner missing here has no ceiling.
+          const levelByHumanId = new Map<string, ProjectAccessLevel | null>();
+          for (const human of humanRows) {
+            levelByHumanId.set(
+              human.id,
+              resolveAccessLevel(
+                {
+                  workspaceKind,
+                  personalOwnerHumanId,
+                  membershipIsOwner: human.membershipIsOwner,
+                  grantLevel:
+                    human.grantLevel === null ? null : ProjectAccessLevel.parse(human.grantLevel),
+                },
+                human.id,
+              ),
+            );
           }
 
           const humansOut: MentionCandidatesResponse["humans"] = [];
-          for (const humanId of candidateIds) {
-            const ceiling = await projectAccessCeilingInTransaction(
-              tx,
-              project.workspaceId,
-              humanId,
-              [projectId],
-            );
-            const level = ceiling.get(projectId) ?? null;
+          for (const human of humanRows) {
+            const level = levelByHumanId.get(human.id) ?? null;
             if (level === null || !projectAccessAtLeast(level, ProjectAccessLevel.enum.read)) {
               continue;
             }
-            const [human] = await tx
-              .select({
-                id: humans.id,
-                email: humans.email,
-                handle: humans.handle,
-                displayName: humans.displayName,
-                avatarObjectId: humans.avatarObjectId,
-              })
-              .from(humans)
-              .where(and(eq(humans.id, humanId), isNull(humans.deactivatedAt)))
-              .limit(1);
-            if (human === undefined || human.handle === null) continue;
+            if (human.handle === null) continue;
             humansOut.push({
               type: "human",
               id: human.id,
@@ -2708,13 +2760,7 @@ export function createProjectsService({
             );
           const agentsOut: MentionCandidatesResponse["agents"] = [];
           for (const row of agentRows) {
-            const ceiling = await projectAccessCeilingInTransaction(
-              tx,
-              project.workspaceId,
-              row.humanId,
-              [projectId],
-            );
-            const level = ceiling.get(projectId) ?? null;
+            const level = levelByHumanId.get(row.humanId) ?? null;
             if (level === null || !projectAccessAtLeast(level, ProjectAccessLevel.enum.read)) {
               continue;
             }
@@ -3218,6 +3264,7 @@ export function createProjectsService({
     async removeBlockedBy(actorArg, issueId, blockedByIssueId) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        await lockIssueForMutation(tx, issueId);
         const current = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
         const [blocker] = await tx
           .select({ title: issues.title })
@@ -3437,6 +3484,7 @@ export function createProjectsService({
     async removeIssueLink(actorArg, issueId, linkId) {
       const actor = requireActor(actorArg);
       await db.transaction(async (tx) => {
+        await lockIssueForMutation(tx, issueId);
         const issue = await requireIssue(tx, issueId, actor, ProjectAccessLevel.enum.contribute);
         const [removed] = await tx
           .delete(issueLinks)
@@ -3606,6 +3654,14 @@ export function createProjectsService({
     async updateKnowledge(actorArg, entryId, input) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({ projectId: knowledgeEntries.projectId })
+          .from(knowledgeEntries)
+          .where(eq(knowledgeEntries.id, entryId))
+          .limit(1);
+        // Lock the parent project before the entry and its authorization read,
+        // matching transfers.accept's projects -> child lock order.
+        if (target !== undefined) await lockProjectForMutation(tx, target.projectId);
         await tx
           .select({ id: knowledgeEntries.id })
           .from(knowledgeEntries)
@@ -3766,6 +3822,14 @@ export function createProjectsService({
     async updateLabel(actorArg, labelId, input) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({ projectId: projectLabels.projectId })
+          .from(projectLabels)
+          .where(eq(projectLabels.id, labelId))
+          .limit(1);
+        // Lock the parent project before the label and its authorization read,
+        // matching transfers.accept's projects -> child lock order.
+        if (target !== undefined) await lockProjectForMutation(tx, target.projectId);
         await tx
           .select({ id: projectLabels.id })
           .from(projectLabels)
@@ -3811,6 +3875,14 @@ export function createProjectsService({
     async deleteLabel(actorArg, labelId) {
       const actor = requireActor(actorArg);
       return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({ projectId: projectLabels.projectId })
+          .from(projectLabels)
+          .where(eq(projectLabels.id, labelId))
+          .limit(1);
+        // Lock the parent project before the authorization read, matching
+        // transfers.accept's projects -> child lock order.
+        if (target !== undefined) await lockProjectForMutation(tx, target.projectId);
         const current = await requireLabel(tx, labelId, actor, ProjectAccessLevel.enum.contribute);
 
         const deleted = await tx
