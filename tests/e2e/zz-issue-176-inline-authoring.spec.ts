@@ -88,9 +88,9 @@ test("navigates to a dedicated knowledge page with Create more", async ({ page }
   await expect(page.getByLabel("Create more")).toBeChecked();
   const toast = page.getByRole("region", { name: "Notifications" });
   await expect(toast).toContainText("Knowledge document created.");
-  await expect(toast.getByRole("link", { name: "View knowledge" })).toBeVisible();
+  await expect(toast.getByRole("button", { name: "View knowledge" })).toBeVisible();
 
-  await toast.getByRole("link", { name: "View knowledge" }).click();
+  await toast.getByRole("button", { name: "View knowledge" }).click();
   await expect(page.getByRole("heading", { name: "Created from the page" })).toBeVisible();
   await expect(page.locator("[data-knowledge-body]")).toContainText("A full-width document");
 

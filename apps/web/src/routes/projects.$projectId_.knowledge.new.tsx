@@ -1,9 +1,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
-import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -38,40 +36,7 @@ function NewKnowledgePage() {
   const navigate = useNavigate();
   const toast = useToast();
   const [createMore, setCreateMore] = useState(false);
-
-  if (project.accessLevel === "read") {
-    return (
-      <Stack gap={4}>
-        <PageHeader
-          breadcrumbs={[
-            <Link
-              key="project"
-              to="/projects/$projectId"
-              params={{ projectId }}
-              color="secondary"
-              weight="medium"
-            >
-              Back to project
-            </Link>,
-          ]}
-          title="New knowledge document"
-          badge="Knowledge"
-        />
-        <Section padding={4}>
-          <EmptyState
-            title="You cannot create knowledge here"
-            description="You have read-only access to this project."
-            headingLevel={2}
-            actions={
-              <Link to="/projects/$projectId" params={{ projectId }}>
-                Back to project
-              </Link>
-            }
-          />
-        </Section>
-      </Stack>
-    );
-  }
+  const readOnly = project.accessLevel === "read";
 
   return (
     <Stack gap={5}>
@@ -90,60 +55,76 @@ function NewKnowledgePage() {
         title="New knowledge document"
         badge="Knowledge"
         subtitle={
-          <>
-            Write in {project.name}. Supports GitHub-flavored Markdown, Mermaid diagrams, and #issue
-            references.
-          </>
+          readOnly
+            ? undefined
+            : `Write in ${project.name}. Supports GitHub-flavored Markdown, Mermaid diagrams, and #issue references.`
         }
       />
-      <Section padding={4}>
-        <Stack gap={3} width="100%">
-          <TitleBodyForm
-            idPrefix="new-knowledge"
-            titleLabel="Knowledge title"
-            bodyLabel="Markdown"
-            bodyRows={15}
-            submitLabel="Create knowledge"
-            fallbackError="Could not create the entry."
-            resetOnSuccess
-            mentionIssues={projectIssues}
-            createMore={{ value: createMore, onChange: setCreateMore }}
-            secondaryAction={
-              <Button
-                type="button"
-                variant="secondary"
-                label="Cancel"
-                href={`/projects/${projectId}`}
-              />
+      {readOnly ? (
+        <Section padding={4}>
+          <EmptyState
+            title="You cannot create knowledge here"
+            description="You have read-only access to this project."
+            headingLevel={2}
+            actions={
+              <Link to="/projects/$projectId" params={{ projectId }}>
+                Back to project
+              </Link>
             }
-            onSubmit={async ({ title, body }) => {
-              const entry = await createKnowledgeEntry(projectId, { title, body });
-              queryClient.setQueryData(knowledgeEntryQuery(entry.id).queryKey, entry);
-              await Promise.all([
-                queryClient.invalidateQueries({
-                  queryKey: knowledgeEntriesQuery(projectId).queryKey,
-                }),
-                queryClient.invalidateQueries({
-                  queryKey: projectActivityQuery(projectId).queryKey,
-                }),
-              ]);
-              if (createMore) {
-                toast({
-                  body: "Knowledge document created.",
-                  endContent: (
-                    <AstryxLink href={`/knowledge/${entry.id}`}>View knowledge</AstryxLink>
-                  ),
-                });
-                return;
-              }
-              await navigate({ to: "/knowledge/$entryId", params: { entryId: entry.id } });
-            }}
           />
-          <Text type="supporting" color="secondary">
-            The editor grows as you write and can be dragged taller by its bottom-right corner.
-          </Text>
-        </Stack>
-      </Section>
+        </Section>
+      ) : (
+        <Section padding={4}>
+          <Stack gap={3} width="100%">
+            <TitleBodyForm
+              idPrefix="new-knowledge"
+              titleLabel="Knowledge title"
+              bodyLabel="Markdown"
+              bodyRows={15}
+              submitLabel="Create knowledge"
+              fallbackError="Could not create the entry."
+              resetOnSuccess
+              mentionIssues={projectIssues}
+              createMore={{ value: createMore, onChange: setCreateMore }}
+              secondaryAction={
+                <Button variant="secondary" label="Cancel" href={`/projects/${projectId}`} />
+              }
+              onSubmit={async ({ title, body }) => {
+                const entry = await createKnowledgeEntry(projectId, { title, body });
+                queryClient.setQueryData(knowledgeEntryQuery(entry.id).queryKey, entry);
+                await Promise.all([
+                  queryClient.invalidateQueries({
+                    queryKey: knowledgeEntriesQuery(projectId).queryKey,
+                  }),
+                  queryClient.invalidateQueries({
+                    queryKey: projectActivityQuery(projectId).queryKey,
+                  }),
+                ]);
+                if (createMore) {
+                  toast({
+                    body: "Knowledge document created.",
+                    endContent: (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        label="View knowledge"
+                        onClick={() =>
+                          void navigate({
+                            to: "/knowledge/$entryId",
+                            params: { entryId: entry.id },
+                          })
+                        }
+                      />
+                    ),
+                  });
+                  return;
+                }
+                await navigate({ to: "/knowledge/$entryId", params: { entryId: entry.id } });
+              }}
+            />
+          </Stack>
+        </Section>
+      )}
     </Stack>
   );
 }
