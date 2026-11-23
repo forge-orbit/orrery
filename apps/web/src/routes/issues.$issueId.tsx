@@ -734,35 +734,33 @@ function IssuePage() {
           </Stack>
         </Section>
       ) : (
-        <Section variant="transparent" padding={0}>
-          <Stack gap={3}>
-            <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
-              <Heading level={2} color="inherit">
-                Description
-              </Heading>
-              {canContribute && issue.body === "" && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  label="Add description"
-                  onClick={() => setIsEditing(true)}
-                />
-              )}
-            </Stack>
-            {issue.body === "" ? (
-              <Text as="p" display="block" type="supporting" color="secondary">
-                No description yet.
-              </Text>
-            ) : (
-              <Stack data-issue-body="">
-                <MentionMarkdown projectId={issue.projectId} issueRefs={projectIssues}>
-                  {issue.body}
-                </MentionMarkdown>
-              </Stack>
+        <Stack gap={3}>
+          <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+            <Heading level={2} color="inherit">
+              Description
+            </Heading>
+            {canContribute && issue.body === "" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                label="Add description"
+                onClick={() => setIsEditing(true)}
+              />
             )}
           </Stack>
-        </Section>
+          {issue.body === "" ? (
+            <Text as="p" display="block" type="supporting" color="secondary">
+              No description yet.
+            </Text>
+          ) : (
+            <Stack data-issue-body="">
+              <MentionMarkdown projectId={issue.projectId} issueRefs={projectIssues}>
+                {issue.body}
+              </MentionMarkdown>
+            </Stack>
+          )}
+        </Stack>
       )}
 
       <Subtasks issue={issue} issues={projectIssues} canContribute={canContribute} />
@@ -776,7 +774,8 @@ function IssuePage() {
         canContribute={canContribute}
       />
 
-      <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
+      <Stack gap={4}>
+        <Divider />
         <Stack gap={3}>
           <Heading level={2} color="inherit">
             Links
@@ -841,9 +840,10 @@ function IssuePage() {
             </Collapsible>
           )}
         </Stack>
-      </Section>
+      </Stack>
 
-      <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
+      <Stack gap={4}>
+        <Divider />
         <Stack gap={3}>
           <Heading level={2} color="inherit">
             Timeline ({timeline.length})
@@ -881,78 +881,76 @@ function IssuePage() {
             </>
           )}
         </Stack>
-      </Section>
+      </Stack>
     </Stack>
   );
 
   const inspectorColumn = (
     <Stack gap={4}>
-      <Section variant="transparent" padding={0} aria-label="Issue properties">
-        <Stack gap={3}>
-          <Heading level={2} color="inherit">
-            Properties
-          </Heading>
+      <Stack gap={3} aria-label="Issue properties">
+        <Heading level={2} color="inherit">
+          Properties
+        </Heading>
 
-          <Divider />
+        <Divider />
 
-          {canContribute ? (
-            <Selector
-              label="Status"
-              id="issue-status-selector"
-              size="sm"
-              width="100%"
-              value={issue.status}
-              isDisabled={statusSubmitting}
-              onChange={(value) => requestStatusChange(IssueStatus.parse(value))}
-              options={STATUS_OPTIONS.map((status) => ({
-                value: status,
-                label: issueStatusLabels[status],
-              }))}
-            />
-          ) : (
-            <Stack gap={0.5} hAlign="start">
-              <Text type="supporting" weight="semibold" color="secondary">
-                Status
-              </Text>
-              <Token
-                label={issueStatusLabels[issue.status]}
-                color={STATUS_COLORS[issue.status]}
-                size="sm"
-              />
-            </Stack>
-          )}
-
-          <AssigneeControl
-            issue={issue}
-            candidates={candidates}
-            canContribute={canContribute}
-            activeHarness={
-              issue.assignee?.agentId !== undefined &&
-              activeSession?.agentId === issue.assignee.agentId
-                ? activeRun?.harness
-                : undefined
-            }
+        {canContribute ? (
+          <Selector
+            label="Status"
+            id="issue-status-selector"
+            size="sm"
+            width="100%"
+            value={issue.status}
+            isDisabled={statusSubmitting}
+            onChange={(value) => requestStatusChange(IssueStatus.parse(value))}
+            options={STATUS_OPTIONS.map((status) => ({
+              value: status,
+              label: issueStatusLabels[status],
+            }))}
           />
-
-          {canContribute ? (
-            <IssuePriorityControls
-              issue={issue}
-              issues={projectIssues}
-              projectId={issue.projectId}
-              showReorder={false}
+        ) : (
+          <Stack gap={0.5} hAlign="start">
+            <Text type="supporting" weight="semibold" color="secondary">
+              Status
+            </Text>
+            <Token
+              label={issueStatusLabels[issue.status]}
+              color={STATUS_COLORS[issue.status]}
+              size="sm"
             />
-          ) : (
-            <Stack gap={0.5} hAlign="start">
-              <Text type="supporting" weight="semibold" color="secondary">
-                Priority
-              </Text>
-              <PriorityBadge priority={issue.priority} />
-            </Stack>
-          )}
+          </Stack>
+        )}
 
-          <IssueLabels issue={issue} labels={projectLabels} canContribute={canContribute} />
-        </Stack>
-      </Section>
+        <AssigneeControl
+          issue={issue}
+          candidates={candidates}
+          canContribute={canContribute}
+          activeHarness={
+            issue.assignee?.agentId !== undefined &&
+            activeSession?.agentId === issue.assignee.agentId
+              ? activeRun?.harness
+              : undefined
+          }
+        />
+
+        {canContribute ? (
+          <IssuePriorityControls
+            issue={issue}
+            issues={projectIssues}
+            projectId={issue.projectId}
+            showReorder={false}
+          />
+        ) : (
+          <Stack gap={0.5} hAlign="start">
+            <Text type="supporting" weight="semibold" color="secondary">
+              Priority
+            </Text>
+            <PriorityBadge priority={issue.priority} />
+          </Stack>
+        )}
+
+        <IssueLabels issue={issue} labels={projectLabels} canContribute={canContribute} />
+      </Stack>
 
       <SessionStatus issueId={issue.id} projectId={issue.projectId} canContribute={canContribute} />
 
@@ -965,7 +963,8 @@ function IssuePage() {
       />
 
       {canContribute && (
-        <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
+        <Stack gap={4}>
+          <Divider />
           <Stack hAlign="start">
             <Button
               type="button"
@@ -977,7 +976,7 @@ function IssuePage() {
               onClick={() => setConfirmTrashOpen(true)}
             />
           </Stack>
-        </Section>
+        </Stack>
       )}
     </Stack>
   );
@@ -1005,6 +1004,7 @@ function IssuePage() {
           !isNarrow && (
             <LayoutPanel
               width={320}
+              padding={6}
               hasDivider
               isScrollable
               role="complementary"
@@ -1103,7 +1103,8 @@ function Blockers({
   );
 
   return (
-    <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
+    <Stack gap={4}>
+      <Divider />
       <Stack gap={3}>
         <Heading level={2} color="inherit">
           Dependencies
@@ -1262,7 +1263,7 @@ function Blockers({
           if (confirmRemove !== undefined) void onRemove(confirmRemove);
         }}
       />
-    </Section>
+    </Stack>
   );
 }
 

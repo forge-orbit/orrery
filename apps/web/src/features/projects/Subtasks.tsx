@@ -1,9 +1,9 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
-import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
@@ -71,13 +71,8 @@ export function Subtasks({
   const isSubtask = issue.parentIssueId !== null;
 
   return (
-    <Section
-      variant="transparent"
-      dividers={["top"]}
-      padding={0}
-      paddingBlockStart={4}
-      data-subtasks-section=""
-    >
+    <Stack gap={4} data-subtasks-section="">
+      <Divider />
       <Stack gap={3}>
         {isSubtask && (
           <Heading level={2} color="inherit">
@@ -201,6 +196,6 @@ export function Subtasks({
           </>
         )}
       </Stack>
-    </Section>
+    </Stack>
   );
 }
