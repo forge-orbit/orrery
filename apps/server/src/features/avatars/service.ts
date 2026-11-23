@@ -10,6 +10,12 @@ import {
   storedObjects,
   workspaceMemberships,
 } from "../../db/schema.ts";
+import {
+  discardObject,
+  isDeleted,
+  type ObjectRow,
+  sweepOrphanObjects,
+} from "../../platform/object-sweep.ts";
 import type { ObjectStore } from "../../platform/storage.ts";
 import type { SessionAccount } from "../accounts/index.ts";
 
@@ -26,7 +32,8 @@ export type AvatarsErrorKind =
   | "invalid_image"
   | "payload_too_large"
   | "avatar_not_found"
-  | "avatar_not_visible";
+  | "avatar_not_visible"
+  | "avatar_upload_expired";
 
 const messages: Record<AvatarsErrorKind, string> = {
   not_signed_in: "Sign in to manage your profile photo.",
@@ -37,6 +44,7 @@ const messages: Record<AvatarsErrorKind, string> = {
   payload_too_large: "The image must be 5 MB or smaller.",
   avatar_not_found: "This human has no profile photo.",
   avatar_not_visible: "No such profile photo.",
+  avatar_upload_expired: "This upload expired before it could be activated. Try again.",
 };
 
 export class AvatarsError extends Error {
@@ -138,36 +146,6 @@ export function avatarKey(humanId: string, objectId: string): string {
   return `avatars/${humanId}/${objectId}.webp`;
 }
 
-type ObjectRow = { id: string; key: string };
-
-const isDeleted = sql`${storedObjects.status} = 'deleted'`;
-/** A `pending` row older than 15 minutes is assumed to belong to a crashed upload. */
-const isOrphan = sql`${isDeleted} or (${storedObjects.status} = 'pending' and ${storedObjects.createdAt} < statement_timestamp() - interval '15 minutes')`;
-
-/**
- * Delete the blob first and only hard-delete its metadata row once the blob is
- * gone. A failed backend delete leaves the row for the next sweep, so a transient
- * storage error can never turn into a lost audit trail or an untracked blob.
- */
-async function discardObject(
-  db: PostgresJsDatabase,
-  store: ObjectStore,
-  row: ObjectRow,
-  stillEligible: SQL,
-): Promise<boolean> {
-  try {
-    await store.delete(row.key);
-  } catch {
-    return false;
-  }
-  try {
-    await db.delete(storedObjects).where(and(eq(storedObjects.id, row.id), stillEligible));
-  } catch {
-    return false;
-  }
-  return true;
-}
-
 function etagMatches(ifNoneMatch: string | undefined, etag: string): boolean {
   if (ifNoneMatch === undefined) return false;
   return ifNoneMatch
@@ -226,10 +204,18 @@ export function createAvatarsService({ db, store }: AvatarsDeps): AvatarsService
             throw new AvatarsError("account_deactivated");
           }
 
-          await tx
+          const [activated] = await tx
             .update(storedObjects)
             .set({ status: "active", deletedAt: null })
-            .where(eq(storedObjects.id, objectId));
+            .where(and(eq(storedObjects.id, objectId), eq(storedObjects.status, "pending")))
+            .returning({ id: storedObjects.id });
+          if (activated === undefined) {
+            // The sweep claimed (or removed) the row after store.put. Activating
+            // anyway would un-delete a claimed row or point the human at a row
+            // whose blob the sweep is deleting, and a hard-deleted row would be
+            // an unhandled 23503. Lose the race cleanly instead.
+            throw new AvatarsError("avatar_upload_expired");
+          }
           await tx.update(humans).set({ avatarObjectId: objectId }).where(eq(humans.id, humanId));
           if (human.avatarObjectId !== null && human.avatarObjectId !== objectId) {
             const [old] = await tx
@@ -287,17 +273,10 @@ export function createAvatarsService({ db, store }: AvatarsDeps): AvatarsService
       if (removed.row !== null) await discardObject(db, store, removed.row, isDeleted);
     },
 
+    // The shared platform sweep covers both avatars and attachments; the
+    // claim-first guarantee is identical for every stored_objects consumer.
     async sweepOrphans() {
-      const rows = await db
-        .select({ id: storedObjects.id, key: storedObjects.key })
-        .from(storedObjects)
-        .where(isOrphan)
-        .orderBy(storedObjects.id);
-      let reclaimed = 0;
-      for (const row of rows) {
-        if (await discardObject(db, store, row, isOrphan)) reclaimed++;
-      }
-      return reclaimed;
+      return sweepOrphanObjects(db, store);
     },
 
     async read(actor, humanId, version, ifNoneMatch) {

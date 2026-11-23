@@ -26,6 +26,8 @@ services:
       # at your own S3 provider) to use the bucket instead.
       ORRERY_STORAGE_DRIVER: ${ORRERY_STORAGE_DRIVER:-local}
       ORRERY_DATA_DIR: /app/data
+      # Cap for downloadable attachments; inline images stay capped at 10 MB.
+      ORRERY_MAX_ATTACHMENT_BYTES: ${ORRERY_MAX_ATTACHMENT_BYTES:-26214400}
       # No fallbacks here on purpose: with driver=s3 a missing value must stop startup.
       ORRERY_S3_ENDPOINT: ${ORRERY_S3_ENDPOINT:-}
       ORRERY_S3_BUCKET: ${ORRERY_S3_BUCKET:-}

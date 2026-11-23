@@ -1,6 +1,7 @@
 
 
 export * from "./agents.ts";
+export * from "./attachments.ts";
 export * from "./auth.ts";
 export * from "./common.ts";
 export * from "./deactivation.ts";

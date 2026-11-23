@@ -10,7 +10,7 @@ import { type Issue, type IssueDetail, type ProjectLabel } from "@orrery/contrac
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { attachIssueLabel, detachIssueLabel } from "./commands.ts";
-import { issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
+import { issueActivityQuery, issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
 import { LabelPill } from "./LabelPill.tsx";
 
 export function IssueLabels({
@@ -40,6 +40,7 @@ export function IssueLabels({
       queryClient.invalidateQueries({
         queryKey: projectActivityQuery(issue.projectId).queryKey,
       }),
+      queryClient.invalidateQueries({ queryKey: issueActivityQuery(issue.id).queryKey }),
     ]);
   }
 

@@ -4,10 +4,9 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
-import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { Heading } from "@astryxdesign/core/Heading";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
-import { Layout, LayoutContent, LayoutPanel } from "@astryxdesign/core/Layout";
+import { Layout, LayoutPanel } from "@astryxdesign/core/Layout";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -16,21 +15,25 @@ import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
 import {
+  type Actor,
   type Issue,
+  type IssueComment,
   type IssueDetail,
   type IssueLink,
   IssueLinkKind,
+  type ProjectActivity,
   IssueStatus,
 } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import type { FormEvent } from "react";
-import { useState } from "react";
+import type { FormEvent, RefObject } from "react";
+import { useRef, useState } from "react";
 import { agentKeysQuery, workspaceAgentKeysQuery } from "../features/agents/index.ts";
 import {
   addBlockedBy,
   addIssueLink,
   type AssigneeCandidate,
+  buildTimeline,
   AssigneeControl,
   completedSubtaskCount,
   createIssueComment,
@@ -39,11 +42,15 @@ import {
   issueBlockingQuery,
   issueCommentsQuery,
   IssueLabels,
+  issueActivityQuery,
   IssueMentionTextArea,
   IssuePriorityControls,
   issueQuery,
   issuesQuery,
   issueStatusLabels,
+  groupLabelEvents,
+  PRIORITY_LABELS,
+  LabelPill,
   PriorityBadge,
   projectActivityQuery,
   projectLabelsQuery,
@@ -55,6 +62,7 @@ import {
   ResourceLoadError,
   Subtasks,
   subtasksOf,
+  type TimelineEntry,
   TitleBodyForm,
   updateIssue,
 } from "../features/projects/index.ts";
@@ -69,6 +77,7 @@ import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextField } from "../lib/fields.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
+import { quoteReply } from "../lib/markdown-toolbar.ts";
 import { Markdown } from "../lib/Markdown.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
 import { formatCompactDateTime, formatFullDateTime, relativeTime } from "../lib/time.ts";
@@ -85,6 +94,7 @@ export const Route = createFileRoute("/issues/$issueId")({
     const project = await context.queryClient.ensureQueryData(projectQuery(issue.projectId));
     await Promise.all([
       context.queryClient.ensureQueryData(issueCommentsQuery(params.issueId)),
+      context.queryClient.ensureQueryData(issueActivityQuery(params.issueId)),
       context.queryClient.ensureQueryData(workspaceQuery(project.workspaceId)),
       context.queryClient.ensureQueryData(agentKeysQuery(project.workspaceId)),
       context.queryClient.ensureQueryData(issueBlockedByQuery(params.issueId)),
@@ -124,6 +134,171 @@ const LINK_KIND_LABELS: Record<IssueLinkKind, string> = {
   link: "Link",
 };
 
+function describeActivity(activity: ProjectActivity): string {
+  const detail = activity.detail;
+  if (detail === null) return activity.summary;
+  switch (detail.kind) {
+    case "issue_edited":
+      return detail.changes
+        .map((change) => {
+          switch (change.kind) {
+            case "status":
+              return `changed status from ${issueStatusLabels[change.from]} to ${issueStatusLabels[change.to]}`;
+            case "priority":
+              return `changed priority from ${PRIORITY_LABELS[change.from]} to ${PRIORITY_LABELS[change.to]}`;
+            case "assignee":
+              return `changed assignee from ${change.from?.displayName ?? "nobody"} to ${change.to?.displayName ?? "nobody"}`;
+            default:
+              return activity.summary;
+          }
+        })
+        .join("; ");
+    case "label_added":
+      return `added the ${detail.label.name} label`;
+    case "label_removed":
+      return `removed the ${detail.label.name} label`;
+    case "issue_closed":
+      return "closed the issue";
+    case "issue_reopened":
+      return "reopened the issue";
+    case "parent_changed":
+      return detail.to === null ? "cleared the parent issue" : "changed the parent issue";
+    case "issue_dependency_added":
+      return `added ${detail.title} as a blocker`;
+    case "issue_dependency_removed":
+      return `removed ${detail.title} as a blocker`;
+    case "issue_link_added":
+      return `added the ${detail.title} link`;
+    case "issue_link_removed":
+      return `removed the ${detail.title} link`;
+    default:
+      return activity.summary;
+  }
+}
+
+function ActorAvatar({ actor }: { actor: Actor }) {
+  if (actor.agentId != null) return <AgentAvatar name={actor.displayName} size={16} />;
+  return (
+    <HumanAvatar name={actor.displayName} avatarUrl={actor.avatarUrl} size="xsm" tooltip={false} />
+  );
+}
+
+function TimelineRow({
+  entry,
+  projectIssues,
+  canContribute,
+  onQuoteReply,
+}: {
+  entry: TimelineEntry;
+  projectIssues: Issue[];
+  canContribute: boolean;
+  onQuoteReply: (comment: IssueComment) => void;
+}) {
+  if (entry.kind === "comment") {
+    return (
+      <Stack as="li" key={entry.id} data-timeline-kind="comment" data-comment-id={entry.comment.id}>
+        <Card variant="muted" padding={3}>
+          <Stack gap={2}>
+            <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" vAlign="center">
+              <Stack direction="horizontal" gap={1.5} vAlign="center">
+                <ActorAvatar actor={entry.comment.author} />
+                <Text type="body" weight="semibold" color="primary">
+                  {entry.comment.author.displayName}
+                </Text>
+                <Text type="supporting" color="secondary">
+                  commented
+                </Text>
+              </Stack>
+              <Text type="supporting" color="secondary">
+                <time
+                  dateTime={entry.comment.createdAt}
+                  title={formatFullDateTime(entry.comment.createdAt)}
+                >
+                  {formatCompactDateTime(entry.comment.createdAt)}
+                </time>
+              </Text>
+            </Stack>
+            <Stack data-comment-body="">
+              <Markdown issueRefs={projectIssues}>{entry.comment.body}</Markdown>
+            </Stack>
+            {canContribute && (
+              <Stack hAlign="start">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  label="Quote reply"
+                  data-quote-comment-id={entry.comment.id}
+                  onClick={() => onQuoteReply(entry.comment)}
+                />
+              </Stack>
+            )}
+          </Stack>
+        </Card>
+      </Stack>
+    );
+  }
+
+  if (entry.kind === "label_group") {
+    return (
+      <Stack
+        as="li"
+        key={entry.id}
+        data-timeline-kind="label_group"
+        data-label-action={entry.action}
+        data-actor-id={entry.actor.humanId ?? entry.actor.agentId ?? ""}
+      >
+        <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
+          <ActorAvatar actor={entry.actor} />
+          <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
+            <Text type="body" weight="semibold" color="primary">
+              {entry.actor.displayName}
+            </Text>
+            <Text type="supporting" color="secondary">
+              {entry.action === "added" ? "added" : "removed"}
+            </Text>
+            {entry.labels.map((label) => (
+              <LabelPill key={label.id} label={label} />
+            ))}
+            <Text type="supporting" color="secondary">
+              <time dateTime={entry.createdAt} title={formatFullDateTime(entry.createdAt)}>
+                {relativeTime(entry.createdAt)}
+              </time>
+            </Text>
+          </Stack>
+        </Stack>
+      </Stack>
+    );
+  }
+
+  return (
+    <Stack
+      as="li"
+      key={entry.id}
+      data-timeline-kind="activity"
+      data-activity-type={entry.activity.type}
+    >
+      <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
+        <ActorAvatar actor={entry.activity.actor} />
+        <Text type="body" weight="semibold" color="primary">
+          {entry.activity.actor.displayName}
+        </Text>
+        <Text type="supporting" color="secondary">
+          {describeActivity(entry.activity)}
+        </Text>
+        <Text type="supporting" color="secondary">
+          <time
+            dateTime={entry.activity.createdAt}
+            title={formatFullDateTime(entry.activity.createdAt)}
+          >
+            {relativeTime(entry.activity.createdAt)}
+          </time>
+        </Text>
+      </Stack>
+    </Stack>
+  );
+}
+
 function IssuePage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -132,6 +307,7 @@ function IssuePage() {
   const { inspector, session: inspectorSession } = Route.useSearch();
   const { data: issue } = useSuspenseQuery(issueQuery(issueId));
   const { data: comments } = useSuspenseQuery(issueCommentsQuery(issueId));
+  const { data: issueActivity } = useSuspenseQuery(issueActivityQuery(issueId));
   const { data: project } = useSuspenseQuery(projectQuery(issue.projectId));
   const { data: workspace } = useSuspenseQuery(workspaceQuery(project.workspaceId));
   const canReadMembers =
@@ -147,14 +323,30 @@ function IssuePage() {
     enabled: workspace.kind === "shared" && workspace.isOwner,
   });
 
-  const [editOpen, setEditOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [confirmTrashOpen, setConfirmTrashOpen] = useState(false);
   const [statusError, setStatusError] = useState<string>();
   const [statusSubmitting, setStatusSubmitting] = useState(false);
   const [warnedCloseTarget, setWarnedCloseTarget] = useState<IssueStatus | null>(null);
   const [trashError, setTrashError] = useState<string>();
   const [trashing, setTrashing] = useState(false);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [commentFocusSignal, setCommentFocusSignal] = useState(0);
+  const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const isNarrow = useMediaQuery("(max-width: 62rem)");
+
+  const timeline = groupLabelEvents(buildTimeline(comments, issueActivity));
+
+  function onQuoteReply(comment: IssueComment) {
+    setCommentDraft((current) => quoteReply(comment.body, current));
+    setCommentFocusSignal((current) => current + 1);
+    requestAnimationFrame(() => {
+      const target = commentInputRef.current;
+      if (target === null) return;
+      target.focus();
+      target.setSelectionRange(target.value.length, target.value.length);
+    });
+  }
 
   const candidates: AssigneeCandidate[] = [];
   const seenHumans = new Set<string>();
@@ -220,6 +412,7 @@ function IssuePage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issuesQuery(issue.projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(issue.projectId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: issueActivityQuery(issue.id).queryKey }),
         queryClient.invalidateQueries({ queryKey: readyWorkQuery(issue.projectId).queryKey }),
       ]);
       toast({ body: `Moved ${issue.identifier} to ${issueStatusLabels[next]}.` });
@@ -257,6 +450,7 @@ function IssuePage() {
         queryClient.invalidateQueries({ queryKey: projectTrashQuery(issue.projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: readyWorkQuery(issue.projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(issue.projectId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: issueActivityQuery(issue.id).queryKey }),
       ]);
       toast({ body: `Moved ${issue.identifier} to trash.` });
       await navigate({ to: "/projects/$projectId", params: { projectId: issue.projectId } });
@@ -390,13 +584,16 @@ function IssuePage() {
             />
             {canContribute && (
               <>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  label="Edit"
-                  onClick={() => setEditOpen(true)}
-                />
+                {!isEditing && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    label="Edit"
+                    data-issue-edit=""
+                    onClick={() => setIsEditing(true)}
+                  />
+                )}
                 <Button
                   type="button"
                   size="sm"
@@ -479,33 +676,89 @@ function IssuePage() {
       {(() => {
         const mainColumn = (
           <Stack gap={5}>
-            <Section variant="transparent" padding={0}>
-              <Stack gap={3}>
-                <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+            {isEditing ? (
+              <Section padding={4}>
+                <Stack gap={2} data-issue-editor="">
                   <Heading level={2} color="inherit">
-                    Description
+                    Edit issue
                   </Heading>
-                  {canContribute && issue.body === "" && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      label="Add description"
-                      onClick={() => setEditOpen(true)}
-                    />
+                  <TitleBodyForm
+                    key={issue.updatedAt}
+                    idPrefix="edit-issue"
+                    titleLabel="Title"
+                    bodyLabel="Body"
+                    bodyRows={15}
+                    submitLabel="Save issue"
+                    fallbackError="Could not save the issue."
+                    initialTitle={issue.title}
+                    initialBody={issue.body}
+                    mentionIssues={projectIssues}
+                    projectId={issue.projectId}
+                    secondaryAction={
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        label="Cancel"
+                        onClick={() => setIsEditing(false)}
+                      />
+                    }
+                    onSubmit={async ({ title, body }) => {
+                      const updated = await updateIssue(issue.id, { title, body });
+                      queryClient.setQueryData<IssueDetail>(issueQuery(issue.id).queryKey, (old) =>
+                        old === undefined ? old : { ...old, ...updated },
+                      );
+                      await Promise.all([
+                        queryClient.invalidateQueries({
+                          queryKey: issuesQuery(issue.projectId).queryKey,
+                        }),
+                        queryClient.invalidateQueries({
+                          queryKey: projectActivityQuery(issue.projectId).queryKey,
+                        }),
+                        queryClient.invalidateQueries({
+                          queryKey: issueActivityQuery(issue.id).queryKey,
+                        }),
+                      ]);
+                      setIsEditing(false);
+                      toast({ body: "Issue updated." });
+                    }}
+                  />
+                </Stack>
+              </Section>
+            ) : (
+              <Section variant="transparent" padding={0}>
+                <Stack gap={3}>
+                  <Stack
+                    direction="horizontal"
+                    gap={2}
+                    wrap="wrap"
+                    justify="between"
+                    align="center"
+                  >
+                    <Heading level={2} color="inherit">
+                      Description
+                    </Heading>
+                    {canContribute && issue.body === "" && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        label="Add description"
+                        onClick={() => setIsEditing(true)}
+                      />
+                    )}
+                  </Stack>
+                  {issue.body === "" ? (
+                    <Text as="p" display="block" type="supporting" color="secondary">
+                      No description yet.
+                    </Text>
+                  ) : (
+                    <Stack data-issue-body="">
+                      <Markdown issueRefs={projectIssues}>{issue.body}</Markdown>
+                    </Stack>
                   )}
                 </Stack>
-                {issue.body === "" ? (
-                  <Text as="p" display="block" type="supporting" color="secondary">
-                    No description yet.
-                  </Text>
-                ) : (
-                  <Stack data-issue-body="">
-                    <Markdown issueRefs={projectIssues}>{issue.body}</Markdown>
-                  </Stack>
-                )}
-              </Stack>
-            </Section>
+              </Section>
+            )}
 
             <Subtasks issue={issue} issues={projectIssues} canContribute={canContribute} />
 
@@ -588,51 +841,22 @@ function IssuePage() {
             <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
               <Stack gap={3}>
                 <Heading level={2} color="inherit">
-                  Comments ({comments.length})
+                  Timeline ({timeline.length})
                 </Heading>
-                {comments.length === 0 ? (
+                {timeline.length === 0 ? (
                   <Text as="p" display="block" type="supporting" color="secondary">
-                    No comments yet.
+                    No comments or lifecycle events yet.
                   </Text>
                 ) : (
-                  <Stack as="ul" gap={3}>
-                    {comments.map((comment) => (
-                      <Stack as="li" key={comment.id} data-comment-id={comment.id}>
-                        <Card variant="muted" padding={3}>
-                          <Stack gap={2}>
-                            <Stack
-                              direction="horizontal"
-                              gap={2}
-                              wrap="wrap"
-                              justify="between"
-                              vAlign="center"
-                            >
-                              <Stack direction="horizontal" gap={1.5} vAlign="center">
-                                <HumanAvatar
-                                  name={comment.author.displayName}
-                                  avatarUrl={comment.author.avatarUrl}
-                                  size="xsm"
-                                  tooltip={false}
-                                />
-                                <Text type="body" weight="semibold" color="primary">
-                                  {comment.author.displayName}
-                                </Text>
-                              </Stack>
-                              <Text type="supporting" color="secondary">
-                                <time
-                                  dateTime={comment.createdAt}
-                                  title={formatFullDateTime(comment.createdAt)}
-                                >
-                                  {formatCompactDateTime(comment.createdAt)}
-                                </time>
-                              </Text>
-                            </Stack>
-                            <Stack data-comment-body="">
-                              <Markdown issueRefs={projectIssues}>{comment.body}</Markdown>
-                            </Stack>
-                          </Stack>
-                        </Card>
-                      </Stack>
+                  <Stack as="ul" gap={3} data-issue-timeline="">
+                    {timeline.map((entry) => (
+                      <TimelineRow
+                        key={entry.id}
+                        entry={entry}
+                        projectIssues={projectIssues}
+                        canContribute={canContribute}
+                        onQuoteReply={onQuoteReply}
+                      />
                     ))}
                   </Stack>
                 )}
@@ -643,6 +867,10 @@ function IssuePage() {
                       issueId={issue.id}
                       projectId={issue.projectId}
                       issues={projectIssues}
+                      body={commentDraft}
+                      onBodyChange={setCommentDraft}
+                      inputRef={commentInputRef}
+                      focusSignal={commentFocusSignal}
                     />
                   </>
                 )}
@@ -769,50 +997,6 @@ function IssuePage() {
 
       {canContribute && (
         <>
-          <Drawer
-            isOpen={editOpen}
-            onOpenChange={setEditOpen}
-            side="end"
-            width="32rem"
-            label="Edit issue"
-          >
-            <Layout
-              height="fill"
-              header={<DrawerHeader title="Edit issue" onOpenChange={setEditOpen} hasDivider />}
-            >
-              <LayoutContent>
-                <TitleBodyForm
-                  key={issue.updatedAt}
-                  idPrefix="edit-issue"
-                  titleLabel="Title"
-                  bodyLabel="Body"
-                  bodyRows={10}
-                  submitLabel="Save issue"
-                  fallbackError="Could not save the issue."
-                  initialTitle={issue.title}
-                  initialBody={issue.body}
-                  mentionIssues={projectIssues}
-                  onSubmit={async ({ title, body }) => {
-                    const updated = await updateIssue(issue.id, { title, body });
-                    queryClient.setQueryData<IssueDetail>(issueQuery(issue.id).queryKey, (old) =>
-                      old === undefined ? old : { ...old, ...updated },
-                    );
-                    await Promise.all([
-                      queryClient.invalidateQueries({
-                        queryKey: issuesQuery(issue.projectId).queryKey,
-                      }),
-                      queryClient.invalidateQueries({
-                        queryKey: projectActivityQuery(issue.projectId).queryKey,
-                      }),
-                    ]);
-                    setEditOpen(false);
-                    toast({ body: "Issue updated." });
-                  }}
-                />
-              </LayoutContent>
-            </Layout>
-          </Drawer>
-
           <AlertDialog
             isOpen={confirmTrashOpen}
             onOpenChange={setConfirmTrashOpen}
@@ -856,6 +1040,7 @@ function Blockers({
       queryClient.invalidateQueries({ queryKey: issueBlockedByQuery(issueId).queryKey }),
       queryClient.invalidateQueries({ queryKey: issueBlockingQuery(issueId).queryKey }),
       queryClient.invalidateQueries({ queryKey: projectActivityQuery(projectId).queryKey }),
+      queryClient.invalidateQueries({ queryKey: issueActivityQuery(issueId).queryKey }),
       queryClient.invalidateQueries({ queryKey: issuesQuery(projectId).queryKey }),
     ]);
 
@@ -1066,14 +1251,21 @@ function CommentForm({
   issueId,
   projectId,
   issues,
+  body,
+  onBodyChange,
+  inputRef,
+  focusSignal,
 }: {
   issueId: string;
   projectId: string;
   issues: Issue[];
+  body: string;
+  onBodyChange: (value: string) => void;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  focusSignal: number;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [body, setBody] = useState("");
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
 
@@ -1086,8 +1278,9 @@ function CommentForm({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issueCommentsQuery(issueId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(projectId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: issueActivityQuery(issueId).queryKey }),
       ]);
-      setBody("");
+      onBodyChange("");
       toast({ body: "Comment added." });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not add the comment.");
@@ -1105,10 +1298,13 @@ function CommentForm({
           htmlName="body"
           placeholder="Write a comment… Type # to reference an issue"
           value={body}
-          onChange={setBody}
-          rows={4}
+          onChange={onBodyChange}
+          rows={7}
           required
           issues={issues}
+          projectId={projectId}
+          inputRef={inputRef}
+          focusSignal={focusSignal}
         />
         {error !== undefined && <Banner status="error" role="alert" title={error} />}
         <Stack direction="horizontal" align="center">
@@ -1144,6 +1340,7 @@ function LinkForm({ issueId, projectId }: { issueId: string; projectId: string }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issueQuery(issueId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(projectId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: issueActivityQuery(issueId).queryKey }),
       ]);
       setUrl("");
       setTitle("");
@@ -1228,6 +1425,7 @@ function LinkRemoveButton({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issueQuery(issueId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(projectId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: issueActivityQuery(issueId).queryKey }),
       ]);
       toast({ body: "Link removed." });
     } catch (cause) {

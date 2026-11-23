@@ -316,6 +316,20 @@
       "when": 1795358865767,
       "tag": "0044_opposite_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1795406424784,
+      "tag": "0045_sticky_dragon_lord",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1795412412963,
+      "tag": "0046_slimy_captain_midlands",
+      "breakpoints": true
     }
   ]
 }

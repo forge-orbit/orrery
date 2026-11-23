@@ -2,12 +2,14 @@ import {
   AgentKeyEventType,
   AgentKeyValidity,
   AssigneeType,
+  AttachmentHolderType,
   FallbackPolicy,
   InvitationDelivery,
   InvitationStatus,
   IssueLinkKind,
   IssuePriority,
   IssueStatus,
+  type IssueActivityDetail,
   NotificationKind,
   TERMINAL_ISSUE_STATUSES,
   ProjectAccessEventType,
@@ -1139,6 +1141,66 @@ export const knowledgeEntries = pgTable(
   ],
 );
 
+/** A project-scoped upload, paired with a stored_objects blob and an authenticated URL. */
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    objectId: text("object_id")
+      .notNull()
+      .references(() => storedObjects.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    uploadedByHumanId: text("uploaded_by_human_id").references(() => humans.id),
+    uploadedByAgentId: text("uploaded_by_agent_id").references(() => agents.id),
+    /** Set at upload; cleared to NULL when bound by #179, and set again when the last reference drops. */
+    unreferencedAt: timestamp("unreferenced_at", { withTimezone: true }).defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "attachments_uploaded_by_actor",
+      sql`(${t.uploadedByHumanId} is not null) <> (${t.uploadedByAgentId} is not null)`,
+    ),
+    check("attachments_byte_size_positive", sql`${t.byteSize} > 0`),
+    check(
+      "attachments_filename_sanitized",
+      sql`length(${t.filename}) between 1 and 255 and ${t.filename} !~ '[[:cntrl:]/\\\\]'`,
+    ),
+    index("attachments_project_created").on(t.projectId, t.createdAt),
+    index("attachments_unreferenced").on(t.unreferencedAt),
+  ],
+);
+
+/**
+ * Which issue, comment, or knowledge entry uses an attachment URL. #179 writes
+ * these rows on save; the cascade keeps cleanup from leaving foreign-key zombies.
+ */
+export const attachmentReferences = pgTable(
+  "attachment_references",
+  {
+    id: text("id").primaryKey(),
+    attachmentId: text("attachment_id")
+      .notNull()
+      .references(() => attachments.id, { onDelete: "cascade" }),
+    holderType: text("holder_type").$type<AttachmentHolderType>().notNull(),
+    holderId: text("holder_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "attachment_references_holder_type",
+      sql`${t.holderType} in (${sql.raw(sqlLiteralList(AttachmentHolderType))})`,
+    ),
+    uniqueIndex("one_reference_per_holder_attachment").on(t.holderType, t.holderId, t.attachmentId),
+    index("attachment_references_attachment").on(t.attachmentId),
+  ],
+);
+
 const projectActivityTypesSql = sql.raw(
   ProjectActivityType.options
     .filter((type) => type.startsWith("project_"))
@@ -1172,6 +1234,7 @@ export const projectActivity = pgTable(
     issueId: text("issue_id").references(() => issues.id),
     knowledgeEntryId: text("knowledge_entry_id").references(() => knowledgeEntries.id),
     summary: text("summary").notNull(),
+    detail: jsonb("detail").$type<IssueActivityDetail>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

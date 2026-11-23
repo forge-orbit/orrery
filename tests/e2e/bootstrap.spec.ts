@@ -45,6 +45,16 @@ async function signIn(page: Page) {
   }
 }
 
+test("redirects sign-in and protected routes to setup before bootstrap", async ({ page }) => {
+  await page.goto("/signin");
+  await expect(page).toHaveURL(/\/setup$/);
+  await expect(page.getByRole("heading", { name: "Set up Orrery" })).toBeVisible();
+
+  await page.goto("/account");
+  await expect(page).toHaveURL(/\/setup$/);
+  await expect(page.getByRole("heading", { name: "Set up Orrery" })).toBeVisible();
+});
+
 test("follows the system and saves an explicit appearance choice", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto("/setup");
@@ -91,7 +101,15 @@ test("creates the first administrator and signs in", async ({ page }) => {
   });
   expect(second.status()).toBe(409);
 
+  await page.goto("/setup");
+  await expect(page).toHaveURL(/\/signin$/);
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+
   await signIn(page);
+
+  await page.goto("/setup");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Set up Orrery" })).not.toBeVisible();
 });
 
 test("keeps setup closed and login working after a restart", async ({ page }) => {
@@ -122,5 +140,13 @@ test("keeps setup closed and login working after a restart", async ({ page }) =>
   });
   expect(attempt.status()).toBe(409);
 
+  await page.goto("/setup");
+  await expect(page).toHaveURL(/\/signin$/);
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+
   await signIn(page);
+
+  await page.goto("/setup");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Set up Orrery" })).not.toBeVisible();
 });

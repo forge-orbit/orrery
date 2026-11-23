@@ -1,3 +1,4 @@
+import { isAttachmentUrl } from "@orrery/contract";
 import { Card } from "@astryxdesign/core/Card";
 import { Code } from "@astryxdesign/core/Code";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
@@ -261,7 +262,18 @@ const components: Components = {
       children,
     );
   },
-  img({ alt }) {
+  img({ alt, src }) {
+    // Only Orrery's own authenticated attachment URLs become <img> elements;
+    // external hotlinks stay plain text so Markdown cannot place tracking pixels.
+    if (typeof src === "string" && isAttachmentUrl(src)) {
+      return createElement("img", {
+        src,
+        alt: alt ?? "",
+        loading: "lazy",
+        decoding: "async",
+        "data-orrery-attachment": "true",
+      });
+    }
     return (
       <Text as="span" type="inherit" color="secondary">
         {alt === undefined || alt === "" ? "[image]" : `[image: ${alt}]`}

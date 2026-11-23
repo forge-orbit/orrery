@@ -266,6 +266,57 @@
         },
         "description": "A JPEG, PNG or WebP image of at most 5 MB."
       },
+      "Attachment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "downloadUrl": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "inline": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "contentType",
+          "byteSize",
+          "downloadUrl",
+          "projectId",
+          "inline",
+          "createdAt"
+        ]
+      },
+      "Timestamp": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "AttachmentUploadRequest": {
+        "type": "object",
+        "properties": {
+          "file": {}
+        },
+        "description": "One image (10 MB) or downloadable file (25 MB by default)."
+      },
       "AccountStatus": {
         "type": "object",
         "properties": {
@@ -276,7 +327,17 @@
             "$ref": "#/components/schemas/Email"
           },
           "deactivatedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "isSystemAdministrator": {
             "type": "boolean"
@@ -288,13 +349,6 @@
           "deactivatedAt",
           "isSystemAdministrator"
         ]
-      },
-      "Timestamp": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "format": "date-time"
       },
       "InstallationDirectoryResponse": {
         "type": "array",
@@ -355,7 +409,17 @@
             "type": "boolean"
           },
           "suspendedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "accountDeactivated": {
             "type": "boolean"
@@ -502,10 +566,30 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "expiresAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "revokedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "revokedByHumanId": {
             "type": [
@@ -1692,7 +1776,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "closedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdBy": {
             "$ref": "#/components/schemas/Actor"
@@ -1888,6 +1982,17 @@
           "sortOrder": {
             "$ref": "#/components/schemas/IssueSortOrder"
           },
+          "assignee": {
+            "$ref": "#/components/schemas/Assignee"
+          },
+          "labelIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
           "parentIssueId": {
             "type": [
               "string",
@@ -1904,6 +2009,33 @@
       "IssueBody": {
         "type": "string",
         "maxLength": 100000
+      },
+      "Assignee": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/AssigneeType"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
+      },
+      "AssigneeType": {
+        "type": "string",
+        "enum": [
+          "human",
+          "agent"
+        ]
       },
       "IssueDetail": {
         "type": "object",
@@ -1949,7 +2081,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "closedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdBy": {
             "$ref": "#/components/schemas/Actor"
@@ -1980,6 +2122,12 @@
             "items": {
               "$ref": "#/components/schemas/IssueLink"
             }
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetadata"
+            }
           }
         },
         "required": [
@@ -2003,7 +2151,8 @@
           "effectiveFallbackPolicy",
           "parentIssueId",
           "labels",
-          "links"
+          "links",
+          "attachments"
         ]
       },
       "IssueLink": {
@@ -2055,6 +2204,34 @@
           "link"
         ]
       },
+      "AttachmentMetadata": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "downloadUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "contentType",
+          "byteSize",
+          "downloadUrl"
+        ]
+      },
       "UpdateIssueRequest": {
         "type": "object",
         "properties": {
@@ -2087,33 +2264,6 @@
             "maxLength": 200
           }
         }
-      },
-      "Assignee": {
-        "type": [
-          "object",
-          "null"
-        ],
-        "properties": {
-          "type": {
-            "$ref": "#/components/schemas/AssigneeType"
-          },
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          }
-        },
-        "required": [
-          "type",
-          "id"
-        ]
-      },
-      "AssigneeType": {
-        "type": "string",
-        "enum": [
-          "human",
-          "agent"
-        ]
       },
       "ProjectLabelsResponse": {
         "type": "array",
@@ -2221,6 +2371,12 @@
           },
           "author": {
             "$ref": "#/components/schemas/Actor"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetadata"
+            }
           }
         },
         "required": [
@@ -2228,41 +2384,8 @@
           "issueId",
           "body",
           "createdAt",
-          "author"
-        ]
-      },
-      "CreateIssueCommentRequest": {
-        "type": "object",
-        "properties": {
-          "body": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 20000
-          }
-        },
-        "required": [
-          "body"
-        ]
-      },
-      "CreateIssueLinkRequest": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "$ref": "#/components/schemas/IssueLinkUrl"
-          },
-          "title": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "kind": {
-            "$ref": "#/components/schemas/IssueLinkKind"
-          }
-        },
-        "required": [
-          "url",
-          "title",
-          "kind"
+          "author",
+          "attachments"
         ]
       },
       "ProjectActivityResponse": {
@@ -2303,6 +2426,9 @@
           },
           "actor": {
             "$ref": "#/components/schemas/Actor"
+          },
+          "detail": {
+            "$ref": "#/components/schemas/IssueActivityDetail"
           }
         },
         "required": [
@@ -2313,7 +2439,8 @@
           "issueId",
           "knowledgeEntryId",
           "createdAt",
-          "actor"
+          "actor",
+          "detail"
         ]
       },
       "ProjectActivityType": {
@@ -2352,6 +2479,367 @@
           "knowledge_edited"
         ]
       },
+      "IssueActivityDetail": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_edited"
+                ]
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "status"
+                          ]
+                        },
+                        "from": {
+                          "$ref": "#/components/schemas/IssueStatus"
+                        },
+                        "to": {
+                          "$ref": "#/components/schemas/IssueStatus"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "from",
+                        "to"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "priority"
+                          ]
+                        },
+                        "from": {
+                          "$ref": "#/components/schemas/IssuePriority"
+                        },
+                        "to": {
+                          "$ref": "#/components/schemas/IssuePriority"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "from",
+                        "to"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "assignee"
+                          ]
+                        },
+                        "from": {
+                          "$ref": "#/components/schemas/IssueAssignee"
+                        },
+                        "to": {
+                          "$ref": "#/components/schemas/IssueAssignee"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "from",
+                        "to"
+                      ]
+                    }
+                  ]
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "kind",
+              "changes"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "label_added"
+                ]
+              },
+              "label": {
+                "$ref": "#/components/schemas/ActivityLabel"
+              }
+            },
+            "required": [
+              "kind",
+              "label"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "label_removed"
+                ]
+              },
+              "label": {
+                "$ref": "#/components/schemas/ActivityLabel"
+              }
+            },
+            "required": [
+              "kind",
+              "label"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_closed"
+                ]
+              },
+              "from": {
+                "$ref": "#/components/schemas/IssueStatus"
+              },
+              "to": {
+                "$ref": "#/components/schemas/IssueStatus"
+              }
+            },
+            "required": [
+              "kind",
+              "from",
+              "to"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_reopened"
+                ]
+              },
+              "from": {
+                "$ref": "#/components/schemas/IssueStatus"
+              },
+              "to": {
+                "$ref": "#/components/schemas/IssueStatus"
+              }
+            },
+            "required": [
+              "kind",
+              "from",
+              "to"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "parent_changed"
+                ]
+              },
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "from",
+              "to"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_dependency_added"
+                ]
+              },
+              "issueId": {
+                "type": "string"
+              },
+              "blockedByIssueId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "issueId",
+              "blockedByIssueId",
+              "title"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_dependency_removed"
+                ]
+              },
+              "issueId": {
+                "type": "string"
+              },
+              "blockedByIssueId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "issueId",
+              "blockedByIssueId",
+              "title"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_link_added"
+                ]
+              },
+              "linkId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "linkId",
+              "url",
+              "title"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue_link_removed"
+                ]
+              },
+              "linkId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "linkId",
+              "url",
+              "title"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ActivityLabel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color"
+        ]
+      },
+      "CreateIssueCommentRequest": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          }
+        },
+        "required": [
+          "body"
+        ]
+      },
+      "CreateIssueLinkRequest": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "$ref": "#/components/schemas/IssueLinkUrl"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IssueLinkKind"
+          }
+        },
+        "required": [
+          "url",
+          "title",
+          "kind"
+        ]
+      },
       "KnowledgeEntriesResponse": {
         "type": "array",
         "items": {
@@ -2384,6 +2872,12 @@
           },
           "updatedBy": {
             "$ref": "#/components/schemas/Actor"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetadata"
+            }
           }
         },
         "required": [
@@ -2394,7 +2888,8 @@
           "createdAt",
           "updatedAt",
           "createdBy",
-          "updatedBy"
+          "updatedBy",
+          "attachments"
         ]
       },
       "CreateKnowledgeEntryRequest": {
@@ -2820,10 +3315,30 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "endedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "lastHeartbeatAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "agentName": {
             "type": "string"
@@ -2940,7 +3455,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "endedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -2983,13 +3508,33 @@
             "type": "string"
           },
           "progressUpdatedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopRequested": {
             "type": "boolean"
           },
           "stopRequestedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopReason": {
             "type": [
@@ -3025,7 +3570,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "endedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           }
         },
         "required": [
@@ -3398,13 +3953,33 @@
             "type": "string"
           },
           "progressUpdatedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopRequested": {
             "type": "boolean"
           },
           "stopRequestedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopReason": {
             "type": [
@@ -3440,7 +4015,17 @@
             "$ref": "#/components/schemas/Timestamp"
           },
           "endedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "projectId": {
             "type": "string"
@@ -3528,7 +4113,17 @@
             ]
           },
           "answeredAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "followUp": {
             "type": [
@@ -3543,10 +4138,30 @@
             ]
           },
           "followUpAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "resolvedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -3672,7 +4287,17 @@
             "type": "string"
           },
           "readAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -3903,7 +4528,17 @@
             "type": "string"
           },
           "stopRequestedAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "stopReason": {
             "type": [
@@ -4318,7 +4953,17 @@
             "minimum": 0
           },
           "disabledAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "disabledReason": {
             "type": [
@@ -4391,7 +5036,17 @@
             "minimum": 0
           },
           "disabledAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "disabledReason": {
             "type": [
@@ -4557,7 +5212,17 @@
             ]
           },
           "deliveredAt": {
-            "$ref": "#/components/schemas/Timestamp"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
           },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
@@ -4989,6 +5654,16 @@
               }
             }
           },
+          "409": {
+            "description": "The upload expired before it could be activated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "413": {
             "description": "The file is larger than 5 MB",
             "content": {
@@ -5124,6 +5799,208 @@
           },
           "404": {
             "description": "No such visible avatar",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/attachments": {
+      "post": {
+        "summary": "Upload a project-scoped attachment",
+        "description": "A Human with Contribute/Manage access or an Agent with an effective Contribute/Manage grant uploads one multipart file. Magic bytes are sniffed, inline raster images are re-encoded without EXIF, and the pending-to-active promotion plus the attachments row commit before the downloadUrl is returned.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachmentUploadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The uploaded attachment metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attachment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The upload is missing or is not a valid image",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or agent key",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot contribute to this project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No accessible project with this id",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The upload expired before it could be activated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The file is larger than the configured limit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file type is not supported",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/attachments/{attachmentId}": {
+      "get": {
+        "summary": "Download a project-scoped attachment",
+        "description": "Requires project Read access for a Human session or Agent API key. Inline images are served with immutable caching; every other file (including SVG) is forced to a download with X-Content-Type-Options: nosniff.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "attachmentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The attachment bytes",
+            "headers": {
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or agent key",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot read this project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such attachment in this project",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8383,7 +9260,7 @@
       },
       "post": {
         "summary": "Create an issue in a project",
-        "description": "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
+        "description": "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. Optional `assignee` (a human or agent in the workspace) and `labelIds` (labels in the project) are validated and applied in the same transaction as the issue, so an invalid value creates nothing. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
         "parameters": [
           {
             "schema": {
@@ -8448,7 +9325,7 @@
             }
           },
           "404": {
-            "description": "No project or parent issue with this id is accessible to the caller",
+            "description": "No project, parent issue, assignee, or label with this id is accessible to the caller",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9774,6 +10651,66 @@
           },
           "403": {
             "description": "Read access cannot comment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No issue with this id is accessible to the caller",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/issues/{issueId}/activity": {
+      "get": {
+        "summary": "An issue's lifecycle activity",
+        "description": "Read access is enough. Lists this issue's structured lifecycle events in the order they happened, each with its actor and, for events recorded after #178, structured detail. Historical rows without detail keep their summary. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "issueId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The issue's activity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectActivityResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The issue id is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -93,7 +93,7 @@ const getIssue = {
 const createIssue = {
   name: "create_issue",
   description:
-    "Create an issue in an in-scope project. Omitted status defaults to `todo` (ready work); pass `backlog` to stage it for triage. Priority and sortOrder may be set at creation; omitted priority defaults to none and omitted sortOrder is spaced by 65535 from the project-local issue number. Requires Contribute access on the key and on its human owner.",
+    "Create an issue in an in-scope project. Omitted status defaults to `todo` (ready work); pass `backlog` to stage it for triage. Priority and sortOrder may be set at creation; omitted priority defaults to none and omitted sortOrder is spaced by 65535 from the project-local issue number. An optional `assignee` (`{\"type\":\"human\"|\"agent\",\"id\":\"...\"}`) and `labelIds` are validated and applied in the same transaction as the issue: an unknown assignee or a label outside the project fails without creating a partial issue. Requires Contribute access on the key and on its human owner.",
   input: CreateIssueRequest.extend({ projectId: id("The project id") }),
   output: z.object({ issue: Issue }),
 };

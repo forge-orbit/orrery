@@ -36,6 +36,13 @@ const Env = z
     // live would strand blobs, so drivers are selected here rather than in settings.
     ORRERY_STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
     ORRERY_DATA_DIR: z.string().min(1).default("data"),
+    // Uploads larger than this are rejected before their bytes are buffered.
+    // Inline images have a stricter 10 MB cap enforced by the attachments service.
+    ORRERY_MAX_ATTACHMENT_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(25 * 1024 * 1024),
 
     // S3-compatible backend (RustFS, MinIO, Garage, AWS S3, Cloudflare R2, ...).
     // Required only when ORRERY_STORAGE_DRIVER=s3; see the refinement below.

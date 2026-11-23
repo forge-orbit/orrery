@@ -17,7 +17,6 @@ export type AvatarsFeatureDeps = AvatarsDeps & {
 
 export interface AvatarsFeature extends Feature {
   sweepOrphans(): Promise<number>;
-  startBackgroundTasks(): void;
 }
 
 export function createAvatarsFeature(deps: AvatarsFeatureDeps): AvatarsFeature {
@@ -26,13 +25,5 @@ export function createAvatarsFeature(deps: AvatarsFeatureDeps): AvatarsFeature {
     name: "avatars",
     rest: createAvatarsRest(service, deps.sessionReader, deps.authenticate),
     sweepOrphans: () => service.sweepOrphans(),
-    startBackgroundTasks: () => {
-      const timer = setInterval(() => {
-        void service.sweepOrphans().catch((error: unknown) => {
-          deps.log.warn("object storage orphan sweep failed", { error: String(error) });
-        });
-      }, 60 * 1000);
-      timer.unref();
-    },
   };
 }

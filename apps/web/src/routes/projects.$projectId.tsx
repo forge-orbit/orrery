@@ -3,11 +3,9 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Divider } from "@astryxdesign/core/Divider";
-import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
-import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -37,13 +35,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import {
-  CreateIssueForm,
-  createKnowledgeEntry,
   IssuePriorityControls,
   issuesQuery,
   issueStatusLabels,
   knowledgeEntriesQuery,
-  knowledgeEntryQuery,
   LabelPill,
   PriorityBadge,
   projectAccessQuery,
@@ -56,7 +51,6 @@ import {
   ResourceLoadError,
   setProjectAccess,
   setProjectFallbackPolicy,
-  TitleBodyForm,
   updateProject,
 } from "../features/projects/index.ts";
 import { workspaceRunsQuery } from "../features/runs/index.ts";
@@ -149,9 +143,8 @@ function ProjectPage() {
   const runsById = new Map(runs.map((run) => [run.id, run]));
   const canContribute = project.accessLevel !== "read";
   const canManage = project.accessLevel === "manage";
+  const navigate = useNavigate();
   const [tab, setTab] = useState<ProjectTab>("issues");
-  const [newIssueOpen, setNewIssueOpen] = useState(false);
-  const [newKnowledgeOpen, setNewKnowledgeOpen] = useState(false);
   const activeTab: ProjectTab = tab === "settings" && !canManage ? "issues" : tab;
 
   return (
@@ -226,7 +219,12 @@ function ProjectPage() {
                 label="New issue"
                 variant="primary"
                 size="sm"
-                onClick={() => setNewIssueOpen(true)}
+                onClick={() =>
+                  void navigate({
+                    to: "/projects/$projectId/issues/new",
+                    params: { projectId: project.id },
+                  })
+                }
               />
             )}
           </>
@@ -287,7 +285,12 @@ function ProjectPage() {
                     <Button
                       label="New issue"
                       variant="primary"
-                      onClick={() => setNewIssueOpen(true)}
+                      onClick={() =>
+                        void navigate({
+                          to: "/projects/$projectId/issues/new",
+                          params: { projectId: project.id },
+                        })
+                      }
                     />
                   ) : undefined
                 }
@@ -438,7 +441,8 @@ function ProjectPage() {
                     label="New document"
                     variant="primary"
                     size="sm"
-                    onClick={() => setNewKnowledgeOpen(true)}
+                    href={`/projects/${project.id}/knowledge/new`}
+                    data-new-knowledge=""
                   />
                 )}
               </Stack>
@@ -453,7 +457,8 @@ function ProjectPage() {
                       <Button
                         label="New document"
                         variant="primary"
-                        onClick={() => setNewKnowledgeOpen(true)}
+                        href={`/projects/${project.id}/knowledge/new`}
+                        data-new-knowledge=""
                       />
                     ) : undefined
                   }
@@ -519,61 +524,6 @@ function ProjectPage() {
             {project.workspaceKind === "shared" && <ProjectAccess projectId={project.id} />}
           </Stack>
         </section>
-      )}
-
-      {canContribute && (
-        <Drawer
-          isOpen={newIssueOpen}
-          onOpenChange={setNewIssueOpen}
-          purpose="form"
-          label="New issue"
-          width="28rem"
-        >
-          <Layout
-            height="auto"
-            header={
-              <DrawerHeader
-                title="New issue"
-                subtitle={project.name}
-                onOpenChange={setNewIssueOpen}
-                hasDivider
-              />
-            }
-          >
-            <LayoutContent>
-              <CreateIssueForm projectId={project.id} />
-            </LayoutContent>
-          </Layout>
-        </Drawer>
-      )}
-
-      {canContribute && (
-        <Drawer
-          isOpen={newKnowledgeOpen}
-          onOpenChange={setNewKnowledgeOpen}
-          purpose="form"
-          label="New knowledge document"
-          width="30rem"
-        >
-          <Layout
-            height="auto"
-            header={
-              <DrawerHeader
-                title="New knowledge document"
-                subtitle={project.name}
-                onOpenChange={setNewKnowledgeOpen}
-                hasDivider
-              />
-            }
-          >
-            <LayoutContent>
-              <CreateKnowledgeForm
-                projectId={project.id}
-                onCreated={() => setNewKnowledgeOpen(false)}
-              />
-            </LayoutContent>
-          </Layout>
-        </Drawer>
       )}
     </Stack>
   );
@@ -937,41 +887,6 @@ function ProjectAccess({ projectId }: { projectId: string }) {
         }}
       />
     </Section>
-  );
-}
-
-function CreateKnowledgeForm({
-  projectId,
-  onCreated,
-}: {
-  projectId: string;
-  onCreated: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const { data: projectIssues = [] } = useQuery(issuesQuery(projectId));
-
-  return (
-    <TitleBodyForm
-      idPrefix="knowledge"
-      titleLabel="Knowledge title"
-      bodyLabel="Markdown"
-      bodyRows={6}
-      submitLabel="Create knowledge"
-      fallbackError="Could not create the entry."
-      resetOnSuccess
-      mentionIssues={projectIssues}
-      onSubmit={async ({ title, body }) => {
-        const entry = await createKnowledgeEntry(projectId, { title, body });
-        queryClient.setQueryData(knowledgeEntryQuery(entry.id).queryKey, entry);
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: knowledgeEntriesQuery(projectId).queryKey }),
-          queryClient.invalidateQueries({ queryKey: projectActivityQuery(projectId).queryKey }),
-        ]);
-        onCreated();
-        await navigate({ to: "/knowledge/$entryId", params: { entryId: entry.id } });
-      }}
-    />
   );
 }
 

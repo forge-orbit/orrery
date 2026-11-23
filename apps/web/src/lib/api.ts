@@ -55,6 +55,17 @@ export async function putForm<T>(
   return parse(await res.json());
 }
 
+/** Multipart POST for project attachments; the browser sets the boundary header. */
+export async function postForm<T>(
+  path: string,
+  body: FormData,
+  parse: (value: unknown) => T,
+): Promise<T> {
+  const res = await fetch(path, { method: "POST", body });
+  if (!res.ok) return failure(res);
+  return parse(await res.json());
+}
+
 export function putJson<T>(path: string, body: unknown, parse: (value: unknown) => T): Promise<T> {
   return sendJson("PUT", path, body, parse);
 }

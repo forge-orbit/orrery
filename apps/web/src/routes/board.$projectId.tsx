@@ -26,11 +26,10 @@ import {
   type RunDetail,
 } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   completedSubtaskCount,
-  CreateIssueForm,
   issueBlockedByQuery,
   issueQuery,
   issuesQuery,
@@ -70,7 +69,7 @@ export const Route = createFileRoute("/board/$projectId")({
 
 type BoardFilter = "all" | "needs-input" | "ready";
 type AssigneeFilter = "all" | "unassigned" | "human" | "agent";
-type BoardPanel = { kind: "new-issue" } | { kind: "session"; issueId: string; sessionId: string };
+type BoardPanel = { kind: "session"; issueId: string; sessionId: string };
 
 const BOARD_COLUMNS: IssueStatus[] = [
   "backlog",
@@ -93,6 +92,7 @@ const COLUMN_STATUS_DOTS: Record<IssueStatus, StatusDotVariant> = {
 function BoardPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const navigate = useNavigate();
   const { projectId } = Route.useParams();
   const { data: project } = useSuspenseQuery(projectQuery(projectId));
   const { data: workspace } = useSuspenseQuery(workspaceQuery(project.workspaceId));
@@ -109,7 +109,6 @@ function BoardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [panel, setPanel] = useState<BoardPanel>();
   const [panelOpen, setPanelOpen] = useState(false);
-  const [createdIssue, setCreatedIssue] = useState<Issue>();
   const [moveError, setMoveError] = useState<string>();
   const [moving, setMoving] = useState(false);
   const [draggingIssueId, setDraggingIssueId] = useState<string>();
@@ -257,7 +256,12 @@ function BoardPage() {
               label="New issue"
               variant="primary"
               size="sm"
-              onClick={() => showPanel({ kind: "new-issue" })}
+              onClick={() =>
+                void navigate({
+                  to: "/projects/$projectId/issues/new",
+                  params: { projectId },
+                })
+              }
             />
           )}
         </Stack>
@@ -368,23 +372,6 @@ function BoardPage() {
         </Section>
       </Stack>
 
-      {createdIssue !== undefined && (
-        <Banner
-          status="success"
-          role="status"
-          isDismissable
-          onDismiss={() => setCreatedIssue(undefined)}
-          title={
-            <>
-              Created{" "}
-              <Link to="/issues/$issueId" params={{ issueId: createdIssue.id }}>
-                {createdIssue.identifier}
-              </Link>
-            </>
-          }
-        />
-      )}
-
       {moveError !== undefined && (
         <Banner
           status="error"
@@ -438,7 +425,12 @@ function BoardPage() {
                 <Button
                   label="New issue"
                   variant="primary"
-                  onClick={() => showPanel({ kind: "new-issue" })}
+                  onClick={() =>
+                    void navigate({
+                      to: "/projects/$projectId/issues/new",
+                      params: { projectId },
+                    })
+                  }
                 />
               ) : undefined
             }
@@ -566,17 +558,15 @@ function BoardPage() {
       <Drawer
         isOpen={panelOpen}
         onOpenChange={setPanelOpen}
-        purpose={panel?.kind === "new-issue" ? "form" : "info"}
-        label={panel?.kind === "new-issue" ? "New issue" : "Session preview"}
+        purpose="info"
+        label="Session preview"
         width="29rem"
       >
         <Layout
           height="auto"
           header={
             <DrawerHeader
-              title={
-                panel?.kind === "new-issue" ? "New issue" : (inspected?.title ?? "Session preview")
-              }
+              title={inspected?.title ?? "Session preview"}
               subtitle={
                 inspected === undefined ? project.name : `${project.key}-${inspected.number}`
               }
@@ -586,17 +576,6 @@ function BoardPage() {
           }
         >
           <LayoutContent>
-            {panel?.kind === "new-issue" && canContribute && (
-              <CreateIssueForm
-                key={project.id}
-                projectId={project.id}
-                onCreated={(issue) => {
-                  setCreatedIssue(issue);
-                  setFilter("all");
-                  setPanelOpen(false);
-                }}
-              />
-            )}
             {panel?.kind === "session" && (
               <>
                 {inspected === undefined ? (

@@ -1,12 +1,17 @@
+import { isAttachmentUrl } from "@orrery/contract";
 import { describe, expect, it } from "vitest";
 import {
+  attachmentMarkdown,
+  attachmentPlaceholder,
   continueListOnEnter,
   insertCode,
   insertCodeBlock,
   insertLink,
   insertTable,
   pasteUrlOverSelection,
+  replaceAttachmentPlaceholder,
   prefixLines,
+  quoteReply,
   wrapSelection,
 } from "./markdown-toolbar.ts";
 
@@ -105,5 +110,53 @@ describe("markdown-toolbar helpers", () => {
       selectionStart: 0,
       selectionEnd: 0,
     });
+  });
+});
+
+describe("quoteReply", () => {
+  it("prefixes every line of a comment with a Markdown blockquote marker", () => {
+    expect(quoteReply("One line.")).toBe("> One line.\n\n");
+    expect(quoteReply("First line.\nSecond line.\n")).toBe("> First line.\n> Second line.\n> \n\n");
+  });
+
+  it("appends a quoted comment after an existing draft with separating whitespace", () => {
+    expect(quoteReply("Quoted.", "My reply")).toBe("My reply\n\n> Quoted.\n\n");
+    expect(quoteReply("Quoted.", "My reply\n")).toBe("My reply\n\n> Quoted.\n\n");
+  });
+});
+
+describe("attachment markdown helpers", () => {
+  it("uses images for inline files and links for downloads", () => {
+    expect(attachmentMarkdown("shot.png", "/api/projects/p/attachments/a", true)).toBe(
+      "![shot.png](/api/projects/p/attachments/a)",
+    );
+    expect(attachmentMarkdown("build log.txt", "/api/projects/p/attachments/b", false)).toBe(
+      "[build log.txt](/api/projects/p/attachments/b)",
+    );
+    expect(attachmentMarkdown("a[b].png", "/url", true)).toBe("![a_b_.png](/url)");
+  });
+
+  it("replaces only the matching upload placeholder", () => {
+    const placeholder = attachmentPlaceholder("shot.png");
+    expect(placeholder).toBe("![Uploading shot.png...]()");
+    expect(attachmentPlaceholder("shot.png", "7")).toBe("![Uploading shot.png #7...]()");
+    expect(
+      replaceAttachmentPlaceholder(`before ${placeholder} after`, placeholder, "![shot.png](/url)"),
+    ).toEqual({
+      value: "before ![shot.png](/url) after",
+      selectionStart: 24,
+      selectionEnd: 24,
+    });
+    expect(replaceAttachmentPlaceholder("unchanged", placeholder, "x").value).toBe("unchanged");
+  });
+});
+
+describe("isAttachmentUrl", () => {
+  it("accepts only well-formed Orrery project attachment URLs", () => {
+    expect(isAttachmentUrl("/api/projects/abc-123/attachments/def_456")).toBe(true);
+    expect(isAttachmentUrl("/api/projects/../attachments/..")).toBe(false);
+    expect(isAttachmentUrl("/api/projects/a/../attachments/b")).toBe(false);
+    expect(isAttachmentUrl("/api/projects/a/attachments/b?x=1")).toBe(false);
+    expect(isAttachmentUrl("https://example.com/api/projects/a/attachments/b")).toBe(false);
   });
 });

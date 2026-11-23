@@ -1,5 +1,5 @@
 import { Token } from "@astryxdesign/core/Token";
-import type { ProjectLabel } from "@orrery/contract";
+import type { ActivityLabel } from "@orrery/contract";
 
 type TokenColor =
   | "red"
@@ -40,7 +40,7 @@ export function tokenColorForHex(hex: string): TokenColor {
   }
 }
 
-export function LabelPill({ label }: { label: ProjectLabel }) {
+export function LabelPill({ label }: { label: ActivityLabel }) {
   return (
     <Token
       label={label.name}

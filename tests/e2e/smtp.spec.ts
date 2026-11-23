@@ -119,11 +119,12 @@ test("sends the test email, and the catcher receives it with a fresh token", asy
   expect(text).toContain(ADMIN_EMAIL);
   expect(to).toContain(ADMIN_EMAIL);
 
-  expect(text).toContain("/api/settings/email-verification");
+  expect(text).not.toContain("/api/settings/email-verification");
   expect(text).not.toContain("verify-email?token=");
-  const token = text.match(/Single-use token, valid for 24 hours:\r?\n\r?\n([A-Za-z0-9_-]+)/)?.[1];
+  const token = text.match(/\/settings\/smtp\?token=([A-Za-z0-9_-]+)/)?.[1];
   expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
   expect(text).toContain(`/settings/smtp?token=${token}`);
+  expect(text.replaceAll("\r\n", "\n")).toContain(`\n${token}\n`);
 
   await recordSecret(token ?? "");
   verificationToken = token ?? "";

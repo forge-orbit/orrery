@@ -58,6 +58,8 @@ Want to write or change a page? See [Writing the docs](./writing-docs.md).
 - [Fixed six-state issue workflow with derived needs-input](./adr/0005-issue-workflow-and-derived-needs-input.md)
 - [Soft-delete issues with 30-day in-place tombstone scrubbing](./adr/0006-soft-delete-and-tombstone-scrubbing.md)
 - [Workspace-scoped outgoing webhooks with a transactional outbox and default-deny SSRF guard](./adr/0007-outgoing-webhooks-outbox-and-security.md)
+- [Pluggable object storage with local filesystem default and S3-compatible backend](./adr/0008-pluggable-object-storage.md)
+- [Project-scoped Markdown attachments with reference-tracked lifecycle](./adr/0009-project-scoped-markdown-attachments.md)
 
 ## Help shape Orrery
 

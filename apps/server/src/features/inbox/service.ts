@@ -24,7 +24,7 @@ import {
 import type { Logger } from "../../platform/log.ts";
 import type { NotifyActivity } from "../notifications/index.ts";
 import type { EnqueueWebhookActivity } from "../webhooks/index.ts";
-import type { OutgoingMail } from "../settings/index.ts";
+import { renderEmail, type OutgoingMail } from "../settings/index.ts";
 import type { WorkActor } from "../projects/index.ts";
 import { decideQuestionAnswer, questionMachine } from "./state-machine.ts";
 
@@ -602,6 +602,17 @@ export function createInboxService(deps: InboxDeps): InboxService {
               "",
               `Answer it in the Orrery inbox before ${outcome.question.responseDeadlineAt}.`,
             ].join("\n"),
+            html: renderEmail({
+              preheader: `${outcome.agentName} asked for input on #${outcome.issueNumber}.`,
+              heading: `Input needed on #${outcome.issueNumber}`,
+              paragraphs: [`${outcome.agentName} asked for your input on "${outcome.issueTitle}".`],
+              callout: {
+                label: "Question",
+                body: outcome.question.question,
+                meta: `Proposed fallback: ${outcome.question.proposedFallback}`,
+              },
+              footnote: `Answer it in your Orrery inbox before ${outcome.question.responseDeadlineAt}.`,
+            }),
           });
         } catch (error) {
           deps.log.warn("input notification email was not delivered", {

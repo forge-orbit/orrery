@@ -76,8 +76,7 @@ const getJson = (app: Hono, path: string, cookie?: string) =>
 
 const problemBody = async (res: Response) => Problem.parse(await res.json());
 
-const tokenFrom = (text: string) =>
-  text.match(/Single-use token, valid for 24 hours:\r?\n\r?\n([A-Za-z0-9_-]+)/)?.[1];
+const tokenFrom = (text: string) => text.match(/\/settings\/smtp\?token=([A-Za-z0-9_-]+)/)?.[1];
 
 interface SentMail {
   settings: SmtpSettings;
@@ -556,7 +555,7 @@ describe("settings", () => {
       expect(mail?.from).toBe(FROM);
 
       expect(mail?.text).toContain(PUBLIC_URL);
-      expect(mail?.text).toContain("/api/settings/email-verification");
+      expect(mail?.text).not.toContain("/api/settings/email-verification");
       expect(mail?.text).not.toContain("verify-email?token");
 
       const token = tokenFrom(mail?.text ?? "");

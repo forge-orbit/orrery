@@ -14,8 +14,8 @@ import { TextField } from "../lib/fields.tsx";
 export const Route = createFileRoute("/setup")({
   staticData: { accessPage: true },
   beforeLoad: async ({ context }) => {
-    const status = await context.queryClient.fetchQuery(setupStatusQuery);
-    if (status.setupComplete) throw redirect({ to: "/signin" });
+    const status = await context.queryClient.fetchQuery({ ...setupStatusQuery, staleTime: 0 });
+    if (status.setupComplete) throw redirect({ to: "/signin", replace: true });
   },
   component: SetupPage,
 });
@@ -38,7 +38,7 @@ function SetupPage() {
       await createFirstAdministrator({ secret, email, password });
 
       queryClient.setQueryData(setupStatusQuery.queryKey, { setupComplete: true });
-      await navigate({ to: "/signin" });
+      await navigate({ to: "/signin", replace: true });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Setup failed.");
       setPassword("");

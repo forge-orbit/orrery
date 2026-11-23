@@ -14,6 +14,9 @@ change theme tokens and rebuild the generated theme.
   `data-count={String(n)}`), never bare boolean `data-foo`.
 - Pass rendered `<Icon icon="..." />` elements (not bare string `icon="..."`) to `Button` and
   `IconButton` `icon` props.
+- Inside `toast({ endContent })`, use a `Button` calling `navigate(...)` for internal routes —
+  never raw `Link` from `@astryxdesign/core/Link`, because `<ToastViewport>` mounts outside
+  `<LinkProvider>` and would trigger a full-page reload.
 
 <!-- ASTRYX:START -->
 Astryx v0.7.16 · 174 components
