@@ -103,3 +103,7 @@ _Avoid_: Email, inbox item, toast
 **Webhook**:
 A workspace-scoped HTTP subscription owned by a workspace owner that sends signed event payloads to an external URL when matching project activity occurs.
 _Avoid_: Integration, hook, callback
+
+**Attachment**:
+A project-scoped uploaded file stored in Orrery and referenced from an issue description, comment, or knowledge entry.
+_Avoid_: Asset, blob, upload
