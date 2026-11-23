@@ -196,8 +196,10 @@ async function requireWorkspaceOwner(
     .select({
       personalOwnerHumanId: workspaces.personalOwnerHumanId,
       isOwner: workspaceMemberships.isOwner,
+      humanDeactivatedAt: humans.deactivatedAt,
     })
     .from(workspaces)
+    .innerJoin(humans, eq(humans.id, humanId))
     .leftJoin(
       workspaceMemberships,
       and(
@@ -208,7 +210,10 @@ async function requireWorkspaceOwner(
     )
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
-  const isOwner = row?.personalOwnerHumanId === humanId || row?.isOwner === true;
+  const isOwner =
+    row !== undefined &&
+    row.humanDeactivatedAt === null &&
+    (row.personalOwnerHumanId === humanId || row.isOwner === true);
   if (!isOwner) throw new AgentsError("not_workspace_owner");
 }
 
@@ -367,12 +372,16 @@ export async function revokeMemberWorkspaceKeys(
     )
     .returning({ id: agentApiKeys.id, agentId: agentApiKeys.agentId });
 
-  for (const key of revoked) {
-    await recordEvent(
-      tx,
-      AgentKeyEventType.enum.agent_key_revoked,
-      { id: key.id, agentId: key.agentId, workspaceId },
-      actorHumanId,
+  if (revoked.length > 0) {
+    await tx.insert(agentKeyEvents).values(
+      revoked.map((key) => ({
+        id: randomUUID(),
+        keyId: key.id,
+        agentId: key.agentId,
+        workspaceId,
+        type: AgentKeyEventType.enum.agent_key_revoked,
+        actorHumanId,
+      })),
     );
   }
 }
@@ -635,7 +644,8 @@ export function createAgentsService({
           .from(agentApiKeys)
           .innerJoin(agents, eq(agents.id, agentApiKeys.agentId))
           .where(and(eq(agentApiKeys.id, keyId), eq(agents.humanId, actor.humanId)))
-          .limit(1);
+          .limit(1)
+          .for("update", { of: agentApiKeys });
         if (source === undefined) throw new AgentsError("key_not_found");
 
         const sourceValidity = AgentKeyValidity.parse(source.key.validity);
@@ -750,6 +760,7 @@ export function createAgentsService({
     async revokeKey(account, keyId) {
       const actor = requireAccount(account);
       return db.transaction(async (tx) => {
+        await lockWorkspaceOwnershipWrites(tx);
         const [owned] = await tx
           .select({ id: agentApiKeys.id })
           .from(agentApiKeys)
@@ -772,6 +783,7 @@ export function createAgentsService({
     async ownerRevokeKey(account, workspaceId, keyId) {
       const actor = requireAccount(account);
       return db.transaction(async (tx) => {
+        await lockWorkspaceOwnershipWrites(tx);
         await requireWorkspaceOwner(tx, workspaceId, actor.humanId);
 
         const [found] = await tx
