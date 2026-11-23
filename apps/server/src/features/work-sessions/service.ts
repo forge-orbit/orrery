@@ -802,14 +802,28 @@ export function createSessionsService({
   const dueQuestionIssueIds = dueQuestionIssueIdsDep ?? (async () => []);
   const notifyActivity: NotifyActivity = notifyActivityDep ?? (async () => {});
 
-  // Lock issues before work sessions, as the main transactions do: expireStale
-  // reverts the issue after updating work_sessions, so locking it afterwards
-  // would invert that order and deadlock against a concurrent claim.
-  const expireCommitted = (issueId: string) =>
-    db.transaction(async (tx) => {
+  // Only lock the issue when an expired lease actually exists (matching
+  // deadlineCommitted and expireCommittedForProject), and lock issues before
+  // work sessions so expireStale cannot invert lock order and deadlock against
+  // a concurrent claim.
+  const expireCommitted = async (issueId: string) => {
+    const [stale] = await db
+      .select({ id: workSessions.id })
+      .from(workSessions)
+      .where(
+        and(
+          eq(workSessions.issueId, issueId),
+          eq(workSessions.status, WorkSessionStatus.enum.active),
+          lte(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+        ),
+      )
+      .limit(1);
+    if (stale === undefined) return;
+    await db.transaction(async (tx) => {
       await lockIssue(tx, issueId);
       await expireStale(tx, issueId, notifyActivity, onActivity);
     });
+  };
 
   const deadlineCommitted = async (issueId: string) => {
     if (evaluateQuestionDeadline === undefined) return;
