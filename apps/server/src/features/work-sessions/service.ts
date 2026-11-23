@@ -802,8 +802,14 @@ export function createSessionsService({
   const dueQuestionIssueIds = dueQuestionIssueIdsDep ?? (async () => []);
   const notifyActivity: NotifyActivity = notifyActivityDep ?? (async () => {});
 
+  // Lock issues before work sessions, as the main transactions do: expireStale
+  // reverts the issue after updating work_sessions, so locking it afterwards
+  // would invert that order and deadlock against a concurrent claim.
   const expireCommitted = (issueId: string) =>
-    db.transaction((tx) => expireStale(tx, issueId, notifyActivity, onActivity));
+    db.transaction(async (tx) => {
+      await lockIssue(tx, issueId);
+      await expireStale(tx, issueId, notifyActivity, onActivity);
+    });
 
   const deadlineCommitted = async (issueId: string) => {
     if (evaluateQuestionDeadline === undefined) return;

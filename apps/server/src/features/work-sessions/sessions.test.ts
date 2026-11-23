@@ -480,6 +480,90 @@ describe("work sessions against real Postgres", () => {
     expect(ready.map((item) => item.id)).not.toContain(b.id);
   });
 
+  it("locks issues before work sessions when expiring a committed lease", async () => {
+    const f = await bootstrap();
+    const identity = await identityFor(f.secret);
+    const issue = await humanIssue(f, "Expired lease lock order");
+    const runId = await newRun(identity);
+    const first = await sessionsService.claim(
+      { kind: "agent", identity },
+      { issueId: issue.id, runId },
+    );
+    await setLease(issue.id, "statement_timestamp() - interval '1 second'");
+
+    let markLocked!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      markLocked = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let workSessionRows = 0;
+    // Stand in for the main transactions that lock issues before expiring work
+    // sessions: hold the issue row, then try to lock the work-session row too.
+    const holder = database.sql.begin(async (tx) => {
+      await tx`select id from issues where id = ${issue.id} for update`;
+      markLocked();
+      await gate;
+      const rows = await tx<{ id: string }[]>`
+        select id from work_sessions
+        where issue_id = ${issue.id} and status = 'active'
+        for update nowait
+      `;
+      workSessionRows = rows.length;
+    });
+
+    let claim: Promise<WorkSession> | undefined;
+    try {
+      await locked;
+      claim = sessionsService.claim(
+        { kind: "agent", identity },
+        { issueId: issue.id, runId: await newRun(identity) },
+      );
+      await expect
+        .poll(
+          async () => {
+            const [row] = await database.sql<{ count: number }[]>`
+              select count(*)::int as count
+              from pg_stat_activity
+              where wait_event_type = 'Lock'
+                and query ilike '%issues%'
+                and pid <> pg_backend_pid()
+            `;
+            return row?.count ?? 0;
+          },
+          { timeout: 5_000, interval: 25 },
+        )
+        .toBeGreaterThan(0);
+      const [waiting] = await database.sql<{ query: string }[]>`
+        select query from pg_stat_activity
+        where wait_event_type = 'Lock'
+          and query ilike '%issues%'
+          and pid <> pg_backend_pid()
+        limit 1
+      `;
+      release();
+      await holder;
+      expect(workSessionRows).toBe(1);
+      // The committed expiry must block on lockIssue, not revert the issue only
+      // after updating work_sessions: that reversed order deadlocks with holder.
+      expect(waiting?.query).toMatch(/^select[\s\S]*from "issues"[\s\S]*for update/i);
+      await expect(claim).resolves.toMatchObject({ status: "active" });
+    } catch (error) {
+      release();
+      await holder.catch(() => {});
+      if (claim !== undefined) await claim.catch(() => {});
+      throw error;
+    }
+    const [old] = await database.db
+      .select({ status: workSessions.status })
+      .from(workSessions)
+      .where(eq(workSessions.id, first.id));
+    expect(old?.status).toBe("expired");
+    expect(await issueStatus(issue.id)).toMatchObject({ status: "in_progress" });
+  });
+
   it("rejects a stale edit, close, progress and completion even when nobody else claimed", async () => {
     const f = await bootstrap();
     const identity = await identityFor(f.secret);
