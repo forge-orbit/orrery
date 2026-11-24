@@ -350,10 +350,12 @@ function WorkspacePage() {
           }
         >
           <LayoutContent>
-            <CreateProjectForm
-              workspaceId={workspace.id}
-              onCreated={() => setCreateProjectOpen(false)}
-            />
+            {createProjectOpen && (
+              <CreateProjectForm
+                workspaceId={workspace.id}
+                onCreated={() => setCreateProjectOpen(false)}
+              />
+            )}
           </LayoutContent>
         </Layout>
       </Drawer>
@@ -530,7 +532,7 @@ function CreateProjectForm({
           width="100%"
         />
         <TextAreaField
-          label="Description"
+          label="Project description"
           id="project-description"
           htmlName="description"
           value={description}
