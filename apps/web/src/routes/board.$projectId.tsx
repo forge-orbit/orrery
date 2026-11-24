@@ -21,7 +21,6 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import {
   type ActiveWorkSession,
   type Issue,
-  ISSUE_SORT_STEP,
   IssuePriority,
   IssueStatus,
   type RunDetail,
@@ -31,7 +30,9 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 import {
+  compareBoardIssues,
   completedSubtaskCount,
+  computeBoardDropPlacement,
   issueQuery,
   issuesQuery,
   issueStatusLabels,
@@ -90,14 +91,6 @@ const COLUMN_STATUS_DOTS: Record<IssueStatus, StatusDotVariant> = {
   cancelled: "neutral",
 };
 
-const PRIORITY_RANK: Record<IssuePriority, number> = {
-  urgent: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-  none: 4,
-};
-
 const DRAG_THRESHOLD_PX = 6;
 
 type DragState = {
@@ -121,15 +114,6 @@ type DropTarget = {
   index: number;
   slotY: number;
 };
-
-function compareBoardIssues(a: Issue, b: Issue): number {
-  return (
-    PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] ||
-    a.sortOrder - b.sortOrder ||
-    a.createdAt.localeCompare(b.createdAt) ||
-    a.number - b.number
-  );
-}
 
 function isInteractiveDragTarget(target: EventTarget | null): boolean {
   return (
@@ -168,6 +152,7 @@ function BoardPage() {
     issue: Issue;
     status: IssueStatus;
     sortOrder: number | undefined;
+    priority: IssuePriority | undefined;
     openSubtaskCount: number;
   }>();
 
@@ -221,16 +206,28 @@ function BoardPage() {
     setPanelOpen(true);
   }
 
-  async function performMove(issue: Issue, status: IssueStatus, sortOrder?: number) {
+  async function performMove(
+    issue: Issue,
+    status: IssueStatus,
+    sortOrder?: number,
+    priority?: IssuePriority,
+  ) {
     setMoving(true);
     setMoveError(undefined);
     setPendingClose(undefined);
+    const nextPriority = priority ?? issue.priority;
+    const priorityChanged = nextPriority !== issue.priority;
     const previousIssues = queryClient.getQueryData<Issue[]>(issuesQuery(projectId).queryKey);
     if (previousIssues !== undefined) {
       const nextIssues = previousIssues
         .map((candidate) =>
           candidate.id === issue.id
-            ? { ...candidate, status, ...(sortOrder === undefined ? {} : { sortOrder }) }
+            ? {
+                ...candidate,
+                status,
+                priority: nextPriority,
+                ...(sortOrder === undefined ? {} : { sortOrder }),
+              }
             : candidate,
         )
         .toSorted(compareBoardIssues);
@@ -239,6 +236,7 @@ function BoardPage() {
     try {
       await updateIssue(issue.id, {
         status,
+        ...(priorityChanged ? { priority: nextPriority } : {}),
         ...(sortOrder === undefined ? {} : { sortOrder }),
       });
       await Promise.all([
@@ -250,8 +248,12 @@ function BoardPage() {
       toast({
         body:
           status === issue.status
-            ? `Reordered ${issue.identifier} in ${issueStatusLabels[status]}.`
-            : `Moved ${issue.identifier} to ${issueStatusLabels[status]}.`,
+            ? priorityChanged
+              ? `Moved ${issue.identifier} to ${PRIORITY_LABELS[nextPriority]} priority in ${issueStatusLabels[status]}.`
+              : `Reordered ${issue.identifier} in ${issueStatusLabels[status]}.`
+            : priorityChanged
+              ? `Moved ${issue.identifier} to ${issueStatusLabels[status]} (${PRIORITY_LABELS[nextPriority]} priority).`
+              : `Moved ${issue.identifier} to ${issueStatusLabels[status]}.`,
       });
     } catch (cause) {
       if (previousIssues !== undefined) {
@@ -265,19 +267,20 @@ function BoardPage() {
     }
   }
 
-  function onMove(issue: Issue, status: IssueStatus, sortOrder?: number) {
+  function onMove(issue: Issue, status: IssueStatus, sortOrder?: number, priority?: IssuePriority) {
     const statusChanged = status !== issue.status;
+    const priorityChanged = priority !== undefined && priority !== issue.priority;
     const orderChanged = sortOrder !== undefined && sortOrder !== issue.sortOrder;
-    if (!statusChanged && !orderChanged) return;
+    if (!statusChanged && !priorityChanged && !orderChanged) return;
     if (statusChanged && (status === "done" || status === "cancelled")) {
       const subtasks = subtasksOf(issues, issue.id);
       const openSubtaskCount = subtasks.length - completedSubtaskCount(subtasks);
       if (openSubtaskCount > 0) {
-        setPendingClose({ issue, status, sortOrder, openSubtaskCount });
+        setPendingClose({ issue, status, sortOrder, priority, openSubtaskCount });
         return;
       }
     }
-    void performMove(issue, status, sortOrder);
+    void performMove(issue, status, sortOrder, priority);
   }
 
   function computeDropTarget(
@@ -426,6 +429,7 @@ function BoardPage() {
       };
       dragStateRef.current = active;
       suppressClickRef.current = true;
+      window.getSelection()?.removeAllRanges();
       const board = boardRef.current;
       if (board !== null) {
         board.style.setProperty("--drag-width", `${active.width}px`);
@@ -452,27 +456,24 @@ function BoardPage() {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     clearDrag();
+    if (suppressClickRef.current) {
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    }
     if (active === undefined || target === undefined) return;
     if (target.status === active.sourceStatus && target.index === active.sourceIndex) return;
 
     const others = (columns[target.status] ?? []).filter((item) => item.id !== active.issue.id);
-    const prev = others[target.index - 1];
-    const next = others[target.index];
-    let nextSortOrder: number | undefined;
-    if (prev !== undefined && next !== undefined) {
-      nextSortOrder = (prev.sortOrder + next.sortOrder) / 2;
-    } else if (prev !== undefined) {
-      nextSortOrder = prev.sortOrder + ISSUE_SORT_STEP;
-    } else if (next !== undefined) {
-      nextSortOrder = next.sortOrder - ISSUE_SORT_STEP;
-    }
-    onMove(active.issue, target.status, nextSortOrder);
+    const placement = computeBoardDropPlacement(active.issue, others, target.index);
+    onMove(active.issue, target.status, placement.sortOrder, placement.priority);
   }
 
   function onCardPointerCancel(event: ReactPointerEvent<HTMLElement>) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    suppressClickRef.current = false;
     clearDrag();
   }
 
@@ -678,7 +679,12 @@ function BoardPage() {
                 isDisabled={moving}
                 isLoading={moving}
                 onClick={() =>
-                  void performMove(pendingClose.issue, pendingClose.status, pendingClose.sortOrder)
+                  void performMove(
+                    pendingClose.issue,
+                    pendingClose.status,
+                    pendingClose.sortOrder,
+                    pendingClose.priority,
+                  )
                 }
               />
               <Button

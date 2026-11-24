@@ -152,6 +152,8 @@
 [data-board-issue-id][data-draggable="true"] {
   cursor: grab;
   touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 [data-board][data-dragging-active="true"] [data-board-issue-id] {
