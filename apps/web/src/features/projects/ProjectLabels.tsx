@@ -370,7 +370,7 @@ export function ProjectLabels({
                             <Stack direction="horizontal" gap={1}>
                               <Button
                                 type="button"
-                                label="Edit label"
+                                label="Edit"
                                 variant="secondary"
                                 size="sm"
                                 isDisabled={saving}
@@ -383,7 +383,7 @@ export function ProjectLabels({
                               />
                               <Button
                                 type="button"
-                                label="Delete label"
+                                label="Delete"
                                 variant="destructive"
                                 size="sm"
                                 isDisabled={saving}

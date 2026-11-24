@@ -344,6 +344,13 @@
       "when": 1795426914465,
       "tag": "0048_backfill_human_handles",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795494051231,
+      "tag": "0049_project_description",
+      "breakpoints": true
     }
   ]
 }
