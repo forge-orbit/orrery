@@ -1425,3 +1425,157 @@ export const webhookDeliveries = pgTable(
     index("webhook_deliveries_created").on(t.createdAt),
   ],
 );
+
+/**
+ * A machine enrolled once across the whole installation. Host credentials are
+ * stored only as a SHA-256 digest, and revoking the host revokes every Runner
+ * registered under it (issue #195, ADR-0010).
+ */
+export const runnerHosts = pgTable(
+  "runner_hosts",
+  {
+    id: text("id").primaryKey(),
+    humanId: text("human_id")
+      .notNull()
+      .references(() => humans.id),
+    displayName: text("display_name").notNull(),
+    platform: text("platform").notNull(),
+    credentialHash: text("credential_hash").notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "runner_hosts_display_name_valid",
+      sql`btrim(${t.displayName}) <> '' and char_length(${t.displayName}) <= 120`,
+    ),
+    check("runner_hosts_platform_valid", sql`${t.platform} ~ '^[a-z0-9][a-z0-9._-]{0,63}$'`),
+    check("runner_hosts_credential_hash_format", sql`${t.credentialHash} ~ '^[0-9a-f]{64}$'`),
+    index("runner_hosts_human_id").on(t.humanId),
+    index("runner_hosts_active_human")
+      .on(t.humanId)
+      .where(sql`${t.revokedAt} is null`),
+  ],
+);
+
+/**
+ * Verifier-bound device-code enrollment session. The CLI holds the raw device
+ * code and verifier; only their digests are persisted. The exchange is single
+ * use (`usedAt`) and expires ten minutes after creation.
+ */
+export const runnerDeviceCodes = pgTable(
+  "runner_device_codes",
+  {
+    id: text("id").primaryKey(),
+    deviceCodeHash: text("device_code_hash").notNull(),
+    userCode: text("user_code").notNull(),
+    verifierHash: text("verifier_hash").notNull(),
+    hostDisplayName: text("host_display_name").notNull(),
+    platform: text("platform").notNull(),
+    humanId: text("human_id").references(() => humans.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    failedAttempts: integer("failed_attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "runner_device_codes_device_code_hash_format",
+      sql`${t.deviceCodeHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("runner_device_codes_verifier_hash_format", sql`${t.verifierHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "runner_device_codes_user_code_format",
+      sql`${t.userCode} ~ '^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$'`,
+    ),
+    check(
+      "runner_device_codes_failed_attempts_bounded",
+      sql`${t.failedAttempts} >= 0 and ${t.failedAttempts} <= 5`,
+    ),
+    check(
+      "runner_device_codes_human_when_approved",
+      sql`${t.approvedAt} is null or ${t.humanId} is not null`,
+    ),
+    uniqueIndex("runner_device_codes_pending_user_code")
+      .on(t.userCode)
+      .where(sql`${t.usedAt} is null`),
+    index("runner_device_codes_device_code_hash").on(t.deviceCodeHash),
+  ],
+);
+
+/** Per-human counter for failed browser user-code entries (max five). */
+export const runnerDeviceCodeAttempts = pgTable(
+  "runner_device_code_attempts",
+  {
+    humanId: text("human_id")
+      .primaryKey()
+      .references(() => humans.id, { onDelete: "cascade" }),
+    failedCount: integer("failed_count").notNull().default(0),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "runner_device_code_attempts_count_bounded",
+      sql`${t.failedCount} >= 0 and ${t.failedCount} <= 5`,
+    ),
+  ],
+);
+
+/**
+ * A live `orrery-runner` process bound to one project checkout. Presence is
+ * never stored as a boolean: it is derived in DB time from last_seen_at,
+ * revocation, and the heartbeat-reported active session count.
+ */
+export const runners = pgTable(
+  "runners",
+  {
+    id: text("id").primaryKey(),
+    hostId: text("host_id")
+      .notNull()
+      .references(() => runnerHosts.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    displayName: text("display_name").notNull(),
+    repoFingerprint: text("repo_fingerprint").notNull(),
+    capabilities: jsonb("capabilities")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    maxConcurrency: integer("max_concurrency").notNull().default(1),
+    activeSlotCount: integer("active_slot_count").notNull().default(0),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "runners_display_name_valid",
+      sql`btrim(${t.displayName}) <> '' and char_length(${t.displayName}) <= 120`,
+    ),
+    check("runners_repo_fingerprint_format", sql`${t.repoFingerprint} ~ '^[0-9a-f]{64}$'`),
+    check("runners_max_concurrency_bounded", sql`${t.maxConcurrency} between 1 and 64`),
+    check(
+      "runners_active_slot_count_bounded",
+      sql`${t.activeSlotCount} >= 0 and ${t.activeSlotCount} <= ${t.maxConcurrency}`,
+    ),
+    index("runners_host_id").on(t.hostId),
+    index("runners_workspace_id").on(t.workspaceId),
+    index("runners_project_id").on(t.projectId),
+    index("runners_active_last_seen")
+      .on(t.lastSeenAt)
+      .where(sql`${t.revokedAt} is null`),
+    uniqueIndex("runners_one_per_host_workspace_project_fingerprint")
+      .on(t.hostId, t.workspaceId, t.projectId, t.repoFingerprint)
+      .where(sql`${t.revokedAt} is null`),
+  ],
+);

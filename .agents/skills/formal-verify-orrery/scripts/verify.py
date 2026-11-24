@@ -2858,6 +2858,113 @@ def extract_code_facts() -> dict[str, Any]:
         and "issue_mentioned" in notif_contract_src
     )
 
+    # M42 (#195): Runner-host device-code enrollment, DB-time presence and
+    # revocation cascades. Every transition guard is read from the live sources,
+    # so deleting one flips the model to the unsafe transition relation.
+    runners_src = read_text("apps/server/src/features/runners/service.ts")
+    runners_rest_src = read_text("apps/server/src/features/runners/rest.ts")
+    deact_runner_src = read_text("apps/server/src/features/deactivation/service.ts")
+    ws_runner_src = read_text("apps/server/src/features/workspaces/service.ts")
+    runners_schema_src = read_text("apps/server/src/db/schema.ts")
+    runners_contract_src = read_text("packages/contract/src/runners.ts")
+    runners_openapi_src = read_text("contract/openapi.json")
+    m42_exchange_fn = slice_between(runners_src, "async exchangeDeviceCode(", "async registerRunner(")
+    m42_approve_fn = slice_between(runners_src, "async approveDeviceCode(", "async exchangeDeviceCode(")
+    m42_register_fn = slice_between(runners_src, "async registerRunner(", "async heartbeat(")
+    m42_heartbeat_fn = slice_between(runners_src, "async heartbeat(", "async listWorkspaceRunners(")
+    m42_fleet_fn = slice_between(runners_src, "async listWorkspaceRunners(", "async revokeRunnerHost(")
+    m42_host_revoke_fn = slice_between(runners_src, "async revokeRunnerHost(", "export type RunnersService")
+    m42_host_cascade_fn = slice_between(runners_src, "export async function revokeRunnerHostsForHuman(")
+    m42_member_cascade_fn = slice_between(runners_src, "export async function revokeWorkspaceRunnersForMember(")
+    m42_deact_fn = slice_between(deact_runner_src, "async deactivate(", "\n    async reactivate(")
+    m42_end_membership_fn = slice_between(ws_runner_src, "async function endMembership(", "\n  }\n\n  return {")
+    m42_code_expiry_decl = slice_between(
+        runners_src, "const deviceCodeNotExpired", "const attemptWindowExpired"
+    )
+
+    m42_exchange_for_update = (
+        'for("update")' in m42_exchange_fn
+        and "deviceCodeHash, tokenHash(input.deviceCode)" in m42_exchange_fn
+    )
+    m42_single_use = (
+        'error: "device_code_used"' in m42_exchange_fn
+        and "usedAt: sql`statement_timestamp()`" in m42_exchange_fn
+    )
+    m42_db_time_expiry = (
+        "notExpired: deviceCodeNotExpired" in m42_exchange_fn
+        and "statement_timestamp()" in m42_code_expiry_decl
+    )
+    m42_verifier_binding = "verifierHash !== tokenHash(input.verifier)" in m42_exchange_fn
+    m42_capped_increments = (
+        "least(" in m42_exchange_fn and "least(" in m42_approve_fn
+    )
+    m42_attempt_window = (
+        "expired: attemptWindowExpired" in m42_approve_fn
+        and ".delete(runnerDeviceCodeAttempts)" in m42_approve_fn
+    )
+    m42_approve_post = (
+        'path: "/api/runners/device-codes/{userCode}/approve"' in runners_rest_src
+        and 'method: "post"'
+        in slice_between(runners_rest_src, "const approveDeviceCode", "const exchangeDeviceCode")
+    )
+    m42_workspace_before_project = (
+        "canSeeWorkspace(tx, input.workspaceId" in m42_register_fn
+        and m42_register_fn.find("canSeeWorkspace(tx, input.workspaceId")
+        < m42_register_fn.find(".from(projects)")
+    )
+    m42_project_access = (
+        "projectAccessCeiling(tx, input.workspaceId, host.humanId" in m42_register_fn
+        and 'throw new RunnersError("project_not_found")' in m42_register_fn
+    )
+    m42_same_human_agent = (
+        "and(eq(agents.id, input.agentId), eq(agents.humanId, host.humanId))" in m42_register_fn
+        and 'throw new RunnersError("agent_not_found")' in m42_register_fn
+    )
+    m42_db_time_presence = (
+        "runnerPresenceSql" in runners_src
+        and "statement_timestamp()" in slice_between(runners_src, "export const runnerPresenceSql", "const runnerFields")
+        and '"revoked_at"' in runners_schema_src
+    )
+    m42_heartbeat_revoked_401 = (
+        'throw new RunnersError("runner_revoked")' in m42_heartbeat_fn
+        and 'runner_revoked: 401' in runners_rest_src
+    )
+    m42_heartbeat_access_401 = (
+        "projectAccessCeiling(tx, runner.workspaceId, host.humanId" in m42_heartbeat_fn
+    )
+    m42_slot_count_400 = (
+        'throw new RunnersError("slot_count_invalid")' in m42_heartbeat_fn
+        and 'slot_count_invalid: 400' in runners_rest_src
+    )
+    m42_fleet_read_filter = (
+        'hasAccess(ceiling.get(row.runner.projectId), "read", projectAccessAtLeast)'
+        in m42_fleet_fn
+    )
+    m42_deactivation_revoke_hosts = "revokeRunnerHostsForHuman(tx, humanId)" in m42_deact_fn
+    m42_host_cascade_runners = (
+        m42_host_cascade_fn.find(".update(runners)") >= 0
+        and m42_host_cascade_fn.find(".update(runners)")
+        < m42_host_cascade_fn.find(".update(runnerHosts)")
+    )
+    m42_member_revoke_runners = (
+        "revokeMemberWorkspaceRunners?.(tx, workspaceId, humanId)" in m42_end_membership_fn
+    )
+    m42_member_scope_only = (
+        ".update(runners)" in m42_member_cascade_fn
+        and ".update(runnerHosts)" not in m42_member_cascade_fn
+        and "eq(runners.workspaceId, workspaceId)" in m42_member_cascade_fn
+    )
+    m42_host_revoke_in_tx = (
+        "db.transaction(" in m42_host_revoke_fn
+        and ".update(runners)" in m42_host_revoke_fn
+        and ".update(runnerHosts)" in m42_host_revoke_fn
+    )
+    m42_contract_and_contract_surface = (
+        "WorkspaceRunnersFleet" in runners_contract_src
+        and '"/api/runners/{runnerId}/heartbeat"' in runners_openapi_src
+        and '"/api/workspaces/{workspaceId}/runners"' in runners_openapi_src
+    )
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -3300,6 +3407,27 @@ def extract_code_facts() -> dict[str, Any]:
         "m41_mention_recipients": m41_mention_recipients,
         "m41_live_read_gate": m41_live_read_gate,
         "m41_dedupe_per_event": m41_dedupe_per_event,
+        "m42_exchange_for_update": m42_exchange_for_update,
+        "m42_single_use": m42_single_use,
+        "m42_db_time_expiry": m42_db_time_expiry,
+        "m42_verifier_binding": m42_verifier_binding,
+        "m42_capped_increments": m42_capped_increments,
+        "m42_attempt_window": m42_attempt_window,
+        "m42_approve_post": m42_approve_post,
+        "m42_workspace_before_project": m42_workspace_before_project,
+        "m42_project_access": m42_project_access,
+        "m42_same_human_agent": m42_same_human_agent,
+        "m42_db_time_presence": m42_db_time_presence,
+        "m42_heartbeat_revoked_401": m42_heartbeat_revoked_401,
+        "m42_heartbeat_access_401": m42_heartbeat_access_401,
+        "m42_slot_count_400": m42_slot_count_400,
+        "m42_fleet_read_filter": m42_fleet_read_filter,
+        "m42_deactivation_revoke_hosts": m42_deactivation_revoke_hosts,
+        "m42_host_cascade_runners": m42_host_cascade_runners,
+        "m42_member_revoke_runners": m42_member_revoke_runners,
+        "m42_member_scope_only": m42_member_scope_only,
+        "m42_host_revoke_in_tx": m42_host_revoke_in_tx,
+        "m42_contract_and_contract_surface": m42_contract_and_contract_surface,
     }
 
 
@@ -8804,6 +8932,177 @@ def check_m41(facts: dict[str, bool]) -> CheckResult:
     )
 
 
+def check_m42(facts: dict[str, Any]) -> CheckResult:
+    """#195: device-code enrollment, DB-time presence and scoped revocation cascades.
+
+    The explorer interleaves enrollment, registration, fleet reads, heartbeat and
+    the three offboarding cascades. Each transition derives its outcome from the
+    guards extracted from the live runners/deactivation/workspaces sources, so a
+    removed guard produces a named counterexample. A verified baseline is then
+    required to break when every single guard is flipped in turn.
+    """
+    files = [
+        "apps/server/src/features/runners/service.ts",
+        "apps/server/src/features/runners/rest.ts",
+        "apps/server/src/features/deactivation/service.ts",
+        "apps/server/src/features/workspaces/service.ts",
+        "apps/server/src/db/schema.ts",
+        "packages/contract/src/runners.ts",
+        "contract/openapi.json",
+        "db/migrations/0050_gray_winter_soldier.sql",
+    ]
+    g = {k: v for k, v in facts.items() if k.startswith("m42_")}
+
+    def violations_for(action: str, applied: frozenset[str]) -> set[str]:
+        bad: set[str] = set()
+        if action == "enroll_exchange":
+            if not g["m42_exchange_for_update"]:
+                bad.add("racing_exchange_bypassed_row_lock")
+            if not g["m42_single_use"]:
+                bad.add("device_code_exchanged_twice")
+            if not g["m42_db_time_expiry"]:
+                bad.add("expired_code_exchanged_in_local_time")
+            if not g["m42_verifier_binding"]:
+                bad.add("wrong_verifier_exchanged")
+            if not g["m42_capped_increments"]:
+                bad.add("failed_attempt_check_constraint_23514")
+            if not g["m42_approve_post"]:
+                bad.add("device_code_approved_by_get")
+        elif action == "approve_window":
+            if not g["m42_attempt_window"]:
+                bad.add("permanent_failed_user_code_lockout")
+        elif action == "register_guards":
+            if not g["m42_workspace_before_project"]:
+                bad.add("project_existence_leaked_before_workspace_check")
+            if not g["m42_project_access"]:
+                bad.add("runner_bound_without_project_access")
+            if not g["m42_same_human_agent"]:
+                bad.add("foreign_human_agent_bound_to_runner")
+        elif action == "presence":
+            if not g["m42_db_time_presence"]:
+                bad.add("presence_stored_as_mutable_boolean")
+        elif action == "heartbeat":
+            revoked_by_deactivation = (
+                "deactivate" in applied
+                and g["m42_deactivation_revoke_hosts"]
+                and g["m42_host_cascade_runners"]
+            )
+            revoked_by_member_removal = (
+                "member_removed" in applied and g["m42_member_revoke_runners"]
+            )
+            revoked_by_host = "host_revoked" in applied and g["m42_host_revoke_in_tx"]
+            if (revoked_by_deactivation or revoked_by_member_removal or revoked_by_host) and not g[
+                "m42_heartbeat_revoked_401"
+            ]:
+                bad.add("revoked_runner_told_to_keep_running")
+            if ("member_removed" in applied or "host_revoked" in applied) and not g[
+                "m42_heartbeat_access_401"
+            ]:
+                bad.add("runner_kept_heartbeating_after_losing_access")
+            if not g["m42_slot_count_400"]:
+                bad.add("slot_count_reported_as_revoked_credential")
+        elif action == "fleet":
+            if not g["m42_fleet_read_filter"]:
+                bad.add("unreadable_project_listed_in_fleet")
+        elif action == "deactivate":
+            if not g["m42_deactivation_revoke_hosts"]:
+                bad.add("runner_host_survived_human_deactivation")
+            if not g["m42_host_cascade_runners"]:
+                bad.add("runner_survived_host_revocation")
+        elif action == "member_removed":
+            if not g["m42_member_revoke_runners"]:
+                bad.add("runner_survived_workspace_member_removal")
+            if not g["m42_member_scope_only"]:
+                bad.add("installation_host_revoked_by_member_removal")
+        elif action == "host_revoked":
+            if not g["m42_host_revoke_in_tx"]:
+                bad.add("host_revocation_left_runners_live")
+        elif action == "contract":
+            if not g["m42_contract_and_contract_surface"]:
+                bad.add("runner_routes_or_contract_missing")
+        return bad
+
+    actions = (
+        "enroll_exchange",
+        "approve_window",
+        "register_guards",
+        "presence",
+        "heartbeat",
+        "fleet",
+        "deactivate",
+        "member_removed",
+        "host_revoked",
+        "contract",
+    )
+
+    def run(check_id: str) -> CheckResult:
+        init = (frozenset(), frozenset())
+
+        def next_states(state):
+            applied, _violations = state
+            for action in actions:
+                if action in applied:
+                    continue
+                found = violations_for(action, applied)
+                yield f"{action} (after {sorted(applied)})", (applied | {action}, frozenset(found))
+
+        def invariant(state):
+            _applied, violations = state
+            if violations:
+                return False, f"runner invariant broken: {sorted(violations)[0]}"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Runner Host Enrollment, DB-Time Presence & Revocation Cascades (#195)",
+            "Device codes are verifier-bound, single-use and DB-time expired; registration never leaks project existence or binds a foreign Agent; presence is derived in DB time; host/deactivation/member-removal revocations are scoped and leave the Runner with a 401 heartbeat",
+            "safety",
+            init,
+            next_states,
+            invariant,
+            files,
+        )
+
+    result = run("M42")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M42-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M42",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M42",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -8849,6 +9148,7 @@ def main() -> None:
         check_m39(facts),
         check_m40(facts),
         check_m41(facts),
+        check_m42(facts),
     ]
 
     if "--json" in sys.argv:

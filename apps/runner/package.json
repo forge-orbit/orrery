@@ -1,0 +1,22 @@
+{
+  "name": "@orrery/runner",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "bin": {
+    "orrery-runner": "./src/main.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc -p .",
+    "test": "vitest run --maxWorkers=1"
+  },
+  "dependencies": {
+    "@orrery/contract": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "vitest": "^5.1.0"
+  }
+}

@@ -107,3 +107,19 @@ _Avoid_: Integration, hook, callback
 **Attachment**:
 A project-scoped uploaded file stored in Orrery and referenced from an issue description, comment, or knowledge entry.
 _Avoid_: Asset, blob, upload
+
+**Runner host**:
+An enrolled machine owned by one human that authenticates to an installation and can be revoked as a unit.
+_Avoid_: Device, machine, node
+
+**Runner**:
+A live `orrery-runner` process on a runner host, bound to one project and local repository checkout.
+_Avoid_: Worker, daemon, runner instance
+
+**Dispatch**:
+A server-issued instruction targeting an issue to a specific runner, linked to the resulting work session once accepted without mutating the issue's assignee.
+_Avoid_: Job, execution, task
+
+**Dispatch token**:
+A short-lived credential minted when a runner accepts a dispatch, scoped strictly to one work session and invalidated when that session ends or the runner host is revoked.
+_Avoid_: Session key, temporary API key

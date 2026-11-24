@@ -618,6 +618,13 @@ export interface WorkspacesDeps {
     humanId: string,
   ) => Promise<void>;
 
+  /** Revoke only the member's workspace-bound runners; never their host. */
+  revokeMemberWorkspaceRunners?: (
+    tx: DbTransaction,
+    workspaceId: string,
+    humanId: string,
+  ) => Promise<number>;
+
   applyInvitationGrants: (
     tx: DbTransaction,
     workspaceId: string,
@@ -809,6 +816,7 @@ export function createWorkspacesService({
   revokeMemberProjectAccess,
   revokeMemberWorkspaceKeys,
   releaseMemberWorkSessions,
+  revokeMemberWorkspaceRunners,
   applyInvitationGrants,
   log,
 }: WorkspacesDeps): WorkspacesService {
@@ -831,6 +839,7 @@ export function createWorkspacesService({
     await revokeMemberProjectAccess(tx, workspaceId, humanId, actorHumanId);
     await revokeMemberWorkspaceKeys(tx, workspaceId, humanId, actorHumanId);
     await releaseMemberWorkSessions(tx, workspaceId, humanId);
+    await revokeMemberWorkspaceRunners?.(tx, workspaceId, humanId);
     await recordEvent(tx, event, workspaceId, actorHumanId, humanId);
   }
 

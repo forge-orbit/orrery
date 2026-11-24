@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import {
   AgentIdentity,
@@ -20,6 +20,8 @@ import {
   issues,
   projectAccessGrants,
   projects,
+  runnerHosts,
+  runners,
   runs as runRows,
   workspaceEvents,
   workspaceMemberships,
@@ -35,6 +37,7 @@ import { createAccountsFeature } from "../accounts/index.ts";
 import { createAgentsFeature, revokeMemberWorkspaceKeys } from "../agents/index.ts";
 import { createInvitationsFeature } from "../invitations/index.ts";
 import { createProjectsFeature, type WorkSessionGate } from "../projects/index.ts";
+import { createRunnersFeature, revokeWorkspaceRunnersForMember } from "../runners/index.ts";
 import { createSettingsFeature } from "../settings/index.ts";
 import {
   createSessionsFeature,
@@ -57,6 +60,7 @@ const SMTP: SmtpSettings = {
   from: "orrery@example.test",
 };
 const silentLogger: Logger = createLogger("error");
+const fingerprint = (value: string) => createHash("sha256").update(value).digest("hex");
 const atLeast = (actual: string, required: string) =>
   ["read", "contribute", "manage"].indexOf(actual) >=
   ["read", "contribute", "manage"].indexOf(required);
@@ -177,6 +181,8 @@ beforeAll(async () => {
       revokeMemberWorkspaceKeys(tx, workspaceId, humanId, actorHumanId),
     releaseMemberWorkSessions: (tx, workspaceId, humanId) =>
       sessionsFeature.releaseMemberWorkSessions(tx, workspaceId, humanId),
+    revokeMemberWorkspaceRunners: (tx, workspaceId, humanId) =>
+      revokeWorkspaceRunnersForMember(tx, workspaceId, humanId),
     applyInvitationGrants: (tx, workspaceId, humanId, grantedByHumanId, offered) =>
       projectsFeature.applyInvitationGrants(tx, workspaceId, humanId, grantedByHumanId, offered),
     log: silentLogger,
@@ -192,6 +198,14 @@ beforeAll(async () => {
       agentsFeature,
       sessionsFeature,
       workspacesFeature,
+      createRunnersFeature({
+        db: database.db,
+        sessionReader: accounts.sessionReader,
+        publicUrl: PUBLIC_URL,
+        projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
+          projectsFeature.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
+        projectAccessAtLeast: atLeast,
+      }),
     ],
     publicUrl: PUBLIC_URL,
     log: silentLogger,
@@ -205,6 +219,10 @@ afterAll(async () => {
 });
 
 const cleanupTables = [
+  "runners",
+  "runner_hosts",
+  "runner_device_codes",
+  "runner_device_code_attempts",
   "work_sessions",
   "agent_key_events",
   "agent_api_key_projects",
@@ -832,5 +850,93 @@ describe("member removal and voluntary leave against real Postgres (#37)", () =>
     await expectProblem(await getJson("/api/agents/me", f.secret), 401, "key_revoked");
     const freshKey = await issueKey(f.memberCookie, f.agentId, f.workspaceId, f.projectId, "read");
     expect((await getJson("/api/agents/me", freshKey)).status).toBe(200);
+  });
+
+  it("revokes only the member's workspace-bound runners, not their Runner host (#195)", async () => {
+    const f = await fixtureSetup("Runner Removal Team");
+    const hostCredential = `orr_rh_${randomBytes(32).toString("hex")}`;
+    const [host] = await database.db
+      .insert(runnerHosts)
+      .values({
+        id: randomUUID(),
+        humanId: f.memberHumanId,
+        displayName: "member-laptop",
+        platform: "linux-x64",
+        credentialHash: tokenHash(hostCredential),
+      })
+      .returning();
+    const [personal] = await database.db
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.personalOwnerHumanId, f.memberHumanId));
+    const [otherProject] = await database.db
+      .insert(projects)
+      .values({
+        id: randomUUID(),
+        workspaceId: personal!.id,
+        name: "Personal repo",
+        key: `K${randomUUID().replaceAll("-", "").slice(0, 9).toUpperCase()}`,
+        createdByHumanId: f.memberHumanId,
+      })
+      .returning();
+    const [sharedRunner] = await database.db
+      .insert(runners)
+      .values({
+        id: randomUUID(),
+        hostId: host!.id,
+        workspaceId: f.workspaceId,
+        projectId: f.projectId,
+        agentId: f.agentId,
+        displayName: "member-laptop",
+        repoFingerprint: fingerprint("shared-repo"),
+      })
+      .returning();
+    const [personalRunner] = await database.db
+      .insert(runners)
+      .values({
+        id: randomUUID(),
+        hostId: host!.id,
+        workspaceId: personal!.id,
+        projectId: otherProject!.id,
+        agentId: f.agentId,
+        displayName: "member-laptop",
+        repoFingerprint: fingerprint("personal-repo"),
+      })
+      .returning();
+
+    expect(
+      (
+        await deletePath(
+          `/api/workspaces/${f.workspaceId}/members/${f.memberHumanId}`,
+          f.adminCookie,
+        )
+      ).status,
+    ).toBe(204);
+
+    const [afterShared] = await database.db
+      .select()
+      .from(runners)
+      .where(eq(runners.id, sharedRunner!.id));
+    const [afterPersonal] = await database.db
+      .select()
+      .from(runners)
+      .where(eq(runners.id, personalRunner!.id));
+    const [afterHost] = await database.db
+      .select()
+      .from(runnerHosts)
+      .where(eq(runnerHosts.id, host!.id));
+    expect(afterShared?.revokedAt).not.toBeNull();
+    expect(afterPersonal?.revokedAt).toBeNull();
+    expect(afterHost?.revokedAt).toBeNull();
+
+    // The removed member's Runner must learn about the revocation on its next
+    // heartbeat with a 401 so the local CLI stops immediately (#195).
+    const heartbeat = await postJson(
+      `/api/runners/${sharedRunner!.id}/heartbeat`,
+      { activeSlotCount: 0 },
+      undefined,
+      hostCredential,
+    );
+    await expectProblem(heartbeat, 401, "runner_revoked");
   });
 });
