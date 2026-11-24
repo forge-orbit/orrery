@@ -237,4 +237,34 @@ describe("a request body that is not JSON", () => {
     expect(res.headers.get("content-type")).toBe("application/problem+json");
     expect(await res.json()).toMatchObject({ status: 404, code: "not_found" });
   });
+
+  it("logs the matched route template instead of raw path parameter values", async () => {
+    const deviceRoute = createRoute({
+      method: "get",
+      path: "/api/device-codes/{userCode}",
+      request: { params: z.object({ userCode: z.string() }) },
+      responses: { 200: { description: "OK" } },
+    });
+    const deviceFeature: Feature = {
+      name: "device",
+      rest: new OpenAPIHono().openapi(deviceRoute, (c) => c.json({ ok: true }, 200)),
+    };
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(" "));
+    });
+    try {
+      const app = createApp({
+        features: [deviceFeature],
+        publicUrl: "http://orrery.test",
+        log: createLogger("info"),
+      });
+      const res = await app.request("/api/device-codes/SECRET-CODE-9999");
+      expect(res.status).toBe(200);
+      expect(lines.join("\n")).not.toContain("SECRET-CODE-9999");
+      expect(lines.join("\n")).toContain("/api/device-codes/:userCode");
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
