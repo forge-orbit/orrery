@@ -514,7 +514,8 @@ export const orreryTheme = {
     },
     "side-nav": {
       "base": {
-        "backgroundColor": "var(--orrery-recessed)"
+        "backgroundColor": "var(--orrery-recessed)",
+        "paddingBlock": "var(--spacing-6)"
       }
     },
     "side-nav-item": {
