@@ -62,7 +62,7 @@ function SmtpSettingsPage() {
     <Stack gap={5}>
       <PageHeader
         breadcrumbs={[
-          <Link key="home" to="/">
+          <Link key="home" to="/" color="secondary" weight="medium">
             Back to your workspaces
           </Link>,
         ]}

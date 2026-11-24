@@ -357,7 +357,13 @@ function NewIssuePage() {
     <Stack gap={4} data-new-issue-page="">
       <PageHeader
         breadcrumbs={[
-          <Link key="project" to="/projects/$projectId" params={{ projectId }} color="secondary">
+          <Link
+            key="project"
+            to="/projects/$projectId"
+            params={{ projectId }}
+            color="secondary"
+            weight="medium"
+          >
             Back to {project.name}
           </Link>,
         ]}

@@ -84,7 +84,6 @@ export function PageHeader({
           wrap="wrap"
           aria-label="Breadcrumb"
         >
-          {breadcrumbs.length === 1 && <Icon icon="chevronLeft" size="xsm" color="secondary" />}
           {breadcrumbs.map((crumb, index) => (
             // oxlint-disable-next-line react/no-array-index-key -- static ordered breadcrumb segments
             <Fragment key={index}>
