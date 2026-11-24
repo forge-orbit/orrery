@@ -1592,6 +1592,9 @@
           "name": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "key": {
             "$ref": "#/components/schemas/ProjectKey"
           },
@@ -1615,6 +1618,7 @@
           "id",
           "workspaceId",
           "name",
+          "description",
           "key",
           "createdAt",
           "createdBy",
@@ -1704,6 +1708,9 @@
             "minLength": 1,
             "maxLength": 120
           },
+          "description": {
+            "$ref": "#/components/schemas/ProjectDescription"
+          },
           "key": {
             "$ref": "#/components/schemas/ProjectKey"
           }
@@ -1712,6 +1719,10 @@
           "name"
         ]
       },
+      "ProjectDescription": {
+        "type": "string",
+        "maxLength": 500
+      },
       "UpdateProjectRequest": {
         "type": "object",
         "properties": {
@@ -1719,6 +1730,9 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 120
+          },
+          "description": {
+            "$ref": "#/components/schemas/ProjectDescription"
           },
           "key": {
             "$ref": "#/components/schemas/ProjectKey"
@@ -8947,7 +8961,7 @@
       },
       "post": {
         "summary": "Create a project in a workspace",
-        "description": "A personal workspace's owner or a shared workspace's owner can always create a project. A shared member needs the Create projects capability; the member who creates a project receives Manage on it. The project belongs to the workspace, its creator is recorded as authorship, and the creation is recorded in the project's activity. Supply a workspace-unique uppercase key or let the server derive one from the name.",
+        "description": "A personal workspace's owner or a shared workspace's owner can always create a project. A shared member needs the Create projects capability; the member who creates a project receives Manage on it. The project belongs to the workspace, its creator is recorded as authorship, and the creation is recorded in the project's activity. Supply an optional description and a workspace-unique uppercase key, or let the server derive a key from the name.",
         "parameters": [
           {
             "schema": {
@@ -9095,7 +9109,7 @@
       },
       "patch": {
         "summary": "Configure a project",
-        "description": "Manage access may rename the project. A request that does not change the name returns the project unchanged and records no event. A project's key is immutable and cannot be changed here.",
+        "description": "Manage access may rename the project or update its description. A request that changes neither returns the project unchanged and records no event. A project's key is immutable and cannot be changed here.",
         "parameters": [
           {
             "schema": {

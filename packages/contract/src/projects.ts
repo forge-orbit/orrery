@@ -158,22 +158,30 @@ export const ProjectKey = z
   .meta({ id: "ProjectKey" });
 export type ProjectKey = z.infer<typeof ProjectKey>;
 
+export const ProjectDescription = z
+  .string()
+  .trim()
+  .max(500, "Keep the description under 500 characters.")
+  .meta({ id: "ProjectDescription" });
+export type ProjectDescription = z.infer<typeof ProjectDescription>;
+
 export const Project = z
   .object({
     id: z.string(),
     workspaceId: z.string(),
     name: z.string(),
-    
+    description: z.string(),
+
     key: ProjectKey,
     createdAt: Timestamp,
     createdBy: Actor,
-    
-    
+
+
     workspaceKind: WorkspaceKind,
-    
-    
+
+
     accessLevel: ProjectAccessLevel,
-    
+
     fallbackPolicy: FallbackPolicy,
   })
   .meta({ id: "Project" });
@@ -185,8 +193,9 @@ export type ProjectsResponse = z.infer<typeof ProjectsResponse>;
 export const CreateProjectRequest = z
   .object({
     name: z.string().trim().min(1, "Name the project.").max(120),
-    
-    
+    description: ProjectDescription.optional(),
+
+
     key: ProjectKey.optional(),
   })
   .meta({ id: "CreateProjectRequest" });
@@ -199,6 +208,7 @@ export type CreateProjectRequest = z.infer<typeof CreateProjectRequest>;
 export const UpdateProjectRequest = z
   .object({
     name: z.string().trim().min(1, "Name the project.").max(120),
+    description: ProjectDescription.optional(),
     key: ProjectKey.optional(),
   })
   .meta({ id: "UpdateProjectRequest" });

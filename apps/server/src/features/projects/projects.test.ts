@@ -289,6 +289,68 @@ describe("projects", () => {
     expect(ProjectsResponse.parse(await visible.json())).toEqual([project]);
   });
 
+  it("supports an optional project description on create and update", async () => {
+    const { app, adminCookie, workspaceId } = await readyApp();
+
+    const emptyDesc = await createProject(app, adminCookie, workspaceId, "No Description");
+    expect(emptyDesc.description).toBe("");
+
+    const withDescRes = await postJson(
+      app,
+      `/api/workspaces/${workspaceId}/projects`,
+      { name: "Orrery", description: "  Self-hosted project management for humans and agents.  " },
+      adminCookie,
+    );
+    expect(withDescRes.status).toBe(201);
+    const withDesc = Project.parse(await withDescRes.json());
+    expect(withDesc.description).toBe("Self-hosted project management for humans and agents.");
+
+    // Updating only the description persists it without recording a rename activity.
+    const updatedRes = await patchJson(
+      app,
+      `/api/projects/${withDesc.id}`,
+      { name: withDesc.name, description: "Updated summary." },
+      adminCookie,
+    );
+    expect(updatedRes.status).toBe(200);
+    expect(Project.parse(await updatedRes.json()).description).toBe("Updated summary.");
+    expect((await activityFor(app, adminCookie, withDesc.id)).map((e) => e.type)).toEqual([
+      "project_created",
+    ]);
+
+    // Omitting description during a rename keeps the existing description.
+    const renamedRes = await patchJson(
+      app,
+      `/api/projects/${withDesc.id}`,
+      { name: "Orrery Core" },
+      adminCookie,
+    );
+    expect(renamedRes.status).toBe(200);
+    expect(Project.parse(await renamedRes.json())).toMatchObject({
+      name: "Orrery Core",
+      description: "Updated summary.",
+    });
+
+    // Clearing the description works.
+    const clearedRes = await patchJson(
+      app,
+      `/api/projects/${withDesc.id}`,
+      { name: "Orrery Core", description: "   " },
+      adminCookie,
+    );
+    expect(clearedRes.status).toBe(200);
+    expect(Project.parse(await clearedRes.json()).description).toBe("");
+
+    // Descriptions longer than 500 characters are rejected.
+    const tooLongRes = await postJson(
+      app,
+      `/api/workspaces/${workspaceId}/projects`,
+      { name: "Too Long", description: "a".repeat(501) },
+      adminCookie,
+    );
+    await expectProblem(tooLongRes, 400, "validation_failed");
+  });
+
   it("runs the issue cycle and persists authorship and activity", async () => {
     const { app, admin, adminCookie, workspaceId } = await readyApp();
     const project = await createProject(app, adminCookie, workspaceId);

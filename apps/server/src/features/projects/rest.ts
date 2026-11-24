@@ -81,7 +81,7 @@ const createProject = createRoute({
   path: "/api/workspaces/{workspaceId}/projects",
   summary: "Create a project in a workspace",
   description:
-    "A personal workspace's owner or a shared workspace's owner can always create a project. A shared member needs the Create projects capability; the member who creates a project receives Manage on it. The project belongs to the workspace, its creator is recorded as authorship, and the creation is recorded in the project's activity. Supply a workspace-unique uppercase key or let the server derive one from the name.",
+    "A personal workspace's owner or a shared workspace's owner can always create a project. A shared member needs the Create projects capability; the member who creates a project receives Manage on it. The project belongs to the workspace, its creator is recorded as authorship, and the creation is recorded in the project's activity. Supply an optional description and a workspace-unique uppercase key, or let the server derive a key from the name.",
   request: {
     params: workspaceParams,
     body: { required: true, content: { "application/json": { schema: CreateProjectRequest } } },
@@ -104,7 +104,7 @@ const updateProject = createRoute({
   path: "/api/projects/{projectId}",
   summary: "Configure a project",
   description:
-    "Manage access may rename the project. A request that does not change the name returns the project unchanged and records no event. A project's key is immutable and cannot be changed here.",
+    "Manage access may rename the project or update its description. A request that changes neither returns the project unchanged and records no event. A project's key is immutable and cannot be changed here.",
   request: {
     params: projectParams,
     body: { required: true, content: { "application/json": { schema: UpdateProjectRequest } } },

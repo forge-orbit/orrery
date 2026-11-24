@@ -428,6 +428,7 @@ function toProject(
     id: string;
     workspaceId: string;
     name: string;
+    description: string;
     key: string;
     createdAt: Date;
     creatorId: string;
@@ -442,6 +443,7 @@ function toProject(
     id: row.id,
     workspaceId: row.workspaceId,
     name: row.name,
+    description: row.description,
     key: row.key,
     createdAt: row.createdAt.toISOString(),
     createdBy: {
@@ -469,6 +471,7 @@ async function readProjectView(
       id: projects.id,
       workspaceId: projects.workspaceId,
       name: projects.name,
+      description: projects.description,
       key: projects.key,
       createdAt: projects.createdAt,
       creatorId: humans.id,
