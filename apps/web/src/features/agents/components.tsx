@@ -766,6 +766,7 @@ function ActiveSessions({
                   issueId={session.issueId}
                   projectId={session.projectId}
                   canContribute={canContribute}
+                  session={session}
                 />
               </TableCell>
               <TableCell>
@@ -794,6 +795,7 @@ function RegisterAgentForm({ onCreated }: { onCreated?: () => void }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -877,6 +879,7 @@ function IssueKeyForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {

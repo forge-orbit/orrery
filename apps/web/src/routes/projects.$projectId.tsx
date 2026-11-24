@@ -478,7 +478,12 @@ function ProjectPage() {
                     {knowledge.map((entry) => (
                       <TableRow key={entry.id} data-knowledge-id={entry.id}>
                         <TableCell>
-                          <Link to="/knowledge/$entryId" params={{ entryId: entry.id }}>
+                          <Link
+                            to="/knowledge/$entryId"
+                            params={{ entryId: entry.id }}
+                            color="primary"
+                            weight="medium"
+                          >
                             {entry.title}
                           </Link>
                         </TableCell>
@@ -543,6 +548,7 @@ function ProjectSettings({ project }: { project: Project }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -695,6 +701,7 @@ function ProjectAccess({ projectId }: { projectId: string }) {
 
   async function onGrant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError(undefined);
     try {

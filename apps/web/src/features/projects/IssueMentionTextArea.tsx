@@ -125,6 +125,10 @@ export interface IssueMentionTextAreaProps {
   inputRef?: RefObject<HTMLTextAreaElement | null>;
   /** Increment to bring the editor back to write mode before focusing it. */
   focusSignal?: number;
+  /** Defer issue and actor suggestions until the composer is activated. */
+  mentionsEnabled?: boolean;
+  /** Called when the textarea first receives focus, before suggestions load. */
+  onFocus?: () => void;
 }
 
 const EMPTY_ISSUES: readonly Issue[] = [];
@@ -142,6 +146,8 @@ export function IssueMentionTextArea({
   projectId,
   inputRef,
   focusSignal = 0,
+  mentionsEnabled = true,
+  onFocus,
 }: IssueMentionTextAreaProps) {
   const [mode, setMode] = useState<"write" | "preview">("write");
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
@@ -164,7 +170,7 @@ export function IssueMentionTextArea({
 
   const candidates = useQuery({
     ...mentionCandidatesQuery(projectId ?? ""),
-    enabled: projectId !== undefined,
+    enabled: projectId !== undefined && mentionsEnabled,
   });
   const mentionHumans: readonly MentionHuman[] = candidates.data?.humans ?? [];
   const mentionAgents: readonly MentionAgent[] = candidates.data?.agents ?? [];
@@ -603,6 +609,7 @@ export function IssueMentionTextArea({
                 }}
                 rows={rows}
                 width="100%"
+                {...(onFocus === undefined ? {} : { onFocus })}
                 {...(required === true ? { required: true } : {})}
                 {...(placeholder !== undefined
                   ? { placeholder }

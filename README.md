@@ -19,6 +19,7 @@
 </p>
 
 <p align="center">
+  <a href="#screenshots">Screenshots</a> ·
   <a href="#features">Features</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="docs/guides/install.md">Guides</a> ·
@@ -28,6 +29,13 @@
   <a href="#webhooks--notifications">Webhooks</a> ·
   <a href="#roadmap">Roadmap</a> ·
   <a href="#contributing">Contributing</a>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/board-sidecar-dark.png">
+    <img src="assets/screenshots/board-sidecar-light.png" alt="Orrery Kanban board with live agent sidecar session drawer" width="100%">
+  </picture>
 </p>
 
 > **Status: MVP complete.** M0–M4 and M6 (in-app notifications, workspace-scoped outgoing webhooks,
@@ -95,6 +103,58 @@ them and connect over [MCP](https://modelcontextprotocol.io).
 - **Responsive Astryx UI.** Built on the Astryx Design System (`@astryxdesign/core`) with Light,
   Dark, and System themes, accessible dialogs and drawers, and mobile-responsive layouts with
   horizontal-scrolling data tables.
+
+## Screenshots
+
+Every screenshot below auto-switches between Light and Dark mode to match your GitHub theme.
+
+### Issue Detail, Mermaid Diagrams & Live Steering
+
+Rich Markdown descriptions with Light/Dark Mermaid rendering, subtasks, PR/doc links, and a live
+**Stop agent** control when a Work session holds an active Claim.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/issue-detail-dark.png">
+    <img src="assets/screenshots/issue-detail-light.png" alt="Orrery issue detail with Mermaid diagram, properties, and live agent stop control" width="100%">
+  </picture>
+</p>
+
+### Needs-Input Inbox
+
+Blocked agents open a one-hour question with a proposed fallback instead of sitting idle in a
+terminal. Humans answer in Markdown directly from `/inbox`.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/needs-input-inbox-dark.png">
+    <img src="assets/screenshots/needs-input-inbox-light.png" alt="Orrery Needs-input inbox with pending agent questions and one-hour fallback policies" width="100%">
+  </picture>
+</p>
+
+### Cross-Workspace My Work
+
+One focus view (`/my-work`) aggregating your assigned issues, active agent sessions with live
+token/cost telemetry, and pending questions across every workspace.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/my-work-dark.png">
+    <img src="assets/screenshots/my-work-light.png" alt="Orrery My work dashboard showing assignments, active agent sessions, and pending questions" width="100%">
+  </picture>
+</p>
+
+### Agents & Harness Runs
+
+Inspect structured Run histories across Claude Code, Codex, and Cursor with recognized harness
+logos, model-change tracking, and child worker trees.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/agents-runs-dark.png">
+    <img src="assets/screenshots/agents-runs-light.png" alt="Orrery workspace Runs panel showing Claude Code, Codex, and Cursor harness runs" width="100%">
+  </picture>
+</p>
 
 ## Quick Start
 

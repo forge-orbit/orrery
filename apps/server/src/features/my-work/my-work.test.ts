@@ -646,6 +646,35 @@ describe("my-work service (real Postgres)", () => {
     }
   });
 
+  it("resolves project access once per workspace while aggregating every scope", async () => {
+    const w = await buildWorld();
+    const calls: { workspaceId: string; projectIds: string[] }[] = [];
+    const measured = createMyWorkService({
+      db: database.db,
+      projectAccessCeiling: (tx, workspaceId, humanId, projectIds) => {
+        calls.push({ workspaceId, projectIds: [...projectIds] });
+        return projectsFeature.projectAccessCeiling(tx, workspaceId, humanId, projectIds);
+      },
+      projectAccessAtLeast,
+    });
+
+    const result = await measured.get(actor(w.alice));
+    expect(ids(result.assignedIssues)).toEqual(
+      ids([w.personalIssue, w.readIssue, w.contributeIssue]),
+    );
+    expect(result.activeAgentSessions.map((s) => s.sessionId).toSorted()).toEqual(
+      [w.personalSession.id, w.readSession.id, w.contributeSession.id].toSorted(),
+    );
+    expect(result.needsInputQuestions.map((q) => q.id).toSorted()).toEqual(
+      [w.openQuestion, w.pausedQuestion, w.expiredQuestion].toSorted(),
+    );
+
+    expect(calls.map((call) => call.workspaceId).toSorted()).toEqual(
+      [w.personal.id, w.shared.id].toSorted(),
+    );
+    expect(calls.map((call) => call.projectIds.length).toSorted((a, b) => a - b)).toEqual([1, 4]);
+  });
+
   it("excludes shared data immediately after a project grant is revoked", async () => {
     const w = await buildWorld();
     await database.db

@@ -1882,6 +1882,12 @@
             "items": {
               "$ref": "#/components/schemas/ProjectLabel"
             }
+          },
+          "blockedByIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -1904,7 +1910,8 @@
           "fallbackPolicyOverride",
           "effectiveFallbackPolicy",
           "parentIssueId",
-          "labels"
+          "labels",
+          "blockedByIds"
         ]
       },
       "IssueStatus": {
@@ -2289,6 +2296,12 @@
               "$ref": "#/components/schemas/ProjectLabel"
             }
           },
+          "blockedByIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "links": {
             "type": "array",
             "items": {
@@ -2323,6 +2336,7 @@
           "effectiveFallbackPolicy",
           "parentIssueId",
           "labels",
+          "blockedByIds",
           "links",
           "attachments"
         ]
@@ -4242,8 +4256,18 @@
           "issueId": {
             "type": "string"
           },
+          "issueNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "issueTitle": {
+            "type": "string"
+          },
           "projectId": {
             "type": "string"
+          },
+          "projectKey": {
+            "$ref": "#/components/schemas/ProjectKey"
           },
           "workspaceId": {
             "type": "string"
@@ -4337,12 +4361,18 @@
           },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
+          },
+          "canAnswer": {
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "issueId",
+          "issueNumber",
+          "issueTitle",
           "projectId",
+          "projectKey",
           "workspaceId",
           "agentId",
           "runId",
@@ -4358,7 +4388,8 @@
           "followUpByHumanId",
           "followUpAt",
           "resolvedAt",
-          "createdAt"
+          "createdAt",
+          "canAnswer"
         ]
       },
       "QuestionStatus": {

@@ -6,7 +6,7 @@ import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
-import { Layout, LayoutPanel } from "@astryxdesign/core/Layout";
+import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from "@astryxdesign/core/Layout";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -85,6 +85,7 @@ import { PageHeader } from "../lib/PageHeader.tsx";
 import { formatCompactDateTime, formatFullDateTime, relativeTime } from "../lib/time.ts";
 
 export const Route = createFileRoute("/issues/$issueId")({
+  staticData: { fullHeightLayout: true },
   validateSearch: (search: Record<string, unknown>) => {
     const parsed: { inspector?: true; session?: string } = {};
     if (search.inspector === true || search.inspector === "true") parsed.inspector = true;
@@ -107,7 +108,13 @@ export const Route = createFileRoute("/issues/$issueId")({
     ]);
   },
   component: IssuePage,
-  errorComponent: ({ error }) => <ResourceLoadError resource="issue" error={error} />,
+  errorComponent: ({ error }) => (
+    <Layout contentWidth="78rem" padding={6}>
+      <LayoutContent>
+        <ResourceLoadError resource="issue" error={error} />
+      </LayoutContent>
+    </Layout>
+  ),
 });
 
 const STATUS_OPTIONS: IssueStatus[] = [
@@ -455,21 +462,24 @@ function IssuePage() {
   }
 
   async function onDelete() {
+    if (trashing) return;
     setTrashing(true);
     setTrashError(undefined);
     try {
       await deleteIssue(issue.id);
       setConfirmTrashOpen(false);
+      toast({ body: `Moved ${issue.identifier} to trash.` });
+      // Leave the issue route before dropping its cached queries: while this page
+      // is mounted, any invalidation or removal makes it refetch the deleted issue.
+      await navigate({ to: "/projects/$projectId", params: { projectId: issue.projectId } });
       queryClient.removeQueries({ queryKey: issueQuery(issue.id).queryKey });
+      queryClient.removeQueries({ queryKey: issueActivityQuery(issue.id).queryKey });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issuesQuery(issue.projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectTrashQuery(issue.projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: readyWorkQuery(issue.projectId).queryKey }),
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(issue.projectId).queryKey }),
-        queryClient.invalidateQueries({ queryKey: issueActivityQuery(issue.id).queryKey }),
       ]);
-      toast({ body: `Moved ${issue.identifier} to trash.` });
-      await navigate({ to: "/projects/$projectId", params: { projectId: issue.projectId } });
     } catch (cause) {
       setConfirmTrashOpen(false);
       const msg = cause instanceof Error ? cause.message : "Could not move the issue to trash.";
@@ -490,135 +500,126 @@ function IssuePage() {
     }
   }
 
-  return (
-    <Stack gap={5}>
-      <PageHeader
-        breadcrumbs={[
-          <Link
-            key="project"
-            to="/projects/$projectId"
-            params={{ projectId: issue.projectId }}
-            color="secondary"
-            weight="medium"
-          >
-            Back to project
-          </Link>,
-          <Link
-            key="board"
-            to="/board/$projectId"
-            params={{ projectId: issue.projectId }}
-            color="secondary"
-            weight="medium"
-          >
-            Board
-          </Link>,
-        ]}
-        title={issue.title}
-        nonWrappingActions={!isNarrow}
-        subtitle={
-          <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-            <Token
-              label={issueStatusLabels[issue.status]}
-              color={STATUS_COLORS[issue.status]}
-              size="sm"
-              data-issue-status={issue.status}
-            />
-            <Text as="span" type="code" color="secondary" data-issue-identifier={issue.identifier}>
-              {issue.identifier}
-            </Text>
-            <PriorityBadge priority={issue.priority} />
-            {issue.assignee !== null && (
-              <Stack
-                as="span"
-                direction="horizontal"
-                gap={1}
-                vAlign="center"
-                data-issue-assignee=""
-              >
-                {issue.assignee.agentId !== undefined ? (
-                  <AgentAvatar
-                    name={issue.assignee.displayName}
-                    harness={
-                      activeSession?.agentId === issue.assignee.agentId
-                        ? activeRun?.harness
-                        : undefined
-                    }
-                    size={14}
-                  />
-                ) : (
-                  <HumanAvatar
-                    name={issue.assignee.displayName}
-                    avatarUrl={issue.assignee.avatarUrl}
-                    size="xsm"
-                    tooltip={false}
-                  />
-                )}
+  const pageHeader = (
+    <PageHeader
+      hasDivider={isNarrow}
+      breadcrumbs={[
+        <Link
+          key="project"
+          to="/projects/$projectId"
+          params={{ projectId: issue.projectId }}
+          color="secondary"
+          weight="medium"
+        >
+          Back to project
+        </Link>,
+        <Link
+          key="board"
+          to="/board/$projectId"
+          params={{ projectId: issue.projectId }}
+          color="secondary"
+          weight="medium"
+        >
+          Board
+        </Link>,
+      ]}
+      title={issue.title}
+      nonWrappingActions={!isNarrow}
+      subtitle={
+        <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+          <Token
+            label={issueStatusLabels[issue.status]}
+            color={STATUS_COLORS[issue.status]}
+            size="sm"
+            data-issue-status={issue.status}
+          />
+          <Text as="span" type="code" color="secondary" data-issue-identifier={issue.identifier}>
+            {issue.identifier}
+          </Text>
+          <PriorityBadge priority={issue.priority} />
+          {issue.assignee !== null && (
+            <Stack as="span" direction="horizontal" gap={1} vAlign="center" data-issue-assignee="">
+              {issue.assignee.agentId !== undefined ? (
+                <AgentAvatar
+                  name={issue.assignee.displayName}
+                  harness={
+                    activeSession?.agentId === issue.assignee.agentId
+                      ? activeRun?.harness
+                      : undefined
+                  }
+                  size={14}
+                />
+              ) : (
+                <HumanAvatar
+                  name={issue.assignee.displayName}
+                  avatarUrl={issue.assignee.avatarUrl}
+                  size="xsm"
+                  tooltip={false}
+                />
+              )}
+              <Text type="supporting" color="primary" weight="medium">
+                {issue.assignee.displayName}
+              </Text>
+            </Stack>
+          )}
+          {activeSession !== undefined &&
+            activeRun !== undefined &&
+            issue.assignee?.agentId !== activeSession.agentId && (
+              <Stack as="span" direction="horizontal" gap={1} vAlign="center" data-working-agent="">
+                <AgentAvatar name={activeRun.agentName} harness={activeRun.harness} size={14} />
                 <Text type="supporting" color="primary" weight="medium">
-                  {issue.assignee.displayName}
+                  {activeRun.agentName}
                 </Text>
               </Stack>
             )}
-            {activeSession !== undefined &&
-              activeRun !== undefined &&
-              issue.assignee?.agentId !== activeSession.agentId && (
-                <Stack
-                  as="span"
-                  direction="horizontal"
-                  gap={1}
-                  vAlign="center"
-                  data-working-agent=""
-                >
-                  <AgentAvatar name={activeRun.agentName} harness={activeRun.harness} size={14} />
-                  <Text type="supporting" color="primary" weight="medium">
-                    {activeRun.agentName}
-                  </Text>
-                </Stack>
-              )}
-            <Text type="supporting" color="secondary">
-              Created by {issue.createdBy.displayName} · Updated{" "}
-              <time dateTime={issue.updatedAt} title={formatFullDateTime(issue.updatedAt)}>
-                {relativeTime(issue.updatedAt)}
-              </time>{" "}
-              by {issue.updatedBy.displayName}
-            </Text>
-          </Stack>
-        }
-        actions={
-          <>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              label="Copy link"
-              onClick={() => void onCopyLink()}
-            />
-            {canContribute && (
-              <>
-                {!isEditing && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    label="Edit"
-                    data-issue-edit=""
-                    onClick={() => setIsEditing(true)}
-                  />
-                )}
+          <Text type="supporting" color="secondary">
+            Created by {issue.createdBy.displayName} · Updated{" "}
+            <time dateTime={issue.updatedAt} title={formatFullDateTime(issue.updatedAt)}>
+              {relativeTime(issue.updatedAt)}
+            </time>{" "}
+            by {issue.updatedBy.displayName}
+          </Text>
+        </Stack>
+      }
+      actions={
+        <>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            label="Copy link"
+            onClick={() => void onCopyLink()}
+          />
+          {canContribute && (
+            <>
+              {!isEditing && (
                 <Button
                   type="button"
                   size="sm"
                   variant="secondary"
-                  isDisabled={statusSubmitting}
-                  isLoading={statusSubmitting}
-                  label={toggleNextStatus === "done" ? "Close issue" : "Reopen issue"}
-                  onClick={() => requestStatusChange(toggleNextStatus)}
+                  label="Edit"
+                  data-issue-edit=""
+                  onClick={() => setIsEditing(true)}
                 />
-              </>
-            )}
-          </>
-        }
-      />
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                isDisabled={statusSubmitting}
+                isLoading={statusSubmitting}
+                label={toggleNextStatus === "done" ? "Close issue" : "Reopen issue"}
+                onClick={() => requestStatusChange(toggleNextStatus)}
+              />
+            </>
+          )}
+        </>
+      }
+    />
+  );
 
+  const banners = (
+    <>
       {statusError !== undefined && (
         <Banner
           status="error"
@@ -673,365 +674,356 @@ function IssuePage() {
           description="End the session before moving this issue to trash."
         />
       )}
+    </>
+  );
 
-      {(() => {
-        const mainColumn = (
-          <Stack gap={5}>
-            {isEditing ? (
-              <Section padding={4}>
-                <Stack gap={2} data-issue-editor="">
-                  <Heading level={2} color="inherit">
-                    Edit issue
-                  </Heading>
-                  <TitleBodyForm
-                    key={issue.updatedAt}
-                    idPrefix="edit-issue"
-                    titleLabel="Title"
-                    bodyLabel="Body"
-                    bodyRows={15}
-                    submitLabel="Save issue"
-                    fallbackError="Could not save the issue."
-                    initialTitle={issue.title}
-                    initialBody={issue.body}
-                    mentionIssues={projectIssues}
-                    projectId={issue.projectId}
-                    secondaryAction={
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        label="Cancel"
-                        onClick={() => setIsEditing(false)}
-                      />
-                    }
-                    onSubmit={async ({ title, body }) => {
-                      const updated = await updateIssue(issue.id, { title, body });
-                      queryClient.setQueryData<IssueDetail>(issueQuery(issue.id).queryKey, (old) =>
-                        old === undefined ? old : { ...old, ...updated },
-                      );
-                      await Promise.all([
-                        queryClient.invalidateQueries({
-                          queryKey: issuesQuery(issue.projectId).queryKey,
-                        }),
-                        queryClient.invalidateQueries({
-                          queryKey: projectActivityQuery(issue.projectId).queryKey,
-                        }),
-                        queryClient.invalidateQueries({
-                          queryKey: issueActivityQuery(issue.id).queryKey,
-                        }),
-                      ]);
-                      setIsEditing(false);
-                      toast({ body: "Issue updated." });
-                    }}
-                  />
-                </Stack>
-              </Section>
-            ) : (
-              <Section variant="transparent" padding={0}>
-                <Stack gap={3}>
-                  <Stack
-                    direction="horizontal"
-                    gap={2}
-                    wrap="wrap"
-                    justify="between"
-                    align="center"
-                  >
-                    <Heading level={2} color="inherit">
-                      Description
-                    </Heading>
-                    {canContribute && issue.body === "" && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        label="Add description"
-                        onClick={() => setIsEditing(true)}
-                      />
-                    )}
-                  </Stack>
-                  {issue.body === "" ? (
-                    <Text as="p" display="block" type="supporting" color="secondary">
-                      No description yet.
-                    </Text>
-                  ) : (
-                    <Stack data-issue-body="">
-                      <MentionMarkdown projectId={issue.projectId} issueRefs={projectIssues}>
-                        {issue.body}
-                      </MentionMarkdown>
-                    </Stack>
-                  )}
-                </Stack>
-              </Section>
-            )}
-
-            <Subtasks issue={issue} issues={projectIssues} canContribute={canContribute} />
-
-            <Blockers
-              issueId={issue.id}
+  const mainColumn = (
+    <Stack gap={5}>
+      {isEditing ? (
+        <Section padding={4}>
+          <Stack gap={2} data-issue-editor="">
+            <Heading level={2} color="inherit">
+              Edit issue
+            </Heading>
+            <TitleBodyForm
+              key={issue.updatedAt}
+              idPrefix="edit-issue"
+              titleLabel="Title"
+              bodyLabel="Body"
+              bodyRows={15}
+              submitLabel="Save issue"
+              fallbackError="Could not save the issue."
+              initialTitle={issue.title}
+              initialBody={issue.body}
+              mentionIssues={projectIssues}
               projectId={issue.projectId}
-              blockedBy={blockedBy}
-              blocking={blocking}
-              candidates={projectIssues}
-              canContribute={canContribute}
-            />
-
-            <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
-              <Stack gap={3}>
-                <Heading level={2} color="inherit">
-                  Links
-                </Heading>
-                {issue.links.length === 0 ? (
-                  <Text as="p" display="block" type="supporting" color="secondary">
-                    No links attached.
-                  </Text>
-                ) : (
-                  <Stack as="ul" gap={2}>
-                    {issue.links.map((link) => (
-                      <Stack as="li" key={link.id} data-link-id={link.id}>
-                        <Card variant="muted" padding={2}>
-                          <Stack
-                            direction="horizontal"
-                            gap={2}
-                            wrap="wrap"
-                            justify="between"
-                            vAlign="center"
-                          >
-                            <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
-                              <Token
-                                label={LINK_KIND_LABELS[link.kind]}
-                                color="gray"
-                                size="sm"
-                                data-link-kind={link.kind}
-                              />
-                              <AstryxLink href={link.url} target="_blank" rel="noopener noreferrer">
-                                {link.title}
-                              </AstryxLink>
-                            </Stack>
-                            <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
-                              <Text type="supporting" color="secondary">
-                                {link.createdBy.displayName}
-                              </Text>
-                              {canContribute && (
-                                <LinkRemoveButton
-                                  issueId={issue.id}
-                                  projectId={issue.projectId}
-                                  link={link}
-                                />
-                              )}
-                            </Stack>
-                          </Stack>
-                        </Card>
-                      </Stack>
-                    ))}
-                  </Stack>
-                )}
-                {canContribute && (
-                  <Collapsible
-                    defaultIsOpen={false}
-                    trigger={
-                      <Text type="body" weight="semibold">
-                        Add link
-                      </Text>
-                    }
-                  >
-                    <Stack paddingBlockStart={2}>
-                      <LinkForm issueId={issue.id} projectId={issue.projectId} />
-                    </Stack>
-                  </Collapsible>
-                )}
-              </Stack>
-            </Section>
-
-            <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
-              <Stack gap={3}>
-                <Heading level={2} color="inherit">
-                  Timeline ({timeline.length})
-                </Heading>
-                {timeline.length === 0 ? (
-                  <Text as="p" display="block" type="supporting" color="secondary">
-                    No comments or lifecycle events yet.
-                  </Text>
-                ) : (
-                  <Stack as="ul" gap={3} data-issue-timeline="">
-                    {timeline.map((entry) => (
-                      <TimelineRow
-                        key={entry.id}
-                        entry={entry}
-                        projectId={issue.projectId}
-                        projectIssues={projectIssues}
-                        canContribute={canContribute}
-                        onQuoteReply={onQuoteReply}
-                      />
-                    ))}
-                  </Stack>
-                )}
-                {canContribute && (
-                  <>
-                    <Divider />
-                    <CommentForm
-                      issueId={issue.id}
-                      projectId={issue.projectId}
-                      issues={projectIssues}
-                      body={commentDraft}
-                      onBodyChange={setCommentDraft}
-                      inputRef={commentInputRef}
-                      focusSignal={commentFocusSignal}
-                    />
-                  </>
-                )}
-              </Stack>
-            </Section>
-          </Stack>
-        );
-
-        const inspectorColumn = (
-          <Stack gap={4}>
-            <Section variant="transparent" padding={0} aria-label="Issue properties">
-              <Stack gap={3}>
-                <Heading level={2} color="inherit">
-                  Properties
-                </Heading>
-
-                <Divider />
-
-                {canContribute ? (
-                  <Selector
-                    label="Status"
-                    id="issue-status-selector"
-                    size="sm"
-                    width="100%"
-                    value={issue.status}
-                    isDisabled={statusSubmitting}
-                    onChange={(value) => requestStatusChange(IssueStatus.parse(value))}
-                    options={STATUS_OPTIONS.map((status) => ({
-                      value: status,
-                      label: issueStatusLabels[status],
-                    }))}
-                  />
-                ) : (
-                  <Stack gap={0.5} hAlign="start">
-                    <Text type="supporting" weight="semibold" color="secondary">
-                      Status
-                    </Text>
-                    <Token
-                      label={issueStatusLabels[issue.status]}
-                      color={STATUS_COLORS[issue.status]}
-                      size="sm"
-                    />
-                  </Stack>
-                )}
-
-                <AssigneeControl
-                  issue={issue}
-                  candidates={candidates}
-                  canContribute={canContribute}
-                  activeHarness={
-                    issue.assignee?.agentId !== undefined &&
-                    activeSession?.agentId === issue.assignee.agentId
-                      ? activeRun?.harness
-                      : undefined
-                  }
+              secondaryAction={
+                <Button
+                  type="button"
+                  variant="secondary"
+                  label="Cancel"
+                  onClick={() => setIsEditing(false)}
                 />
-
-                {canContribute ? (
-                  <IssuePriorityControls
-                    issue={issue}
-                    issues={projectIssues}
-                    projectId={issue.projectId}
-                    showReorder={false}
-                  />
-                ) : (
-                  <Stack gap={0.5} hAlign="start">
-                    <Text type="supporting" weight="semibold" color="secondary">
-                      Priority
-                    </Text>
-                    <PriorityBadge priority={issue.priority} />
-                  </Stack>
-                )}
-
-                <IssueLabels issue={issue} labels={projectLabels} canContribute={canContribute} />
-              </Stack>
-            </Section>
-
-            <SessionStatus
-              issueId={issue.id}
-              projectId={issue.projectId}
-              canContribute={canContribute}
+              }
+              onSubmit={async ({ title, body }) => {
+                const updated = await updateIssue(issue.id, { title, body });
+                queryClient.setQueryData<IssueDetail>(issueQuery(issue.id).queryKey, (old) =>
+                  old === undefined ? old : { ...old, ...updated },
+                );
+                await Promise.all([
+                  queryClient.invalidateQueries({
+                    queryKey: issuesQuery(issue.projectId).queryKey,
+                  }),
+                  queryClient.invalidateQueries({
+                    queryKey: projectActivityQuery(issue.projectId).queryKey,
+                  }),
+                  queryClient.invalidateQueries({
+                    queryKey: issueActivityQuery(issue.id).queryKey,
+                  }),
+                ]);
+                setIsEditing(false);
+                toast({ body: "Issue updated." });
+              }}
             />
-
-            <SessionInspector
-              key={`${issue.id}:${inspector ?? false}:${inspectorSession ?? ""}`}
-              issueId={issue.id}
-              canContribute={canContribute}
-              initialOpen={inspector}
-              initialSessionId={inspectorSession}
-            />
-
-            {canContribute && (
-              <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
-                <Stack hAlign="start">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="destructive"
-                    label="Move to Trash"
-                    isDisabled={activeSession !== undefined || trashing}
-                    data-trash-button=""
-                    onClick={() => setConfirmTrashOpen(true)}
-                  />
-                </Stack>
-              </Section>
+          </Stack>
+        </Section>
+      ) : (
+        <Stack gap={3}>
+          <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+            <Heading level={2} color="inherit">
+              Description
+            </Heading>
+            {canContribute && issue.body === "" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                label="Add description"
+                onClick={() => setIsEditing(true)}
+              />
             )}
           </Stack>
-        );
-
-        if (isNarrow) {
-          return (
-            <Stack gap={4}>
-              {mainColumn}
-              <Divider />
-              {inspectorColumn}
+          {issue.body === "" ? (
+            <Text as="p" display="block" type="supporting" color="secondary">
+              No description yet.
+            </Text>
+          ) : (
+            <Stack data-issue-body="">
+              <MentionMarkdown projectId={issue.projectId} issueRefs={projectIssues}>
+                {issue.body}
+              </MentionMarkdown>
             </Stack>
-          );
-        }
+          )}
+        </Stack>
+      )}
 
-        return (
-          <Layout
-            height="auto"
-            padding={0}
-            content={<Stack paddingInlineEnd={6}>{mainColumn}</Stack>}
-            end={
-              <LayoutPanel
-                width={320}
-                padding={0}
-                isScrollable
-                role="complementary"
-                label="Issue details"
-                data-issue-sidebar=""
-              >
-                <Section variant="transparent" dividers={["start"]} padding={0}>
-                  <Stack paddingInlineStart={6}>{inspectorColumn}</Stack>
-                </Section>
-              </LayoutPanel>
-            }
+      <Subtasks issue={issue} issues={projectIssues} canContribute={canContribute} />
+
+      <Blockers
+        issueId={issue.id}
+        projectId={issue.projectId}
+        blockedBy={blockedBy}
+        blocking={blocking}
+        candidates={projectIssues}
+        canContribute={canContribute}
+      />
+
+      <Stack gap={4}>
+        <Divider />
+        <Stack gap={3}>
+          <Heading level={2} color="inherit">
+            Links
+          </Heading>
+          {issue.links.length === 0 ? (
+            <Text as="p" display="block" type="supporting" color="secondary">
+              No links attached.
+            </Text>
+          ) : (
+            <Stack as="ul" gap={2}>
+              {issue.links.map((link) => (
+                <Stack as="li" key={link.id} data-link-id={link.id}>
+                  <Card variant="muted" padding={2}>
+                    <Stack
+                      direction="horizontal"
+                      gap={2}
+                      wrap="wrap"
+                      justify="between"
+                      vAlign="center"
+                    >
+                      <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
+                        <Token
+                          label={LINK_KIND_LABELS[link.kind]}
+                          color="gray"
+                          size="sm"
+                          data-link-kind={link.kind}
+                        />
+                        <AstryxLink href={link.url} target="_blank" rel="noopener noreferrer">
+                          {link.title}
+                        </AstryxLink>
+                      </Stack>
+                      <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
+                        <Text type="supporting" color="secondary">
+                          {link.createdBy.displayName}
+                        </Text>
+                        {canContribute && (
+                          <LinkRemoveButton
+                            issueId={issue.id}
+                            projectId={issue.projectId}
+                            link={link}
+                          />
+                        )}
+                      </Stack>
+                    </Stack>
+                  </Card>
+                </Stack>
+              ))}
+            </Stack>
+          )}
+          {canContribute && (
+            <Collapsible
+              defaultIsOpen={false}
+              trigger={
+                <Text type="body" weight="semibold">
+                  Add link
+                </Text>
+              }
+            >
+              <Stack paddingBlockStart={2}>
+                <LinkForm issueId={issue.id} projectId={issue.projectId} />
+              </Stack>
+            </Collapsible>
+          )}
+        </Stack>
+      </Stack>
+
+      <Stack gap={4}>
+        <Divider />
+        <Stack gap={3}>
+          <Heading level={2} color="inherit">
+            Timeline ({timeline.length})
+          </Heading>
+          {timeline.length === 0 ? (
+            <Text as="p" display="block" type="supporting" color="secondary">
+              No comments or lifecycle events yet.
+            </Text>
+          ) : (
+            <Stack as="ul" gap={3} data-issue-timeline="">
+              {timeline.map((entry) => (
+                <TimelineRow
+                  key={entry.id}
+                  entry={entry}
+                  projectId={issue.projectId}
+                  projectIssues={projectIssues}
+                  canContribute={canContribute}
+                  onQuoteReply={onQuoteReply}
+                />
+              ))}
+            </Stack>
+          )}
+          {canContribute && (
+            <>
+              <Divider />
+              <CommentForm
+                issueId={issue.id}
+                projectId={issue.projectId}
+                issues={projectIssues}
+                body={commentDraft}
+                onBodyChange={setCommentDraft}
+                inputRef={commentInputRef}
+                focusSignal={commentFocusSignal}
+              />
+            </>
+          )}
+        </Stack>
+      </Stack>
+    </Stack>
+  );
+
+  const inspectorColumn = (
+    <Stack gap={4}>
+      <Stack gap={3} aria-label="Issue properties">
+        <Heading level={2} color="inherit">
+          Properties
+        </Heading>
+
+        <Divider />
+
+        {canContribute ? (
+          <Selector
+            label="Status"
+            id="issue-status-selector"
+            size="sm"
+            width="100%"
+            value={issue.status}
+            isDisabled={statusSubmitting}
+            onChange={(value) => requestStatusChange(IssueStatus.parse(value))}
+            options={STATUS_OPTIONS.map((status) => ({
+              value: status,
+              label: issueStatusLabels[status],
+            }))}
           />
-        );
-      })()}
+        ) : (
+          <Stack gap={0.5} hAlign="start">
+            <Text type="supporting" weight="semibold" color="secondary">
+              Status
+            </Text>
+            <Token
+              label={issueStatusLabels[issue.status]}
+              color={STATUS_COLORS[issue.status]}
+              size="sm"
+            />
+          </Stack>
+        )}
+
+        <AssigneeControl
+          issue={issue}
+          candidates={candidates}
+          canContribute={canContribute}
+          activeHarness={
+            issue.assignee?.agentId !== undefined &&
+            activeSession?.agentId === issue.assignee.agentId
+              ? activeRun?.harness
+              : undefined
+          }
+        />
+
+        {canContribute ? (
+          <IssuePriorityControls
+            issue={issue}
+            issues={projectIssues}
+            projectId={issue.projectId}
+            showReorder={false}
+          />
+        ) : (
+          <Stack gap={0.5} hAlign="start">
+            <Text type="supporting" weight="semibold" color="secondary">
+              Priority
+            </Text>
+            <PriorityBadge priority={issue.priority} />
+          </Stack>
+        )}
+
+        <IssueLabels issue={issue} labels={projectLabels} canContribute={canContribute} />
+      </Stack>
+
+      <SessionStatus issueId={issue.id} projectId={issue.projectId} canContribute={canContribute} />
+
+      <SessionInspector
+        key={`${issue.id}:${inspector ?? false}:${inspectorSession ?? ""}`}
+        issueId={issue.id}
+        canContribute={canContribute}
+        initialOpen={inspector}
+        initialSessionId={inspectorSession}
+      />
 
       {canContribute && (
-        <>
-          <AlertDialog
-            isOpen={confirmTrashOpen}
-            onOpenChange={setConfirmTrashOpen}
-            title={`Move ${issue.identifier} to Trash?`}
-            description="Soft-deleted issues stay recoverable from project Trash for 30 days."
-            actionLabel="Move to Trash"
-            actionVariant="destructive"
-            isActionLoading={trashing}
-            onAction={() => void onDelete()}
-          />
-        </>
+        <Stack gap={4}>
+          <Divider />
+          <Stack hAlign="start">
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              label="Move to Trash"
+              isDisabled={activeSession !== undefined || trashing}
+              data-trash-button=""
+              onClick={() => setConfirmTrashOpen(true)}
+            />
+          </Stack>
+        </Stack>
       )}
     </Stack>
+  );
+
+  return (
+    <>
+      <Layout
+        contentWidth="78rem"
+        padding={6}
+        header={!isNarrow && <LayoutHeader hasDivider>{pageHeader}</LayoutHeader>}
+        content={
+          <LayoutContent isScrollable>
+            <Stack gap={5}>
+              {isNarrow && pageHeader}
+              {banners}
+              {mainColumn}
+              {isNarrow && (
+                <>
+                  <Divider />
+                  {inspectorColumn}
+                </>
+              )}
+            </Stack>
+          </LayoutContent>
+        }
+        end={
+          !isNarrow && (
+            <LayoutPanel
+              width={320}
+              hasDivider
+              isScrollable
+              role="complementary"
+              label="Issue details"
+            >
+              {inspectorColumn}
+            </LayoutPanel>
+          )
+        }
+      />
+
+      {canContribute && (
+        <AlertDialog
+          isOpen={confirmTrashOpen}
+          onOpenChange={setConfirmTrashOpen}
+          title={`Move ${issue.identifier} to Trash?`}
+          description="Soft-deleted issues stay recoverable from project Trash for 30 days."
+          actionLabel="Move to Trash"
+          actionVariant="destructive"
+          isActionLoading={trashing}
+          onAction={() => void onDelete()}
+        />
+      )}
+    </>
   );
 }
 
@@ -1068,7 +1060,7 @@ function Blockers({
 
   async function onAdd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (selected === "") return;
+    if (selected === "" || submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -1106,7 +1098,8 @@ function Blockers({
   );
 
   return (
-    <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={4}>
+    <Stack gap={4}>
+      <Divider />
       <Stack gap={3}>
         <Heading level={2} color="inherit">
           Dependencies
@@ -1265,7 +1258,7 @@ function Blockers({
           if (confirmRemove !== undefined) void onRemove(confirmRemove);
         }}
       />
-    </Section>
+    </Stack>
   );
 }
 
@@ -1293,6 +1286,7 @@ function CommentForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -1355,6 +1349,7 @@ function LinkForm({ issueId, projectId }: { issueId: string; projectId: string }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {

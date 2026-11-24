@@ -52,6 +52,7 @@ export function TitleBodyForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Timestamp } from "./common.ts";
+import { ProjectKey } from "./projects.ts";
 
 
 
@@ -19,7 +20,10 @@ export const Question = z
   .object({
     id: z.string(),
     issueId: z.string(),
+    issueNumber: z.int().positive(),
+    issueTitle: z.string(),
     projectId: z.string(),
+    projectKey: ProjectKey,
     workspaceId: z.string(),
     agentId: z.string(),
     runId: z.string(),
@@ -43,6 +47,8 @@ export const Question = z
     followUpAt: Timestamp.nullable(),
     resolvedAt: Timestamp.nullable(),
     createdAt: Timestamp,
+    /** Whether the signed-in caller may answer this question. */
+    canAnswer: z.boolean(),
   })
   .meta({ id: "Question" });
 export type Question = z.infer<typeof Question>;

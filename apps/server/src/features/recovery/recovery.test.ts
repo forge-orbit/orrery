@@ -23,8 +23,9 @@ import { tokenHash } from "../../platform/tokens.ts";
 import {
   accountByEmail,
   createAccountsService,
+  hashPassword,
   invalidateAccountSessions,
-  setAccountPassword,
+  setAccountPasswordHash,
 } from "../accounts/index.ts";
 import type { OutgoingMail } from "../settings/index.ts";
 import {
@@ -114,7 +115,9 @@ describe("password recovery", () => {
       db: database.db,
       accounts: {
         accountByEmail: (email, tx) => accountByEmail(tx ?? database.db, email),
-        setPassword: (humanId, password, tx) => setAccountPassword(tx, humanId, password),
+        hashPassword: (password) => hashPassword(password),
+        setPasswordHash: (humanId, passwordHash, tx) =>
+          setAccountPasswordHash(tx, humanId, passwordHash),
         invalidateBrowserSessions: (humanId, tx) => invalidateAccountSessions(tx, humanId),
       },
       deliver,
@@ -159,6 +162,32 @@ describe("password recovery", () => {
 
   async function tokenFromLastMail(): Promise<string> {
     return tokenFromMail(delivered.at(-1));
+  }
+
+  async function waitForLockWait(pattern: string) {
+    await expect
+      .poll(
+        async () => {
+          const [row] = await database.sql<{ count: number }[]>`
+            select count(*)::int as count
+            from pg_stat_activity
+            where wait_event_type = 'Lock'
+              and query ilike ${`%${pattern}%`}
+              and pid <> pg_backend_pid()
+          `;
+          return row?.count ?? 0;
+        },
+        { timeout: 5_000, interval: 25 },
+      )
+      .toBeGreaterThan(0);
+  }
+
+  async function usedAtOf(raw: string) {
+    const [row] = await database.db
+      .select({ usedAt: passwordResetTokens.usedAt })
+      .from(passwordResetTokens)
+      .where(eq(passwordResetTokens.tokenHash, tokenHash(raw)));
+    return row === undefined ? undefined : row.usedAt;
   }
 
   it("mails a single-use link only to a verified address, with one uniform answer", async () => {
@@ -284,6 +313,112 @@ describe("password recovery", () => {
     const rows = await database.db.select().from(passwordResetTokens);
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.usedAt !== null)).toBe(true);
+  });
+
+  it("settles two concurrent confirmations with different valid tokens without deadlocking", async () => {
+    const humanId = await bootstrap(true);
+    const first = randomBytes(32).toString("base64url");
+    const second = randomBytes(32).toString("base64url");
+    await insertToken(humanId, first, 3600);
+    await insertToken(humanId, second, 3600);
+
+    const results = await Promise.allSettled([
+      service.confirmReset(first, NEW_PASSWORD),
+      service.confirmReset(second, "another-new-password"),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const loser = results.find((result) => result.status === "rejected");
+    if (loser?.status !== "rejected") throw new Error("expected one confirmation to lose");
+    expect(loser.reason).toBeInstanceOf(RecoveryError);
+    expect(loser.reason).toMatchObject({ kind: "reset_token_invalid" });
+
+    const winningPassword =
+      results[0]?.status === "fulfilled" ? NEW_PASSWORD : "another-new-password";
+    expect((await accounts().login({ email: EMAIL, password: winningPassword })).email).toBe(EMAIL);
+
+    const rows = await database.db.select().from(passwordResetTokens);
+    expect(rows.every((row) => row.usedAt !== null)).toBe(true);
+    expect(
+      (await database.db.select().from(accountRecoveryEvents)).filter(
+        (event) => event.type === "password_reset_completed",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("locks the human before it redeems the reset token", async () => {
+    const humanId = await bootstrap(true);
+    const token = randomBytes(32).toString("base64url");
+    await insertToken(humanId, token, 3600);
+
+    let markLocked!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      markLocked = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holder = database.sql.begin(async (tx) => {
+      await tx`select id from humans where id = ${humanId} for update`;
+      markLocked();
+      await gate;
+    });
+
+    let confirmation: Promise<{ message: string }> | undefined;
+    try {
+      await locked;
+      confirmation = service.confirmReset(token, NEW_PASSWORD);
+      await waitForLockWait('%from "humans"%for update%');
+      expect(await usedAtOf(token)).toBeNull();
+      release();
+      await holder;
+      await expect(confirmation).resolves.toEqual({ message: PASSWORD_RESET_CONFIRM_MESSAGE });
+    } finally {
+      release();
+      await holder.catch(() => {});
+      if (confirmation !== undefined) await confirmation.catch(() => {});
+    }
+
+    expect(await usedAtOf(token)).not.toBeNull();
+  });
+
+  it("locks the human before local recovery revokes pending reset tokens", async () => {
+    const humanId = await bootstrap(true);
+    const token = randomBytes(32).toString("base64url");
+    await insertToken(humanId, token, 3600);
+
+    let markLocked!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      markLocked = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holder = database.sql.begin(async (tx) => {
+      await tx`select id from humans where id = ${humanId} for update`;
+      markLocked();
+      await gate;
+    });
+
+    let recovery: Promise<{ email: string; message: string }> | undefined;
+    try {
+      await locked;
+      recovery = service.localRecover(EMAIL, NEW_PASSWORD);
+      await waitForLockWait('%from "humans"%for update%');
+      expect(await usedAtOf(token)).toBeNull();
+      release();
+      await holder;
+      await expect(recovery).resolves.toMatchObject({ email: EMAIL });
+    } finally {
+      release();
+      await holder.catch(() => {});
+      if (recovery !== undefined) await recovery.catch(() => {});
+    }
+
+    expect(await usedAtOf(token)).not.toBeNull();
+    expect((await accounts().login({ email: EMAIL, password: NEW_PASSWORD })).email).toBe(EMAIL);
   });
 
   it("local recovery revokes pending links and is for system administrators only", async () => {
@@ -472,7 +607,9 @@ describe("password recovery", () => {
             db: database.db,
             accounts: {
               accountByEmail: (email, tx) => accountByEmail(tx ?? database.db, email),
-              setPassword: (humanId, password, tx) => setAccountPassword(tx, humanId, password),
+              hashPassword: (password) => hashPassword(password),
+              setPasswordHash: (humanId, passwordHash, tx) =>
+                setAccountPasswordHash(tx, humanId, passwordHash),
               invalidateBrowserSessions: (humanId, tx) => invalidateAccountSessions(tx, humanId),
             },
             deliver: async (mail) => {

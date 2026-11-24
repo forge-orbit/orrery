@@ -136,6 +136,11 @@ test("sticks the right sidebar on desktop and stacks it below the content on nar
 
   if (firstSidebarBox === null || secondSidebarBox === null)
     throw new Error("the sticky sidebar did not lay out");
+  const propertiesHeadingBox = await sidebar
+    .getByRole("heading", { name: "Properties", level: 2 })
+    .boundingBox();
+  if (propertiesHeadingBox === null) throw new Error("the properties heading did not lay out");
+  expect(propertiesHeadingBox.y).toBeGreaterThanOrEqual(20);
   expect(Math.abs(secondSidebarBox.y - firstSidebarBox.y)).toBeLessThan(4);
 
   async function assertNarrowLayout(width: number, height: number) {

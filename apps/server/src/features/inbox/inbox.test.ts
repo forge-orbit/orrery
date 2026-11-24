@@ -332,6 +332,9 @@ describe("questions against real Postgres", () => {
 
     expect(question.status).toBe("open");
     expect(question.proposedFallback).toBe("Use v1");
+    expect(question.issueNumber).toBe(issue.number);
+    expect(question.issueTitle).toBe(issue.title);
+    expect(question.canAnswer).toBe(false);
     expect(await isNeedsInput(issue.id)).toBe(true);
     expect(delivered).toHaveLength(1);
     expect(delivered[0]?.to).toBe(f.email);
@@ -342,6 +345,8 @@ describe("questions against real Postgres", () => {
     );
     expect(kindOf(agentAnswer)).toBe("agents_cannot_answer");
     expect((await database.db.select().from(questionRows))[0]?.status).toBe("open");
+    const listed = (await inbox.list(await humanActor(f))).find((row) => row.id === question.id);
+    expect(listed?.canAnswer).toBe(true);
   });
 
   it("resolves exactly once when two humans answer concurrently", async () => {
@@ -532,6 +537,111 @@ describe("questions against real Postgres", () => {
     expect(fromList?.status).toBe("paused");
     const fromHistory = await inbox.issueHistory(await humanActor(f), issue.id);
     expect(fromHistory[0]?.status).toBe("paused");
+  });
+
+  it("lists questions from every accessible workspace with one ceiling call per workspace", async () => {
+    const f = await bootstrap();
+    const issue = await newIssue(f);
+    const runId = await newRun(f);
+    await claim(f, issue.id, runId);
+    const mine = await ask(f, issue.id, runId);
+
+    const secondWorkspaceId = randomUUID();
+    await database.db.transaction(async (tx) => {
+      await tx.insert(workspaces).values({
+        id: secondWorkspaceId,
+        kind: "shared",
+        name: "Second inbox workspace",
+      });
+      await tx.insert(workspaceMemberships).values({
+        id: randomUUID(),
+        workspaceId: secondWorkspaceId,
+        humanId: f.humanId,
+        isOwner: true,
+      });
+    });
+    const [secondProject] = await database.db
+      .insert(projects)
+      .values({
+        id: randomUUID(),
+        workspaceId: secondWorkspaceId,
+        name: "Second inbox project",
+        key: `S${randomUUID().replaceAll("-", "").slice(0, 9).toUpperCase()}`,
+        createdByHumanId: f.humanId,
+      })
+      .returning();
+    const [secondIssue] = await database.db
+      .insert(issues)
+      .values({
+        id: randomUUID(),
+        projectId: secondProject!.id,
+        number: 1,
+        title: "Second workspace issue",
+        status: "in_progress",
+        priority: "medium",
+        sortOrder: 65535,
+        createdByHumanId: f.humanId,
+        updatedByHumanId: f.humanId,
+        needsInput: true,
+      })
+      .returning();
+    const [secondRun] = await database.db
+      .insert(runRows)
+      .values({
+        id: randomUUID(),
+        agentId: f.agentId,
+        workspaceId: secondWorkspaceId,
+        status: "active",
+      })
+      .returning();
+    const [secondSession] = await database.db
+      .insert(workSessions)
+      .values({
+        id: randomUUID(),
+        agentId: f.agentId,
+        runId: secondRun!.id,
+        workspaceId: secondWorkspaceId,
+        issueId: secondIssue!.id,
+        status: "active",
+        leaseExpiresAt: new Date(Date.now() + 5 * 60_000),
+        progress: "working",
+      })
+      .returning();
+    const secondQuestionId = randomUUID();
+    await database.db.insert(questionRows).values({
+      id: secondQuestionId,
+      issueId: secondIssue!.id,
+      projectId: secondProject!.id,
+      workspaceId: secondWorkspaceId,
+      agentId: f.agentId,
+      runId: secondRun!.id,
+      sessionId: secondSession!.id,
+      question: "A second workspace question?",
+      proposedFallback: "Use the default",
+      status: "open",
+      responseDeadlineAt: sql`statement_timestamp() - interval '1 second'`,
+      createdAt: sql`statement_timestamp() - interval '2 hours'`,
+    });
+
+    const calls: { workspaceId: string; projectIds: string[] }[] = [];
+    const measured = createInboxService({
+      db: database.db,
+      projectAccessCeiling: (tx, workspaceId, humanId, projectIds) => {
+        calls.push({ workspaceId, projectIds: [...projectIds] });
+        return projectsService.projectAccessCeiling(tx, workspaceId, humanId, projectIds);
+      },
+      projectAccessAtLeast,
+      deliver: async () => {},
+      log: silentLogger,
+    });
+    const rows = await measured.list(await humanActor(f));
+    expect(rows.map((row) => row.id).toSorted()).toEqual([mine.id, secondQuestionId].toSorted());
+    expect(rows.find((row) => row.id === secondQuestionId)?.status).toBe("paused");
+
+    expect(calls.map((call) => call.workspaceId).toSorted()).toEqual(
+      [f.workspaceId, secondWorkspaceId].toSorted(),
+    );
+    expect(calls).toHaveLength(2);
   });
 
   it("records the question and its resolution in project history", async () => {

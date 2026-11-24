@@ -486,12 +486,17 @@ async function expireStale(
   issueId: string,
   notify: NotifyActivity,
   onActivity: EnqueueWebhookActivity,
+  knownProjectId?: string,
 ): Promise<void> {
-  const [issue] = await tx
-    .select({ projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
+  const projectId =
+    knownProjectId ??
+    (
+      await tx
+        .select({ projectId: issues.projectId })
+        .from(issues)
+        .where(eq(issues.id, issueId))
+        .limit(1)
+    )[0]?.projectId;
   const expired = await tx
     .update(workSessions)
     .set({
@@ -509,12 +514,12 @@ async function expireStale(
     .returning({ id: workSessions.id, agentId: workSessions.agentId });
 
   if (expired.length > 0) await revertIssueToTodo(tx, issueId);
-  if (expired.length > 0 && issue !== undefined) {
+  if (expired.length > 0 && projectId !== undefined) {
     const activityId = randomUUID();
     const summary = "Work session expired: the five-minute claim lease lapsed";
     await tx.insert(projectActivity).values({
       id: activityId,
-      projectId: issue.projectId,
+      projectId,
       issueId,
       type: ProjectActivityType.enum.issue_session_expired,
       actorAgentId: expired[0]!.agentId,
@@ -524,7 +529,7 @@ async function expireStale(
     await onActivity(tx, activityId);
     await notify(tx, {
       activityId,
-      projectId: issue.projectId,
+      projectId,
       issueId,
       kind: "session_expired",
       summary,
@@ -865,7 +870,9 @@ export function createSessionsService({
         .orderBy(issues.id)
         .for("update");
 
-      for (const issueId of issueIds) await expireStale(tx, issueId, notifyActivity, onActivity);
+      for (const issueId of issueIds) {
+        await expireStale(tx, issueId, notifyActivity, onActivity, projectId);
+      }
     });
   };
 

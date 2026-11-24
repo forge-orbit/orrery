@@ -6,6 +6,7 @@ import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
+import type { ActiveWorkSession, WorkSession } from "@orrery/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { useState } from "react";
@@ -15,18 +16,25 @@ import { formatDateTime, formatFullDateTime, relativeTime } from "../../lib/time
 import { projectActivityQuery } from "../projects/index.ts";
 import { workspaceRunsQuery } from "../runs/index.ts";
 import { requestStop } from "./commands.ts";
-import { sessionQuery, sessionsQuery } from "./queries.ts";
+import { activeSessionsQuery, sessionQuery, sessionsQuery } from "./queries.ts";
 
 export function SessionStatus({
   issueId,
   projectId,
   canContribute,
+  session: preloadedSession,
 }: {
   issueId: string;
   projectId: string;
   canContribute: boolean;
+  /** A session already loaded by a parent poll, so this row need not fetch its own. */
+  session?: WorkSession | null;
 }) {
-  const { data: session } = useQuery(sessionQuery(issueId));
+  const { data: queriedSession } = useQuery({
+    ...sessionQuery(issueId),
+    enabled: preloadedSession === undefined,
+  });
+  const session = preloadedSession === undefined ? queriedSession : preloadedSession;
   const { data: runs = [] } = useQuery({
     ...workspaceRunsQuery(session?.workspaceId ?? ""),
     enabled: session !== null && session !== undefined,
@@ -113,10 +121,23 @@ function StopAgentForm({
     setError(undefined);
     try {
       const updated = await requestStop(issueId, reason);
+      // Cancel the in-flight polls first so a slower response cannot replace
+      // the stop flag with the snapshot that was fetched before it was set.
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: sessionQuery(issueId).queryKey }),
+        queryClient.cancelQueries({ queryKey: activeSessionsQuery(workspaceId).queryKey }),
+      ]);
       queryClient.setQueryData(sessionQuery(issueId).queryKey, updated);
+      queryClient.setQueryData<ActiveWorkSession[]>(
+        activeSessionsQuery(workspaceId).queryKey,
+        (current) =>
+          current?.map((entry) => (entry.id === updated.id ? { ...entry, ...updated } : entry)),
+      );
       setConfirmOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: sessionsQuery(issueId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: sessionQuery(issueId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: activeSessionsQuery(workspaceId).queryKey }),
         queryClient.invalidateQueries({ queryKey: ["workspaces", workspaceId, "work-sessions"] }),
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(projectId).queryKey }),
       ]);

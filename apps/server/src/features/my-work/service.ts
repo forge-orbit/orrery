@@ -94,51 +94,70 @@ export function createMyWorkService(deps: MyWorkDeps): MyWorkService {
             ...new Map([...personal, ...shared].map((row) => [row.id, row])).values(),
           ];
 
-          const assignedIssues: MyWorkResponse["assignedIssues"] = [];
-          const activeAgentSessions: MyWorkResponse["activeAgentSessions"] = [];
-          const needsInputQuestions: MyWorkResponse["needsInputQuestions"] = [];
+          if (scopes.length === 0) {
+            return { assignedIssues: [], activeAgentSessions: [], needsInputQuestions: [] };
+          }
 
-          for (const scope of scopes) {
-            const scopeProjects = await tx
-              .select({ id: projects.id, name: projects.name, key: projects.key })
-              .from(projects)
-              .where(eq(projects.workspaceId, scope.id));
-            if (scopeProjects.length === 0) continue;
+          const workspaceIds = scopes.map((scope) => scope.id);
+          const workspaceNames = new Map(scopes.map((scope) => [scope.id, scope.name]));
+          const allProjects = await tx
+            .select({
+              id: projects.id,
+              workspaceId: projects.workspaceId,
+              key: projects.key,
+            })
+            .from(projects)
+            .where(inArray(projects.workspaceId, workspaceIds));
+          if (allProjects.length === 0) {
+            return { assignedIssues: [], activeAgentSessions: [], needsInputQuestions: [] };
+          }
 
+          // The ceiling helper is workspace-scoped, so one call per workspace resolves
+          // every project instead of one call per project.
+          const projectsByWorkspace = new Map<
+            string,
+            { id: string; workspaceId: string; key: string }[]
+          >();
+          for (const project of allProjects) {
+            const list = projectsByWorkspace.get(project.workspaceId) ?? [];
+            list.push(project);
+            projectsByWorkspace.set(project.workspaceId, list);
+          }
+          const levels = new Map<string, ProjectAccessLevel | null>();
+          for (const [workspaceId, workspaceProjects] of projectsByWorkspace) {
             const ceiling = await deps.projectAccessCeiling(
               tx,
-              scope.id,
+              workspaceId,
               actor.humanId,
-              scopeProjects.map((row) => row.id),
+              workspaceProjects.map((row) => row.id),
             );
-            const levelOf = (projectId: string) => ceiling.get(projectId) ?? null;
-            const readable = scopeProjects
-              .filter((row) => {
-                const level = levelOf(row.id);
-                return (
-                  level !== null && deps.projectAccessAtLeast(level, ProjectAccessLevel.enum.read)
-                );
-              })
-              .map((row) => row.id);
-            if (readable.length === 0) continue;
-            const actionable = new Set(
-              scopeProjects
-                .filter((row) => {
-                  const level = levelOf(row.id);
-                  return (
-                    level !== null &&
-                    deps.projectAccessAtLeast(level, ProjectAccessLevel.enum.contribute)
-                  );
-                })
-                .map((row) => row.id),
-            );
-            const projectKey = new Map(scopeProjects.map((row) => [row.id, row.key]));
+            for (const [projectId, level] of ceiling) levels.set(projectId, level);
+          }
 
-            const assigned = await tx
+          const readable: string[] = [];
+          const actionable: string[] = [];
+          for (const project of allProjects) {
+            const level = levels.get(project.id) ?? null;
+            if (level === null) continue;
+            if (deps.projectAccessAtLeast(level, ProjectAccessLevel.enum.read)) {
+              readable.push(project.id);
+            }
+            if (deps.projectAccessAtLeast(level, ProjectAccessLevel.enum.contribute)) {
+              actionable.push(project.id);
+            }
+          }
+          if (readable.length === 0) {
+            return { assignedIssues: [], activeAgentSessions: [], needsInputQuestions: [] };
+          }
+
+          const assignedIssues = (
+            await tx
               .select({
                 id: issues.id,
                 projectId: issues.projectId,
                 projectName: projects.name,
+                projectKey: projects.key,
+                workspaceId: projects.workspaceId,
                 number: issues.number,
                 title: issues.title,
                 status: issues.status,
@@ -151,6 +170,7 @@ export function createMyWorkService(deps: MyWorkDeps): MyWorkService {
               .where(
                 and(
                   inArray(issues.projectId, readable),
+                  inArray(projects.workspaceId, workspaceIds),
                   eq(issues.assigneeType, "human"),
                   eq(issues.assigneeId, actor.humanId),
                   isNull(issues.deletedAt),
@@ -158,26 +178,25 @@ export function createMyWorkService(deps: MyWorkDeps): MyWorkService {
                 ),
               )
               .orderBy(desc(issues.updatedAt))
-              .limit(PAGE);
-            assignedIssues.push(
-              ...assigned.map((row) => ({
-                id: row.id,
-                projectId: row.projectId,
-                projectName: row.projectName,
-                projectKey: projectKey.get(row.projectId) ?? "",
-                workspaceId: scope.id,
-                workspaceName: scope.name,
-                number: row.number,
-                identifier: `${projectKey.get(row.projectId) ?? ""}-${row.number}`,
-                title: row.title,
-                status: row.status,
-                priority: row.priority,
-                needsInput: row.needsInput,
-                updatedAt: row.updatedAt.toISOString(),
-              })),
-            );
+              .limit(PAGE)
+          ).map((row) => ({
+            id: row.id,
+            projectId: row.projectId,
+            projectName: row.projectName,
+            projectKey: row.projectKey,
+            workspaceId: row.workspaceId,
+            workspaceName: workspaceNames.get(row.workspaceId) ?? "",
+            number: row.number,
+            identifier: `${row.projectKey}-${row.number}`,
+            title: row.title,
+            status: row.status,
+            priority: row.priority,
+            needsInput: row.needsInput,
+            updatedAt: row.updatedAt.toISOString(),
+          }));
 
-            const liveSessions = await tx
+          const activeAgentSessions = (
+            await tx
               .select({
                 id: workSessions.id,
                 agentId: workSessions.agentId,
@@ -190,6 +209,8 @@ export function createMyWorkService(deps: MyWorkDeps): MyWorkService {
                 issueTitle: issues.title,
                 issueProjectId: issues.projectId,
                 projectName: projects.name,
+                projectKey: projects.key,
+                workspaceId: workSessions.workspaceId,
                 leaseExpiresAt: workSessions.leaseExpiresAt,
                 progress: workSessions.progress,
                 stopRequestedAt: workSessions.stopRequestedAt,
@@ -205,43 +226,44 @@ export function createMyWorkService(deps: MyWorkDeps): MyWorkService {
               .innerJoin(projects, eq(projects.id, issues.projectId))
               .where(
                 and(
-                  eq(workSessions.workspaceId, scope.id),
+                  inArray(workSessions.workspaceId, workspaceIds),
                   eq(agents.humanId, actor.humanId),
                   eq(workSessions.status, "active"),
                   gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
                   isNull(issues.deletedAt),
                   inArray(issues.projectId, readable),
+                  eq(workSessions.workspaceId, projects.workspaceId),
                 ),
               )
               .orderBy(desc(workSessions.leaseExpiresAt))
-              .limit(PAGE);
-            activeAgentSessions.push(
-              ...liveSessions.map((row) => ({
-                sessionId: row.id,
-                agentId: row.agentId,
-                agentName: row.agentName,
-                runId: row.runId,
-                harness: row.harness,
-                model: row.model,
-                issueId: row.issueId,
-                issueIdentifier: `${projectKey.get(row.issueProjectId) ?? ""}-${row.issueNumber}`,
-                issueTitle: row.issueTitle,
-                projectId: row.issueProjectId,
-                projectName: row.projectName,
-                workspaceId: scope.id,
-                workspaceName: scope.name,
-                leaseExpiresAt: row.leaseExpiresAt.toISOString(),
-                progress: row.progress,
-                stopRequestedAt: row.stopRequestedAt?.toISOString() ?? null,
-                stopReason: row.stopReason,
-                inputTokens: row.inputTokens,
-                outputTokens: row.outputTokens,
-                costUsdMicros: row.costUsdMicros,
-              })),
-            );
+              .limit(PAGE)
+          ).map((row) => ({
+            sessionId: row.id,
+            agentId: row.agentId,
+            agentName: row.agentName,
+            runId: row.runId,
+            harness: row.harness,
+            model: row.model,
+            issueId: row.issueId,
+            issueIdentifier: `${row.projectKey}-${row.issueNumber}`,
+            issueTitle: row.issueTitle,
+            projectId: row.issueProjectId,
+            projectName: row.projectName,
+            workspaceId: row.workspaceId,
+            workspaceName: workspaceNames.get(row.workspaceId) ?? "",
+            leaseExpiresAt: row.leaseExpiresAt.toISOString(),
+            progress: row.progress,
+            stopRequestedAt: row.stopRequestedAt?.toISOString() ?? null,
+            stopReason: row.stopReason,
+            inputTokens: row.inputTokens,
+            outputTokens: row.outputTokens,
+            costUsdMicros: row.costUsdMicros,
+          }));
 
-            if (actionable.size > 0) {
-              const pending = await tx
+          let needsInputQuestions: MyWorkResponse["needsInputQuestions"] = [];
+          if (actionable.length > 0) {
+            needsInputQuestions = (
+              await tx
                 .select({
                   id: questions.id,
                   issueId: questions.issueId,
@@ -249,6 +271,8 @@ export function createMyWorkService(deps: MyWorkDeps): MyWorkService {
                   issueTitle: issues.title,
                   issueProjectId: issues.projectId,
                   projectName: projects.name,
+                  projectKey: projects.key,
+                  workspaceId: questions.workspaceId,
                   agentId: questions.agentId,
                   agentName: agents.name,
                   question: questions.question,
@@ -262,37 +286,35 @@ export function createMyWorkService(deps: MyWorkDeps): MyWorkService {
                 .innerJoin(agents, eq(agents.id, questions.agentId))
                 .where(
                   and(
-                    eq(questions.workspaceId, scope.id),
-                    inArray(questions.projectId, [...actionable]),
+                    inArray(questions.workspaceId, workspaceIds),
+                    inArray(questions.projectId, actionable),
                     inArray(questions.status, [
                       QuestionStatus.enum.open,
                       QuestionStatus.enum.paused,
                     ]),
                     isNull(issues.deletedAt),
+                    eq(questions.workspaceId, projects.workspaceId),
                     sql`${effectiveQuestionStatus} in ('open', 'paused')`,
                   ),
                 )
                 .orderBy(desc(questions.createdAt))
-                .limit(PAGE);
-              needsInputQuestions.push(
-                ...pending.map((row) => ({
-                  id: row.id,
-                  issueId: row.issueId,
-                  issueIdentifier: `${projectKey.get(row.issueProjectId) ?? ""}-${row.issueNumber}`,
-                  issueTitle: row.issueTitle,
-                  projectId: row.issueProjectId,
-                  projectName: row.projectName,
-                  workspaceId: scope.id,
-                  workspaceName: scope.name,
-                  agentId: row.agentId,
-                  agentName: row.agentName,
-                  question: row.question,
-                  status: QuestionStatus.parse(row.status),
-                  responseDeadlineAt: row.responseDeadlineAt.toISOString(),
-                  createdAt: row.createdAt.toISOString(),
-                })),
-              );
-            }
+                .limit(PAGE)
+            ).map((row) => ({
+              id: row.id,
+              issueId: row.issueId,
+              issueIdentifier: `${row.projectKey}-${row.issueNumber}`,
+              issueTitle: row.issueTitle,
+              projectId: row.issueProjectId,
+              projectName: row.projectName,
+              workspaceId: row.workspaceId,
+              workspaceName: workspaceNames.get(row.workspaceId) ?? "",
+              agentId: row.agentId,
+              agentName: row.agentName,
+              question: row.question,
+              status: QuestionStatus.parse(row.status),
+              responseDeadlineAt: row.responseDeadlineAt.toISOString(),
+              createdAt: row.createdAt.toISOString(),
+            }));
           }
 
           return {

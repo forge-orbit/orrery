@@ -335,6 +335,8 @@ export const Issue = z
     
     parentIssueId: z.string().nullable(),
     labels: z.array(ProjectLabel),
+    /** Ids of issues that currently block this one. Loaded with the issue list. */
+    blockedByIds: z.array(z.string()),
   })
   .meta({ id: "Issue" });
 export type Issue = z.infer<typeof Issue>;

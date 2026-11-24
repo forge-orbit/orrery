@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { NotificationKind, ProjectAccessLevel, type NotificationsResponse } from "@orrery/contract";
-import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { NotificationKind, type NotificationsResponse } from "@orrery/contract";
+import { and, desc, eq, inArray, isNull, lt, or, sql, type SQLWrapper } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { z } from "zod";
 import {
@@ -39,17 +39,8 @@ export class NotificationsError extends Error {
   }
 }
 
-export type NotificationsProjectAccessCeiling = (
-  tx: DbTransaction,
-  workspaceId: string,
-  humanId: string,
-  projectIds: readonly string[],
-) => Promise<Map<string, ProjectAccessLevel | null>>;
-
 export interface NotificationsDeps {
   db: PostgresJsDatabase;
-  projectAccessCeiling: NotificationsProjectAccessCeiling;
-  projectAccessAtLeast: (actual: ProjectAccessLevel, required: ProjectAccessLevel) => boolean;
 }
 
 export interface ActivityNotificationInput {
@@ -121,7 +112,7 @@ async function callerIsActive(tx: DbTransaction, humanId: string): Promise<boole
  * a project grant. Project transfers are reflected immediately because the join uses the
  * project's current workspace_id; there is no denormalized workspace id to go stale.
  */
-const readableAccess = (humanId: string) =>
+const readableAccess = (humanId: string | SQLWrapper) =>
   sql`exists (
     select 1 from ${workspaces}
     where ${workspaces.id} = ${projects.workspaceId}
@@ -145,103 +136,92 @@ const readableAccess = (humanId: string) =>
       )
   )`;
 
-export function createNotificationsService(deps: NotificationsDeps): NotificationsService {
-  const { db } = deps;
+const createForActivity: NotifyActivity = async (tx, input) => {
+  const [issue] = await tx
+    .select({
+      assigneeType: issues.assigneeType,
+      assigneeId: issues.assigneeId,
+      createdByHumanId: issues.createdByHumanId,
+    })
+    .from(issues)
+    .where(eq(issues.id, input.issueId))
+    .limit(1);
+  if (issue === undefined) return;
 
-  const hasReadAccess = async (
-    tx: DbTransaction,
-    humanId: string,
-    workspaceId: string,
-    projectId: string,
-  ): Promise<boolean> => {
-    const ceiling = await deps.projectAccessCeiling(tx, workspaceId, humanId, [projectId]);
-    const level = ceiling.get(projectId) ?? null;
-    return level !== null && deps.projectAccessAtLeast(level, ProjectAccessLevel.enum.read);
-  };
-
-  const createForActivity: NotifyActivity = async (tx, input) => {
-    const [issue] = await tx
-      .select({
-        assigneeType: issues.assigneeType,
-        assigneeId: issues.assigneeId,
-        createdByHumanId: issues.createdByHumanId,
-      })
-      .from(issues)
-      .where(eq(issues.id, input.issueId))
-      .limit(1);
-    if (issue === undefined) return;
-
-    const [project] = await tx
-      .select({ workspaceId: projects.workspaceId })
-      .from(projects)
-      .where(eq(projects.id, input.projectId))
-      .limit(1);
-    if (project === undefined) return;
-
-    const isMention = input.kind === "issue_mentioned";
-    const mentionedIds = new Set<string>();
-    if (input.mentionHandles !== undefined && input.mentionHandles.length > 0) {
-      const handles = [...new Set(input.mentionHandles.map((handle) => handle.toLowerCase()))];
-      const mentioned = await tx
-        .select({ id: humans.id })
-        .from(humans)
-        .where(and(inArray(sql`lower(${humans.handle})`, handles), isNull(humans.deactivatedAt)));
-      for (const { id } of mentioned) mentionedIds.add(id);
-    }
-
-    const recipients = new Set<string>();
-    if (!isMention && input.actorAgentId !== null && input.actorAgentId !== undefined) {
-      const [owner] = await tx
-        .select({ humanId: agents.humanId })
-        .from(agents)
-        .where(eq(agents.id, input.actorAgentId))
-        .limit(1);
-      if (owner !== undefined) recipients.add(owner.humanId);
-    }
-    // An `issue_mentioned` notification is only for the handles actually written:
-    // an unmentioned assignee must never receive one.
-    if (!isMention && issue.assigneeType === "human" && issue.assigneeId !== null) {
-      recipients.add(issue.assigneeId);
-    }
-    // A handoff with no human assignee also notifies the issue's human creator (if any).
-    if (
-      input.kind === "handoff" &&
-      issue.assigneeType !== "human" &&
-      issue.createdByHumanId !== null
-    ) {
-      recipients.add(issue.createdByHumanId);
-    }
-    for (const humanId of mentionedIds) recipients.add(humanId);
-
-    // Never notify the human who caused the event, even when they mentioned themselves.
-    // An agent's owner is not auto-added for a mention, so an explicit @mention of that
-    // owner is delivered; for all other events the owner remains a recipient as before.
-    if (input.actorHumanId !== null && input.actorHumanId !== undefined) {
-      recipients.delete(input.actorHumanId);
-    }
-    if (recipients.size === 0) return;
-
-    const live = await tx
+  const isMention = input.kind === "issue_mentioned";
+  const mentionedIds = new Set<string>();
+  if (input.mentionHandles !== undefined && input.mentionHandles.length > 0) {
+    const handles = [...new Set(input.mentionHandles.map((handle) => handle.toLowerCase()))];
+    const mentioned = await tx
       .select({ id: humans.id })
       .from(humans)
-      .where(and(inArray(humans.id, [...recipients]), isNull(humans.deactivatedAt)));
-    for (const { id: humanId } of live) {
-      if (!(await hasReadAccess(tx, humanId, project.workspaceId, input.projectId))) continue;
-      await tx
-        .insert(notifications)
-        .values({
-          id: randomUUID(),
-          humanId,
-          projectId: input.projectId,
-          issueId: input.issueId,
-          activityId: input.activityId,
-          kind: input.kind,
-          summary: input.summary,
-          createdAt: sql`statement_timestamp()`,
-        })
-        .onConflictDoNothing();
-    }
-  };
+      .where(and(inArray(sql`lower(${humans.handle})`, handles), isNull(humans.deactivatedAt)));
+    for (const { id } of mentioned) mentionedIds.add(id);
+  }
+
+  const recipients = new Set<string>();
+  if (!isMention && input.actorAgentId !== null && input.actorAgentId !== undefined) {
+    const [owner] = await tx
+      .select({ humanId: agents.humanId })
+      .from(agents)
+      .where(eq(agents.id, input.actorAgentId))
+      .limit(1);
+    if (owner !== undefined) recipients.add(owner.humanId);
+  }
+  // An `issue_mentioned` notification is only for the handles actually written:
+  // an unmentioned assignee must never receive one.
+  if (!isMention && issue.assigneeType === "human" && issue.assigneeId !== null) {
+    recipients.add(issue.assigneeId);
+  }
+  // A handoff with no human assignee also notifies the issue's human creator (if any).
+  if (
+    input.kind === "handoff" &&
+    issue.assigneeType !== "human" &&
+    issue.createdByHumanId !== null
+  ) {
+    recipients.add(issue.createdByHumanId);
+  }
+  for (const humanId of mentionedIds) recipients.add(humanId);
+
+  // Never notify the human who caused the event, even when they mentioned themselves.
+  // An agent's owner is not auto-added for a mention, so an explicit @mention of that
+  // owner is delivered; for all other events the owner remains a recipient as before.
+  if (input.actorHumanId !== null && input.actorHumanId !== undefined) {
+    recipients.delete(input.actorHumanId);
+  }
+  if (recipients.size === 0) return;
+
+  const live = await tx
+    .select({ id: humans.id })
+    .from(humans)
+    .innerJoin(projects, eq(projects.id, input.projectId))
+    .where(
+      and(
+        inArray(humans.id, [...recipients]),
+        isNull(humans.deactivatedAt),
+        readableAccess(humans.id),
+      ),
+    );
+  if (live.length === 0) return;
+  await tx
+    .insert(notifications)
+    .values(
+      live.map(({ id: humanId }) => ({
+        id: randomUUID(),
+        humanId,
+        projectId: input.projectId,
+        issueId: input.issueId,
+        activityId: input.activityId,
+        kind: input.kind,
+        summary: input.summary,
+        createdAt: sql`statement_timestamp()`,
+      })),
+    )
+    .onConflictDoNothing();
+};
+
+export function createNotificationsService(deps: NotificationsDeps): NotificationsService {
+  const { db } = deps;
 
   const notificationColumns = {
     id: notifications.id,

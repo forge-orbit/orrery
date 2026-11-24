@@ -197,9 +197,6 @@ export function createFeatures(
     db: database.db,
     sessionReader: accounts.sessionReader,
     authenticate: agentAuthenticator,
-    projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
-      projects.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
-    projectAccessAtLeast,
     log,
   });
   wiredNotifyActivity = notifications.notifyActivity;
@@ -269,7 +266,9 @@ export function createFeatures(
       db: database.db,
       accounts: {
         accountByEmail: (email, tx) => accounts.accountByEmail(email, tx),
-        setPassword: (humanId, password, tx) => accounts.setPassword(humanId, password, tx),
+        hashPassword: (password) => accounts.hashPassword(password),
+        setPasswordHash: (humanId, passwordHash, tx) =>
+          accounts.setPasswordHash(humanId, passwordHash, tx),
         invalidateBrowserSessions: (humanId, tx) => accounts.invalidateBrowserSessions(humanId, tx),
       },
       deliver: settings.deliver,

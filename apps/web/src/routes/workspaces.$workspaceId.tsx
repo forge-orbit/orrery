@@ -476,6 +476,7 @@ function CreateProjectForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     try {
@@ -784,6 +785,7 @@ function WorkspaceMembers({
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
+                  if (savingPermissions) return;
                   void onSavePermissions();
                 }}
               >
@@ -974,6 +976,7 @@ function InviteMemberForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setError(undefined);
     setInvited(undefined);

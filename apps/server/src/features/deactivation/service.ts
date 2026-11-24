@@ -99,15 +99,14 @@ async function lockOwnershipWrites(tx: DbTransaction) {
 }
 
 async function bumpGuards(tx: DbTransaction, workspaceIds: readonly string[]) {
-  for (const workspaceId of workspaceIds) {
-    await tx
-      .insert(workspaceOwnershipGuards)
-      .values({ workspaceId, version: 0 })
-      .onConflictDoUpdate({
-        target: workspaceOwnershipGuards.workspaceId,
-        set: { version: sql`${workspaceOwnershipGuards.version} + 1` },
-      });
-  }
+  if (workspaceIds.length === 0) return;
+  await tx
+    .insert(workspaceOwnershipGuards)
+    .values(workspaceIds.map((workspaceId) => ({ workspaceId, version: 0 })))
+    .onConflictDoUpdate({
+      target: workspaceOwnershipGuards.workspaceId,
+      set: { version: sql`${workspaceOwnershipGuards.version} + 1` },
+    });
 }
 
 async function recordAccountEvent(
@@ -205,16 +204,18 @@ export function createDeactivationService({ db }: DeactivationDeps): Deactivatio
             agentId: agentApiKeys.agentId,
             workspaceId: agentApiKeys.workspaceId,
           });
-        for (const key of revokedKeys) {
-          await tx.insert(agentKeyEvents).values({
-            id: randomUUID(),
-            keyId: key.id,
-            agentId: key.agentId,
-            workspaceId: key.workspaceId,
-            type: AgentKeyEventType.enum.agent_key_revoked,
-            actorHumanId: actor.humanId,
-            createdAt: sql`statement_timestamp()`,
-          });
+        if (revokedKeys.length > 0) {
+          await tx.insert(agentKeyEvents).values(
+            revokedKeys.map((key) => ({
+              id: randomUUID(),
+              keyId: key.id,
+              agentId: key.agentId,
+              workspaceId: key.workspaceId,
+              type: AgentKeyEventType.enum.agent_key_revoked,
+              actorHumanId: actor.humanId,
+              createdAt: sql`statement_timestamp()`,
+            })),
+          );
         }
 
         const grants = await tx
@@ -234,8 +235,8 @@ export function createDeactivationService({ db }: DeactivationDeps): Deactivatio
               grants.map((grant) => grant.id),
             ),
           );
-          for (const grant of grants) {
-            await tx.insert(projectAccessEvents).values({
+          await tx.insert(projectAccessEvents).values(
+            grants.map((grant) => ({
               id: randomUUID(),
               projectId: grant.projectId,
               workspaceId: grant.workspaceId,
@@ -245,8 +246,8 @@ export function createDeactivationService({ db }: DeactivationDeps): Deactivatio
               level: null,
               previousLevel: ProjectAccessLevel.parse(grant.level),
               createdAt: sql`statement_timestamp()`,
-            });
-          }
+            })),
+          );
         }
 
         const sharedWorkspaceIds = tx

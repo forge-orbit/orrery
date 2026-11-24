@@ -20,6 +20,8 @@ export interface PageHeaderProps {
    * the default centre-aligned, wrapping behaviour.
    */
   nonWrappingActions?: boolean;
+  /** Draw a bottom divider beneath the header. Set false inside LayoutHeader hasDivider. */
+  hasDivider?: boolean;
 }
 
 export function PageHeader({
@@ -30,6 +32,7 @@ export function PageHeader({
   subtitle,
   actions,
   nonWrappingActions = false,
+  hasDivider = true,
 }: PageHeaderProps) {
   const titleBlock = (
     <Stack gap={0.5}>
@@ -105,7 +108,7 @@ export function PageHeader({
           </>
         )}
       </Stack>
-      <Divider />
+      {hasDivider && <Divider />}
     </Stack>
   );
 }

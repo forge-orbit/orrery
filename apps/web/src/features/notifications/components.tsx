@@ -25,9 +25,11 @@ const kindTokens: Record<NotificationKind, { label: string; color: "blue" | "ora
 export function NotificationRow({
   notification,
   onRead,
+  isReadPending,
 }: {
   notification: Notification;
-  onRead: (id: string) => void;
+  onRead: (id: string) => void | Promise<void>;
+  isReadPending: boolean;
 }) {
   const linkRef = useRef<HTMLAnchorElement>(null);
   const unread = notification.readAt === null;
@@ -48,7 +50,7 @@ export function NotificationRow({
           to="/issues/$issueId"
           params={{ issueId: notification.issue.id }}
           onClick={() => {
-            if (unread) onRead(notification.id);
+            if (unread) void onRead(notification.id);
           }}
         >
           <Stack as="span" direction="horizontal" gap={2} vAlign="center" wrap="wrap">
@@ -97,7 +99,8 @@ export function NotificationRow({
               size="sm"
               variant="ghost"
               label="Mark read"
-              onClick={() => onRead(notification.id)}
+              isDisabled={isReadPending}
+              onClick={() => void onRead(notification.id)}
             />
           </Stack>
         ) : undefined
@@ -109,14 +112,21 @@ export function NotificationRow({
 export function NotificationsList({
   notifications,
   onRead,
+  pendingReadIds,
 }: {
   notifications: Notification[];
-  onRead: (id: string) => void;
+  onRead: (id: string) => void | Promise<void>;
+  pendingReadIds: ReadonlySet<string>;
 }) {
   return (
     <List aria-label="Notifications" density="compact" hasDividers>
       {notifications.map((notification) => (
-        <NotificationRow key={notification.id} notification={notification} onRead={onRead} />
+        <NotificationRow
+          key={notification.id}
+          notification={notification}
+          onRead={onRead}
+          isReadPending={pendingReadIds.has(notification.id)}
+        />
       ))}
     </List>
   );

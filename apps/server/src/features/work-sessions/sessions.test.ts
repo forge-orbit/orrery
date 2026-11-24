@@ -510,6 +510,48 @@ describe("work sessions against real Postgres", () => {
     expect(ready.map((item) => item.id)).not.toContain(b.id);
   });
 
+  it("expires every stale lease in a project and records one activity per issue", async () => {
+    const f = await bootstrap();
+    const identity = await identityFor(f.secret);
+    const firstRun = await newRun(identity);
+    const secondRun = await newRun(identity);
+    const first = await humanIssue(f, "First lapsed issue");
+    const second = await humanIssue(f, "Second lapsed issue");
+    await sessionsService.claim(
+      { kind: "agent", identity },
+      { issueId: first.id, runId: firstRun },
+    );
+    await sessionsService.claim(
+      { kind: "agent", identity },
+      { issueId: second.id, runId: secondRun },
+    );
+    await setLease(first.id, "statement_timestamp() - interval '1 second'");
+    await setLease(second.id, "statement_timestamp() - interval '1 second'");
+
+    const ready = await sessionsService.readyWork(humanActor(f), f.projectId);
+    expect(ready.map((issue) => issue.id).toSorted()).toEqual([first.id, second.id].toSorted());
+    expect((await issueStatus(first.id)).status).toBe("todo");
+    expect((await issueStatus(second.id)).status).toBe("todo");
+    expect(await activeCount(first.id)).toBe(0);
+    expect(await activeCount(second.id)).toBe(0);
+
+    const activities = await database.db
+      .select({ issueId: projectActivity.issueId })
+      .from(projectActivity)
+      .where(
+        and(
+          eq(projectActivity.projectId, f.projectId),
+          eq(projectActivity.type, "issue_session_expired"),
+        ),
+      );
+    expect(
+      activities
+        .map((row) => row.issueId)
+        .filter((issueId): issueId is string => issueId !== null)
+        .toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual([first.id, second.id].toSorted((a, b) => a.localeCompare(b)));
+  });
+
   it("locks issues before work sessions when expiring a committed lease", async () => {
     const f = await bootstrap();
     const identity = await identityFor(f.secret);

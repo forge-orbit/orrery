@@ -639,11 +639,35 @@ describe("personal-to-shared project transfer against real Postgres", () => {
     const destinationOwner = await insertHuman("dest-owner@example.com");
     const ownerCookie = await sessionFor(destinationOwner.id);
     const dest = await createSharedWorkspace(ownerCookie, "Owner Team", "dest-owner@example.com");
+    const coOwner = await insertHuman("dest-co-owner@example.com");
+    await database.db.insert(workspaceMemberships).values({
+      id: randomUUID(),
+      workspaceId: dest.workspaceId,
+      humanId: coOwner.id,
+      isOwner: true,
+    });
 
     const authorization = await authorize(s.cookie, s.project.id, dest.workspaceId);
     const res = await accept(ownerCookie, authorization.token);
     expect(res.status).toBe(200);
     expect(await getProject(ownerCookie, s.project.id)).toMatchObject({ accessLevel: "manage" });
+
+    const recipientIds = [destinationOwner.id, coOwner.id].toSorted();
+    const grants = await database.db
+      .select({ humanId: projectAccessGrants.humanId })
+      .from(projectAccessGrants)
+      .where(eq(projectAccessGrants.projectId, s.project.id));
+    expect(grants.map((grant) => grant.humanId).toSorted()).toEqual(recipientIds);
+    const events = await database.db
+      .select({ humanId: projectAccessEvents.subjectHumanId })
+      .from(projectAccessEvents)
+      .where(
+        and(
+          eq(projectAccessEvents.projectId, s.project.id),
+          eq(projectAccessEvents.type, "project_access_granted"),
+        ),
+      );
+    expect(events.map((event) => event.humanId).toSorted()).toEqual(recipientIds);
   });
 
   it("refuses acceptance when the project workspace changed after authorization", async () => {
@@ -1547,16 +1571,38 @@ describe("shared-to-shared project transfer against real Postgres", () => {
     const destinationMember = await insertHuman("assignee-destination@example.com");
     await addMembership(sourceW1.workspaceId, destinationMember.id);
     await addMembership(destW2.workspaceId, destinationMember.id);
+    const suspendedMember = await insertHuman("assignee-suspended@example.com");
+    await addMembership(sourceW1.workspaceId, suspendedMember.id);
+    await addMembership(destW2.workspaceId, suspendedMember.id);
+    await database.db
+      .update(workspaceMemberships)
+      .set({ suspendedAt: sql`statement_timestamp()` })
+      .where(
+        and(
+          eq(workspaceMemberships.workspaceId, destW2.workspaceId),
+          eq(workspaceMemberships.humanId, suspendedMember.id),
+        ),
+      );
 
     const sourceHumanIssue = await createIssue(
       sourceW1.cookie,
       sourceW1.project.id,
       "Source human assignee",
     );
+    const secondSourceHumanIssue = await createIssue(
+      sourceW1.cookie,
+      sourceW1.project.id,
+      "Second source human assignee",
+    );
     const sourceAgentIssue = await createIssue(
       sourceW1.cookie,
       sourceW1.project.id,
       "Source agent assignee",
+    );
+    const suspendedHumanIssue = await createIssue(
+      sourceW1.cookie,
+      sourceW1.project.id,
+      "Suspended human assignee",
     );
     const destinationHumanIssue = await createIssue(
       sourceW1.cookie,
@@ -1571,12 +1617,21 @@ describe("shared-to-shared project transfer against real Postgres", () => {
       expect(res.status).toBe(200);
     };
     await assign(sourceHumanIssue, { type: "human", id: sourceMember.id });
+    await assign(secondSourceHumanIssue, { type: "human", id: sourceMember.id });
     await assign(sourceAgentIssue, { type: "agent", id: sourceAgent.agentId });
+    await assign(suspendedHumanIssue, { type: "human", id: suspendedMember.id });
     await assign(destinationHumanIssue, { type: "human", id: destinationMember.id });
 
     const authorization = await authorize(sourceW1.cookie, sourceW1.project.id, destW2.workspaceId);
     expect((await accept(ownerCookie, authorization.token)).status).toBe(200);
 
+    const issueIds = [
+      sourceHumanIssue,
+      secondSourceHumanIssue,
+      sourceAgentIssue,
+      suspendedHumanIssue,
+      destinationHumanIssue,
+    ];
     const rows = await database.db
       .select({
         id: issuesTable.id,
@@ -1584,10 +1639,15 @@ describe("shared-to-shared project transfer against real Postgres", () => {
         assigneeId: issuesTable.assigneeId,
       })
       .from(issuesTable)
-      .where(inArray(issuesTable.id, [sourceHumanIssue, sourceAgentIssue, destinationHumanIssue]));
+      .where(inArray(issuesTable.id, issueIds));
     const byId = new Map(rows.map((row) => [row.id, row]));
     expect(byId.get(sourceHumanIssue)).toMatchObject({ assigneeType: null, assigneeId: null });
+    expect(byId.get(secondSourceHumanIssue)).toMatchObject({
+      assigneeType: null,
+      assigneeId: null,
+    });
     expect(byId.get(sourceAgentIssue)).toMatchObject({ assigneeType: null, assigneeId: null });
+    expect(byId.get(suspendedHumanIssue)).toMatchObject({ assigneeType: null, assigneeId: null });
     expect(byId.get(destinationHumanIssue)).toMatchObject({
       assigneeType: "human",
       assigneeId: destinationMember.id,

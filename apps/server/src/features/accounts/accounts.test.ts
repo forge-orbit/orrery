@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Problem } from "@orrery/contract";
 import type { Hono } from "hono";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { browserSessions, humans, instanceSetup, workspaces } from "../../db/schema.ts";
 import { createDb, type Database } from "../../platform/db.ts";
@@ -88,6 +88,30 @@ describe("accounts", () => {
   }
 
   const setupBody = { secret: SECRET, email: EMAIL_INPUT, password: PASSWORD };
+
+  async function seededAdmin() {
+    const [admin] = await database.db.select().from(humans).where(eq(humans.email, EMAIL));
+    if (admin === undefined) throw new Error("the administrator was not created");
+    return admin;
+  }
+
+  async function waitForLockWait(pattern: string) {
+    await expect
+      .poll(
+        async () => {
+          const [row] = await database.sql<{ count: number }[]>`
+            select count(*)::int as count
+            from pg_stat_activity
+            where wait_event_type = 'Lock'
+              and query ilike ${`%${pattern}%`}
+              and pid <> pg_backend_pid()
+          `;
+          return row?.count ?? 0;
+        },
+        { timeout: 5_000, interval: 25 },
+      )
+      .toBeGreaterThan(0);
+  }
 
   async function bootstrapAdmin(app: Hono) {
     const res = await postJson(app, "/api/setup/admin", setupBody);
@@ -535,6 +559,215 @@ describe("accounts", () => {
         password: "new-password-1234",
       });
       expect(newLogin.status).toBe(200);
+    });
+
+    it("refuses a password change when the presented session is no longer live", async () => {
+      const app = makeApp(SECRET);
+      await bootstrapAdmin(app);
+      const login = await postJson(app, "/api/auth/login", { email: EMAIL, password: PASSWORD });
+      const token = sessionCookie(login)?.split(";")[0]?.split("=")[1] ?? "";
+      const service = createAccountsService({
+        db: database.db,
+        setupSecret: SECRET,
+        publicUrl: PUBLIC_URL,
+      });
+      const admin = await seededAdmin();
+      await service.logout(token);
+
+      await expect(
+        service.changePassword(admin.id, token, {
+          currentPassword: PASSWORD,
+          newPassword: "new-password-1234",
+        }),
+      ).rejects.toMatchObject({ name: "AccountsError", kind: "invalid_current_password" });
+
+      expect(
+        (await postJson(app, "/api/auth/login", { email: EMAIL, password: PASSWORD })).status,
+      ).toBe(200);
+      expect(
+        (await postJson(app, "/api/auth/login", { email: EMAIL, password: "new-password-1234" }))
+          .status,
+      ).toBe(401);
+    });
+
+    it("settles two concurrent password changes with exactly one winner", async () => {
+      const app = makeApp(SECRET);
+      await bootstrapAdmin(app);
+      const login = await postJson(app, "/api/auth/login", { email: EMAIL, password: PASSWORD });
+      const token = sessionCookie(login)?.split(";")[0]?.split("=")[1] ?? "";
+      const service = createAccountsService({
+        db: database.db,
+        setupSecret: SECRET,
+        publicUrl: PUBLIC_URL,
+      });
+      const admin = await seededAdmin();
+
+      const passwords = ["new-password-alpha", "new-password-bravo"];
+      const results = await Promise.allSettled(
+        passwords.map((newPassword) =>
+          service.changePassword(admin.id, token, { currentPassword: PASSWORD, newPassword }),
+        ),
+      );
+
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      const loser = results.find((result) => result.status === "rejected");
+      if (loser?.status !== "rejected") throw new Error("expected one rejected change");
+      expect(loser.reason).toBeInstanceOf(AccountsError);
+      expect(loser.reason).toMatchObject({ kind: "invalid_current_password" });
+
+      for (const [index, password] of passwords.entries()) {
+        const res = await postJson(app, "/api/auth/login", { email: EMAIL, password });
+        expect(res.status).toBe(results[index]?.status === "fulfilled" ? 200 : 401);
+      }
+      expect(
+        (await postJson(app, "/api/auth/login", { email: EMAIL, password: PASSWORD })).status,
+      ).toBe(401);
+    });
+
+    it("refuses a password change when the account is deactivated during hashing", async () => {
+      const app = makeApp(SECRET);
+      await bootstrapAdmin(app);
+      const login = await postJson(app, "/api/auth/login", { email: EMAIL, password: PASSWORD });
+      const token = sessionCookie(login)?.split(";")[0]?.split("=")[1] ?? "";
+      const service = createAccountsService({
+        db: database.db,
+        setupSecret: SECRET,
+        publicUrl: PUBLIC_URL,
+      });
+      const admin = await seededAdmin();
+      const hashBefore = admin.passwordHash;
+
+      let markLocked!: () => void;
+      const locked = new Promise<void>((resolve) => {
+        markLocked = resolve;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holder = database.sql.begin(async (tx) => {
+        await tx`select id from humans where id = ${admin.id} for update`;
+        markLocked();
+        await gate;
+        await tx`update humans set deactivated_at = now() where id = ${admin.id}`;
+      });
+
+      let change: Promise<void> | undefined;
+      try {
+        await locked;
+        change = service.changePassword(admin.id, token, {
+          currentPassword: PASSWORD,
+          newPassword: "new-password-1234",
+        });
+        await waitForLockWait('%update "humans"%');
+        release();
+        await holder;
+        await expect(change).rejects.toMatchObject({
+          name: "AccountsError",
+          kind: "invalid_current_password",
+        });
+      } finally {
+        release();
+        await holder.catch(() => {});
+        if (change !== undefined) await change.catch(() => {});
+      }
+
+      const [after] = await database.db.select().from(humans).where(eq(humans.id, admin.id));
+      expect(after?.passwordHash).toBe(hashBefore);
+      expect(
+        (await postJson(app, "/api/auth/login", { email: EMAIL, password: "new-password-1234" }))
+          .status,
+      ).toBe(401);
+    });
+
+    it("refuses to mint a session when the password changes during sign-in", async () => {
+      const app = makeApp(SECRET);
+      await bootstrapAdmin(app);
+      const service = createAccountsService({
+        db: database.db,
+        setupSecret: SECRET,
+        publicUrl: PUBLIC_URL,
+      });
+      const admin = await seededAdmin();
+
+      let markLocked!: () => void;
+      const locked = new Promise<void>((resolve) => {
+        markLocked = resolve;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holder = database.sql.begin(async (tx) => {
+        await tx`select id from humans where id = ${admin.id} for update`;
+        markLocked();
+        await gate;
+        await tx`update humans set password_hash = ${"scrypt$16384$8$1$cmFjZWQtc2FsdA$AA"} where id = ${admin.id}`;
+      });
+
+      let attempt: Promise<{ token: string; email: string }> | undefined;
+      try {
+        await locked;
+        attempt = service.login({ email: EMAIL, password: PASSWORD });
+        await waitForLockWait('%from "humans"%for update%');
+        release();
+        await holder;
+        await expect(attempt).rejects.toMatchObject({
+          name: "AccountsError",
+          kind: "invalid_credentials",
+        });
+      } finally {
+        release();
+        await holder.catch(() => {});
+        if (attempt !== undefined) await attempt.catch(() => {});
+      }
+
+      expect(await database.db.select().from(browserSessions)).toHaveLength(0);
+    });
+
+    it("refuses to mint a session when the account is deactivated during sign-in", async () => {
+      const app = makeApp(SECRET);
+      await bootstrapAdmin(app);
+      const service = createAccountsService({
+        db: database.db,
+        setupSecret: SECRET,
+        publicUrl: PUBLIC_URL,
+      });
+      const admin = await seededAdmin();
+
+      let markLocked!: () => void;
+      const locked = new Promise<void>((resolve) => {
+        markLocked = resolve;
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holder = database.sql.begin(async (tx) => {
+        await tx`select id from humans where id = ${admin.id} for update`;
+        markLocked();
+        await gate;
+        await tx`update humans set deactivated_at = now() where id = ${admin.id}`;
+      });
+
+      let attempt: Promise<{ token: string; email: string }> | undefined;
+      try {
+        await locked;
+        attempt = service.login({ email: EMAIL, password: PASSWORD });
+        await waitForLockWait('%from "humans"%for update%');
+        release();
+        await holder;
+        await expect(attempt).rejects.toMatchObject({
+          name: "AccountsError",
+          kind: "invalid_credentials",
+        });
+      } finally {
+        release();
+        await holder.catch(() => {});
+        if (attempt !== undefined) await attempt.catch(() => {});
+      }
+
+      expect(await database.db.select().from(browserSessions)).toHaveLength(0);
     });
 
     it("signs out by revoking the browser session and clearing the cookie", async () => {

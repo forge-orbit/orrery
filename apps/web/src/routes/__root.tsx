@@ -1,6 +1,7 @@
-import { Badge } from "@astryxdesign/core/Badge";
 import { AppShell } from "@astryxdesign/core/AppShell";
+import { Badge } from "@astryxdesign/core/Badge";
 import { Card } from "@astryxdesign/core/Card";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { IconButton } from "@astryxdesign/core/IconButton";
@@ -22,7 +23,12 @@ import {
 import { createElement } from "react";
 import markDark from "../../../../assets/orrery-mark-dark.svg";
 import markLight from "../../../../assets/orrery-mark.svg";
-import { sessionQuery, setupStatusQuery, signOut } from "../features/accounts/index.ts";
+import {
+  type Session,
+  sessionQuery,
+  setupStatusQuery,
+  signOut,
+} from "../features/accounts/index.ts";
 import { installationInvitationsQuery } from "../features/invitations/index.ts";
 import { notificationUnreadCountQuery } from "../features/notifications/index.ts";
 import { workspacesQuery } from "../features/workspaces/index.ts";
@@ -37,6 +43,7 @@ export interface RouterContext {
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     accessPage?: boolean;
+    fullHeightLayout?: boolean;
   }
 }
 
@@ -232,6 +239,9 @@ function RootLayout() {
   const accessPage = useMatches({
     select: (matches) => matches.some((match) => match.staticData.accessPage === true),
   });
+  const fullHeightLayout = useMatches({
+    select: (matches) => matches.some((match) => match.staticData.fullHeightLayout === true),
+  });
 
   if (accessPage) {
     return (
@@ -291,11 +301,15 @@ function RootLayout() {
           </SideNav>
         }
       >
-        <Layout contentWidth="78rem">
-          <Stack as="main" id="content" data-app-content="" padding={6}>
-            <Outlet />
-          </Stack>
-        </Layout>
+        {fullHeightLayout ? (
+          <Outlet />
+        ) : (
+          <Layout contentWidth="78rem">
+            <Stack as="main" id="content" data-app-content="" padding={6}>
+              <Outlet />
+            </Stack>
+          </Layout>
+        )}
       </AppShell>
     </LinkProvider>
   );
@@ -558,45 +572,69 @@ function SidebarLinks({ onNavigate }: { onNavigate?: () => void }) {
       {workspaces.length > 0 && (
         <>
           <Divider />
-          <SideNavSection title="Your workspaces">
-            {workspaces.map((workspace) => (
-              <SideNavItem
-                key={workspace.id}
-                label={workspace.name}
-                href={`/workspaces/${workspace.id}`}
-                icon={
-                  workspace.kind === "personal" ? NavPersonalWorkspaceIcon : NavSharedWorkspaceIcon
-                }
-                isSelected={pathname === `/workspaces/${workspace.id}`}
-                size="sm"
-                {...clickProp}
-              />
-            ))}
-          </SideNavSection>
+          <Collapsible
+            defaultIsOpen
+            trigger={
+              <Stack paddingInlineStart={2}>
+                <Text type="supporting" weight="medium" color="secondary">
+                  Your workspaces
+                </Text>
+              </Stack>
+            }
+          >
+            <SideNavSection title="Your workspaces" isHeaderHidden>
+              {workspaces.map((workspace) => (
+                <SideNavItem
+                  key={workspace.id}
+                  label={workspace.name}
+                  href={`/workspaces/${workspace.id}`}
+                  icon={
+                    workspace.kind === "personal"
+                      ? NavPersonalWorkspaceIcon
+                      : NavSharedWorkspaceIcon
+                  }
+                  isSelected={pathname === `/workspaces/${workspace.id}`}
+                  size="sm"
+                  {...clickProp}
+                />
+              ))}
+            </SideNavSection>
+          </Collapsible>
         </>
       )}
 
       {isAdmin && (
         <>
           <Divider />
-          <SideNavSection title="Admin">
-            <SideNavItem
-              label="SMTP settings"
-              href="/settings/smtp"
-              icon={NavMailIcon}
-              isSelected={pathname.startsWith("/settings/smtp")}
-              size="sm"
-              {...clickProp}
-            />
-            <SideNavItem
-              label="Installation history"
-              href="/history/installation"
-              icon="clock"
-              isSelected={pathname.startsWith("/history/installation")}
-              size="sm"
-              {...clickProp}
-            />
-          </SideNavSection>
+          <Collapsible
+            defaultIsOpen
+            trigger={
+              <Stack paddingInlineStart={2}>
+                <Text type="supporting" weight="medium" color="secondary">
+                  Admin
+                </Text>
+              </Stack>
+            }
+          >
+            <SideNavSection title="Admin" isHeaderHidden>
+              <SideNavItem
+                label="SMTP settings"
+                href="/settings/smtp"
+                icon={NavMailIcon}
+                isSelected={pathname.startsWith("/settings/smtp")}
+                size="sm"
+                {...clickProp}
+              />
+              <SideNavItem
+                label="Installation history"
+                href="/history/installation"
+                icon="clock"
+                isSelected={pathname.startsWith("/history/installation")}
+                size="sm"
+                {...clickProp}
+              />
+            </SideNavSection>
+          </Collapsible>
         </>
       )}
     </Stack>
@@ -617,10 +655,13 @@ function SidebarFooter({
   const logout = useMutation({
     mutationFn: signOut,
     onSuccess: async () => {
-      queryClient.clear();
+      // Mark the cached session signed out before navigating; clearing the cache
+      // now would make the sidebar and current route refetch as the session ends.
+      queryClient.setQueryData<Session>(sessionQuery.queryKey, { signedIn: false });
       onNavigate?.();
       toast({ body: "Signed out." });
       await navigate({ to: "/signin", replace: true });
+      queryClient.clear();
     },
     onError: (error) => {
       toast({ body: error.message, type: "error" });

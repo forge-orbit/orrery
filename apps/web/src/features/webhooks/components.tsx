@@ -726,6 +726,7 @@ function WebhookForm({
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError(undefined);
     try {

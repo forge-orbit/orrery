@@ -18,7 +18,7 @@ import {
   type AgentIdentity,
 } from "@orrery/contract";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -513,6 +513,31 @@ describe("#179 attachment reference sync, metadata, grace sweep and Trash cleanu
     expect(await sweepOrphanObjects(database.db, store)).toBe(1);
     expect(await store.head(claimed?.key ?? "")).toBeNull();
     expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+  });
+
+  it("reclaims every expired attachment in one sweep pass", async () => {
+    const first = await upload("first-orphan.txt", "first orphan\n");
+    const second = await upload("second-orphan.txt", "second orphan\n");
+    const ids = [first.id, second.id];
+    await database.db
+      .update(attachments)
+      .set({ unreferencedAt: sql`statement_timestamp() - interval '25 hours'` })
+      .where(inArray(attachments.id, ids));
+
+    expect(await attached.service.sweepUnreferenced()).toBe(2);
+    expect(
+      await database.db.select().from(attachments).where(inArray(attachments.id, ids)),
+    ).toHaveLength(0);
+    const objects = await database.db
+      .select({
+        id: storedObjects.id,
+        status: storedObjects.status,
+        deletedAt: storedObjects.deletedAt,
+      })
+      .from(storedObjects)
+      .where(inArray(storedObjects.id, ids));
+    expect(objects).toHaveLength(2);
+    expect(objects.every((row) => row.status === "deleted" && row.deletedAt !== null)).toBe(true);
   });
 
   it("lets a late save win over the 24-hour sweep, and rejects a reclaimed URL cleanly", async () => {
