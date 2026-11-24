@@ -11,7 +11,8 @@ import {
   validationHook,
 } from "../../platform/problem.ts";
 import type { SessionReader } from "../accounts/index.ts";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import { agentErrorStatus, isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import { assertDispatchRestAllowed } from "../agents/index.ts";
 import type { WorkActor } from "../projects/index.ts";
 import {
   NotificationsError,
@@ -93,7 +94,11 @@ function failure<K extends readonly NotificationsErrorKind[]>(
   kinds: K,
 ) {
   if (isAgentError(error)) {
-    return problemResponse(c, { status: 401, code: error.kind, title: error.message });
+    return problemResponse(c, {
+      status: agentErrorStatus(error.kind),
+      code: error.kind,
+      title: error.message,
+    });
   }
   if (error instanceof NotificationsError && isKind(error, kinds)) {
     return problemResponse(c, {
@@ -122,7 +127,10 @@ export function createNotificationsRest(
 
   const workActor = async (c: Context): Promise<WorkActor | null> => {
     const identity = await authenticate(c.req.raw);
-    if (identity !== null) return { kind: "agent", identity };
+    if (identity !== null) {
+      assertDispatchRestAllowed(identity, c.req.method, c.req.path);
+      return { kind: "agent", identity };
+    }
     const account = await sessionReader(c);
     return account === null ? null : { kind: "human", account };
   };

@@ -7,7 +7,11 @@ import {
   type StopOutcome,
 } from "@orrery/contract";
 import { sessionTools } from "@orrery/contract";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import {
+  assertDispatchToolAllowed,
+  isAgentError,
+  type AgentAuthenticator,
+} from "../agents/index.ts";
 import { SessionsError, type SessionsService } from "./service.ts";
 
 type Args = Record<string, unknown>;
@@ -142,7 +146,9 @@ export function createSessionsMcp(service: SessionsService, authenticate: AgentA
             const identity = await authenticate(request);
             if (identity === null) throw new SessionsError("not_signed_in");
 
-            const result = await strategy(identity, tool.input.parse(rawArgs));
+            const parsed = tool.input.parse(rawArgs);
+            assertDispatchToolAllowed(identity, tool.name, parsed);
+            const result = await strategy(identity, parsed);
             return {
               content: [{ type: "text" as const, text: JSON.stringify(result) }],
               structuredContent: result,

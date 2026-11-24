@@ -10,3 +10,8 @@ export function readBearerToken(header: string | null): string | null {
 export function isAgentError(error: unknown): error is Error & { kind: string } {
   return error instanceof Error && error.name === "AgentsError" && "kind" in error;
 }
+
+/** Dispatch-scope violations are refusals (403); credential failures are 401. */
+export function agentErrorStatus(kind: string): 401 | 403 {
+  return kind === "dispatch_forbidden" ? 403 : 401;
+}

@@ -205,6 +205,9 @@ beforeAll(async () => {
         projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
           projectsFeature.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
         projectAccessAtLeast: atLeast,
+        claimWorkSession: async () => {
+          throw new Error("claimWorkSession is not wired in this test");
+        },
       }),
     ],
     publicUrl: PUBLIC_URL,

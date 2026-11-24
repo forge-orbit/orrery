@@ -1,9 +1,15 @@
 import { z } from "zod";
 import { Timestamp } from "./common.ts";
+import { Run } from "./runs.ts";
+import { WorkSession } from "./sessions.ts";
 
 /** A stable, opaque identity for a runner-related resource. */
 export const RunnerId = z.string().min(1).max(200).meta({ id: "RunnerId" });
 export type RunnerId = z.infer<typeof RunnerId>;
+
+/** An enrolled machine owns Runners across every workspace. */
+export const RunnerHostId = z.string().min(1).max(200).meta({ id: "RunnerHostId" });
+export type RunnerHostId = z.infer<typeof RunnerHostId>;
 
 /** The operating-system family a Runner host reports at enrollment. */
 export const RunnerPlatform = z
@@ -55,7 +61,7 @@ export type RunnerPresence = z.infer<typeof RunnerPresence>;
 
 export const RunnerHost = z
   .object({
-    id: RunnerId,
+    id: RunnerHostId,
     humanId: z.string(),
     displayName: RunnerHostDisplayName,
     platform: RunnerPlatform,
@@ -69,7 +75,7 @@ export type RunnerHost = z.infer<typeof RunnerHost>;
 export const Runner = z
   .object({
     id: RunnerId,
-    hostId: RunnerId,
+    hostId: RunnerHostId,
     workspaceId: z.string(),
     projectId: z.string(),
     agentId: z.string(),
@@ -184,8 +190,92 @@ export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 
 export const RevokeRunnerHostResponse = z
   .object({
-    hostId: RunnerId,
+    hostId: RunnerHostId,
     revokedRunners: z.int().min(0),
   })
   .meta({ id: "RevokeRunnerHostResponse" });
 export type RevokeRunnerHostResponse = z.infer<typeof RevokeRunnerHostResponse>;
+
+/** A stable, opaque identity for one delivery of work to a Runner. */
+export const DispatchId = z.string().min(1).max(200).meta({ id: "DispatchId" });
+export type DispatchId = z.infer<typeof DispatchId>;
+
+/** Fences a local execution attempt: a reconnect reuses the same id. */
+export const DispatchAttemptId = z.string().min(1).max(200).meta({ id: "DispatchAttemptId" });
+export type DispatchAttemptId = z.infer<typeof DispatchAttemptId>;
+
+/** Database-backed reconciliation state of a Dispatch. */
+export const DispatchState = z
+  .enum(["pending", "active", "uncertain", "ended"])
+  .meta({ id: "DispatchState" });
+export type DispatchState = z.infer<typeof DispatchState>;
+
+/** Thin delivery bridge; it never changes the issue's assignee. */
+export const Dispatch = z
+  .object({
+    id: DispatchId,
+    runnerId: RunnerId,
+    hostId: RunnerHostId,
+    workspaceId: z.string(),
+    projectId: z.string(),
+    issueId: z.string(),
+    requestedByHumanId: z.string(),
+    agentId: z.string(),
+    dispatchAttemptId: DispatchAttemptId,
+    state: DispatchState,
+    runId: z.string().nullable(),
+    workSessionId: z.string().nullable(),
+    lastUpSeq: z.int().min(0),
+    lastDownSeq: z.int().min(0),
+    branchName: z.string().nullable(),
+    dirtyWorktree: z.boolean(),
+    createdAt: Timestamp,
+    acceptedAt: Timestamp.nullable(),
+    endedAt: Timestamp.nullable(),
+  })
+  .meta({ id: "Dispatch" });
+export type Dispatch = z.infer<typeof Dispatch>;
+
+export const CreateDispatchRequest = z
+  .object({
+    runnerId: RunnerId,
+    agentId: z.string().min(1).max(200).optional(),
+  })
+  .meta({ id: "CreateDispatchRequest" });
+export type CreateDispatchRequest = z.infer<typeof CreateDispatchRequest>;
+
+export const IssueDispatchesResponse = z
+  .object({ dispatches: z.array(Dispatch) })
+  .meta({ id: "IssueDispatchesResponse" });
+export type IssueDispatchesResponse = z.infer<typeof IssueDispatchesResponse>;
+
+/**
+ * The `orr_dt_...` secret is returned exactly once. Only its SHA-256 digest is
+ * persisted, bound to every id in `DispatchScope`.
+ */
+export const DispatchAcceptance = z
+  .object({
+    dispatch: Dispatch,
+    run: Run,
+    session: WorkSession,
+    dispatchToken: z.string().min(1),
+  })
+  .meta({ id: "DispatchAcceptance" });
+export type DispatchAcceptance = z.infer<typeof DispatchAcceptance>;
+
+/** Every id a Dispatch token is fenced to; a tool may touch only these rows. */
+export const DispatchScope = z
+  .object({
+    runnerHostId: RunnerHostId,
+    runnerId: RunnerId,
+    dispatchId: DispatchId,
+    dispatchAttemptId: DispatchAttemptId,
+    agentId: z.string(),
+    workspaceId: z.string(),
+    projectId: z.string(),
+    issueId: z.string(),
+    runId: z.string(),
+    workSessionId: z.string(),
+  })
+  .meta({ id: "DispatchScope" });
+export type DispatchScope = z.infer<typeof DispatchScope>;

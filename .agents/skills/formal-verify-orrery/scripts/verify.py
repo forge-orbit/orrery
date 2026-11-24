@@ -586,7 +586,10 @@ def extract_code_facts() -> dict[str, Any]:
     m12_rest_bearer = (
         "await workActor(c)" in list_projects_rest
         and "agentAuthenticator(c.req.raw)" in proj_rest_src
-        and 'if (identity !== null) return { kind: "agent", identity };' in proj_rest_src
+        and (
+            'if (identity !== null) return { kind: "agent", identity };' in proj_rest_src
+            or "assertDispatchRestAllowed(identity, c.req.method, c.req.path);" in proj_rest_src
+        )
         and "isAgentError(error)" in proj_rest_src
     )
     m12_rest_admin_session = (
@@ -940,6 +943,14 @@ def extract_code_facts() -> dict[str, Any]:
     lock_issue_fn = slice_between(sess_src, "async function lockIssue(", "export async function revertIssueToTodo(")
     expire_fn = slice_between(sess_src, "async function expireStale(", "const fiveMinutes")
     claim_fn = slice_between(sess_src, "async claim(actor, input)", "async renew(actor, issueId")
+    # #196 extracted the claim rules into claimInTransaction so dispatch
+    # acceptance can claim inside its own transaction. Include that helper here:
+    # the invariants are now enforced there, not in the thin service method.
+    claim_fn += slice_between(
+        sess_src,
+        "export async function claimInTransaction(",
+        "export function createSessionsService(",
+    )
     renew_fn = slice_between(sess_src, "async renew(actor, issueId", "async progress(actor, issueId")
     # #83 made this helper generic so activity appends can return the inserted row while
     # the lease-taking writes still return a WorkSession. Accept either spelling of the
@@ -1222,6 +1233,11 @@ def extract_code_facts() -> dict[str, Any]:
     q_eval_fn = slice_between(q_src, "const evaluateDeadline", "const questionDeadline")
     q_deadline_fn = slice_between(q_src, "const questionDeadline", "export function createInboxService")
     sess_claim_fn = slice_between(sess_src, "async claim(actor, input)", "async renew(actor, issueId")
+    sess_claim_fn += slice_between(
+        sess_src,
+        "export async function claimInTransaction(",
+        "export function createSessionsService(",
+    )
     sess_renew_fn = slice_between(sess_src, "async renew(actor, issueId", "async progress(actor, issueId")
 
     m20_statuses = (
@@ -2965,6 +2981,135 @@ def extract_code_facts() -> dict[str, Any]:
         and '"/api/workspaces/{workspaceId}/runners"' in runners_openapi_src
     )
 
+    # M43 (#196): manual issue dispatch, atomic accept and fenced token auth.
+    # Every guard below is extracted from the owning source function, so removing
+    # one flips the transition relation and produces a named counterexample.
+    agents_dispatch_service = read_text("apps/server/src/features/agents/service.ts")
+    dispatch_allowlist_src = read_text("apps/server/src/features/agents/dispatch.ts")
+    proj_mcp_dispatch = read_text("apps/server/src/features/projects/mcp.ts")
+    sess_mcp_dispatch = read_text("apps/server/src/features/work-sessions/mcp.ts")
+    inbox_rest_dispatch = read_text("apps/server/src/features/inbox/rest.ts")
+    sess_rest_dispatch = read_text("apps/server/src/features/work-sessions/rest.ts")
+    proj_rest_dispatch = read_text("apps/server/src/features/projects/rest.ts")
+    dispatch_migration = read_text("db/migrations/0051_nebulous_warbound.sql")
+    create_dispatch_fn = slice_between(runners_src, "async createDispatch(", "async listIssueDispatches(")
+    list_dispatch_fn = slice_between(runners_src, "async listIssueDispatches(", "async acceptDispatch(")
+    accept_dispatch_fn = slice_between(runners_src, "async acceptDispatch(", "async revokeRunnerHost(")
+    dispatchable_fn = slice_between(
+        runners_src, "async function assertIssueDispatchable(", "async function revokeDispatchTokensForRunners("
+    )
+    resolve_key_fn = slice_between(
+        agents_dispatch_service,
+        "async function resolveKeyInTransaction(",
+        "export async function agentProjectAccessInTransaction(",
+    )
+    resolve_token_fn = slice_between(
+        agents_dispatch_service,
+        "async function resolveDispatchTokenInTransaction(",
+        "async function resolveKeyInTransaction(",
+    )
+    dispatch_live_decl = slice_between(
+        agents_dispatch_service, "const dispatchLive", "async function resolveDispatchTokenInTransaction("
+    )
+    dispatch_tool_set = slice_between(dispatch_allowlist_src, "const dispatchTools", "];")
+
+    m43_create_non_enum = (
+        "issue.deletedAt !== null" in create_dispatch_fn
+        and "canSeeWorkspace(tx, issue.workspaceId, human.humanId)" in create_dispatch_fn
+        and 'throw new RunnersError("issue_not_found")' in create_dispatch_fn
+    )
+    m43_create_read_access = (
+        'hasAccess(callerCeiling.get(issue.projectId), "read", projectAccessAtLeast)'
+        in create_dispatch_fn
+    )
+    m43_list_non_enum = (
+        "issue.deletedAt !== null" in list_dispatch_fn
+        and "canSeeWorkspace(tx, issue.workspaceId, human.humanId)" in list_dispatch_fn
+        and 'throw new RunnersError("issue_not_found")' in list_dispatch_fn
+    )
+    m43_list_read_access = (
+        'hasAccess(ceiling.get(issue.projectId), "read", projectAccessAtLeast)'
+        in list_dispatch_fn
+    )
+    m43_owner_only = (
+        'if (joined.hostHumanId !== human.humanId) throw new RunnersError("runner_forbidden")'
+        in create_dispatch_fn
+        and "runner_forbidden: 403" in runners_rest_src
+    )
+    m43_assignee_compatible = (
+        "assertIssueDispatchable(tx, issueId, agentId)" in create_dispatch_fn
+        and 'issue.assigneeType === "human"' in dispatchable_fn
+        and "issue.assigneeId !== agentId" in dispatchable_fn
+        and "assignee:" not in dispatchable_fn
+    )
+    m43_atomic_accept = (
+        "db.transaction(" in accept_dispatch_fn
+        and "nativeSessionId: dispatch.dispatchAttemptId" in accept_dispatch_fn
+        and "claimWorkSession(tx," in accept_dispatch_fn
+        and "tx.insert(dispatchTokens)" in accept_dispatch_fn
+        and 'state: "active"' in accept_dispatch_fn
+        and "runId: runRow.id" in accept_dispatch_fn
+    )
+    m43_claim_error_409 = (
+        "error instanceof SessionsError" in accept_dispatch_fn
+        and 'new RunnersError("issue_not_dispatchable")' in accept_dispatch_fn
+        and "issue_not_dispatchable: 409" in runners_rest_src
+    )
+    m43_token_wire_resolve = 'credential.startsWith("orr_dt_")' in resolve_key_fn
+    m43_token_identity_resolve = (
+        "credential.dispatchScope !== undefined" in resolve_key_fn
+        and "eq(dispatchTokens.id, credential.keyId)" in resolve_token_fn
+    )
+    m43_token_live_db_time = all(
+        marker in dispatch_live_decl
+        for marker in [
+            "dispatchTokens.revokedAt} is null",
+            "runnerDispatches.state} = 'active'",
+            "runnerDispatches.dispatchAttemptId} = ${dispatchTokens.dispatchAttemptId}",
+            "workSessions.status} = 'active'",
+            "workSessions.leaseExpiresAt} > statement_timestamp()",
+            "runnerHosts.revokedAt} is null",
+            "runners.revokedAt} is null",
+            "humans.deactivatedAt} is null",
+        ]
+    )
+    m43_token_workspace_access = (
+        "humanCanUseWorkspace(tx, token.workspaceId, row.humanId)" in resolve_token_fn
+        and "projectAccessCeiling(tx, token.workspaceId, row.humanId, [token.projectId])"
+        in resolve_token_fn
+        and 'if (level === null || level === undefined) throw new AgentsError("dispatch_token_invalid")'
+        in resolve_token_fn
+    )
+    m43_mcp_allowlist = (
+        "claim_issue" not in dispatch_tool_set
+        and "renew_claim" not in dispatch_tool_set
+        and "assertDispatchToolAllowed(identity, tool.name, parsed)" in proj_mcp_dispatch
+        and "assertDispatchToolAllowed(identity, tool.name, parsed)" in sess_mcp_dispatch
+    )
+    m43_rest_allowlist = (
+        "if (match === null) continue;" in dispatch_allowlist_src
+        and "refuse();" in dispatch_allowlist_src
+        and "/api/projects/${project}/issues" not in dispatch_allowlist_src
+    )
+    m43_body_fence = (
+        "assertDispatchBodyAllowed" in dispatch_allowlist_src
+        and "assertDispatchBodyAllowed(actor.identity" in inbox_rest_dispatch
+        and "fenceSessionBody" in sess_rest_dispatch
+        and "fenceKnowledgeEntry" in proj_rest_dispatch
+    )
+    m43_state_ended = (
+        "endDispatchesWithoutLiveSession" in runners_src
+        and "await endDispatchesWithoutLiveSession(tx, eq(runnerDispatches.issueId, issueId))"
+        in list_dispatch_fn
+    )
+    m43_contract_surface = (
+        "DispatchAcceptance" in runners_contract_src
+        and '"/api/issues/{issueId}/dispatches"' in runners_openapi_src
+        and '"/api/runners/{runnerId}/dispatches/{dispatchId}/accept"' in runners_openapi_src
+        and "runner_dispatches" in dispatch_migration
+        and "dispatch_tokens" in dispatch_migration
+    )
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -3428,6 +3573,23 @@ def extract_code_facts() -> dict[str, Any]:
         "m42_member_scope_only": m42_member_scope_only,
         "m42_host_revoke_in_tx": m42_host_revoke_in_tx,
         "m42_contract_and_contract_surface": m42_contract_and_contract_surface,
+        "m43_create_non_enum": m43_create_non_enum,
+        "m43_create_read_access": m43_create_read_access,
+        "m43_list_non_enum": m43_list_non_enum,
+        "m43_list_read_access": m43_list_read_access,
+        "m43_owner_only": m43_owner_only,
+        "m43_assignee_compatible": m43_assignee_compatible,
+        "m43_atomic_accept": m43_atomic_accept,
+        "m43_claim_error_409": m43_claim_error_409,
+        "m43_token_wire_resolve": m43_token_wire_resolve,
+        "m43_token_identity_resolve": m43_token_identity_resolve,
+        "m43_token_live_db_time": m43_token_live_db_time,
+        "m43_token_workspace_access": m43_token_workspace_access,
+        "m43_mcp_allowlist": m43_mcp_allowlist,
+        "m43_rest_allowlist": m43_rest_allowlist,
+        "m43_body_fence": m43_body_fence,
+        "m43_state_ended": m43_state_ended,
+        "m43_contract_surface": m43_contract_surface,
     }
 
 
@@ -9103,6 +9265,173 @@ def check_m42(facts: dict[str, Any]) -> CheckResult:
     )
 
 
+def check_m43(facts: dict[str, Any]) -> CheckResult:
+    """#196: manual dispatch, atomic accept and single-issue Dispatch token auth.
+
+    The explorer interleaves dispatch creation (owner and non-owner), acceptance,
+    MCP/REST tool calls with a Dispatch token, offboarding events and contract
+    exposure. Every transition's outcome is derived from a guard extracted from
+    the live runners/agents/dispatch sources, so a removed guard yields a named
+    counterexample. The verified baseline must break under each single flip.
+    """
+    files = [
+        "apps/server/src/features/runners/service.ts",
+        "apps/server/src/features/runners/rest.ts",
+        "apps/server/src/features/agents/service.ts",
+        "apps/server/src/features/agents/dispatch.ts",
+        "apps/server/src/features/projects/mcp.ts",
+        "apps/server/src/features/work-sessions/mcp.ts",
+        "apps/server/src/features/inbox/rest.ts",
+        "apps/server/src/features/work-sessions/rest.ts",
+        "apps/server/src/features/projects/rest.ts",
+        "apps/server/src/db/schema.ts",
+        "packages/contract/src/runners.ts",
+        "contract/openapi.json",
+        "db/migrations/0051_nebulous_warbound.sql",
+    ]
+    g = {k: v for k, v in facts.items() if k.startswith("m43_")}
+
+    actions = (
+        "outsider_create",
+        "teammate_create",
+        "owner_create",
+        "list_no_access",
+        "accept",
+        "mcp_denied",
+        "rest_denied",
+        "in_tx_access",
+        "revoked",
+        "contract",
+    )
+    prerequisites = {
+        "list_no_access": "owner_create",
+        "mcp_denied": "accept",
+        "rest_denied": "accept",
+        "in_tx_access": "accept",
+        "revoked": "accept",
+    }
+
+    def violations_for(action: str, _applied: frozenset[str]) -> set[str]:
+        bad: set[str] = set()
+        if action == "outsider_create":
+            if not g["m43_create_non_enum"]:
+                bad.add("outsider_learned_issue_exists_via_dispatch")
+        elif action == "teammate_create":
+            if not g["m43_owner_only"]:
+                bad.add("teammate_dispatched_to_another_humans_host")
+        elif action == "owner_create":
+            if not g["m43_create_read_access"]:
+                bad.add("dispatch_created_without_project_read_access")
+            if not g["m43_assignee_compatible"]:
+                bad.add("dispatch_created_for_incompatible_assignee")
+        elif action == "list_no_access":
+            if not g["m43_list_non_enum"]:
+                bad.add("dispatch_list_leaked_to_non_member")
+            if not g["m43_list_read_access"]:
+                bad.add("dispatch_list_leaked_without_read_access")
+        elif action == "accept":
+            if not g["m43_atomic_accept"]:
+                bad.add("torn_dispatch_acceptance")
+            if not g["m43_claim_error_409"]:
+                bad.add("failed_claim_surfaced_as_500")
+        elif action == "mcp_denied":
+            if not g["m43_token_wire_resolve"]:
+                bad.add("dispatch_token_not_authenticated_on_mcp")
+            if not g["m43_mcp_allowlist"]:
+                bad.add("claim_and_renew_allowed_with_dispatch_token")
+        elif action == "rest_denied":
+            if not g["m43_token_wire_resolve"]:
+                bad.add("dispatch_token_not_authenticated_on_rest")
+            if not g["m43_rest_allowlist"]:
+                bad.add("cross_issue_or_create_issue_allowed_with_dispatch_token")
+            if not g["m43_body_fence"]:
+                bad.add("unfenced_question_or_knowledge_body_with_dispatch_token")
+        elif action == "in_tx_access":
+            if not g["m43_token_identity_resolve"]:
+                bad.add("in_transaction_dispatch_identity_rejected_as_invalid_key")
+            if not g["m43_token_workspace_access"]:
+                bad.add("dispatch_token_kept_access_after_membership_loss")
+        elif action == "revoked":
+            if not g["m43_token_live_db_time"]:
+                bad.add("dispatch_token_outlived_session_lease_host_or_human")
+            if not g["m43_state_ended"]:
+                bad.add("ended_dispatch_still_reported_as_running")
+        elif action == "contract":
+            if not g["m43_contract_surface"]:
+                bad.add("dispatch_routes_or_contract_missing")
+        return bad
+
+    def run(check_id: str) -> CheckResult:
+        init = (frozenset(), frozenset())
+
+        def next_states(state):
+            applied, _violations = state
+            for action in actions:
+                if action in applied:
+                    continue
+                prereq = prerequisites.get(action)
+                if prereq is not None and prereq not in applied:
+                    continue
+                found = violations_for(action, applied)
+                yield f"{action} (after {sorted(applied)})", (applied | {action}, frozenset(found))
+
+        def invariant(state):
+            _applied, violations = state
+            if violations:
+                return False, f"dispatch invariant broken: {sorted(violations)[0]}"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Manual Issue Dispatch, Atomic Claim & Fenced Dispatch Token Auth (#196)",
+            "Only the Runner host owner can dispatch; non-members and readers without project access get 404; accept atomically registers the Run, claims the Work session and mints a hashed Dispatch token; both authentication paths live-check DB-time liveness; REST/MCP allowlists fence every call to one issue",
+            "safety",
+            init,
+            next_states,
+            invariant,
+            files,
+        )
+
+    result = run("M43")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M43-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M43",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M43",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -9149,6 +9478,7 @@ def main() -> None:
         check_m40(facts),
         check_m41(facts),
         check_m42(facts),
+        check_m43(facts),
     ]
 
     if "--json" in sys.argv:

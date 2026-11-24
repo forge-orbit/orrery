@@ -3,6 +3,7 @@ import {
   AgentKeyValidity,
   AssigneeType,
   AttachmentHolderType,
+  DispatchState,
   FallbackPolicy,
   InvitationDelivery,
   InvitationStatus,
@@ -1576,6 +1577,118 @@ export const runners = pgTable(
       .where(sql`${t.revokedAt} is null`),
     uniqueIndex("runners_one_per_host_workspace_project_fingerprint")
       .on(t.hostId, t.workspaceId, t.projectId, t.repoFingerprint)
+      .where(sql`${t.revokedAt} is null`),
+  ],
+);
+
+/**
+ * A human's delivery of one issue to one of their Runners. The dispatch is a
+ * thin bridge: accepting it creates a Run and claims a Work session through
+ * the existing services, and never writes issues.assignee (issue #196).
+ */
+export const runnerDispatches = pgTable(
+  "runner_dispatches",
+  {
+    id: text("id").primaryKey(),
+    runnerId: text("runner_id")
+      .notNull()
+      .references(() => runners.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    issueId: text("issue_id")
+      .notNull()
+      .references(() => issues.id, { onDelete: "cascade" }),
+    requestedByHumanId: text("requested_by_human_id")
+      .notNull()
+      .references(() => humans.id),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    dispatchAttemptId: text("dispatch_attempt_id").notNull(),
+    state: text("state").$type<DispatchState>().notNull().default("pending"),
+    runId: text("run_id").references(() => runs.id),
+    workSessionId: text("work_session_id").references(() => workSessions.id),
+    lastUpSeq: integer("last_up_seq").notNull().default(0),
+    lastDownSeq: integer("last_down_seq").notNull().default(0),
+    branchName: text("branch_name"),
+    dirtyWorktree: boolean("dirty_worktree").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [
+    check(
+      "runner_dispatches_state",
+      sql`${t.state} in (${sql.raw(sqlLiteralList(DispatchState))})`,
+    ),
+    check(
+      "runner_dispatches_sequence_nonnegative",
+      sql`${t.lastUpSeq} >= 0 and ${t.lastDownSeq} >= 0`,
+    ),
+    check(
+      "runner_dispatches_accepted_fields",
+      sql`(${t.state} = 'pending' and ${t.acceptedAt} is null and ${t.runId} is null and ${t.workSessionId} is null)
+          or (${t.state} in ('active', 'uncertain', 'ended') and ${t.acceptedAt} is not null and ${t.runId} is not null and ${t.workSessionId} is not null)`,
+    ),
+    uniqueIndex("runner_dispatches_one_attempt").on(t.dispatchAttemptId),
+    index("runner_dispatches_runner_created").on(t.runnerId, t.createdAt),
+    index("runner_dispatches_issue_created").on(t.issueId, t.createdAt),
+    index("runner_dispatches_pending_runner")
+      .on(t.runnerId)
+      .where(sql`${t.state} = 'pending'`),
+  ],
+);
+
+/**
+ * A short-lived, hash-only bearer credential bound to one Dispatch attempt.
+ * The secret is returned once at acceptance; only its digest is stored.
+ */
+export const dispatchTokens = pgTable(
+  "dispatch_tokens",
+  {
+    id: text("id").primaryKey(),
+    tokenHash: text("token_hash").notNull().unique(),
+    runnerHostId: text("runner_host_id")
+      .notNull()
+      .references(() => runnerHosts.id, { onDelete: "cascade" }),
+    runnerId: text("runner_id")
+      .notNull()
+      .references(() => runners.id, { onDelete: "cascade" }),
+    dispatchId: text("dispatch_id")
+      .notNull()
+      .references(() => runnerDispatches.id, { onDelete: "cascade" }),
+    dispatchAttemptId: text("dispatch_attempt_id").notNull(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    issueId: text("issue_id")
+      .notNull()
+      .references(() => issues.id, { onDelete: "cascade" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    workSessionId: text("work_session_id")
+      .notNull()
+      .references(() => workSessions.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    check("dispatch_tokens_token_hash_format", sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
+    index("dispatch_tokens_hash_created").on(t.tokenHash),
+    index("dispatch_tokens_dispatch_created").on(t.dispatchId, t.createdAt),
+    index("dispatch_tokens_session_active")
+      .on(t.workSessionId)
       .where(sql`${t.revokedAt} is null`),
   ],
 );

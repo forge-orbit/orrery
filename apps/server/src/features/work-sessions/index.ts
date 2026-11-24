@@ -13,8 +13,13 @@ import { createSessionsMcp } from "./mcp.ts";
 import { createSessionsRest, routes } from "./rest.ts";
 
 export { routes as sessionsRoutes };
-export { releaseIssueWorkSessions, SessionsError } from "./service.ts";
-export type { SessionsErrorKind, SessionsService } from "./service.ts";
+export {
+  claimInTransaction,
+  releaseIssueWorkSessions,
+  SessionsError,
+  toSession,
+} from "./service.ts";
+export type { ClaimInTransactionDeps, SessionsErrorKind, SessionsService } from "./service.ts";
 
 export type SessionsFeatureDeps = SessionsDeps & {
   sessionReader: SessionReader;

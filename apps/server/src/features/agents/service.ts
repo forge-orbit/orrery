@@ -23,8 +23,13 @@ import {
   agentApiKeys,
   agentKeyEvents,
   agents,
+  dispatchTokens,
   humans,
   projects,
+  runnerDispatches,
+  runnerHosts,
+  runners,
+  workSessions,
   workspaceMemberships,
   workspaces,
 } from "../../db/schema.ts";
@@ -40,6 +45,7 @@ const VALIDITY_DAYS: Record<Exclude<AgentKeyValidity, "never">, number> = {
 };
 
 const newSecret = () => `orr_ak_${randomBytes(32).toString("base64url")}`;
+export const newDispatchToken = () => `orr_dt_${randomBytes(32).toString("hex")}`;
 const keyHintFor = (secret: string) => `${secret.slice(0, 19)}...`;
 
 function expiryFor(validity: AgentKeyValidity) {
@@ -64,7 +70,9 @@ export type AgentsErrorKind =
   | "insufficient_agent_access"
   | "human_deactivated"
   | "source_key_revoked"
-  | "source_key_expired";
+  | "source_key_expired"
+  | "dispatch_token_invalid"
+  | "dispatch_forbidden";
 
 const messages: Record<AgentsErrorKind, string> = {
   not_signed_in: "Not signed in.",
@@ -83,6 +91,8 @@ const messages: Record<AgentsErrorKind, string> = {
   human_deactivated: "The human who owns this key is deactivated.",
   source_key_revoked: "A revoked key cannot be rotated.",
   source_key_expired: "An expired key cannot be rotated.",
+  dispatch_token_invalid: "The Dispatch token is no longer valid.",
+  dispatch_forbidden: "This operation is outside the Dispatch token's single-issue scope.",
 };
 
 export class AgentsError extends Error {
@@ -386,6 +396,117 @@ export async function revokeMemberWorkspaceKeys(
   }
 }
 
+/**
+ * Every dispatch token request is live-checked in database time, both at the
+ * top-level authentication and inside write transactions. A dispatch that is
+ * no longer active, a lapsed work-session lease, a revoked host/runner or a
+ * deactivated/loss-of-access human all invalidate the credential immediately.
+ */
+const dispatchLive = sql<boolean>`${dispatchTokens.revokedAt} is null
+  and ${runnerDispatches.state} = 'active'
+  and ${runnerDispatches.dispatchAttemptId} = ${dispatchTokens.dispatchAttemptId}
+  and ${workSessions.status} = 'active'
+  and ${workSessions.leaseExpiresAt} > statement_timestamp()
+  and ${runnerHosts.revokedAt} is null
+  and ${runners.revokedAt} is null
+  and ${humans.deactivatedAt} is null`;
+
+async function resolveDispatchTokenInTransaction(
+  tx: DbTransaction,
+  projectAccessCeiling: ProjectAccessCeiling,
+  credential: string | AgentIdentity,
+  target?: AgentKeyTarget,
+): Promise<AgentIdentity> {
+  const byToken = typeof credential === "string";
+  const [row] = await tx
+    .select({
+      token: dispatchTokens,
+      dispatch: runnerDispatches,
+      runner: { hostId: runners.hostId, workspaceId: runners.workspaceId },
+      humanId: humans.id,
+      agentName: agents.name,
+      projectName: projects.name,
+      live: dispatchLive,
+    })
+    .from(dispatchTokens)
+    .innerJoin(runnerDispatches, eq(dispatchTokens.dispatchId, runnerDispatches.id))
+    .innerJoin(runners, eq(dispatchTokens.runnerId, runners.id))
+    .innerJoin(runnerHosts, eq(dispatchTokens.runnerHostId, runnerHosts.id))
+    .innerJoin(humans, eq(runnerHosts.humanId, humans.id))
+    .innerJoin(workSessions, eq(dispatchTokens.workSessionId, workSessions.id))
+    .innerJoin(agents, eq(dispatchTokens.agentId, agents.id))
+    .innerJoin(projects, eq(dispatchTokens.projectId, projects.id))
+    .where(
+      byToken
+        ? eq(dispatchTokens.tokenHash, tokenHash(credential))
+        : eq(dispatchTokens.id, credential.keyId),
+    )
+    .limit(1);
+  if (row === undefined) throw new AgentsError("dispatch_token_invalid");
+
+  const token = row.token;
+  const dispatch = row.dispatch;
+  const scope = {
+    runnerHostId: token.runnerHostId,
+    runnerId: token.runnerId,
+    dispatchId: token.dispatchId,
+    dispatchAttemptId: token.dispatchAttemptId,
+    agentId: token.agentId,
+    workspaceId: token.workspaceId,
+    projectId: token.projectId,
+    issueId: token.issueId,
+    runId: token.runId,
+    workSessionId: token.workSessionId,
+  };
+  // The token must agree with the dispatch and the runner it was minted for.
+  if (
+    !row.live ||
+    token.runnerHostId !== row.runner.hostId ||
+    token.runnerId !== dispatch.runnerId ||
+    token.dispatchAttemptId !== dispatch.dispatchAttemptId ||
+    token.agentId !== dispatch.agentId ||
+    token.workspaceId !== dispatch.workspaceId ||
+    token.projectId !== dispatch.projectId ||
+    token.issueId !== dispatch.issueId ||
+    token.runId !== dispatch.runId ||
+    token.workSessionId !== dispatch.workSessionId ||
+    row.runner.workspaceId !== token.workspaceId
+  ) {
+    throw new AgentsError("dispatch_token_invalid");
+  }
+  if (
+    !byToken &&
+    (credential.dispatchScope === undefined ||
+      JSON.stringify(credential.dispatchScope) !== JSON.stringify(scope))
+  ) {
+    throw new AgentsError("dispatch_token_invalid");
+  }
+  if (target?.workspaceId !== undefined && target.workspaceId !== token.workspaceId) {
+    throw new AgentsError("dispatch_forbidden");
+  }
+  if (target?.projectId !== undefined && target.projectId !== token.projectId) {
+    throw new AgentsError("dispatch_forbidden");
+  }
+
+  if (!(await humanCanUseWorkspace(tx, token.workspaceId, row.humanId))) {
+    throw new AgentsError("dispatch_token_invalid");
+  }
+  const ceiling = await projectAccessCeiling(tx, token.workspaceId, row.humanId, [token.projectId]);
+  const level = ceiling.get(token.projectId);
+  if (level === null || level === undefined) throw new AgentsError("dispatch_token_invalid");
+
+  return {
+    agentId: token.agentId,
+    name: row.agentName,
+    humanId: row.humanId,
+    keyId: token.id,
+    workspaceId: token.workspaceId,
+    validity: AgentKeyValidity.enum.never,
+    projects: [{ projectId: token.projectId, projectName: row.projectName, level }],
+    dispatchScope: scope,
+  };
+}
+
 async function resolveKeyInTransaction(
   tx: DbTransaction,
   projectAccessCeiling: ProjectAccessCeiling,
@@ -393,6 +514,15 @@ async function resolveKeyInTransaction(
   credential: string | AgentIdentity,
   target?: AgentKeyTarget,
 ): Promise<AgentIdentity> {
+  // Dispatch tokens are resolved both from the wire (`orr_dt_...`) and from an
+  // already-authenticated AgentIdentity inside a write transaction (attachment
+  // service calls agentProjectAccessInTransaction with the identity object).
+  if (
+    (typeof credential === "string" && credential.startsWith("orr_dt_")) ||
+    (typeof credential !== "string" && credential.dispatchScope !== undefined)
+  ) {
+    return resolveDispatchTokenInTransaction(tx, projectAccessCeiling, credential, target);
+  }
   const byToken = typeof credential === "string";
   const [row] = await tx
     .select({

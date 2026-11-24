@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ProjectAccessLevel } from "./projects.ts";
 import { Timestamp } from "./common.ts";
+import { DispatchScope } from "./runners.ts";
 
 
 
@@ -133,6 +134,8 @@ export const AgentIdentity = z
     workspaceId: z.string(),
     validity: AgentKeyValidity,
     projects: z.array(AgentKeyProject),
+    /** Present only for `orr_dt_...` credentials; absent for API keys. */
+    dispatchScope: DispatchScope.optional(),
   })
   .meta({ id: "AgentIdentity" });
 export type AgentIdentity = z.infer<typeof AgentIdentity>;

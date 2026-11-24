@@ -8,9 +8,16 @@ export { routes as agentsRoutes };
 export {
   AgentsError,
   agentProjectAccessInTransaction,
+  newDispatchToken,
   revokeMemberWorkspaceKeys,
 } from "./service.ts";
-export { isAgentError, readBearerToken } from "./auth.ts";
+export { agentErrorStatus, isAgentError, readBearerToken } from "./auth.ts";
+export {
+  assertDispatchBodyAllowed,
+  assertDispatchRestAllowed,
+  assertDispatchToolAllowed,
+} from "./dispatch.ts";
+export type { DispatchTarget } from "./dispatch.ts";
 export type { AgentAuthenticator } from "./auth.ts";
 export type { AgentsService, AgentsErrorKind } from "./service.ts";
 

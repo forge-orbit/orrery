@@ -40,7 +40,13 @@ import {
   validationHook,
 } from "../../platform/problem.ts";
 import type { SessionReader } from "../accounts/index.ts";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import {
+  agentErrorStatus,
+  AgentsError,
+  isAgentError,
+  type AgentAuthenticator,
+} from "../agents/index.ts";
+import { assertDispatchRestAllowed } from "../agents/index.ts";
 import type { WorkActor } from "./service.ts";
 import { ProjectsError, type ProjectsErrorKind, type ProjectsService } from "./service.ts";
 
@@ -72,6 +78,7 @@ const listProjects = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No workspace with this id is accessible to the caller"),
   },
 });
@@ -245,6 +252,7 @@ const getProject = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -265,6 +273,7 @@ const listIssues = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -283,6 +292,7 @@ const listMentionCandidates = createRoute({
     },
     400: problem("The project id is invalid"),
     401: problem("Not signed in, or the agent key is unusable"),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -330,6 +340,7 @@ const getIssue = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No issue with this id is accessible to the caller"),
   },
 });
@@ -435,6 +446,7 @@ const listLabels = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -641,6 +653,7 @@ const listBlockedBy = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No issue with this id is accessible to the caller"),
   },
 });
@@ -661,6 +674,7 @@ const listBlocking = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No issue with this id is accessible to the caller"),
   },
 });
@@ -681,6 +695,7 @@ const listComments = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No issue with this id is accessible to the caller"),
   },
 });
@@ -701,6 +716,7 @@ const listIssueActivity = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No issue with this id is accessible to the caller"),
   },
 });
@@ -794,6 +810,7 @@ const listActivity = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -814,6 +831,7 @@ const listKnowledge = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -861,6 +879,7 @@ const getKnowledge = createRoute({
     401: problem(
       "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
     ),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No knowledge entry with this id is accessible to the caller"),
   },
 });
@@ -1062,7 +1081,7 @@ const knowledgeWriteKinds = [...knowledgeReadKinds, "insufficient_project_access
 function failure<K extends readonly ProjectsErrorKind[]>(c: Context, error: unknown, kinds: K) {
   if (isAgentError(error)) {
     return problemResponse(c, {
-      status: 401,
+      status: agentErrorStatus(error.kind),
       code: error.kind,
       title: error.message,
     });
@@ -1086,9 +1105,20 @@ export function createProjectsRest(
 
   const workActor = async (c: Context): Promise<WorkActor | null> => {
     const identity = await agentAuthenticator(c.req.raw);
-    if (identity !== null) return { kind: "agent", identity };
+    if (identity !== null) {
+      assertDispatchRestAllowed(identity, c.req.method, c.req.path);
+      return { kind: "agent", identity };
+    }
     const account = await sessionReader(c);
     return account === null ? null : { kind: "human", account };
+  };
+
+  const fenceKnowledgeEntry = async (actor: WorkActor | null, entryId: string) => {
+    if (actor?.kind !== "agent" || actor.identity.dispatchScope === undefined) return;
+    const entryProjectId = await service.knowledgeProjectId(entryId);
+    if (entryProjectId !== actor.identity.dispatchScope.projectId) {
+      throw new AgentsError("dispatch_forbidden");
+    }
   };
 
   app.openapi(listProjects, async (c) => {
@@ -1469,7 +1499,9 @@ export function createProjectsRest(
   app.openapi(getKnowledge, async (c) => {
     try {
       const { entryId } = c.req.valid("param");
-      return c.json(await service.getKnowledge(await workActor(c), entryId), 200);
+      const actor = await workActor(c);
+      await fenceKnowledgeEntry(actor, entryId);
+      return c.json(await service.getKnowledge(actor, entryId), 200);
     } catch (error) {
       return failure(c, error, knowledgeReadKinds);
     }
@@ -1478,10 +1510,9 @@ export function createProjectsRest(
   app.openapi(updateKnowledge, async (c) => {
     try {
       const { entryId } = c.req.valid("param");
-      return c.json(
-        await service.updateKnowledge(await workActor(c), entryId, c.req.valid("json")),
-        200,
-      );
+      const actor = await workActor(c);
+      await fenceKnowledgeEntry(actor, entryId);
+      return c.json(await service.updateKnowledge(actor, entryId, c.req.valid("json")), 200);
     } catch (error) {
       return failure(c, error, knowledgeWriteKinds);
     }
