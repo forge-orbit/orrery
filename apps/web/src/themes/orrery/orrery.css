@@ -594,6 +594,7 @@
 
   .astryx-side-nav {
     background-color: var(--orrery-recessed);
+    padding-block: var(--spacing-6);
   }
 
   .astryx-side-nav-item {

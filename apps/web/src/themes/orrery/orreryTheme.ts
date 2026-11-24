@@ -115,6 +115,7 @@ export const orreryTheme = defineTheme({
     "side-nav": {
       base: {
         backgroundColor: "var(--orrery-recessed)",
+        paddingBlock: "var(--spacing-6)",
       },
     },
     "side-nav-item": {
