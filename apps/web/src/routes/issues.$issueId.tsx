@@ -30,7 +30,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Pencil, RotateCcw, Trash2 } from "lucide-react";
 import type { FormEvent, RefObject } from "react";
 import { useRef, useState } from "react";
-import { agentKeysQuery, workspaceAgentKeysQuery } from "../features/agents/index.ts";
+import { agentKeysQuery, agentsQuery, workspaceAgentKeysQuery } from "../features/agents/index.ts";
 import {
   addBlockedBy,
   addIssueLink,
@@ -71,6 +71,7 @@ import {
   TitleBodyForm,
   updateIssue,
 } from "../features/projects/index.ts";
+import { DelegateToRunner } from "../features/runners/index.ts";
 import { workspaceRunsQuery } from "../features/runs/index.ts";
 import {
   activeSessionsQuery,
@@ -102,6 +103,7 @@ export const Route = createFileRoute("/issues/$issueId")({
       context.queryClient.ensureQueryData(issueActivityQuery(params.issueId)),
       context.queryClient.ensureQueryData(workspaceQuery(project.workspaceId)),
       context.queryClient.ensureQueryData(agentKeysQuery(project.workspaceId)),
+      context.queryClient.ensureQueryData(agentsQuery),
       context.queryClient.ensureQueryData(issueBlockedByQuery(params.issueId)),
       context.queryClient.ensureQueryData(issueBlockingQuery(params.issueId)),
       context.queryClient.ensureQueryData(issuesQuery(issue.projectId)),
@@ -341,6 +343,7 @@ function IssuePage() {
       ? new Set<string>()
       : missingProjectAccessHumanIds(membersQuery.data ?? [], accessIds.data);
   const { data: myKeys } = useSuspenseQuery(agentKeysQuery(project.workspaceId));
+  const { data: myAgents } = useSuspenseQuery(agentsQuery);
   const workspaceKeys = useQuery({
     ...workspaceAgentKeysQuery(project.workspaceId),
     enabled: workspace.kind === "shared" && workspace.isOwner,
@@ -954,6 +957,15 @@ function IssuePage() {
       </Stack>
 
       <SessionStatus issueId={issue.id} projectId={issue.projectId} canContribute={canContribute} />
+
+      {canContribute && (
+        <DelegateToRunner
+          issueId={issue.id}
+          workspaceId={project.workspaceId}
+          projectId={issue.projectId}
+          agents={myAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+        />
+      )}
 
       <SessionInspector
         key={`${issue.id}:${inspector ?? false}:${inspectorSession ?? ""}`}

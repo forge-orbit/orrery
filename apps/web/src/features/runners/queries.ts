@@ -1,4 +1,8 @@
-import { DeviceCodePreview, WorkspaceRunnersFleet } from "@orrery/contract";
+import {
+  DeviceCodePreview,
+  IssueDispatchesResponse,
+  WorkspaceRunnersFleet,
+} from "@orrery/contract";
 import { queryOptions } from "@tanstack/react-query";
 import { getJson } from "../../lib/api.ts";
 
@@ -14,6 +18,20 @@ export function workspaceRunnersQuery(workspaceId: string, live = false) {
         WorkspaceRunnersFleet.parse(value),
       ),
     refetchInterval: live ? 4_000 : false,
+  });
+}
+
+export function issueDispatchesQueryKey(issueId: string) {
+  return ["issues", issueId, "dispatches"] as const;
+}
+
+export function issueDispatchesQuery(issueId: string) {
+  return queryOptions({
+    queryKey: issueDispatchesQueryKey(issueId),
+    queryFn: () =>
+      getJson(`/api/issues/${encodeURIComponent(issueId)}/dispatches`, (value) =>
+        IssueDispatchesResponse.parse(value),
+      ),
   });
 }
 

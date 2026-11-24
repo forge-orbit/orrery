@@ -9,7 +9,11 @@ import {
   IssueSortOrder,
   projectTools,
 } from "@orrery/contract";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import {
+  assertDispatchToolAllowed,
+  isAgentError,
+  type AgentAuthenticator,
+} from "../agents/index.ts";
 import { ProjectsError, type ProjectsService, type WorkActor } from "./service.ts";
 
 type Args = Record<string, unknown>;
@@ -189,6 +193,7 @@ export function createProjectsMcp(service: ProjectsService, authenticate: AgentA
             const identity = await authenticate(request);
             if (identity === null) throw new ProjectsError("not_signed_in");
             const parsed = tool.input.parse(rawArgs);
+            assertDispatchToolAllowed(identity, tool.name, parsed);
             const result = await strategy(
               { kind: "agent", identity },
               Object.fromEntries(Object.entries(parsed)),

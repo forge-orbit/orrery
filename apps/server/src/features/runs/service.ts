@@ -56,13 +56,13 @@ export interface RunsService {
   listWorkspaceRuns(account: SessionAccount | null, workspaceId: string): Promise<RunDetail[]>;
 }
 
-type RunRow = typeof runs.$inferSelect;
+export type RunRow = typeof runs.$inferSelect;
 type ChildRow = typeof runChildren.$inferSelect;
 type ModelChangeRow = typeof runModelChanges.$inferSelect;
 
 const iso = (value: Date | null) => value?.toISOString() ?? null;
 
-function toRun(row: RunRow): Run {
+export function toRun(row: RunRow): Run {
   return {
     id: row.id,
     agentId: row.agentId,

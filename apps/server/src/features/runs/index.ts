@@ -6,7 +6,7 @@ import { createRunsRest, routes } from "./rest.ts";
 import { type RunsDeps, type RunsService, createRunsService } from "./service.ts";
 
 export { routes as runsRoutes };
-export { RunsError } from "./service.ts";
+export { RunsError, toRun } from "./service.ts";
 export type { RunsErrorKind, RunsService } from "./service.ts";
 
 export type RunsFeatureDeps = RunsDeps & {

@@ -14,7 +14,8 @@ import {
   validationHook,
 } from "../../platform/problem.ts";
 import type { SessionReader } from "../accounts/index.ts";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import { agentErrorStatus, isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import { assertDispatchBodyAllowed, assertDispatchRestAllowed } from "../agents/index.ts";
 import type { WorkActor } from "../projects/index.ts";
 import { InboxError, type InboxErrorKind, type InboxService } from "./service.ts";
 
@@ -130,7 +131,11 @@ function isKind<K extends readonly InboxErrorKind[]>(
 
 function failure<K extends readonly InboxErrorKind[]>(c: Context, error: unknown, kinds: K) {
   if (isAgentError(error)) {
-    return problemResponse(c, { status: 401, code: error.kind, title: error.message });
+    return problemResponse(c, {
+      status: agentErrorStatus(error.kind),
+      code: error.kind,
+      title: error.message,
+    });
   }
   if (error instanceof InboxError && isKind(error, kinds)) {
     return problemResponse(c, {
@@ -171,18 +176,34 @@ export function createInboxRest(
 
   const workActor = async (c: Context): Promise<WorkActor | null> => {
     const identity = await authenticate(c.req.raw);
-    if (identity !== null) return { kind: "agent", identity };
+    if (identity !== null) {
+      assertDispatchRestAllowed(identity, c.req.method, c.req.path);
+      return { kind: "agent", identity };
+    }
     const account = await sessionReader(c);
     return account === null ? null : { kind: "human", account };
   };
   const agentActor = async (c: Context) => {
     const identity = await authenticate(c.req.raw);
-    return identity === null ? null : ({ kind: "agent", identity } as const);
+    if (identity === null) return null;
+    assertDispatchRestAllowed(identity, c.req.method, c.req.path);
+    return { kind: "agent" as const, identity };
   };
 
   app.openapi(ask, async (c) => {
     try {
-      return c.json(await service.ask(await agentActor(c), c.req.valid("json")), 201);
+      const body = c.req.valid("json");
+      const actor = await agentActor(c);
+      if (actor !== null) {
+        const target = { issueId: body.issueId, runId: body.runId };
+        const extraSessionId = Reflect.get(body, "sessionId");
+        if (typeof extraSessionId === "string") {
+          assertDispatchBodyAllowed(actor.identity, { ...target, sessionId: extraSessionId });
+        } else {
+          assertDispatchBodyAllowed(actor.identity, target);
+        }
+      }
+      return c.json(await service.ask(actor, body), 201);
     } catch (error) {
       return failure(c, error, askKinds);
     }

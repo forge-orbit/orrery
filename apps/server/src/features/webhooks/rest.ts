@@ -15,7 +15,12 @@ import {
   validationHook,
 } from "../../platform/problem.ts";
 import type { SessionReader } from "../accounts/index.ts";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import {
+  agentErrorStatus,
+  assertDispatchRestAllowed,
+  isAgentError,
+  type AgentAuthenticator,
+} from "../agents/index.ts";
 import type { WorkActor } from "../projects/index.ts";
 import { WebhooksError, type WebhooksErrorKind, type WebhooksService } from "./service.ts";
 
@@ -189,7 +194,11 @@ function isKind<K extends readonly WebhooksErrorKind[]>(
 
 function failure<K extends readonly WebhooksErrorKind[]>(c: Context, error: unknown, kinds: K) {
   if (isAgentError(error)) {
-    return problemResponse(c, { status: 401, code: error.kind, title: error.message });
+    return problemResponse(c, {
+      status: agentErrorStatus(error.kind),
+      code: error.kind,
+      title: error.message,
+    });
   }
   if (error instanceof WebhooksError && isKind(error, kinds)) {
     return problemResponse(c, {
@@ -210,7 +219,10 @@ export function createWebhooksRest(
 
   const workActor = async (c: Context): Promise<WorkActor | null> => {
     const identity = await authenticate(c.req.raw);
-    if (identity !== null) return { kind: "agent", identity };
+    if (identity !== null) {
+      assertDispatchRestAllowed(identity, c.req.method, c.req.path);
+      return { kind: "agent", identity };
+    }
     const account = await sessionReader(c);
     return account === null ? null : { kind: "human", account };
   };

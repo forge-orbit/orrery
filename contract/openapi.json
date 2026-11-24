@@ -773,6 +773,9 @@
             "items": {
               "$ref": "#/components/schemas/AgentKeyProject"
             }
+          },
+          "dispatchScope": {
+            "$ref": "#/components/schemas/DispatchScope"
           }
         },
         "required": [
@@ -784,6 +787,73 @@
           "validity",
           "projects"
         ]
+      },
+      "DispatchScope": {
+        "type": "object",
+        "properties": {
+          "runnerHostId": {
+            "$ref": "#/components/schemas/RunnerHostId"
+          },
+          "runnerId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "issueId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "workSessionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runnerHostId",
+          "runnerId",
+          "dispatchId",
+          "dispatchAttemptId",
+          "agentId",
+          "workspaceId",
+          "projectId",
+          "issueId",
+          "runId",
+          "workSessionId"
+        ]
+      },
+      "RunnerHostId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "RunnerId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "DispatchId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "DispatchAttemptId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
       },
       "SmtpSettingsResponse": {
         "type": "object",
@@ -5622,11 +5692,6 @@
           "platform"
         ]
       },
-      "RunnerId": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 200
-      },
       "HostCredential": {
         "type": "string",
         "minLength": 32,
@@ -5659,7 +5724,7 @@
             "$ref": "#/components/schemas/RunnerId"
           },
           "hostId": {
-            "$ref": "#/components/schemas/RunnerId"
+            "$ref": "#/components/schemas/RunnerHostId"
           },
           "workspaceId": {
             "type": "string"
@@ -5859,7 +5924,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/RunnerId"
+            "$ref": "#/components/schemas/RunnerHostId"
           },
           "humanId": {
             "type": "string"
@@ -5917,7 +5982,7 @@
             "$ref": "#/components/schemas/RunnerId"
           },
           "hostId": {
-            "$ref": "#/components/schemas/RunnerId"
+            "$ref": "#/components/schemas/RunnerHostId"
           },
           "workspaceId": {
             "type": "string"
@@ -6023,7 +6088,7 @@
         "type": "object",
         "properties": {
           "hostId": {
-            "$ref": "#/components/schemas/RunnerId"
+            "$ref": "#/components/schemas/RunnerHostId"
           },
           "revokedRunners": {
             "type": "integer",
@@ -6033,6 +6098,270 @@
         "required": [
           "hostId",
           "revokedRunners"
+        ]
+      },
+      "Dispatch": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "runnerId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "hostId": {
+            "$ref": "#/components/schemas/RunnerHostId"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "issueId": {
+            "type": "string"
+          },
+          "requestedByHumanId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DispatchState"
+          },
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workSessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastUpSeq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastDownSeq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "branchName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dirtyWorktree": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "acceptedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "endedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "runnerId",
+          "hostId",
+          "workspaceId",
+          "projectId",
+          "issueId",
+          "requestedByHumanId",
+          "agentId",
+          "dispatchAttemptId",
+          "state",
+          "runId",
+          "workSessionId",
+          "lastUpSeq",
+          "lastDownSeq",
+          "branchName",
+          "dirtyWorktree",
+          "createdAt",
+          "acceptedAt",
+          "endedAt"
+        ]
+      },
+      "DispatchState": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "active",
+          "uncertain",
+          "ended"
+        ]
+      },
+      "CreateDispatchRequest": {
+        "type": "object",
+        "properties": {
+          "runnerId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "runnerId"
+        ]
+      },
+      "IssueDispatchesResponse": {
+        "type": "object",
+        "properties": {
+          "dispatches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Dispatch"
+            }
+          }
+        },
+        "required": [
+          "dispatches"
+        ]
+      },
+      "DispatchAcceptance": {
+        "type": "object",
+        "properties": {
+          "dispatch": {
+            "$ref": "#/components/schemas/Dispatch"
+          },
+          "run": {
+            "$ref": "#/components/schemas/Run"
+          },
+          "session": {
+            "$ref": "#/components/schemas/WorkSession"
+          },
+          "dispatchToken": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "dispatch",
+          "run",
+          "session",
+          "dispatchToken"
+        ]
+      },
+      "Run": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "harness": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harnessVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nativeSessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "endedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "lastHeartbeatAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "workspaceId",
+          "harness",
+          "harnessVersion",
+          "nativeSessionId",
+          "model",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "endedAt",
+          "lastHeartbeatAt"
         ]
       }
     },
@@ -6565,6 +6894,16 @@
           },
           "401": {
             "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9485,6 +9824,16 @@
               }
             }
           },
+          "403": {
+            "description": "The credential is not permitted for this operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No workspace with this id is accessible to the caller",
             "content": {
@@ -9625,6 +9974,16 @@
           },
           "401": {
             "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10172,6 +10531,16 @@
               }
             }
           },
+          "403": {
+            "description": "The credential is not permitted for this operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No project with this id is accessible to the caller",
             "content": {
@@ -10320,6 +10689,16 @@
               }
             }
           },
+          "403": {
+            "description": "The credential is not permitted for this operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No project with this id is accessible to the caller",
             "content": {
@@ -10372,6 +10751,16 @@
           },
           "401": {
             "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10741,6 +11130,16 @@
           },
           "401": {
             "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11374,6 +11773,16 @@
               }
             }
           },
+          "403": {
+            "description": "The credential is not permitted for this operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No issue with this id is accessible to the caller",
             "content": {
@@ -11507,6 +11916,16 @@
               }
             }
           },
+          "403": {
+            "description": "The credential is not permitted for this operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No issue with this id is accessible to the caller",
             "content": {
@@ -11559,6 +11978,16 @@
           },
           "401": {
             "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11697,6 +12126,16 @@
           },
           "401": {
             "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11928,6 +12367,16 @@
               }
             }
           },
+          "403": {
+            "description": "The credential is not permitted for this operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No project with this id is accessible to the caller",
             "content": {
@@ -11980,6 +12429,16 @@
           },
           "401": {
             "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12118,6 +12577,16 @@
           },
           "401": {
             "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12430,6 +12899,16 @@
               }
             }
           },
+          "403": {
+            "description": "The credential is not permitted for this operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such run belongs to this agent in this workspace",
             "content": {
@@ -12482,6 +12961,16 @@
           },
           "401": {
             "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13552,6 +14041,16 @@
               }
             }
           },
+          "403": {
+            "description": "The credential is not permitted for this operation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such issue or work session is in scope for the caller",
             "content": {
@@ -13604,6 +14103,16 @@
           },
           "401": {
             "description": "Not signed in, or the agent key is invalid or revoked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential is not permitted for this operation",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15580,9 +16089,7 @@
         "parameters": [
           {
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/components/schemas/RunnerId"
             },
             "required": true,
             "name": "runnerId",
@@ -15770,9 +16277,7 @@
         "parameters": [
           {
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
+              "$ref": "#/components/schemas/RunnerHostId"
             },
             "required": true,
             "name": "hostId",
@@ -15842,6 +16347,289 @@
           },
           "429": {
             "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/issues/{issueId}/dispatches": {
+      "post": {
+        "summary": "Delegate an issue to one of your online Runners",
+        "description": "Owner-only: the selected Runner host must belong to the signed-in human. The issue's assignee is never changed.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "issueId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDispatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The pending Dispatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dispatch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The dispatch request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the Runner host credential is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the Runner host owner may dispatch to this Runner",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such issue, Runner or Dispatch is accessible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Runner is unavailable or the issue is not claimable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failed dispatch attempts; try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List the signed-in human's dispatches for an issue",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "issueId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The human's dispatches for this issue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueDispatchesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The dispatch request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the Runner host credential is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the Runner host owner may dispatch to this Runner",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such issue, Runner or Dispatch is accessible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Runner is unavailable or the issue is not claimable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failed dispatch attempts; try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/{runnerId}/dispatches/{dispatchId}/accept": {
+      "post": {
+        "summary": "Accept a Dispatch from a Runner host",
+        "description": "Authenticates with the `orr_rh_...` host credential. Registers the Run, claims the Work session and returns the single-use `orr_dt_...` Dispatch token in one transaction.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/RunnerId"
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "$ref": "#/components/schemas/DispatchId"
+            },
+            "required": true,
+            "name": "dispatchId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The accepted Dispatch, Run, Work session and Dispatch token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchAcceptance"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The dispatch request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the Runner host credential is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the Runner host owner may dispatch to this Runner",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such issue, Runner or Dispatch is accessible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Runner is unavailable or the issue is not claimable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failed dispatch attempts; try again later",
             "content": {
               "application/problem+json": {
                 "schema": {

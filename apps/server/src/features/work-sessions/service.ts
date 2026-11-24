@@ -192,7 +192,7 @@ export interface SessionsService {
 }
 
 type SessionRow = typeof workSessions.$inferSelect;
-type SessionView = SessionRow & { effectiveStatus: string };
+export type SessionView = SessionRow & { effectiveStatus: string };
 
 const sessionColumns = {
   id: workSessions.id,
@@ -228,7 +228,7 @@ function telemetryUpdate(
 
 const iso = (value: Date | null) => value?.toISOString() ?? null;
 
-function toSession(row: SessionView): WorkSession {
+export function toSession(row: SessionView): WorkSession {
   return {
     id: row.id,
     agentId: row.agentId,
@@ -790,6 +790,78 @@ async function requireActivityReadAccess(
   }
 }
 
+export interface ClaimInTransactionDeps {
+  projectAccessCeiling: SessionsProjectAccessCeiling;
+  projectAccessAtLeast: SessionsProjectAccessAtLeast;
+  evaluateQuestionDeadline: (tx: DbTransaction, issueId: string) => Promise<void>;
+  notifyActivity: NotifyActivity;
+  onActivity: EnqueueWebhookActivity;
+}
+
+/** The exact Orrery claim rules, callable inside a caller-owned transaction. */
+export async function claimInTransaction(
+  tx: DbTransaction,
+  identity: AgentIdentity,
+  input: { issueId: string; runId: string },
+  deps: ClaimInTransactionDeps,
+): Promise<WorkSession> {
+  await lockAgentWorkspaceAccess(tx, identity);
+  const requireAccess = requireAccessArgs(tx, deps.projectAccessCeiling, deps.projectAccessAtLeast);
+  const issue = await lockIssue(tx, input.issueId);
+  await expireStale(tx, issue.id, deps.notifyActivity, deps.onActivity);
+  await deps.evaluateQuestionDeadline(tx, issue.id);
+
+  const [fresh] = await tx
+    .select({ status: issues.status, needsInput: issues.needsInput })
+    .from(issues)
+    .where(eq(issues.id, issue.id))
+    .limit(1);
+  await requireAccess(
+    { kind: "agent", identity },
+    issue.projectId,
+    ProjectAccessLevel.enum.contribute,
+    "issue_not_found",
+  );
+
+  await requireRun(tx, identity, input.runId);
+  assertClaimAssignee(issue.assigneeType, issue.assigneeId, identity.agentId);
+
+  const existing = await findActive(tx, issue.id);
+  if (existing !== undefined) {
+    if (isSameRun(existing, identity, input.runId)) return toSession(existing);
+    throw new SessionsError("issue_claimed");
+  }
+
+  if (fresh?.needsInput ?? false) throw new SessionsError("issue_needs_input");
+  if (fresh?.status !== "todo") throw new SessionsError("issue_blocked");
+
+  const created = await insertFreshSession(
+    tx,
+    issue.id,
+    {
+      id: randomUUID(),
+      agentId: identity.agentId,
+      runId: input.runId,
+      workspaceId: identity.workspaceId,
+      issueId: issue.id,
+      status: WorkSessionStatus.enum.active,
+      leaseExpiresAt: fiveMinutes,
+      createdAt: sql`statement_timestamp()`,
+      updatedAt: sql`statement_timestamp()`,
+    },
+    deps.notifyActivity,
+    deps.onActivity,
+  );
+  if (created !== undefined) {
+    await tx
+      .update(issues)
+      .set({ status: "in_progress", updatedAt: sql`statement_timestamp()` })
+      .where(and(eq(issues.id, issue.id), eq(issues.status, "todo")));
+    return toSession(created);
+  }
+  throw new SessionsError("issue_claimed");
+}
+
 export function createSessionsService({
   db,
   projectAccessCeiling,
@@ -930,66 +1002,15 @@ export function createSessionsService({
       const identity = requireAgent(actor);
       await deadlineCommitted(input.issueId);
       await expireCommitted(input.issueId);
-      return db.transaction(async (tx) => {
-        await lockAgentWorkspaceAccess(tx, identity);
-        const requireAccess = requireAccessArgs(tx, projectAccessCeiling, projectAccessAtLeast);
-        const issue = await lockIssue(tx, input.issueId);
-        await expireStale(tx, issue.id, notifyActivity, onActivity);
-        await checkDeadline(tx, issue.id);
-
-        const [fresh] = await tx
-          .select({ status: issues.status, needsInput: issues.needsInput })
-          .from(issues)
-          .where(eq(issues.id, issue.id))
-          .limit(1);
-        await requireAccess(
-          { kind: "agent", identity },
-          issue.projectId,
-          ProjectAccessLevel.enum.contribute,
-          "issue_not_found",
-        );
-
-        await requireRun(tx, identity, input.runId);
-
-        assertClaimAssignee(issue.assigneeType, issue.assigneeId, identity.agentId);
-
-        const existing = await findActive(tx, issue.id);
-        if (existing !== undefined) {
-          if (isSameRun(existing, identity, input.runId)) return toSession(existing);
-          throw new SessionsError("issue_claimed");
-        }
-
-        if (fresh?.needsInput ?? false) throw new SessionsError("issue_needs_input");
-
-        if (fresh?.status !== "todo") throw new SessionsError("issue_blocked");
-
-        const created = await insertFreshSession(
-          tx,
-          issue.id,
-          {
-            id: randomUUID(),
-            agentId: identity.agentId,
-            runId: input.runId,
-            workspaceId: identity.workspaceId,
-            issueId: issue.id,
-            status: WorkSessionStatus.enum.active,
-            leaseExpiresAt: fiveMinutes,
-            createdAt: sql`statement_timestamp()`,
-            updatedAt: sql`statement_timestamp()`,
-          },
+      return db.transaction((tx) =>
+        claimInTransaction(tx, identity, input, {
+          projectAccessCeiling,
+          projectAccessAtLeast,
+          evaluateQuestionDeadline: checkDeadline,
           notifyActivity,
           onActivity,
-        );
-        if (created !== undefined) {
-          await tx
-            .update(issues)
-            .set({ status: "in_progress", updatedAt: sql`statement_timestamp()` })
-            .where(and(eq(issues.id, issue.id), eq(issues.status, "todo")));
-          return toSession(created);
-        }
-
-        throw new SessionsError("issue_claimed");
-      });
+        }),
+      );
     },
 
     async renew(actor, issueId, sessionId, telemetry) {

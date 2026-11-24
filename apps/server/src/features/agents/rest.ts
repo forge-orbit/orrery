@@ -219,6 +219,8 @@ const statusFor = {
   human_deactivated: 401,
   source_key_revoked: 409,
   source_key_expired: 409,
+  dispatch_token_invalid: 401,
+  dispatch_forbidden: 403,
 } as const satisfies Record<AgentsErrorKind, number>;
 
 function isKind<K extends readonly AgentsErrorKind[]>(
@@ -266,6 +268,8 @@ const identityKinds = [
   "key_out_of_scope",
   "insufficient_agent_access",
   "human_deactivated",
+  "dispatch_token_invalid",
+  "dispatch_forbidden",
 ] as const;
 
 type AgentKeyReader = (c: Context) => string | null;

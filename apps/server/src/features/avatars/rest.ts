@@ -2,7 +2,12 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { AvatarUploadRequest, SessionResponse } from "@orrery/contract";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import {
+  agentErrorStatus,
+  assertDispatchRestAllowed,
+  isAgentError,
+  type AgentAuthenticator,
+} from "../agents/index.ts";
 import { toSessionResponse, type SessionAccount, type SessionReader } from "../accounts/index.ts";
 import {
   problemContent as problem,
@@ -84,6 +89,7 @@ const getAvatar = createRoute({
       headers: avatarHeaders.omit({ "X-Content-Type-Options": true }),
     },
     401: problem("No valid session"),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No such visible avatar"),
   },
 });
@@ -189,6 +195,7 @@ export function createAvatarsRest(
         try {
           const identity = await authenticate(c.req.raw);
           if (identity !== null) {
+            assertDispatchRestAllowed(identity, c.req.method, c.req.path);
             actor = {
               kind: "agent",
               humanId: identity.humanId,
@@ -198,7 +205,7 @@ export function createAvatarsRest(
         } catch (error) {
           if (isAgentError(error)) {
             return problemResponse(c, {
-              status: 401,
+              status: agentErrorStatus(error.kind),
               code: error.kind,
               title: error.message,
             });

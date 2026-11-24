@@ -42,6 +42,7 @@ import { createSystemFeature, systemRoutes } from "./system/index.ts";
 import { createTransfersFeature, transfersRoutes } from "./transfers/index.ts";
 import { createWebhooksFeature, webhooksRoutes } from "./webhooks/index.ts";
 import {
+  claimInTransaction,
   createSessionsFeature,
   releaseIssueWorkSessions,
   sessionsRoutes,
@@ -244,6 +245,15 @@ export function createFeatures(
     projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
       projects.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
     projectAccessAtLeast,
+    claimWorkSession: (tx, identity, input) =>
+      claimInTransaction(tx, identity, input, {
+        projectAccessCeiling: (t, wid, hid, pids) =>
+          projects.projectAccessCeiling(t, wid, hid, pids),
+        projectAccessAtLeast,
+        evaluateQuestionDeadline: evaluateDeadline,
+        notifyActivity: notifications.notifyActivity,
+        onActivity: webhooks.enqueueForActivity,
+      }),
   });
 
   return [

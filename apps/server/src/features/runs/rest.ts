@@ -7,7 +7,8 @@ import {
   validationHook,
 } from "../../platform/problem.ts";
 import type { SessionReader } from "../accounts/index.ts";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import { agentErrorStatus, isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import { assertDispatchRestAllowed } from "../agents/index.ts";
 import { RunsError, type RunsErrorKind, type RunsService } from "./service.ts";
 
 const report = createRoute({
@@ -26,6 +27,7 @@ const report = createRoute({
     },
     400: problem("The hook event is invalid"),
     401: problem("The key is invalid, revoked, expired, or its workspace is no longer accessible"),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No such run belongs to this agent in this workspace"),
   },
 });
@@ -44,6 +46,7 @@ const workspaceRuns = createRoute({
     },
     400: problem("The workspace id is invalid"),
     401: problem("Not signed in"),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("This workspace does not exist or you cannot access it"),
   },
 });
@@ -66,7 +69,7 @@ function isKind<K extends readonly RunsErrorKind[]>(
 function failure<K extends readonly RunsErrorKind[]>(c: Context, error: unknown, kinds: K) {
   if (isAgentError(error)) {
     return problemResponse(c, {
-      status: 401,
+      status: agentErrorStatus(error.kind),
       code: error.kind,
       title: error.message,
     });
@@ -94,6 +97,7 @@ export function createRunsRest(
   app.openapi(report, async (c) => {
     try {
       const identity = await authenticate(c.req.raw);
+      if (identity !== null) assertDispatchRestAllowed(identity, c.req.method, c.req.path);
       return c.json(await service.report(identity, c.req.valid("json")), 200);
     } catch (error) {
       return failure(c, error, reportKinds);

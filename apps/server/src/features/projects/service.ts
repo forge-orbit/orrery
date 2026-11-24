@@ -1866,6 +1866,8 @@ export interface ProjectsService {
   listActivity(actor: WorkActor | null, projectId: string): Promise<ProjectActivity[]>;
   listIssueActivity(actor: WorkActor | null, issueId: string): Promise<ProjectActivity[]>;
   listKnowledge(actor: WorkActor | null, projectId: string): Promise<KnowledgeEntry[]>;
+  /** Resource-project lookup used to fence Dispatch tokens on knowledge routes. */
+  knowledgeProjectId(entryId: string): Promise<string | null>;
   getKnowledge(actor: WorkActor | null, entryId: string): Promise<KnowledgeEntry>;
   createKnowledge(
     actor: WorkActor | null,
@@ -3647,6 +3649,15 @@ export function createProjectsService({
         },
         { accessMode: "read only" },
       );
+    },
+
+    async knowledgeProjectId(entryId) {
+      const [row] = await db
+        .select({ projectId: knowledgeEntries.projectId })
+        .from(knowledgeEntries)
+        .where(eq(knowledgeEntries.id, entryId))
+        .limit(1);
+      return row?.projectId ?? null;
     },
 
     async getKnowledge(actorArg, entryId) {

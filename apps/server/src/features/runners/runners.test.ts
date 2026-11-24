@@ -86,6 +86,9 @@ beforeAll(async () => {
             ]),
           ),
         projectAccessAtLeast,
+        claimWorkSession: async () => {
+          throw new Error("claimWorkSession is not wired in this test");
+        },
       }),
     ],
     publicUrl: PUBLIC_URL,

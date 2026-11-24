@@ -1,6 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { RunReportInput, runTools } from "@orrery/contract";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import {
+  assertDispatchToolAllowed,
+  isAgentError,
+  type AgentAuthenticator,
+} from "../agents/index.ts";
 import { RunsError, type RunsService } from "./service.ts";
 
 export function createRunsMcp(service: RunsService, authenticate: AgentAuthenticator) {
@@ -17,6 +21,7 @@ export function createRunsMcp(service: RunsService, authenticate: AgentAuthentic
           try {
             const identity = await authenticate(request);
             const parsed = RunReportInput.parse(rawArgs);
+            if (identity !== null) assertDispatchToolAllowed(identity, tool.name, parsed);
             const result = await service.report(identity, parsed);
             return {
               content: [{ type: "text" as const, text: JSON.stringify(result) }],

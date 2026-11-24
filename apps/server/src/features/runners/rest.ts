@@ -3,14 +3,21 @@ import type { Context } from "hono";
 import {
   ApproveDeviceCodeResponse,
   CreateDeviceCodeRequest,
+  CreateDispatchRequest,
+  DispatchId,
   DeviceCodePreview,
   DeviceCodeResponse,
+  Dispatch,
+  DispatchAcceptance,
   ExchangeDeviceCodeRequest,
+  IssueDispatchesResponse,
   HeartbeatRequest,
   HostCredentialResponse,
   RegisterRunnerRequest,
   RevokeRunnerHostResponse,
   Runner,
+  RunnerHostId,
+  RunnerId,
   UserCode,
   WorkspaceRunnersFleet,
 } from "@orrery/contract";
@@ -24,9 +31,20 @@ import { readBearerToken } from "../agents/index.ts";
 import { RunnersError, type RunnersErrorKind, type RunnersService } from "./service.ts";
 
 const userCodeParams = z.object({ userCode: UserCode });
-const hostParams = z.object({ hostId: z.string().min(1).max(200) });
-const runnerParams = z.object({ runnerId: z.string().min(1).max(200) });
+const hostParams = z.object({ hostId: RunnerHostId });
+const runnerParams = z.object({ runnerId: RunnerId });
 const workspaceParams = z.object({ workspaceId: z.string().min(1).max(200) });
+const issueParams = z.object({ issueId: z.string().min(1).max(200) });
+const acceptParams = z.object({ runnerId: RunnerId, dispatchId: DispatchId });
+
+const dispatchErrors = {
+  400: problem("The dispatch request is invalid"),
+  401: problem("Not signed in, or the Runner host credential is invalid"),
+  403: problem("Only the Runner host owner may dispatch to this Runner"),
+  404: problem("No such issue, Runner or Dispatch is accessible"),
+  409: problem("The Runner is unavailable or the issue is not claimable"),
+  429: problem("Too many failed dispatch attempts; try again later"),
+};
 
 const enrollErrors = {
   400: problem("The enrollment request is invalid"),
@@ -174,6 +192,55 @@ const revokeRunnerHost = createRoute({
   },
 });
 
+const createDispatch = createRoute({
+  method: "post",
+  path: "/api/issues/{issueId}/dispatches",
+  summary: "Delegate an issue to one of your online Runners",
+  description:
+    "Owner-only: the selected Runner host must belong to the signed-in human. The issue's assignee is never changed.",
+  request: {
+    params: issueParams,
+    body: { content: { "application/json": { schema: CreateDispatchRequest } }, required: true },
+  },
+  responses: {
+    201: {
+      description: "The pending Dispatch",
+      content: { "application/json": { schema: Dispatch } },
+    },
+    ...dispatchErrors,
+  },
+});
+
+const listIssueDispatches = createRoute({
+  method: "get",
+  path: "/api/issues/{issueId}/dispatches",
+  summary: "List the signed-in human's dispatches for an issue",
+  request: { params: issueParams },
+  responses: {
+    200: {
+      description: "The human's dispatches for this issue",
+      content: { "application/json": { schema: IssueDispatchesResponse } },
+    },
+    ...dispatchErrors,
+  },
+});
+
+const acceptDispatch = createRoute({
+  method: "post",
+  path: "/api/runners/{runnerId}/dispatches/{dispatchId}/accept",
+  summary: "Accept a Dispatch from a Runner host",
+  description:
+    "Authenticates with the `orr_rh_...` host credential. Registers the Run, claims the Work session and returns the single-use `orr_dt_...` Dispatch token in one transaction.",
+  request: { params: acceptParams },
+  responses: {
+    200: {
+      description: "The accepted Dispatch, Run, Work session and Dispatch token",
+      content: { "application/json": { schema: DispatchAcceptance } },
+    },
+    ...dispatchErrors,
+  },
+});
+
 const bearer = (c: Context) => readBearerToken(c.req.raw.headers.get("authorization")) ?? undefined;
 
 type Status = 400 | 401 | 403 | 404 | 409 | 429;
@@ -195,6 +262,15 @@ const statusFor = {
   runner_not_found: 404,
   agent_not_found: 404,
   no_default_agent: 409,
+  issue_not_found: 404,
+  runner_forbidden: 403,
+  runner_unavailable: 409,
+  runner_not_for_issue: 409,
+  insufficient_dispatch_access: 403,
+  dispatch_not_found: 404,
+  dispatch_not_pending: 409,
+  issue_not_claimable: 409,
+  issue_not_dispatchable: 409,
 } as const satisfies Record<RunnersErrorKind, Status>;
 
 function failure(c: Context, error: unknown) {
@@ -217,6 +293,9 @@ export const routes = [
   heartbeat,
   listWorkspaceRunners,
   revokeRunnerHost,
+  createDispatch,
+  listIssueDispatches,
+  acceptDispatch,
 ];
 
 export function createRunnersRest(service: RunnersService, sessionReader: SessionReader) {
@@ -285,6 +364,40 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
     try {
       const { hostId } = c.req.valid("param");
       return c.json(await service.revokeRunnerHost(await sessionReader(c), hostId), 200);
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(createDispatch, async (c) => {
+    try {
+      const { issueId } = c.req.valid("param");
+      const body = c.req.valid("json");
+      return c.json(
+        await service.createDispatch(await sessionReader(c), issueId, body.runnerId, body),
+        201,
+      );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(listIssueDispatches, async (c) => {
+    try {
+      const { issueId } = c.req.valid("param");
+      return c.json(
+        { dispatches: await service.listIssueDispatches(await sessionReader(c), issueId) },
+        200,
+      );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(acceptDispatch, async (c) => {
+    try {
+      const { runnerId, dispatchId } = c.req.valid("param");
+      return c.json(await service.acceptDispatch(bearer(c), runnerId, dispatchId), 200);
     } catch (error) {
       return failure(c, error);
     }

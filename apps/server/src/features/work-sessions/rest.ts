@@ -26,7 +26,13 @@ import {
   validationHook,
 } from "../../platform/problem.ts";
 import type { SessionReader } from "../accounts/index.ts";
-import { isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import { agentErrorStatus, isAgentError, type AgentAuthenticator } from "../agents/index.ts";
+import {
+  assertDispatchBodyAllowed,
+  assertDispatchRestAllowed,
+  assertDispatchToolAllowed,
+  type DispatchTarget,
+} from "../agents/index.ts";
 import type { WorkActor } from "../projects/index.ts";
 import { SessionsError, type SessionsErrorKind, type SessionsService } from "./service.ts";
 
@@ -294,6 +300,7 @@ const listActivities = createRoute({
     },
     400: problem("The issue or session id is invalid"),
     401: problem("Not signed in, or the agent key is invalid or revoked"),
+    403: problem("The credential is not permitted for this operation"),
     404: problem("No such issue or work session is in scope for the caller"),
   },
 });
@@ -312,6 +319,7 @@ const activeSessions = createRoute({
     },
     400: problem("The workspace id is invalid"),
     401: problem("Not signed in, or the agent key is invalid or revoked"),
+    403: problem("The credential is not permitted for this operation"),
   },
 });
 
@@ -377,7 +385,11 @@ function isKind<K extends readonly SessionsErrorKind[]>(
 
 function failure<K extends readonly SessionsErrorKind[]>(c: Context, error: unknown, kinds: K) {
   if (isAgentError(error)) {
-    return problemResponse(c, { status: 401, code: error.kind, title: error.message });
+    return problemResponse(c, {
+      status: agentErrorStatus(error.kind),
+      code: error.kind,
+      title: error.message,
+    });
   }
   if (error instanceof SessionsError && isKind(error, kinds)) {
     return problemResponse(c, {
@@ -445,13 +457,33 @@ export function createSessionsRest(
 
   const workActor = async (c: Context): Promise<WorkActor | null> => {
     const identity = await authenticate(c.req.raw);
-    if (identity !== null) return { kind: "agent", identity };
+    if (identity !== null) {
+      assertDispatchRestAllowed(identity, c.req.method, c.req.path);
+      return { kind: "agent", identity };
+    }
     const account = await sessionReader(c);
     return account === null ? null : { kind: "human", account };
   };
   const agentActor = async (c: Context) => {
     const identity = await authenticate(c.req.raw);
-    return identity === null ? null : { kind: "agent" as const, identity };
+    if (identity === null) return null;
+    assertDispatchRestAllowed(identity, c.req.method, c.req.path);
+    return { kind: "agent" as const, identity };
+  };
+  /** Fence every id carried in a session body or path to the dispatch scope. */
+  const fenceSessionBody = (
+    identity: NonNullable<Awaited<ReturnType<typeof authenticate>>>,
+    body: Record<string, unknown>,
+    issueId?: string,
+    paramSessionId?: string,
+  ) => {
+    const target: DispatchTarget = {};
+    if (issueId !== undefined) target.issueId = issueId;
+    const sessionId = body.sessionId ?? paramSessionId;
+    if (typeof sessionId === "string") target.sessionId = sessionId;
+    if (typeof body.runId === "string") target.runId = body.runId;
+    if (typeof body.outcome === "string") target.outcome = body.outcome;
+    assertDispatchBodyAllowed(identity, target);
   };
 
   app.openapi(claim, async (c) => {
@@ -488,9 +520,11 @@ export function createSessionsRest(
   app.openapi(progress, async (c) => {
     try {
       const body = c.req.valid("json");
+      const actor = await agentActor(c);
+      if (actor !== null) fenceSessionBody(actor.identity, body, c.req.valid("param").issueId);
       return c.json(
         await service.progress(
-          await agentActor(c),
+          actor,
           c.req.valid("param").issueId,
           body.summary,
           body.sessionId,
@@ -506,9 +540,17 @@ export function createSessionsRest(
   app.openapi(stop, async (c) => {
     try {
       const body = c.req.valid("json");
+      const actor = await agentActor(c);
+      if (actor !== null) {
+        fenceSessionBody(actor.identity, body, c.req.valid("param").issueId);
+        assertDispatchToolAllowed(actor.identity, "stop_session", {
+          outcome: body.outcome,
+          sessionId: body.sessionId,
+        });
+      }
       return c.json(
         await service.stop(
-          await agentActor(c),
+          actor,
           c.req.valid("param").issueId,
           body.outcome,
           body.sessionId,
@@ -538,10 +580,13 @@ export function createSessionsRest(
 
   app.openapi(resume, async (c) => {
     try {
+      const body = c.req.valid("json");
+      const actor = await agentActor(c);
+      if (actor !== null) fenceSessionBody(actor.identity, body, c.req.valid("param").issueId);
       return c.json(
-        await service.resume(await agentActor(c), {
+        await service.resume(actor, {
           issueId: c.req.valid("param").issueId,
-          runId: c.req.valid("json").runId,
+          runId: body.runId,
         }),
         200,
       );
@@ -589,8 +634,10 @@ export function createSessionsRest(
   app.openapi(logActivity, async (c) => {
     try {
       const body = c.req.valid("json");
+      const actor = await agentActor(c);
+      if (actor !== null) fenceSessionBody(actor.identity, body, c.req.valid("param").issueId);
       return c.json(
-        await service.logActivity(await agentActor(c), {
+        await service.logActivity(actor, {
           issueId: c.req.valid("param").issueId,
           kind: body.kind,
           summary: body.summary,
@@ -607,7 +654,11 @@ export function createSessionsRest(
   app.openapi(listActivities, async (c) => {
     try {
       const { issueId, sessionId } = c.req.valid("param");
-      return c.json(await service.listActivities(await workActor(c), issueId, sessionId), 200);
+      const actor = await workActor(c);
+      if (actor?.kind === "agent") {
+        fenceSessionBody(actor.identity, {}, issueId, sessionId);
+      }
+      return c.json(await service.listActivities(actor, issueId, sessionId), 200);
     } catch (error) {
       return failure(c, error, listActivitiesKinds);
     }
