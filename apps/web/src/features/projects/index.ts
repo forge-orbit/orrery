@@ -26,6 +26,13 @@ export {
   projectAccessCandidates,
   type ProjectAccessCandidate,
 } from "./assignee-access.ts";
+export {
+  compareBoardIssues,
+  computeBoardDropPlacement,
+  PRIORITY_RANK,
+  type BoardDropPlacement,
+  type BoardOrderable,
+} from "./board-placement.ts";
 export { AssigneeControl, type AssigneeCandidate } from "./AssigneeControl.tsx";
 export { IssueLabels } from "./IssueLabels.tsx";
 export { IssueMentionTextArea } from "./IssueMentionTextArea.tsx";
