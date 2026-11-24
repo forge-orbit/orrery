@@ -1,0 +1,2 @@
+ALTER TABLE "projects" ADD COLUMN "description" text DEFAULT '' NOT NULL;--> statement-breakpoint
+ALTER TABLE "projects" ADD CONSTRAINT "projects_description_length" CHECK (char_length("projects"."description") <= 500);

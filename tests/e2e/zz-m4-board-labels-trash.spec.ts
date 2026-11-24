@@ -74,11 +74,11 @@ test("board, badges, labels, subtasks, trash and restore work in the browser", a
   const temporary = page.locator("[data-project-label-id]").filter({ hasText: "Temporary label" });
   const temporaryId = await temporary.getAttribute("data-project-label-id");
   const temporaryRow = page.locator(`[data-project-label-id="${temporaryId}"]`);
-  await temporaryRow.getByRole("button", { name: "Edit label" }).click();
+  await temporaryRow.getByRole("button", { name: "Edit" }).click();
   await temporaryRow.getByLabel("Label name").fill("Renamed label");
   await temporaryRow.getByRole("button", { name: "Save label" }).click();
   await expect(page.locator('[data-label-name="Renamed label"]')).toBeVisible();
-  await temporaryRow.getByRole("button", { name: "Delete label" }).click();
+  await temporaryRow.getByRole("button", { name: "Delete" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Delete label" }).click();
   await expect(page.locator('[data-label-name="Renamed label"]')).toHaveCount(0);
 

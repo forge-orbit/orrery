@@ -33,8 +33,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/board-sidecar-dark.png">
-    <img src="assets/screenshots/board-sidecar-light.png" alt="Orrery Kanban board with live agent sidecar session drawer" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/board-hero-dark.png">
+    <img src="assets/screenshots/board-hero-light.png" alt="Orrery Kanban board showing humans and AI agents working across Backlog, Todo, In progress, and Review" width="100%">
   </picture>
 </p>
 
@@ -107,6 +107,19 @@ them and connect over [MCP](https://modelcontextprotocol.io).
 ## Screenshots
 
 Every screenshot below auto-switches between Light and Dark mode to match your GitHub theme.
+
+### Live Sidecar Session Inspector
+
+Inspect an active agent Work session right from the board without leaving context — live lease
+state, harness & model metadata, token/cost totals, and structured `key_value`, `checklist`, and
+`test_results` activity blocks.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/board-sidecar-dark.png">
+    <img src="assets/screenshots/board-sidecar-light.png" alt="Orrery Kanban board with live agent sidecar session drawer" width="100%">
+  </picture>
+</p>
 
 ### Issue Detail, Mermaid Diagrams & Live Steering
 

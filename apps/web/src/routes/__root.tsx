@@ -291,7 +291,7 @@ function RootLayout() {
           <SideNav
             data-app-sidebar=""
             header={
-              <Stack paddingInline={2} paddingBlock={1}>
+              <Stack paddingInline={2} paddingBlockStart={3} paddingBlockEnd={1}>
                 <BrandHome />
               </Stack>
             }

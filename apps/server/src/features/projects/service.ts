@@ -432,6 +432,7 @@ const projectColumns = {
   id: projects.id,
   workspaceId: projects.workspaceId,
   name: projects.name,
+  description: projects.description,
   key: projects.key,
   createdAt: projects.createdAt,
   createdByHumanId: projects.createdByHumanId,
@@ -577,6 +578,7 @@ type ProjectRow = {
   id: string;
   workspaceId: string;
   name: string;
+  description: string;
   key: string;
   createdAt: Date;
   createdByHumanId: string;
@@ -729,6 +731,7 @@ function toProject(row: ProjectRow): Project {
     id: row.id,
     workspaceId: row.workspaceId,
     name: row.name,
+    description: row.description,
     key: row.key,
     createdAt: row.createdAt.toISOString(),
     createdBy: actorFromRow(
@@ -2048,8 +2051,16 @@ export function createProjectsService({
         const used = new Set(existing.map((row) => row.key));
         const key = input.key ?? availableProjectKey(baseProjectKey(input.name), used);
         if (used.has(key)) throw new ProjectsError("project_key_taken");
+        const description = input.description ?? "";
         let created:
-          | { id: string; workspaceId: string; name: string; key: string; createdAt: Date }
+          | {
+              id: string;
+              workspaceId: string;
+              name: string;
+              description: string;
+              key: string;
+              createdAt: Date;
+            }
           | undefined;
         try {
           [created] = await tx
@@ -2058,6 +2069,7 @@ export function createProjectsService({
               id,
               workspaceId,
               name: input.name,
+              description,
               key,
               createdByHumanId: actor.humanId,
               createdAt: sql`statement_timestamp()`,
@@ -2066,6 +2078,7 @@ export function createProjectsService({
               id: projects.id,
               workspaceId: projects.workspaceId,
               name: projects.name,
+              description: projects.description,
               key: projects.key,
               createdAt: projects.createdAt,
             });
@@ -2108,6 +2121,7 @@ export function createProjectsService({
           id: created.id,
           workspaceId: created.workspaceId,
           name: created.name,
+          description: created.description,
           key: created.key,
           createdAt: created.createdAt.toISOString(),
           createdBy: actorForWrite(workActor),
@@ -2133,20 +2147,29 @@ export function createProjectsService({
         if (input.key !== undefined && input.key !== current.key) {
           throw new ProjectsError("project_key_immutable");
         }
-        if (input.name === current.name) return toProject(current);
+        const nextDescription = input.description ?? current.description;
+        const nameChanged = input.name !== current.name;
+        const descriptionChanged = nextDescription !== current.description;
+        if (!nameChanged && !descriptionChanged) return toProject(current);
         const [updated] = await tx
           .update(projects)
-          .set({ name: input.name })
+          .set({ name: input.name, description: nextDescription })
           .where(eq(projects.id, projectId))
-          .returning({ name: projects.name, createdAt: projects.createdAt });
+          .returning({
+            name: projects.name,
+            description: projects.description,
+            createdAt: projects.createdAt,
+          });
         if (updated === undefined) throw new ProjectsError("project_not_found");
-        await recordActivity(tx, {
-          projectId,
-          type: "project_renamed",
-          actor: workActor,
-          summary: updated.name,
-        });
-        return toProject({ ...current, name: updated.name });
+        if (nameChanged) {
+          await recordActivity(tx, {
+            projectId,
+            type: "project_renamed",
+            actor: workActor,
+            summary: updated.name,
+          });
+        }
+        return toProject({ ...current, name: updated.name, description: updated.description });
       });
     },
 

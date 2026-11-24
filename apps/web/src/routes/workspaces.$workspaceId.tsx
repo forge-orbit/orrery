@@ -63,7 +63,7 @@ import {
   workspacesQuery,
 } from "../features/workspaces/index.ts";
 import { HumanAvatar } from "../lib/avatar.tsx";
-import { TextField } from "../lib/fields.tsx";
+import { TextAreaField, TextField } from "../lib/fields.tsx";
 import { Link } from "../lib/Link.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
 
@@ -422,35 +422,54 @@ function Projects({
   return (
     <Grid columns={{ minWidth: 300, max: 3 }} gap={3}>
       {projects.map((project) => (
-        <Card key={project.id} data-project-id={project.id} padding={4}>
-          <Stack gap={3}>
-            <Stack direction="horizontal" gap={2} justify="between" align="center">
-              <Link
-                to="/projects/$projectId"
-                params={{ projectId: project.id }}
-                weight="semibold"
-                color="primary"
-              >
-                {project.name}
-              </Link>
-              <Token label={project.key} color="gray" size="sm" />
+        <Card key={project.id} data-project-id={project.id} padding={4} height="100%">
+          <Stack gap={3} height="100%" justify="between">
+            <Stack gap={1.5}>
+              <Stack direction="horizontal" gap={2} justify="between" align="center">
+                <Link
+                  to="/projects/$projectId"
+                  params={{ projectId: project.id }}
+                  weight="semibold"
+                  color="primary"
+                >
+                  {project.name}
+                </Link>
+                <Token label={project.key} color="gray" size="sm" />
+              </Stack>
+              {project.description !== "" && (
+                <Text
+                  as="p"
+                  type="supporting"
+                  color="secondary"
+                  maxLines={2}
+                  data-project-description=""
+                >
+                  {project.description}
+                </Text>
+              )}
             </Stack>
-            <Divider />
-            <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
-              <Text
-                type="supporting"
-                color="secondary"
-                data-project-access-level={project.accessLevel}
-              >
-                Access: {project.accessLevel}
-              </Text>
-              <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
-                <Link to="/board/$projectId" params={{ projectId: project.id }} weight="medium">
-                  Board
-                </Link>
-                <Link to="/projects/$projectId" params={{ projectId: project.id }} weight="medium">
-                  Issues
-                </Link>
+            <Stack gap={3}>
+              <Divider />
+              <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
+                <Text
+                  type="supporting"
+                  color="secondary"
+                  data-project-access-level={project.accessLevel}
+                >
+                  Access: {project.accessLevel}
+                </Text>
+                <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
+                  <Link to="/board/$projectId" params={{ projectId: project.id }} weight="medium">
+                    Board
+                  </Link>
+                  <Link
+                    to="/projects/$projectId"
+                    params={{ projectId: project.id }}
+                    weight="medium"
+                  >
+                    Issues
+                  </Link>
+                </Stack>
               </Stack>
             </Stack>
           </Stack>
@@ -471,6 +490,7 @@ function CreateProjectForm({
   const navigate = useNavigate();
   const toast = useToast();
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
 
@@ -480,10 +500,11 @@ function CreateProjectForm({
     setSubmitting(true);
     setError(undefined);
     try {
-      const project = await createProject(workspaceId, { name });
+      const project = await createProject(workspaceId, { name, description });
       queryClient.setQueryData(projectQuery(project.id).queryKey, project);
       await queryClient.invalidateQueries({ queryKey: projectsQuery(workspaceId).queryKey });
       setName("");
+      setDescription("");
       onCreated();
       toast({ body: `Created project "${project.name}".` });
       await navigate({ to: "/projects/$projectId", params: { projectId: project.id } });
@@ -506,6 +527,19 @@ function CreateProjectForm({
           required
           maxLength={120}
           placeholder="e.g. Web Platform"
+          width="100%"
+        />
+        <TextAreaField
+          label="Description"
+          id="project-description"
+          htmlName="description"
+          value={description}
+          onChange={setDescription}
+          isOptional
+          rows={3}
+          maxLength={500}
+          htmlMaxLength={500}
+          placeholder="What is this project about?"
           width="100%"
         />
         {error !== undefined && <Banner status="error" role="alert" title={error} />}

@@ -58,7 +58,7 @@ import { workspaceRunsQuery } from "../features/runs/index.ts";
 import { activeSessionsQuery } from "../features/work-sessions/index.ts";
 import { workspaceMembersQuery, workspaceQuery } from "../features/workspaces/index.ts";
 import { HumanAvatar } from "../lib/avatar.tsx";
-import { TextField } from "../lib/fields.tsx";
+import { TextAreaField, TextField } from "../lib/fields.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
@@ -179,7 +179,11 @@ function ProjectPage() {
             data-project-access-level={project.accessLevel}
           />
         }
-        subtitle={`Created by ${project.createdBy.displayName}`}
+        subtitle={
+          project.description !== ""
+            ? `${project.description} · Created by ${project.createdBy.displayName}`
+            : `Created by ${project.createdBy.displayName}`
+        }
         actions={
           <>
             <Stack direction="horizontal" gap={3} align="center" wrap="wrap">
@@ -527,7 +531,10 @@ function ProjectPage() {
       {activeTab === "settings" && canManage && (
         <section id="panel-settings" role="tabpanel">
           <Stack gap={3}>
-            <ProjectSettings key={`${project.name}:${project.fallbackPolicy}`} project={project} />
+            <ProjectSettings
+              key={`${project.name}:${project.description}:${project.fallbackPolicy}`}
+              project={project}
+            />
             {project.workspaceKind === "shared" && <ProjectAccess projectId={project.id} />}
           </Stack>
         </section>
@@ -540,6 +547,7 @@ function ProjectSettings({ project }: { project: Project }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description);
   const [fallbackPolicy, setFallbackPolicy] = useState<FallbackPolicy>(project.fallbackPolicy);
   const [error, setError] = useState<string>();
   const [policyError, setPolicyError] = useState<string>();
@@ -552,7 +560,7 @@ function ProjectSettings({ project }: { project: Project }) {
     setSaving(true);
     setError(undefined);
     try {
-      const updated = await updateProject(project.id, { name });
+      const updated = await updateProject(project.id, { name, description });
       queryClient.setQueryData(projectQuery(project.id).queryKey, updated);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: projectActivityQuery(project.id).queryKey }),
@@ -602,6 +610,19 @@ function ProjectSettings({ project }: { project: Project }) {
                 onChange={setName}
                 required
                 maxLength={120}
+                width="min(100%, 28rem)"
+              />
+              <TextAreaField
+                label="Description"
+                id="project-description"
+                htmlName="description"
+                value={description}
+                onChange={setDescription}
+                isOptional
+                rows={3}
+                maxLength={500}
+                htmlMaxLength={500}
+                placeholder="What is this project about?"
                 width="min(100%, 28rem)"
               />
               {error !== undefined && (

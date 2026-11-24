@@ -8949,7 +8949,7 @@ def check_m42(facts: dict[str, Any]) -> CheckResult:
         "apps/server/src/db/schema.ts",
         "packages/contract/src/runners.ts",
         "contract/openapi.json",
-        "db/migrations/0049_purple_scrambler.sql",
+        "db/migrations/0050_gray_winter_soldier.sql",
     ]
     g = {k: v for k, v in facts.items() if k.startswith("m42_")}
 
