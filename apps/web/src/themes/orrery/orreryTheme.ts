@@ -14,9 +14,9 @@ export const orreryTheme = defineTheme({
     "--orrery-recessed": ["#f8f9fa", "#15171d"],
     "--orrery-muted": ["#6b7280", "#9ca3af"],
     "--orrery-border": ["#cbd5e1", "#3b4252"],
-    "--orrery-control-border": ["#94a3b8", "#4c566a"],
-    "--orrery-accent": ["#d94816", "#ff8a56"],
-    "--orrery-accent-hover": ["#b8390e", "#ffa47a"],
+    "--orrery-control-border": ["#8291a7", "#5c677d"],
+    "--orrery-accent": ["#cf4312", "#ff8a56"],
+    "--orrery-accent-hover": ["#ad350c", "#ffa47a"],
     "--orrery-on-accent": ["#ffffff", "#111318"],
     "--orrery-attention-text": ["#89330f", "#ffc19f"],
     "--orrery-attention-fill": ["#fff0e4", "#38271f"],
@@ -147,7 +147,7 @@ export const orreryTheme = defineTheme({
     },
     table: {
       base: {
-        minInlineSize: "62rem",
+        minInlineSize: "46rem",
       },
     },
     "table-scroll-wrapper": {

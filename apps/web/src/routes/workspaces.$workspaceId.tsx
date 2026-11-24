@@ -39,6 +39,7 @@ import {
 } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Plus, UserPlus } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { sessionQuery } from "../features/accounts/index.ts";
@@ -196,14 +197,19 @@ function WorkspacePage() {
                 params={{ workspaceId: workspace.id }}
                 color="secondary"
                 weight="medium"
+                isStandalone
               >
-                Access history
+                <Stack as="span" direction="horizontal" gap={1} vAlign="center">
+                  <Icon icon="clock" size="xsm" aria-hidden="true" />
+                  Access history
+                </Stack>
               </Link>
             )}
             {mayInvite(workspace) && (
               <Button
                 type="button"
                 label="Invite member"
+                icon={<Icon icon={UserPlus} />}
                 variant="secondary"
                 size="sm"
                 onClick={() => setInviteOpen(true)}
@@ -213,6 +219,7 @@ function WorkspacePage() {
               <Button
                 type="button"
                 label="New project"
+                icon={<Icon icon={Plus} />}
                 variant="primary"
                 size="sm"
                 onClick={() => setCreateProjectOpen(true)}
@@ -413,7 +420,12 @@ function Projects({
           headingLevel={2}
           actions={
             canCreate ? (
-              <Button label="Create project" variant="primary" onClick={onCreateClick} />
+              <Button
+                label="Create project"
+                icon={<Icon icon={Plus} />}
+                variant="primary"
+                onClick={onCreateClick}
+              />
             ) : undefined
           }
         />
@@ -428,14 +440,16 @@ function Projects({
           <Stack gap={3} height="100%" justify="between">
             <Stack gap={1.5}>
               <Stack direction="horizontal" gap={2} justify="between" align="center">
-                <Link
-                  to="/projects/$projectId"
-                  params={{ projectId: project.id }}
-                  weight="semibold"
-                  color="primary"
-                >
-                  {project.name}
-                </Link>
+                <Heading level={3} color="inherit" maxLines={1}>
+                  <Link
+                    to="/projects/$projectId"
+                    params={{ projectId: project.id }}
+                    weight="semibold"
+                    color="primary"
+                  >
+                    {project.name}
+                  </Link>
+                </Heading>
                 <Token label={project.key} color="gray" size="sm" />
               </Stack>
               {project.description !== "" && (
@@ -458,16 +472,30 @@ function Projects({
                   color="secondary"
                   data-project-access-level={project.accessLevel}
                 >
-                  Access: {project.accessLevel}
+                  Access:{" "}
+                  {project.accessLevel === "manage"
+                    ? "Manage"
+                    : project.accessLevel === "contribute"
+                      ? "Contribute"
+                      : "Read"}
                 </Text>
                 <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
-                  <Link to="/board/$projectId" params={{ projectId: project.id }} weight="medium">
-                    Board
+                  <Link
+                    to="/board/$projectId"
+                    params={{ projectId: project.id }}
+                    weight="medium"
+                    isStandalone
+                  >
+                    <Stack as="span" direction="horizontal" gap={1} vAlign="center">
+                      <Icon icon="viewColumns" size="xsm" aria-hidden="true" />
+                      Board
+                    </Stack>
                   </Link>
                   <Link
                     to="/projects/$projectId"
                     params={{ projectId: project.id }}
                     weight="medium"
+                    isStandalone
                   >
                     Issues
                   </Link>

@@ -32,6 +32,7 @@ import {
 } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Plus, Trash2, UserPlus } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import {
@@ -193,9 +194,13 @@ function ProjectPage() {
                   params={{ projectId: project.id }}
                   color="secondary"
                   weight="medium"
+                  isStandalone
                   data-trash-link=""
                 >
-                  Trash
+                  <Stack as="span" direction="horizontal" gap={1} vAlign="center">
+                    <Icon icon={Trash2} size="xsm" aria-hidden="true" />
+                    Trash
+                  </Stack>
                 </Link>
               )}
               <Link
@@ -203,14 +208,19 @@ function ProjectPage() {
                 params={{ projectId: project.id }}
                 color="secondary"
                 weight="medium"
+                isStandalone
               >
-                View history
+                <Stack as="span" direction="horizontal" gap={1} vAlign="center">
+                  <Icon icon="clock" size="xsm" aria-hidden="true" />
+                  View history
+                </Stack>
               </Link>
               <Link
                 to="/board/$projectId"
                 params={{ projectId: project.id }}
-                color="accent"
+                color="secondary"
                 weight="semibold"
+                isStandalone
                 data-board-link=""
               >
                 <Stack as="span" direction="horizontal" gap={1} vAlign="center">
@@ -223,6 +233,7 @@ function ProjectPage() {
               <Button
                 type="button"
                 label="New issue"
+                icon={<Icon icon={Plus} />}
                 variant="primary"
                 size="sm"
                 onClick={() =>
@@ -290,6 +301,7 @@ function ProjectPage() {
                   canContribute ? (
                     <Button
                       label="New issue"
+                      icon={<Icon icon={Plus} />}
                       variant="primary"
                       onClick={() =>
                         void navigate({
@@ -445,6 +457,7 @@ function ProjectPage() {
                   <Button
                     type="button"
                     label="New document"
+                    icon={<Icon icon={Plus} />}
                     variant="primary"
                     size="sm"
                     href={`/projects/${project.id}/knowledge/new`}
@@ -462,6 +475,7 @@ function ProjectPage() {
                     canContribute ? (
                       <Button
                         label="New document"
+                        icon={<Icon icon={Plus} />}
                         variant="primary"
                         href={`/projects/${project.id}/knowledge/new`}
                         data-new-knowledge=""
@@ -935,6 +949,7 @@ function ProjectAccess({ projectId }: { projectId: string }) {
               isDisabled={saving}
               isLoading={saving}
               label="Grant access"
+              icon={<Icon icon={UserPlus} />}
               variant="primary"
             />
           </Stack>

@@ -6,6 +6,8 @@ import { Code } from "@astryxdesign/core/Code";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -28,6 +30,7 @@ import {
   type WebhookEvent,
 } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { Pencil, Plus, RefreshCw, Send, Trash2 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
@@ -352,6 +355,7 @@ export function WebhooksSection({
                   size="sm"
                   variant="primary"
                   label={copied ? "Copied" : "Copy secret"}
+                  icon={<Icon icon={copied ? "check" : "copy"} />}
                   onClick={() => void copySecret(revealedSecret.secret)}
                 />
                 <Button
@@ -410,6 +414,7 @@ export function WebhooksSection({
             <Button
               type="button"
               label="Add webhook"
+              icon={<Icon icon={Plus} />}
               variant="primary"
               size="sm"
               isDisabled={atLimit}
@@ -439,6 +444,7 @@ export function WebhooksSection({
                 <Button
                   type="button"
                   label="Add webhook"
+                  icon={<Icon icon={Plus} />}
                   variant="primary"
                   size="sm"
                   onClick={() => {
@@ -507,12 +513,13 @@ export function WebhooksSection({
                         </Stack>
                       </TableCell>
                       <TableCell>
-                        <Stack direction="horizontal" gap={1} wrap="wrap">
+                        <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
                           <Button
                             type="button"
                             size="sm"
                             variant="secondary"
                             label="Send test"
+                            icon={<Icon icon={Send} />}
                             isLoading={sendingTest}
                             isDisabled={rowBusy}
                             onClick={() => void onSendTest(hook)}
@@ -522,25 +529,15 @@ export function WebhooksSection({
                             size="sm"
                             variant="secondary"
                             label="Deliveries"
+                            icon={<Icon icon="clock" />}
                             onClick={() => setDeliveriesHookId(hook.id)}
                           />
                           <Button
                             type="button"
                             size="sm"
                             variant="secondary"
-                            label="Edit"
-                            isDisabled={rowBusy}
-                            onClick={() => {
-                              setEditingHook(hook);
-                              setActionError(undefined);
-                              setFormOpen(true);
-                            }}
-                          />
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
                             label="Rotate secret"
+                            icon={<Icon icon={RefreshCw} />}
                             isDisabled={rowBusy}
                             onClick={() => setConfirmRotate(hook)}
                           />
@@ -553,11 +550,27 @@ export function WebhooksSection({
                             isDisabled={rowBusy}
                             onClick={() => void toggleEnabled(hook, !hook.enabled)}
                           />
-                          <Button
+                          <IconButton
                             type="button"
                             size="sm"
-                            variant="destructive"
+                            variant="ghost"
+                            label="Edit"
+                            tooltip="Edit webhook"
+                            icon={<Icon icon={Pencil} />}
+                            isDisabled={rowBusy}
+                            onClick={() => {
+                              setEditingHook(hook);
+                              setActionError(undefined);
+                              setFormOpen(true);
+                            }}
+                          />
+                          <IconButton
+                            type="button"
+                            size="sm"
+                            variant="ghost"
                             label="Delete"
+                            tooltip="Delete webhook"
+                            icon={<Icon icon={Trash2} color="error" />}
                             isDisabled={rowBusy}
                             onClick={() => setConfirmDelete(hook)}
                           />

@@ -6,6 +6,7 @@ import { Code } from "@astryxdesign/core/Code";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
@@ -31,6 +32,7 @@ import {
   type RunDetail,
 } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { KeyRound, Plus } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
@@ -269,6 +271,7 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
             <Button
               type="button"
               label="Register agent"
+              icon={<Icon icon={Plus} />}
               variant="primary"
               size="sm"
               onClick={() => setRegisterOpen(true)}
@@ -284,6 +287,7 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                 <Button
                   type="button"
                   label="Register agent"
+                  icon={<Icon icon={Plus} />}
                   variant="primary"
                   size="sm"
                   onClick={() => setRegisterOpen(true)}
@@ -375,6 +379,7 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                           size="sm"
                           variant="secondary"
                           label="Issue key"
+                          icon={<Icon icon={KeyRound} />}
                           onClick={() => setIssueKeyAgentId(agent.id)}
                         />
                       </TableCell>
@@ -417,6 +422,7 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                 <Button
                   type="button"
                   label="Issue key"
+                  icon={<Icon icon={KeyRound} />}
                   variant="secondary"
                   size="sm"
                   onClick={() => setIssueKeyAgentId(agents[0]?.id ?? "")}
@@ -435,6 +441,7 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                   <Button
                     type="button"
                     label="Issue key"
+                    icon={<Icon icon={KeyRound} />}
                     variant="secondary"
                     size="sm"
                     onClick={() => setIssueKeyAgentId(agents[0]?.id ?? "")}

@@ -1,6 +1,7 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import {
@@ -16,6 +17,7 @@ import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { RotateCcw } from "lucide-react";
 import { useState } from "react";
 import {
   issueQuery,
@@ -185,6 +187,7 @@ function ProjectTrashPage() {
                     <Button
                       type="button"
                       label={`Restore ${issue.identifier}`}
+                      icon={<Icon icon={RotateCcw} />}
                       variant="secondary"
                       size="sm"
                       isDisabled={restoringId !== undefined}

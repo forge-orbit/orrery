@@ -1,10 +1,12 @@
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { useToast } from "@astryxdesign/core/Toast";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 import {
   createKnowledgeEntry,
@@ -39,7 +41,7 @@ function NewKnowledgePage() {
   const readOnly = project.accessLevel === "read";
 
   return (
-    <Stack gap={5}>
+    <Stack gap={5} maxWidth="56rem" width="100%">
       <PageHeader
         breadcrumbs={[
           <Link
@@ -77,6 +79,7 @@ function NewKnowledgePage() {
               bodyLabel="Markdown"
               bodyRows={15}
               submitLabel="Create knowledge"
+              submitIcon={<Icon icon={Plus} />}
               fallbackError="Could not create the entry."
               resetOnSuccess
               mentionIssues={projectIssues}

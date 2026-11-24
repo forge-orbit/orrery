@@ -28,6 +28,7 @@ import {
 } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Plus } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 import {
   completedSubtaskCount,
@@ -531,6 +532,7 @@ function BoardPage() {
           {canContribute && (
             <Button
               label="New issue"
+              icon={<Icon icon={Plus} />}
               variant="primary"
               size="sm"
               onClick={() =>
@@ -703,6 +705,7 @@ function BoardPage() {
               canContribute ? (
                 <Button
                   label="New issue"
+                  icon={<Icon icon={Plus} />}
                   variant="primary"
                   onClick={() =>
                     void navigate({
@@ -764,7 +767,6 @@ function BoardPage() {
                         justify="between"
                         vAlign="center"
                         gap={1.5}
-                        paddingInline={1}
                         paddingBlock={1}
                       >
                         <Stack direction="horizontal" gap={1.5} vAlign="center">

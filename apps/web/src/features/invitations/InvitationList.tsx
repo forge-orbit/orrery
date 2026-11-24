@@ -65,6 +65,7 @@ function terminalEvent(invitation: InvitationSummary): { label: string; at: stri
 export interface InvitationListProps {
   invitations: InvitationSummary[];
   emptyMessage: string;
+  emptyDescription?: string;
   busyId?: string;
   error?: string;
   embedded?: boolean;
@@ -75,6 +76,7 @@ export interface InvitationListProps {
 export function InvitationList({
   invitations,
   emptyMessage,
+  emptyDescription,
   busyId,
   error,
   embedded = false,
@@ -90,7 +92,14 @@ export function InvitationList({
   const showActions = onResend !== undefined || onRevoke !== undefined;
 
   if (invitations.length === 0) {
-    const empty = <EmptyState title={emptyMessage} isCompact headingLevel={3} />;
+    const empty = (
+      <EmptyState
+        title={emptyMessage}
+        {...(emptyDescription === undefined ? {} : { description: emptyDescription })}
+        isCompact
+        headingLevel={3}
+      />
+    );
     if (embedded) return empty;
     return (
       <Section padding={3}>

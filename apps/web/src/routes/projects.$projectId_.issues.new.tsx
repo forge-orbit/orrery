@@ -3,6 +3,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
 import { Layout, LayoutPanel } from "@astryxdesign/core/Layout";
@@ -18,6 +19,7 @@ import {
 } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Plus } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { agentKeysQuery, workspaceAgentKeysQuery } from "../features/agents/index.ts";
@@ -227,6 +229,7 @@ function NewIssuePage() {
           <Button
             type="submit"
             label="Create issue"
+            icon={<Icon icon={Plus} />}
             variant="primary"
             isDisabled={submitting || !canContribute}
             isLoading={submitting}

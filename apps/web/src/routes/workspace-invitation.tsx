@@ -12,7 +12,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { WorkspaceInvitationToken, type WorkspaceInvitationPreview } from "@orrery/contract";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { sessionQuery, signIn, signOut, type Session } from "../features/accounts/index.ts";
@@ -65,12 +65,13 @@ function InvalidInvitationLink() {
 }
 
 function InvitationLoadError({ error }: { error: unknown }) {
+  const router = useRouter();
   const invalid = error instanceof ApiProblemError && error.code === "invitation_invalid";
   if (invalid) return <InvalidInvitationLink />;
   const stale = error instanceof ApiProblemError && error.code === "invitation_scope_invalid";
   return (
     <Stack as="main" gap={5}>
-      <Stack gap={3}>
+      <Stack gap={3} align="start">
         <Heading level={1} color="inherit">
           Workspace invitation
         </Heading>
@@ -83,9 +84,20 @@ function InvitationLoadError({ error }: { error: unknown }) {
               : "Could not load this invitation. Check your connection and try again."
           }
         />
-        <Text as="p" display="block" type="supporting">
-          <Link to="/">Go to your workspaces</Link>
-        </Text>
+        <Stack direction="horizontal" gap={3} align="center" wrap="wrap">
+          {!stale && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              label="Retry"
+              onClick={() => void router.invalidate()}
+            />
+          )}
+          <Link to="/" isStandalone hasUnderline>
+            Go to your workspaces
+          </Link>
+        </Stack>
       </Stack>
     </Stack>
   );
@@ -96,7 +108,7 @@ function WorkspaceInvitationPage() {
   if (token === "") {
     return (
       <Stack as="main" gap={5}>
-        <Stack gap={3}>
+        <Stack gap={3} align="start">
           <Heading level={1} color="inherit">
             Workspace invitation
           </Heading>
@@ -105,6 +117,9 @@ function WorkspaceInvitationPage() {
             role="alert"
             title="This invitation link is incomplete. Ask for a fresh invitation."
           />
+          <Link to="/" isStandalone hasUnderline>
+            Go to your workspaces
+          </Link>
         </Stack>
       </Stack>
     );
@@ -169,12 +184,14 @@ function Invitation({ token }: { token: string }) {
           <Text as="p" display="block" type="supporting" color="secondary">
             Sign in with {preview.email} to join the workspace.
           </Text>
-          <Stack gap={2}>
+          <Stack gap={2} align="center">
             <Link
               to="/signin"
               search={{ next: `/workspace-invitation?token=${token}` }}
-              color="inherit"
+              color="accent"
               weight="semibold"
+              isStandalone
+              hasUnderline
             >
               Sign in
             </Link>
