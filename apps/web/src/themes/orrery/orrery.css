@@ -313,9 +313,9 @@
     --orrery-recessed: light-dark(#f8f9fa, #15171d);
     --orrery-muted: light-dark(#6b7280, #9ca3af);
     --orrery-border: light-dark(#cbd5e1, #3b4252);
-    --orrery-control-border: light-dark(#94a3b8, #4c566a);
-    --orrery-accent: light-dark(#d94816, #ff8a56);
-    --orrery-accent-hover: light-dark(#b8390e, #ffa47a);
+    --orrery-control-border: light-dark(#8291a7, #5c677d);
+    --orrery-accent: light-dark(#cf4312, #ff8a56);
+    --orrery-accent-hover: light-dark(#ad350c, #ffa47a);
     --orrery-on-accent: light-dark(#ffffff, #111318);
     --orrery-attention-text: light-dark(#89330f, #ffc19f);
     --orrery-attention-fill: light-dark(#fff0e4, #38271f);
@@ -624,7 +624,7 @@
   }
 
   .astryx-table {
-    min-inline-size: 62rem;
+    min-inline-size: 46rem;
   }
 
   .astryx-table-scroll-wrapper {

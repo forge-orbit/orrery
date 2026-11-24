@@ -15,6 +15,7 @@ export interface TitleBodyFormProps {
   bodyLabel: string;
   bodyRows: number;
   submitLabel: string;
+  submitIcon?: ReactNode;
   fallbackError: string;
   initialTitle?: string;
   initialBody?: string;
@@ -35,6 +36,7 @@ export function TitleBodyForm({
   bodyLabel,
   bodyRows,
   submitLabel,
+  submitIcon,
   fallbackError,
   initialTitle = "",
   initialBody = "",
@@ -107,6 +109,7 @@ export function TitleBodyForm({
             isDisabled={submitting}
             isLoading={submitting}
             label={submitLabel}
+            {...(submitIcon === undefined ? {} : { icon: submitIcon })}
             variant="primary"
           />
           {secondaryAction}

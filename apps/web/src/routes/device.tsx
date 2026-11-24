@@ -30,15 +30,15 @@ function DeviceApprovalPage() {
   const valid = UserCode.safeParse(code).success;
   if (!valid) {
     return (
-      <Stack as="main" gap={5}>
-        <Stack gap={3}>
+      <Stack as="main" gap={5} maxWidth="32rem" width="100%">
+        <Stack gap={3} align="start">
           <Heading level={1} color="inherit">
             Runner host approval
           </Heading>
           <Banner status="error" title="This device code is invalid." />
-          <Text as="p" display="block" type="supporting">
-            <Link to="/">Go to your workspaces</Link>
-          </Text>
+          <Link to="/" isStandalone hasUnderline>
+            Go to your workspaces
+          </Link>
         </Stack>
       </Stack>
     );
@@ -59,7 +59,7 @@ function ValidDeviceApproval({ code }: { code: string }) {
   });
 
   return (
-    <Stack as="main" gap={5}>
+    <Stack as="main" gap={5} maxWidth="32rem" width="100%">
       <Stack gap={3}>
         <Heading level={1} color="inherit">
           Approve Runner host

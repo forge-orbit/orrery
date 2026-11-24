@@ -90,9 +90,10 @@ const kindTokens: Record<
 > = {
   project_activity: { label: "Activity", color: "blue" },
   project_access: { label: "Project access", color: "purple" },
-  workspace_access: { label: "Workspace", color: "orange" },
-  agent_credential: { label: "Agent key", color: "green" },
+  workspace_access: { label: "Workspace", color: "blue" },
+  agent_key: { label: "Agent key", color: "green" },
   installation_access: { label: "Installation", color: "gray" },
+  account_status: { label: "Account status", color: "gray" },
 };
 
 function kindMeta(kind: string) {
@@ -128,6 +129,7 @@ export function HistoryList({
   const activeFilter = kindFilter !== "all" && !kinds.includes(kindFilter) ? "all" : kindFilter;
   const visible =
     activeFilter === "all" ? events : events.filter((event) => event.kind === activeFilter);
+  const showScope = visible.some((event) => event.scope.name !== null);
 
   if (events.length === 0) {
     return (
@@ -164,7 +166,7 @@ export function HistoryList({
             <TableRow>
               <TableHeaderCell>Event</TableHeaderCell>
               <TableHeaderCell>Category</TableHeaderCell>
-              <TableHeaderCell>Scope</TableHeaderCell>
+              {showScope && <TableHeaderCell>Scope</TableHeaderCell>}
               <TableHeaderCell>When</TableHeaderCell>
             </TableRow>
           </TableHeader>
@@ -185,7 +187,7 @@ export function HistoryList({
                   data-event-id={event.id}
                 >
                   <TableCell>
-                    <Stack direction="horizontal" gap={1.5} vAlign="center">
+                    <Stack direction="horizontal" gap={1.5} vAlign="start">
                       <HumanAvatar
                         name={event.actor.displayName}
                         avatarUrl={event.actor.avatarUrl}
@@ -206,15 +208,19 @@ export function HistoryList({
                   <TableCell>
                     <Token label={meta.label} color={meta.color} size="sm" />
                   </TableCell>
-                  <TableCell>
-                    {event.scope.name !== null ? (
-                      <Token label={event.scope.name} color="gray" size="sm" />
-                    ) : (
-                      <Text type="supporting" color="secondary">
-                        —
-                      </Text>
-                    )}
-                  </TableCell>
+                  {showScope && (
+                    <TableCell>
+                      {event.scope.name !== null ? (
+                        <Text type="supporting" color="secondary">
+                          {event.scope.name}
+                        </Text>
+                      ) : (
+                        <Text type="supporting" color="secondary">
+                          —
+                        </Text>
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell>
                     <Text type="supporting" color="secondary">
                       <time dateTime={event.createdAt} title={formatFullDateTime(event.createdAt)}>

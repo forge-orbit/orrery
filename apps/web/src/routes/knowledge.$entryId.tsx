@@ -1,10 +1,12 @@
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { useToast } from "@astryxdesign/core/Toast";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { Pencil } from "lucide-react";
 import { useState } from "react";
 import {
   issuesQuery,
@@ -41,7 +43,7 @@ function KnowledgePage() {
   const canContribute = project.accessLevel !== "read";
 
   return (
-    <Stack gap={5}>
+    <Stack gap={5} maxWidth="56rem" width="100%">
       <PageHeader
         breadcrumbs={[
           <Link
@@ -72,6 +74,7 @@ function KnowledgePage() {
               size="sm"
               variant="secondary"
               label="Edit"
+              icon={<Icon icon={Pencil} />}
               data-knowledge-edit=""
               onClick={() => setIsEditing(true)}
             />
@@ -140,7 +143,7 @@ function KnowledgePage() {
         </Section>
       ) : (
         <Section variant="transparent" padding={0}>
-          <Stack data-knowledge-body="">
+          <Stack data-knowledge-body="" maxWidth="68ch">
             <MentionMarkdown projectId={entry.projectId} issueRefs={projectIssues}>
               {entry.body}
             </MentionMarkdown>

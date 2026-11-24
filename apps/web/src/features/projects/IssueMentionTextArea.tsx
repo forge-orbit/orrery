@@ -389,14 +389,7 @@ export function IssueMentionTextArea({
       </Stack>
 
       <Card padding={0}>
-        <Stack
-          direction="horizontal"
-          justify="between"
-          vAlign="center"
-          gap={2}
-          wrap="wrap"
-          padding={2}
-        >
+        <Stack direction="vertical" gap={1.5} padding={2}>
           <TabList
             value={mode}
             onChange={(next) => setMode(next === "preview" ? "preview" : "write")}
@@ -411,160 +404,160 @@ export function IssueMentionTextArea({
           {mode === "write" && (
             <Stack
               direction="horizontal"
-              gap={0.5}
+              gap={1}
               vAlign="center"
               wrap="wrap"
               role="toolbar"
               aria-label="Formatting"
             >
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Heading"
-                tooltip="Add heading"
-                icon={<Icon icon={Heading2} />}
-                onClick={() => applyEdit((s, e) => prefixLines(value, s, e, "## "))}
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Bold"
-                tooltip="Bold (Ctrl+B)"
-                icon={<Icon icon={Bold} />}
-                onClick={() =>
-                  applyEdit((s, e) => wrapSelection(value, s, e, "**", "**", "bold text"))
-                }
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Italic"
-                tooltip="Italic (Ctrl+I)"
-                icon={<Icon icon={Italic} />}
-                onClick={() =>
-                  applyEdit((s, e) => wrapSelection(value, s, e, "*", "*", "italic text"))
-                }
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Strikethrough"
-                tooltip="Strikethrough (Ctrl+Shift+X)"
-                icon={<Icon icon={Strikethrough} />}
-                onClick={() =>
-                  applyEdit((s, e) => wrapSelection(value, s, e, "~~", "~~", "strikethrough"))
-                }
-              />
+              <Stack direction="horizontal" gap={0.5} vAlign="center">
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Heading"
+                  tooltip="Add heading"
+                  icon={<Icon icon={Heading2} />}
+                  onClick={() => applyEdit((s, e) => prefixLines(value, s, e, "## "))}
+                />
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Bold"
+                  tooltip="Bold (Ctrl+B)"
+                  icon={<Icon icon={Bold} />}
+                  onClick={() =>
+                    applyEdit((s, e) => wrapSelection(value, s, e, "**", "**", "bold text"))
+                  }
+                />
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Italic"
+                  tooltip="Italic (Ctrl+I)"
+                  icon={<Icon icon={Italic} />}
+                  onClick={() =>
+                    applyEdit((s, e) => wrapSelection(value, s, e, "*", "*", "italic text"))
+                  }
+                />
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Strikethrough"
+                  tooltip="Strikethrough (Ctrl+Shift+X)"
+                  icon={<Icon icon={Strikethrough} />}
+                  onClick={() =>
+                    applyEdit((s, e) => wrapSelection(value, s, e, "~~", "~~", "strikethrough"))
+                  }
+                />
+              </Stack>
 
-              <Divider orientation="vertical" />
+              <Stack direction="horizontal" gap={0.5} vAlign="center">
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Quote"
+                  tooltip="Insert a quote"
+                  icon={<Icon icon={Quote} />}
+                  onClick={() => applyEdit((s, e) => prefixLines(value, s, e, "> "))}
+                />
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Inline code"
+                  tooltip="Inline code (Ctrl+E)"
+                  icon={<Icon icon={Code} />}
+                  onClick={() => applyEdit((s, e) => insertCode(value, s, e))}
+                />
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Code block"
+                  tooltip="Insert code block"
+                  icon={<Icon icon={SquareCode} />}
+                  onClick={() => applyEdit((s, e) => insertCodeBlock(value, s, e))}
+                />
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Link"
+                  tooltip="Add a link (Ctrl+K)"
+                  icon={<Icon icon={Link2} />}
+                  onClick={() => applyEdit((s, e) => insertLink(value, s, e))}
+                />
+              </Stack>
 
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Quote"
-                tooltip="Insert a quote"
-                icon={<Icon icon={Quote} />}
-                onClick={() => applyEdit((s, e) => prefixLines(value, s, e, "> "))}
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Inline code"
-                tooltip="Inline code (Ctrl+E)"
-                icon={<Icon icon={Code} />}
-                onClick={() => applyEdit((s, e) => insertCode(value, s, e))}
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Code block"
-                tooltip="Insert code block"
-                icon={<Icon icon={SquareCode} />}
-                onClick={() => applyEdit((s, e) => insertCodeBlock(value, s, e))}
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Link"
-                tooltip="Add a link (Ctrl+K)"
-                icon={<Icon icon={Link2} />}
-                onClick={() => applyEdit((s, e) => insertLink(value, s, e))}
-              />
+              <Stack direction="horizontal" gap={0.5} vAlign="center">
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Bulleted list"
+                  tooltip="Add a bulleted list"
+                  icon={<Icon icon={List} />}
+                  onClick={() => applyEdit((s, e) => prefixLines(value, s, e, "- "))}
+                />
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Numbered list"
+                  tooltip="Add a numbered list"
+                  icon={<Icon icon={ListOrdered} />}
+                  onClick={() => applyEdit((s, e) => prefixLines(value, s, e, (i) => `${i + 1}. `))}
+                />
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Task list"
+                  tooltip="Add a task list"
+                  icon={<Icon icon={ListChecks} />}
+                  onClick={() => applyEdit((s, e) => prefixLines(value, s, e, "- [ ] "))}
+                />
+                <IconButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label="Table"
+                  tooltip="Insert a table"
+                  icon={<Icon icon={Table2} />}
+                  onClick={() => applyEdit((s, e) => insertTable(value, s, e))}
+                />
+              </Stack>
 
-              <Divider orientation="vertical" />
-
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Bulleted list"
-                tooltip="Add a bulleted list"
-                icon={<Icon icon={List} />}
-                onClick={() => applyEdit((s, e) => prefixLines(value, s, e, "- "))}
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Numbered list"
-                tooltip="Add a numbered list"
-                icon={<Icon icon={ListOrdered} />}
-                onClick={() => applyEdit((s, e) => prefixLines(value, s, e, (i) => `${i + 1}. `))}
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Task list"
-                tooltip="Add a task list"
-                icon={<Icon icon={ListChecks} />}
-                onClick={() => applyEdit((s, e) => prefixLines(value, s, e, "- [ ] "))}
-              />
-              <IconButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                label="Table"
-                tooltip="Insert a table"
-                icon={<Icon icon={Table2} />}
-                onClick={() => applyEdit((s, e) => insertTable(value, s, e))}
-              />
-
-              {issues.length > 0 && (
-                <>
-                  <Divider orientation="vertical" />
-                  <IconButton
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    label="Reference issue"
-                    tooltip="Reference an issue (#)"
-                    icon={<Icon icon={Hash} />}
-                    onClick={() => applyEdit((s, e) => insertMentionTrigger(value, s, e))}
-                  />
-                </>
-              )}
-              {mentionActors.length > 0 && (
-                <>
-                  {issues.length === 0 && <Divider orientation="vertical" />}
-                  <IconButton
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    label="Mention a teammate"
-                    tooltip="Mention a teammate (@)"
-                    icon={<Icon icon={AtSign} />}
-                    onClick={() => applyEdit((s, e) => insertAtTrigger(value, s, e))}
-                  />
-                </>
+              {(issues.length > 0 || mentionActors.length > 0) && (
+                <Stack direction="horizontal" gap={0.5} vAlign="center">
+                  {issues.length > 0 && (
+                    <IconButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      label="Reference issue"
+                      tooltip="Reference an issue (#)"
+                      icon={<Icon icon={Hash} />}
+                      onClick={() => applyEdit((s, e) => insertMentionTrigger(value, s, e))}
+                    />
+                  )}
+                  {mentionActors.length > 0 && (
+                    <IconButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      label="Mention a teammate"
+                      tooltip="Mention a teammate (@)"
+                      icon={<Icon icon={AtSign} />}
+                      onClick={() => applyEdit((s, e) => insertAtTrigger(value, s, e))}
+                    />
+                  )}
+                </Stack>
               )}
             </Stack>
           )}
@@ -614,7 +607,7 @@ export function IssueMentionTextArea({
                 {...(placeholder !== undefined
                   ? { placeholder }
                   : issues.length > 0
-                    ? { placeholder: "Write in Markdown… Type # for an issue or @ to mention" }
+                    ? { placeholder: "Write in Markdown… Use # or @ to reference" }
                     : { placeholder: "Write in Markdown…" })}
               />
             </Stack>

@@ -129,11 +129,16 @@ function RegisterPage() {
         <Heading level={1} color="inherit">
           Accept your invitation
         </Heading>
-        <Banner
-          status="error"
-          role="alert"
-          title="This invitation link is incomplete. Ask for a fresh invitation."
-        />
+        <Stack gap={3} align="start">
+          <Banner
+            status="error"
+            role="alert"
+            title="This invitation link is incomplete. Ask for a fresh invitation."
+          />
+          <Link to="/signin" isStandalone hasUnderline>
+            Back to sign in
+          </Link>
+        </Stack>
       </Stack>
     );
   }

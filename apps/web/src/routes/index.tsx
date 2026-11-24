@@ -4,6 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Drawer, DrawerHeader } from "@astryxdesign/core/Drawer";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Section } from "@astryxdesign/core/Section";
@@ -14,6 +15,7 @@ import { Token } from "@astryxdesign/core/Token";
 import type { InvitationSummary } from "@orrery/contract";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { Plus, UserPlus } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { sessionQuery, setupStatusQuery } from "../features/accounts/index.ts";
@@ -74,6 +76,7 @@ function Home() {
           <Button
             type="button"
             label="New workspace"
+            icon={<Icon icon={Plus} />}
             variant="primary"
             size="sm"
             onClick={() => setCreateOpen(true)}
@@ -276,13 +279,19 @@ function InstallationInvitations() {
     <Section variant="transparent" dividers={["top"]} padding={0} paddingBlockStart={5}>
       <Stack gap={3}>
         <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
-          <Heading level={2} color="inherit">
-            Installation administration
-          </Heading>
+          <Stack gap={0.5}>
+            <Heading level={2} color="inherit">
+              Installation administration
+            </Heading>
+            <Text type="supporting" color="secondary">
+              Invite people to create accounts on this installation.
+            </Text>
+          </Stack>
           <Stack direction="horizontal" gap={2} wrap="wrap" align="center">
             <Button
               type="button"
               label="Invite person"
+              icon={<Icon icon={UserPlus} />}
               variant="secondary"
               size="sm"
               onClick={() => setInviteOpen(true)}
@@ -293,6 +302,7 @@ function InstallationInvitations() {
           embedded
           invitations={invitations}
           emptyMessage="No installation invitations yet."
+          emptyDescription="Pending and past invitations to join this installation will appear here."
           {...(busyId === undefined ? {} : { busyId })}
           {...(error === undefined ? {} : { error })}
           onResend={(invitation) =>

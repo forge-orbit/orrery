@@ -5,6 +5,7 @@ import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from "@astryxdesign/core/Layout";
 import { Link as AstryxLink } from "@astryxdesign/core/Link";
@@ -26,6 +27,7 @@ import {
 } from "@orrery/contract";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Pencil, RotateCcw, Trash2 } from "lucide-react";
 import type { FormEvent, RefObject } from "react";
 import { useRef, useState } from "react";
 import { agentKeysQuery, workspaceAgentKeysQuery } from "../features/agents/index.ts";
@@ -588,6 +590,7 @@ function IssuePage() {
             size="sm"
             variant="ghost"
             label="Copy link"
+            icon={<Icon icon="copy" />}
             onClick={() => void onCopyLink()}
           />
           {canContribute && (
@@ -598,6 +601,7 @@ function IssuePage() {
                   size="sm"
                   variant="secondary"
                   label="Edit"
+                  icon={<Icon icon={Pencil} />}
                   data-issue-edit=""
                   onClick={() => setIsEditing(true)}
                 />
@@ -609,6 +613,9 @@ function IssuePage() {
                 isDisabled={statusSubmitting}
                 isLoading={statusSubmitting}
                 label={toggleNextStatus === "done" ? "Close issue" : "Reopen issue"}
+                icon={
+                  toggleNextStatus === "done" ? <Icon icon="check" /> : <Icon icon={RotateCcw} />
+                }
                 onClick={() => requestStatusChange(toggleNextStatus)}
               />
             </>
@@ -965,6 +972,7 @@ function IssuePage() {
               size="sm"
               variant="destructive"
               label="Move to Trash"
+              icon={<Icon icon={Trash2} />}
               isDisabled={activeSession !== undefined || trashing}
               data-trash-button=""
               onClick={() => setConfirmTrashOpen(true)}

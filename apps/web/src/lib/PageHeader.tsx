@@ -51,7 +51,12 @@ export function PageHeader({
         {statusToken}
       </Stack>
       {subtitle !== undefined && (
-        <Text as="p" display="block" type="supporting" color="secondary">
+        <Text
+          as={typeof subtitle === "string" ? "p" : "div"}
+          display="block"
+          type="supporting"
+          color="secondary"
+        >
           {subtitle}
         </Text>
       )}

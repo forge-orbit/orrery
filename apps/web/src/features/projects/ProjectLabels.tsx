@@ -5,6 +5,7 @@ import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import {
@@ -20,6 +21,7 @@ import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
 import type { ProjectLabel } from "@orrery/contract";
 import { useQueryClient } from "@tanstack/react-query";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { TextField } from "../../lib/fields.tsx";
@@ -262,6 +264,7 @@ export function ProjectLabels({
                 <Button
                   type="submit"
                   label="Create label"
+                  icon={<Icon icon={Plus} />}
                   variant="primary"
                   isDisabled={saving}
                   isLoading={saving}
@@ -368,10 +371,12 @@ export function ProjectLabels({
                         {canContribute && (
                           <TableCell>
                             <Stack direction="horizontal" gap={1}>
-                              <Button
+                              <IconButton
                                 type="button"
                                 label="Edit"
-                                variant="secondary"
+                                tooltip={`Edit ${label.name}`}
+                                icon={<Icon icon={Pencil} />}
+                                variant="ghost"
                                 size="sm"
                                 isDisabled={saving}
                                 onClick={() => {
@@ -381,10 +386,12 @@ export function ProjectLabels({
                                   setError(undefined);
                                 }}
                               />
-                              <Button
+                              <IconButton
                                 type="button"
                                 label="Delete"
-                                variant="destructive"
+                                tooltip={`Delete ${label.name}`}
+                                icon={<Icon icon={Trash2} color="error" />}
+                                variant="ghost"
                                 size="sm"
                                 isDisabled={saving}
                                 onClick={() => setConfirmDelete(label)}

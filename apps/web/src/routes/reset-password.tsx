@@ -3,7 +3,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Stack } from "@astryxdesign/core/Stack";
-import { Text } from "@astryxdesign/core/Text";
 import { createFileRoute } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 import { useState } from "react";
@@ -48,14 +47,16 @@ function ResetPasswordPage() {
         <Heading level={1} color="inherit">
           Choose a new password
         </Heading>
-        <Banner
-          status="error"
-          role="alert"
-          title="This reset link is incomplete. Ask for a fresh reset link."
-        />
-        <Text as="p" display="block" type="supporting">
-          <Link to="/forgot-password">Request a reset link</Link>
-        </Text>
+        <Stack gap={3} align="start">
+          <Banner
+            status="error"
+            role="alert"
+            title="This reset link is incomplete. Ask for a fresh reset link."
+          />
+          <Link to="/forgot-password" isStandalone hasUnderline>
+            Request a reset link
+          </Link>
+        </Stack>
       </Stack>
     );
   }
@@ -66,11 +67,11 @@ function ResetPasswordPage() {
         Choose a new password
       </Heading>
       {message !== undefined ? (
-        <Stack gap={3}>
+        <Stack gap={3} align="start">
           <Banner status="success" role="status" title={message} />
-          <Text as="p" display="block" type="supporting">
-            <Link to="/signin">Sign in</Link>
-          </Text>
+          <Link to="/signin" isStandalone hasUnderline>
+            Sign in
+          </Link>
         </Stack>
       ) : (
         <form onSubmit={(event) => void onSubmit(event)}>
