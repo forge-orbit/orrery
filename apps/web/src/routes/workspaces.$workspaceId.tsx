@@ -45,6 +45,7 @@ import { sessionQuery } from "../features/accounts/index.ts";
 import { AgentsSection, agentKeysQuery, agentsQuery } from "../features/agents/index.ts";
 import { InvitationList } from "../features/invitations/index.ts";
 import { createProject, projectQuery, projectsQuery } from "../features/projects/index.ts";
+import { RunnersSection } from "../features/runners/index.ts";
 import { RunsSection, workspaceRunsQuery } from "../features/runs/index.ts";
 import { WebhooksSection, workspaceWebhooksQuery } from "../features/webhooks/index.ts";
 import { activeSessionsQuery as workspaceActiveSessionsQuery } from "../features/work-sessions/index.ts";
@@ -120,7 +121,7 @@ type PermissionDraft = {
   capabilities: Partial<Record<WorkspaceCapability, boolean>>;
 };
 
-type WorkspaceTab = "projects" | "agents" | "runs" | "members" | "webhooks";
+type WorkspaceTab = "projects" | "agents" | "runs" | "runners" | "members" | "webhooks";
 
 export const Route = createFileRoute("/workspaces/$workspaceId")({
   loader: async ({ context, params }) => {
@@ -228,6 +229,7 @@ function WorkspacePage() {
             value === "projects" ||
             value === "agents" ||
             value === "runs" ||
+            value === "runners" ||
             value === "members" ||
             value === "webhooks"
           ) {
@@ -257,6 +259,7 @@ function WorkspacePage() {
           panelId="panel-runs"
           endContent={<Badge label={runs.length} />}
         />
+        <Tab value="runners" label="Runners" panelId="panel-runners" />
         {showMembersTab && (
           <Tab
             value="members"
@@ -302,6 +305,12 @@ function WorkspacePage() {
       {activeTab === "runs" && (
         <Stack as="section" id="panel-runs" role="tabpanel" gap={4}>
           <RunsSection workspaceId={workspace.id} />
+        </Stack>
+      )}
+
+      {activeTab === "runners" && (
+        <Stack as="section" id="panel-runners" role="tabpanel" gap={4}>
+          <RunnersSection workspaceId={workspace.id} />
         </Stack>
       )}
 

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import {
   AgentKeyValidity,
@@ -29,6 +29,8 @@ import {
   projectAccessGrants,
   projectTransferAuthorizations,
   projects,
+  runnerHosts,
+  runners,
   runs,
   workSessions,
   workspaceInvitations,
@@ -616,5 +618,61 @@ describe("account deactivation and reactivation (#38)", () => {
       404,
       "transfer_invalid",
     );
+  });
+
+  it("revokes the human's installation-wide Runner hosts and their Runners (#195)", async () => {
+    const member = await createHuman(
+      "deactivation-runner-hosts@example.com",
+      "deactivation-runner-password",
+    );
+    const adminCookie = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
+    const workspace = await insertSharedWorkspace("Runner Host Workspace", member.humanId);
+    const project = await insertProject(workspace.id, member.humanId);
+    const agent = one(
+      await database.db
+        .insert(agents)
+        .values({ id: randomUUID(), humanId: member.humanId, name: `agent-${randomUUID()}` })
+        .returning(),
+    );
+    const host = one(
+      await database.db
+        .insert(runnerHosts)
+        .values({
+          id: randomUUID(),
+          humanId: member.humanId,
+          displayName: "member-laptop",
+          platform: "linux-x64",
+          credentialHash: tokenHash(randomBytes(32).toString("hex")),
+        })
+        .returning(),
+    );
+    const runner = one(
+      await database.db
+        .insert(runners)
+        .values({
+          id: randomUUID(),
+          hostId: host.id,
+          workspaceId: workspace.id,
+          projectId: project.id,
+          agentId: agent.id,
+          displayName: "member-laptop",
+          repoFingerprint: createHash("sha256").update("repo").digest("hex"),
+        })
+        .returning(),
+    );
+
+    const res = await postJson(`/api/admin/accounts/${member.humanId}/deactivate`, {}, adminCookie);
+    expect(res.status).toBe(200);
+
+    const [storedHost] = await database.db
+      .select()
+      .from(runnerHosts)
+      .where(eq(runnerHosts.id, host.id));
+    const [storedRunner] = await database.db
+      .select()
+      .from(runners)
+      .where(eq(runners.id, runner.id));
+    expect(storedHost?.revokedAt).not.toBeNull();
+    expect(storedRunner?.revokedAt).not.toBeNull();
   });
 });

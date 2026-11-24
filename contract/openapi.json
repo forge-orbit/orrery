@@ -5451,6 +5451,544 @@
         "required": [
           "items"
         ]
+      },
+      "DeviceCodeResponse": {
+        "type": "object",
+        "properties": {
+          "deviceCode": {
+            "$ref": "#/components/schemas/DeviceCode"
+          },
+          "userCode": {
+            "$ref": "#/components/schemas/UserCode"
+          },
+          "verificationUri": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "deviceCode",
+          "userCode",
+          "verificationUri",
+          "expiresAt"
+        ]
+      },
+      "DeviceCode": {
+        "type": "string",
+        "minLength": 32,
+        "maxLength": 256
+      },
+      "UserCode": {
+        "type": "string",
+        "pattern": "^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$"
+      },
+      "CreateDeviceCodeRequest": {
+        "type": "object",
+        "properties": {
+          "hostDisplayName": {
+            "$ref": "#/components/schemas/RunnerHostDisplayName"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/RunnerPlatform"
+          },
+          "verifierHash": {
+            "$ref": "#/components/schemas/Sha256Hex"
+          }
+        },
+        "required": [
+          "hostDisplayName",
+          "platform",
+          "verifierHash"
+        ]
+      },
+      "RunnerHostDisplayName": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      },
+      "RunnerPlatform": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+      },
+      "Sha256Hex": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "DeviceCodePreview": {
+        "type": "object",
+        "properties": {
+          "userCode": {
+            "$ref": "#/components/schemas/UserCode"
+          },
+          "hostDisplayName": {
+            "$ref": "#/components/schemas/RunnerHostDisplayName"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/RunnerPlatform"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "userCode",
+          "hostDisplayName",
+          "platform",
+          "expiresAt"
+        ]
+      },
+      "ApproveDeviceCodeResponse": {
+        "type": "object",
+        "properties": {
+          "hostDisplayName": {
+            "$ref": "#/components/schemas/RunnerHostDisplayName"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/RunnerPlatform"
+          }
+        },
+        "required": [
+          "hostDisplayName",
+          "platform"
+        ]
+      },
+      "HostCredentialResponse": {
+        "type": "object",
+        "properties": {
+          "hostId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/HostCredential"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/RunnerHostDisplayName"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/RunnerPlatform"
+          }
+        },
+        "required": [
+          "hostId",
+          "credential",
+          "displayName",
+          "platform"
+        ]
+      },
+      "RunnerId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "HostCredential": {
+        "type": "string",
+        "minLength": 32,
+        "maxLength": 256
+      },
+      "ExchangeDeviceCodeRequest": {
+        "type": "object",
+        "properties": {
+          "deviceCode": {
+            "$ref": "#/components/schemas/DeviceCode"
+          },
+          "verifier": {
+            "$ref": "#/components/schemas/DeviceVerifier"
+          }
+        },
+        "required": [
+          "deviceCode",
+          "verifier"
+        ]
+      },
+      "DeviceVerifier": {
+        "type": "string",
+        "minLength": 32,
+        "maxLength": 256
+      },
+      "Runner": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "hostId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/RunnerHostDisplayName"
+          },
+          "repoFingerprint": {
+            "$ref": "#/components/schemas/Sha256Hex"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 64
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64
+          },
+          "activeSlotCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 64
+          },
+          "lastSeenAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "disconnectedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "revokedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "presence": {
+            "$ref": "#/components/schemas/RunnerPresence"
+          }
+        },
+        "required": [
+          "id",
+          "hostId",
+          "workspaceId",
+          "projectId",
+          "agentId",
+          "displayName",
+          "repoFingerprint",
+          "capabilities",
+          "maxConcurrency",
+          "activeSlotCount",
+          "lastSeenAt",
+          "disconnectedAt",
+          "revokedAt",
+          "createdAt",
+          "presence"
+        ]
+      },
+      "RunnerPresence": {
+        "type": "string",
+        "enum": [
+          "online",
+          "busy",
+          "offline"
+        ]
+      },
+      "RegisterRunnerRequest": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "projectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "agentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/RunnerHostDisplayName"
+          },
+          "repoFingerprint": {
+            "$ref": "#/components/schemas/Sha256Hex"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 64,
+            "default": []
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64,
+            "default": 1
+          }
+        },
+        "required": [
+          "workspaceId",
+          "projectId",
+          "repoFingerprint"
+        ]
+      },
+      "HeartbeatRequest": {
+        "type": "object",
+        "properties": {
+          "activeSlotCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 64,
+            "default": 0
+          }
+        }
+      },
+      "WorkspaceRunnersFleet": {
+        "type": "object",
+        "properties": {
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetRunnerHost"
+            }
+          }
+        },
+        "required": [
+          "hosts"
+        ]
+      },
+      "FleetRunnerHost": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/RunnerHost"
+          },
+          "presence": {
+            "$ref": "#/components/schemas/RunnerPresence"
+          },
+          "canRevoke": {
+            "type": "boolean"
+          },
+          "runners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetRunner"
+            }
+          }
+        },
+        "required": [
+          "host",
+          "presence",
+          "canRevoke",
+          "runners"
+        ]
+      },
+      "RunnerHost": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "humanId": {
+            "type": "string"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/RunnerHostDisplayName"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/RunnerPlatform"
+          },
+          "lastSeenAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "revokedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "humanId",
+          "displayName",
+          "platform",
+          "lastSeenAt",
+          "revokedAt",
+          "createdAt"
+        ]
+      },
+      "FleetRunner": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "hostId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/RunnerHostDisplayName"
+          },
+          "repoFingerprint": {
+            "$ref": "#/components/schemas/Sha256Hex"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 64
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64
+          },
+          "activeSlotCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 64
+          },
+          "lastSeenAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "disconnectedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "revokedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "presence": {
+            "$ref": "#/components/schemas/RunnerPresence"
+          },
+          "hostDisplayName": {
+            "$ref": "#/components/schemas/RunnerHostDisplayName"
+          },
+          "hostPlatform": {
+            "$ref": "#/components/schemas/RunnerPlatform"
+          },
+          "canRevoke": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "hostId",
+          "workspaceId",
+          "projectId",
+          "agentId",
+          "displayName",
+          "repoFingerprint",
+          "capabilities",
+          "maxConcurrency",
+          "activeSlotCount",
+          "lastSeenAt",
+          "disconnectedAt",
+          "revokedAt",
+          "createdAt",
+          "presence",
+          "hostDisplayName",
+          "hostPlatform",
+          "canRevoke"
+        ]
+      },
+      "RevokeRunnerHostResponse": {
+        "type": "object",
+        "properties": {
+          "hostId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "revokedRunners": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "hostId",
+          "revokedRunners"
+        ]
       }
     },
     "parameters": {}
@@ -14539,6 +15077,726 @@
           },
           "404": {
             "description": "No such workspace or webhook is accessible to the caller",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/device-codes": {
+      "post": {
+        "summary": "Begin a verifier-bound Runner host enrollment",
+        "description": "Creates a ten-minute, single-use device-code session. The verifier hash binds the later exchange; only digests are stored.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeviceCodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The device code, user code and browser verification URI",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceCodeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/device-codes/{userCode}": {
+      "get": {
+        "summary": "Preview a device code for browser approval",
+        "description": "Read-only: a GET can never approve an enrollment or reveal a credential.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/UserCode"
+            },
+            "required": true,
+            "name": "userCode",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requesting host's display name and platform",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceCodePreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/device-codes/{userCode}/approve": {
+      "post": {
+        "summary": "Approve a Runner host enrollment",
+        "description": "Requires an authenticated human POST. Binds the host to the approving human across the installation; records up to five failed user-code attempts.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/UserCode"
+            },
+            "required": true,
+            "name": "userCode",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The approved host's display name and platform",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveDeviceCodeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/device-codes/token": {
+      "post": {
+        "summary": "Exchange an approved device code for a host credential",
+        "description": "Verifier-bound, one-time exchange. Returns the long-lived host credential, which is never stored in plaintext.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExchangeDeviceCodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The host credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostCredentialResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/register": {
+      "post": {
+        "summary": "Register a project-bound Runner",
+        "description": "Authenticates with a host credential. Sends only an opaque repository fingerprint; raw local paths are never accepted or stored.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRunnerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The registered Runner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Runner"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/{runnerId}/heartbeat": {
+      "post": {
+        "summary": "Heartbeat a Runner in database time",
+        "description": "A 401 means the host or human was revoked; the CLI must stop local operation immediately.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Runner with derived DB-time presence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Runner"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspaceId}/runners": {
+      "get": {
+        "summary": "List a workspace's Runners Fleet",
+        "description": "Runners grouped under their Runner host with live, DB-time presence.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "workspaceId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The workspace Runners Fleet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceRunnersFleet"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runner-hosts/{hostId}/revoke": {
+      "post": {
+        "summary": "Revoke a Runner host and all its Runners",
+        "description": "Only the human who owns the host may revoke it.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "hostId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The revoked host and the number of Runners invalidated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeRunnerHostResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
             "content": {
               "application/problem+json": {
                 "schema": {

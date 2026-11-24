@@ -28,6 +28,7 @@ import {
   workspaces,
 } from "../../db/schema.ts";
 import type { SessionAccount } from "../accounts/index.ts";
+import { revokeRunnerHostsForHuman } from "../runners/index.ts";
 
 export type DeactivationErrorKind =
   | "not_signed_in"
@@ -171,6 +172,10 @@ export function createDeactivationService({ db }: DeactivationDeps): Deactivatio
           .update(humans)
           .set({ deactivatedAt: sql`statement_timestamp()` })
           .where(eq(humans.id, humanId));
+
+        // A deactivated human loses every Runner host in the installation, and
+        // with them all Runners, inside this same transaction (#195, ADR-0010).
+        await revokeRunnerHostsForHuman(tx, humanId);
 
         await tx.delete(browserSessions).where(eq(browserSessions.humanId, humanId));
 

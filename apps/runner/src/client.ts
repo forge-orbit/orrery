@@ -1,0 +1,115 @@
+import { z } from "zod";
+import {
+  DeviceCodeResponse,
+  HostCredentialResponse,
+  Runner,
+  type CreateDeviceCodeRequest,
+  type ExchangeDeviceCodeRequest,
+  type HeartbeatRequest,
+  type RegisterRunnerRequest,
+} from "@orrery/contract";
+
+export class RunnerRequestError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+
+  constructor(status: number, code: string | null, message: string) {
+    super(`Orrery returned ${status}${code === null ? "" : ` (${code})`}: ${message}`);
+    this.name = "RunnerRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export interface OrreryClientOptions {
+  server: string;
+  credential?: string | undefined;
+  signal?: AbortSignal | undefined;
+}
+
+export class OrreryClient {
+  readonly server: string;
+  private readonly credential: string | undefined;
+  private readonly signal: AbortSignal | undefined;
+
+  constructor(options: OrreryClientOptions) {
+    this.server = options.server.replace(/\/$/, "");
+    this.credential = options.credential;
+    this.signal = options.signal;
+  }
+
+  private async request(path: string, init: RequestInit = {}): Promise<unknown> {
+    const headers = new Headers(init.headers);
+    if (init.body !== undefined) headers.set("content-type", "application/json");
+    if (this.credential !== undefined) headers.set("authorization", `Bearer ${this.credential}`);
+    let response: Response;
+    try {
+      response = await fetch(`${this.server}${path}`, {
+        ...init,
+        headers,
+        signal: this.signal ?? null,
+      });
+    } catch (error) {
+      throw new Error(`Cannot reach Orrery at ${this.server}: ${String(error)}`, { cause: error });
+    }
+    if (!response.ok) {
+      let code: string | null = null;
+      let detail = response.statusText;
+      try {
+        const body = z
+          .object({
+            code: z.string().optional(),
+            detail: z.string().optional(),
+            title: z.string().optional(),
+          })
+          .safeParse(await response.json());
+        if (body.success) {
+          if (body.data.code !== undefined) code = body.data.code;
+          if (body.data.detail !== undefined) detail = body.data.detail;
+          else if (body.data.title !== undefined) detail = body.data.title;
+        }
+      } catch {
+        // A non-JSON failure still becomes a typed status error.
+      }
+      throw new RunnerRequestError(response.status, code, detail);
+    }
+    if (response.status === 204) return undefined;
+    return response.json();
+  }
+
+  async createDeviceCode(input: CreateDeviceCodeRequest) {
+    return DeviceCodeResponse.parse(
+      await this.request("/api/runners/device-codes", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async exchangeDeviceCode(input: ExchangeDeviceCodeRequest) {
+    return HostCredentialResponse.parse(
+      await this.request("/api/runners/device-codes/token", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async registerRunner(input: RegisterRunnerRequest) {
+    return Runner.parse(
+      await this.request("/api/runners/register", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async heartbeat(runnerId: string, input: HeartbeatRequest) {
+    return Runner.parse(
+      await this.request(`/api/runners/${encodeURIComponent(runnerId)}/heartbeat`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+}

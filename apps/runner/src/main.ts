@@ -1,0 +1,125 @@
+#!/usr/bin/env node
+import { hostname } from "node:os";
+import { parseArgs } from "node:util";
+import { readCredential } from "./credential.ts";
+import { login } from "./login.ts";
+import { start } from "./start.ts";
+
+const fail = (message: string): never => {
+  process.stderr.write(`${message}\n`);
+  process.exit(1);
+};
+
+const usage = `orrery-runner — local agent runner for Orrery
+
+Commands:
+  login                     Enroll this machine as a Runner host in the browser
+  start --workspace ID --project ID
+                            Register a project-bound Runner and heartbeat
+  status                    Show the locally stored host credential
+
+Options:
+  --server URL              Orrery base URL (default: ORRERY_URL or http://localhost:8080)
+  --host-name NAME          Display name for this machine (login)
+  --platform NAME           Platform label (login)
+  --agent ID                Default Agent id (start; otherwise the host owner's first Agent)
+  --name NAME               Runner display name (start)
+  --capability NAME         Declared capability, repeatable (start)
+  --concurrency N           Max concurrent local slots, 1-64 (start)
+  --repo PATH               Local checkout path (start; default: current directory)
+  --heartbeat-ms N          Heartbeat interval (start; default: 5000)
+  -h, --help                Show this help
+`;
+
+export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      server: { type: "string" },
+      "host-name": { type: "string" },
+      platform: { type: "string" },
+      "poll-ms": { type: "string" },
+      workspace: { type: "string" },
+      project: { type: "string" },
+      agent: { type: "string" },
+      name: { type: "string" },
+      capability: { type: "string", multiple: true },
+      concurrency: { type: "string" },
+      repo: { type: "string" },
+      "heartbeat-ms": { type: "string" },
+      help: { type: "boolean", short: "h" },
+    },
+    allowPositionals: true,
+  });
+
+  if (values.help === true || positionals.length === 0) {
+    process.stdout.write(usage);
+    return;
+  }
+
+  const server = values.server ?? process.env.ORRERY_URL ?? "http://localhost:8080";
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+
+  const command = positionals[0] ?? "";
+  try {
+    switch (command) {
+      case "login": {
+        await login({
+          server,
+          hostDisplayName: values["host-name"] ?? hostname(),
+          ...(values.platform === undefined ? {} : { platform: values.platform }),
+          ...(values["poll-ms"] === undefined ? {} : { pollIntervalMs: Number(values["poll-ms"]) }),
+          signal: controller.signal,
+        });
+        return;
+      }
+      case "start": {
+        const workspaceId = values.workspace;
+        const projectId = values.project;
+        if (workspaceId === undefined || projectId === undefined) {
+          throw new Error("start requires --workspace ID and --project ID");
+        }
+        const concurrency = values.concurrency === undefined ? 1 : Number(values.concurrency);
+        if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64) {
+          fail("--concurrency must be an integer from 1 to 64");
+        }
+        const heartbeatMs =
+          values["heartbeat-ms"] === undefined ? 5000 : Number(values["heartbeat-ms"]);
+        if (!Number.isInteger(heartbeatMs) || heartbeatMs < 10) {
+          fail("--heartbeat-ms must be an integer of at least 10");
+        }
+        await start({
+          server,
+          workspaceId,
+          projectId,
+          ...(values.agent === undefined ? {} : { agentId: values.agent }),
+          ...(values.name === undefined ? {} : { displayName: values.name }),
+          capabilities: values.capability ?? [],
+          maxConcurrency: concurrency,
+          heartbeatMs,
+          ...(values.repo === undefined ? {} : { repoPath: values.repo }),
+          signal: controller.signal,
+        });
+        return;
+      }
+      case "status": {
+        const stored = await readCredential();
+        process.stdout.write(
+          `Runner host '${stored.displayName}' (${stored.hostId}) enrolled with ${stored.server}.\n`,
+        );
+        return;
+      }
+      default:
+        fail(`Unknown command '${command}'. Run 'orrery-runner --help'.`);
+    }
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+}
+
+if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) {
+  await main();
+}

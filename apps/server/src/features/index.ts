@@ -31,6 +31,11 @@ import {
 import { createOwnershipFeature, ownershipRoutes } from "./ownership/index.ts";
 import { createProjectsFeature, projectAccessAtLeast, projectsRoutes } from "./projects/index.ts";
 import { createRecoveryFeature, recoveryRoutes } from "./recovery/index.ts";
+import {
+  createRunnersFeature,
+  revokeWorkspaceRunnersForMember,
+  runnersRoutes,
+} from "./runners/index.ts";
 import { createRunsFeature, runsRoutes } from "./runs/index.ts";
 import { createSettingsFeature, settingsRoutes } from "./settings/index.ts";
 import { createSystemFeature, systemRoutes } from "./system/index.ts";
@@ -234,6 +239,16 @@ export function createFeatures(
   questionLeaseDeadline = (tx, issueId) => inbox.questionDeadline(tx, issueId);
   questionEvaluateDeadline = (tx, issueId) => inbox.evaluateDeadline(tx, issueId);
   dueQuestionIssueIds = () => inbox.findDueQuestionIssueIds();
+
+  const runners = createRunnersFeature({
+    db: database.db,
+    sessionReader: accounts.sessionReader,
+    publicUrl: config.PUBLIC_URL,
+    projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
+      projects.projectAccessCeiling(tx, workspaceId, humanId, projectIds),
+    projectAccessAtLeast,
+  });
+
   return [
     createSystemFeature({ ping: database.ping, checkStorage: () => storage.checkHealth() }),
     accounts,
@@ -285,6 +300,8 @@ export function createFeatures(
         revokeMemberWorkspaceKeys(tx, workspaceId, humanId, actorHumanId),
       releaseMemberWorkSessions: (tx, workspaceId, humanId) =>
         sessions.releaseMemberWorkSessions(tx, workspaceId, humanId),
+      revokeMemberWorkspaceRunners: (tx, workspaceId, humanId) =>
+        revokeWorkspaceRunnersForMember(tx, workspaceId, humanId),
       applyInvitationGrants: (tx, workspaceId, humanId, grantedByHumanId, offered) =>
         projects.applyInvitationGrants(tx, workspaceId, humanId, grantedByHumanId, offered),
       log,
@@ -321,6 +338,7 @@ export function createFeatures(
       db: database.db,
       sessionReader: accounts.sessionReader,
     }),
+    runners,
   ];
 }
 
@@ -345,4 +363,5 @@ export const routes = [
   ...myWorkRoutes,
   ...transfersRoutes,
   ...webhooksRoutes,
+  ...runnersRoutes,
 ];
