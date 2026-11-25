@@ -335,7 +335,7 @@ test("grants access in the browser and shows Read without mutation controls", as
   for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
 });
 
-test("a project manager without member-directory access keeps the email field", async ({
+test("a project manager without member-directory access gets a picker and an empty state", async ({
   page,
 }) => {
   await page.goto("/signin");
@@ -346,14 +346,22 @@ test("a project manager without member-directory access keeps the email field", 
 
   await page.goto(`/projects/${memberProjectId}`);
   await page.getByRole("tab", { name: "Settings" }).click();
-  const email = page.getByLabel("Email");
-  await expect(email).toBeVisible();
-  await expect(page.getByRole("button", { name: /Member/ })).toHaveCount(0);
-  await email.fill(COLLEAGUE_EMAIL);
+  await expect(page.getByLabel("Email")).toHaveCount(0);
+  const member = page.getByRole("button", { name: /Member/ });
+  await expect(member).toBeVisible();
+  await member.click();
+  await page.getByRole("option", { name: new RegExp(COLLEAGUE_EMAIL) }).click();
   await page.getByRole("button", { name: "Grant access" }).click();
   await expect(page.locator(`[data-project-access-for="${COLLEAGUE_EMAIL}"]`)).toContainText(
     "read",
   );
+
+  await expect(
+    page.getByRole("heading", {
+      name: "All workspace members already have access to this project.",
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Grant access" })).toHaveCount(0);
   for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
 });
 

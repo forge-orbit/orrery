@@ -1860,6 +1860,38 @@
           "updatedAt"
         ]
       },
+      "ProjectAccessCandidatesResponse": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/ProjectAccessCandidate"
+        }
+      },
+      "ProjectAccessCandidate": {
+        "type": "object",
+        "properties": {
+          "humanId": {
+            "type": "string"
+          },
+          "email": {
+            "$ref": "#/components/schemas/Email"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
+          }
+        },
+        "required": [
+          "humanId",
+          "email",
+          "displayName",
+          "avatarUrl"
+        ]
+      },
       "ProjectAccessHumanIds": {
         "type": "array",
         "items": {
@@ -11258,6 +11290,76 @@
           },
           "409": {
             "description": "Workspace owners already have Manage access to every project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/access/candidates": {
+      "get": {
+        "summary": "Workspace members who can still be granted project access",
+        "description": "Manage only. Lists active members of the project's shared workspace who are not workspace owners and do not already hold a grant, so a Project manager can search for a person without reading the full member directory. Suspended and deactivated people are never suggested, and a personal project has no collaborators.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The members who can still receive a grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAccessCandidatesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The project id is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Read or Contribute access cannot manage project access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No project with this id is accessible to the caller",
             "content": {
               "application/problem+json": {
                 "schema": {

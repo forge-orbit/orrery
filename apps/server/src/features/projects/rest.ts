@@ -19,6 +19,7 @@ import {
   KnowledgeEntriesResponse,
   KnowledgeEntry,
   Project,
+  ProjectAccessCandidatesResponse,
   ProjectAccessGrant,
   ProjectAccessGrantsResponse,
   ProjectAccessHumanIds,
@@ -188,6 +189,25 @@ const projectAccessHumanIds = createRoute({
     400: problem("The project id is invalid"),
     401: problem("Not signed in"),
     403: problem("Read access is not enough to assign issues"),
+    404: problem("No project with this id is accessible to the caller"),
+  },
+});
+
+const listProjectAccessCandidates = createRoute({
+  method: "get",
+  path: "/api/projects/{projectId}/access/candidates",
+  summary: "Workspace members who can still be granted project access",
+  description:
+    "Manage only. Lists active members of the project's shared workspace who are not workspace owners and do not already hold a grant, so a Project manager can search for a person without reading the full member directory. Suspended and deactivated people are never suggested, and a personal project has no collaborators.",
+  request: { params: projectParams },
+  responses: {
+    200: {
+      description: "The members who can still receive a grant",
+      content: { "application/json": { schema: ProjectAccessCandidatesResponse } },
+    },
+    400: problem("The project id is invalid"),
+    401: problem("Not signed in"),
+    403: problem("Read or Contribute access cannot manage project access"),
     404: problem("No project with this id is accessible to the caller"),
   },
 });
@@ -918,6 +938,7 @@ export const routes = [
   updateProject,
   setProjectFallbackPolicy,
   listProjectAccess,
+  listProjectAccessCandidates,
   projectAccessHumanIds,
   setProjectAccess,
   removeProjectAccess,
@@ -1183,6 +1204,18 @@ export function createProjectsRest(
     try {
       const { projectId } = c.req.valid("param");
       return c.json(await service.listProjectAccess(await sessionReader(c), projectId), 200);
+    } catch (error) {
+      return failure(c, error, projectWriteKinds);
+    }
+  });
+
+  app.openapi(listProjectAccessCandidates, async (c) => {
+    try {
+      const { projectId } = c.req.valid("param");
+      return c.json(
+        await service.listProjectAccessCandidates(await sessionReader(c), projectId),
+        200,
+      );
     } catch (error) {
       return failure(c, error, projectWriteKinds);
     }

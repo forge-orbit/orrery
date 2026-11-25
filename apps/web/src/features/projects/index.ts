@@ -54,6 +54,7 @@ export {
   mentionCandidatesQuery,
   knowledgeEntriesQuery,
   knowledgeEntryQuery,
+  projectAccessCandidatesQuery,
   projectAccessHumanIdsQuery,
   projectAccessQuery,
   projectActivityQuery,

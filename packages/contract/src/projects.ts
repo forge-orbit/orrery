@@ -246,6 +246,22 @@ export const ProjectAccessHumanIds = z
   .meta({ id: "ProjectAccessHumanIds" });
 export type ProjectAccessHumanIds = z.infer<typeof ProjectAccessHumanIds>;
 
+/** A workspace member who could still be granted access to a project. */
+export const ProjectAccessCandidate = z
+  .object({
+    humanId: z.string(),
+    email: Email,
+    displayName: z.string().nullable(),
+    avatarUrl: AvatarUrl.nullable(),
+  })
+  .meta({ id: "ProjectAccessCandidate" });
+export type ProjectAccessCandidate = z.infer<typeof ProjectAccessCandidate>;
+
+export const ProjectAccessCandidatesResponse = z
+  .array(ProjectAccessCandidate)
+  .meta({ id: "ProjectAccessCandidatesResponse" });
+export type ProjectAccessCandidatesResponse = z.infer<typeof ProjectAccessCandidatesResponse>;
+
 
 
 
