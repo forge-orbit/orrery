@@ -724,7 +724,6 @@ function SidebarFooter({
             />
           </Stack>
         )}
-        <ForgeOrbitAttribution />
       </Stack>
     </footer>
   );
