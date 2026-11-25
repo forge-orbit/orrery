@@ -1184,6 +1184,10 @@ export const knowledgeEntries = pgTable(
     updatedByAgentId: text("updated_by_agent_id").references(() => agents.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedByHumanId: text("deleted_by_human_id").references(() => humans.id),
+    purgedAt: timestamp("purged_at", { withTimezone: true }),
   },
   (t) => [
     check(
@@ -1193,6 +1197,14 @@ export const knowledgeEntries = pgTable(
     check(
       "knowledge_entries_updated_by_actor",
       sql`(${t.updatedByHumanId} is not null) <> (${t.updatedByAgentId} is not null)`,
+    ),
+    check(
+      "knowledge_entries_deleted_pair",
+      sql`(${t.deletedAt} is null) = (${t.deletedByHumanId} is null)`,
+    ),
+    check(
+      "knowledge_entries_purged_requires_deleted",
+      sql`${t.purgedAt} is null or ${t.deletedAt} is not null`,
     ),
     index("knowledge_entries_project_created").on(t.projectId, t.createdAt),
   ],

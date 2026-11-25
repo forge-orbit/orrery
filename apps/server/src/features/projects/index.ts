@@ -23,6 +23,7 @@ export { ProjectsError } from "./service.ts";
 export type {
   IssueSessionGate,
   ProjectsErrorKind,
+  ProjectsService,
   ReleaseIssueWorkSessions,
   WorkActor,
   WorkSessionGate,

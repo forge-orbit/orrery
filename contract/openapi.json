@@ -2778,7 +2778,9 @@
           "issue_deleted",
           "issue_restored",
           "knowledge_created",
-          "knowledge_edited"
+          "knowledge_edited",
+          "knowledge_deleted",
+          "knowledge_restored"
         ]
       },
       "IssueActivityDetail": {
@@ -13715,6 +13717,217 @@
           },
           "404": {
             "description": "No knowledge entry with this id is accessible to the caller",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Move a knowledge entry to the project's trash",
+        "description": "Human Contribute or Manage only; agents cannot delete knowledge. A soft-deleted entry leaves the project's knowledge list and the MCP tools immediately, keeps its attachment references, and a Project manager can restore it within 30 days. Trashing records knowledge_deleted in the project activity in the same transaction.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "entryId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The knowledge entry was moved to trash"
+          },
+          "400": {
+            "description": "The entry id is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Read access cannot delete knowledge, and agents cannot delete knowledge",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active knowledge entry with this id is accessible to the caller",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/knowledge/{entryId}/restore": {
+      "post": {
+        "summary": "Restore a trashed knowledge entry",
+        "description": "Human Manage (Project manager) only. Restores an entry from trash within 30 days, clearing its deletion metadata and recording knowledge_restored in the project activity in the same transaction. An already purged entry, or one past the 30-day boundary in database time, answers 409. Agents and members below Manage answer 403; non-members answer 404.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "entryId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restored knowledge entry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The entry id is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only a Project manager can restore a trashed knowledge entry",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No knowledge entry with this id is accessible to the caller",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The knowledge entry has already been purged",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/knowledge/trash": {
+      "get": {
+        "summary": "The project's recoverable trashed knowledge entries",
+        "description": "Manage only. Lists soft-deleted knowledge entries that have not been purged, so a Project manager can decide what to restore. Purged tombstones never appear here.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The recoverable trashed knowledge entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeEntriesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The project id is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only a Project manager can read the knowledge trash",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No project with this id is accessible to the caller",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -100,9 +100,11 @@ export type ProjectsErrorKind =
   | "cross_project_parent"
   | "subtask_depth_exceeded"
   | "agents_cannot_delete_issues"
+  | "agents_cannot_delete_knowledge"
   | "issue_active_session_exists"
   | "issue_needs_input"
-  | "issue_purged";
+  | "issue_purged"
+  | "knowledge_entry_purged";
 
 const messages = {
   not_signed_in: "Not signed in.",
@@ -131,11 +133,14 @@ const messages = {
   subtask_depth_exceeded:
     "Maximum subtask depth is one: a subtask cannot have children, and an issue with subtasks cannot become a subtask.",
   agents_cannot_delete_issues: "Agents cannot delete issues; only a human can.",
+  agents_cannot_delete_knowledge: "Agents cannot delete knowledge; only a human can.",
   issue_active_session_exists:
     "This issue has an active work session; stop or release it before deleting the issue.",
   issue_needs_input:
     "This issue has an unanswered question; answer it before moving the issue to review or closing it.",
   issue_purged: "This issue's trash window has ended and it can no longer be restored.",
+  knowledge_entry_purged:
+    "This knowledge entry's trash window has ended and it can no longer be restored.",
 } as const satisfies Record<ProjectsErrorKind, string>;
 
 const ACCESS_RANK: Record<ProjectAccessLevel, number> = {
@@ -530,6 +535,8 @@ const knowledgeColumns = {
   body: knowledgeEntries.body,
   createdAt: knowledgeEntries.createdAt,
   updatedAt: knowledgeEntries.updatedAt,
+  deletedAt: knowledgeEntries.deletedAt,
+  purgedAt: knowledgeEntries.purgedAt,
   createdByHumanId: knowledgeEntries.createdByHumanId,
   createdByEmail: knowledgeCreator.email,
   createdByHandle: knowledgeCreator.handle,
@@ -694,6 +701,8 @@ type KnowledgeRow = {
   body: string;
   createdAt: Date;
   updatedAt: Date;
+  deletedAt: Date | null;
+  purgedAt: Date | null;
   createdByHumanId: string | null;
   createdByEmail: string | null;
   createdByHandle: string | null;
@@ -1380,6 +1389,7 @@ async function requireKnowledge(
   entryId: string,
   actor: WorkActor,
   required: ProjectAccessLevel,
+  includeDeleted = false,
 ) {
   const membershipMatch = humanIdMatch(actor, "membership");
   const grantMatch = humanIdMatch(actor, "grant");
@@ -1407,7 +1417,11 @@ async function requireKnowledge(
       and(eq(workspaceMemberships.workspaceId, projects.workspaceId), membershipMatch),
     )
     .leftJoin(projectAccessGrants, and(eq(projectAccessGrants.projectId, projects.id), grantMatch))
-    .where(eq(knowledgeEntries.id, entryId))
+    .where(
+      includeDeleted
+        ? eq(knowledgeEntries.id, entryId)
+        : and(eq(knowledgeEntries.id, entryId), isNull(knowledgeEntries.deletedAt)),
+    )
     .limit(1);
 
   if (row === undefined) throw new ProjectsError("knowledge_entry_not_found");
@@ -1455,7 +1469,7 @@ type RecordActivityInput =
     }
   | {
       projectId: string;
-      type: "knowledge_created" | "knowledge_edited";
+      type: "knowledge_created" | "knowledge_edited" | "knowledge_deleted" | "knowledge_restored";
       actor: WorkActor;
       summary: string;
       knowledgeEntryId: string;
@@ -1871,6 +1885,9 @@ export interface ProjectsService {
   listActivity(actor: WorkActor | null, projectId: string): Promise<ProjectActivity[]>;
   listIssueActivity(actor: WorkActor | null, issueId: string): Promise<ProjectActivity[]>;
   listKnowledge(actor: WorkActor | null, projectId: string): Promise<KnowledgeEntry[]>;
+  listKnowledgeTrash(actor: WorkActor | null, projectId: string): Promise<KnowledgeEntry[]>;
+  deleteKnowledge(actor: WorkActor | null, entryId: string): Promise<void>;
+  restoreKnowledge(actor: WorkActor | null, entryId: string): Promise<KnowledgeEntry>;
   /** Resource-project lookup used to fence Dispatch tokens on knowledge routes. */
   knowledgeProjectId(entryId: string): Promise<string | null>;
   getKnowledge(actor: WorkActor | null, entryId: string): Promise<KnowledgeEntry>;
@@ -1968,6 +1985,60 @@ export function createProjectsService({
         return rows.map((row) =>
           toIssue(row, labels.get(row.id) ?? [], blockedBy.get(row.id) ?? []),
         );
+      },
+      { accessMode: "read only" },
+    );
+  }
+
+  async function readKnowledge(
+    actor: WorkActor,
+    projectId: string,
+    scope: "active" | "trash" = "active",
+  ): Promise<KnowledgeEntry[]> {
+    return db.transaction(
+      async (tx) => {
+        await requireProject(
+          tx,
+          projectId,
+          actor,
+          scope === "trash" ? ProjectAccessLevel.enum.manage : ProjectAccessLevel.enum.read,
+        );
+        const rows = await tx
+          .select(knowledgeColumns)
+          .from(knowledgeEntries)
+          .leftJoin(knowledgeCreator, eq(knowledgeCreator.id, knowledgeEntries.createdByHumanId))
+          .leftJoin(
+            knowledgeAgentCreator,
+            eq(knowledgeAgentCreator.id, knowledgeEntries.createdByAgentId),
+          )
+          .leftJoin(knowledgeEditor, eq(knowledgeEditor.id, knowledgeEntries.updatedByHumanId))
+          .leftJoin(
+            knowledgeAgentEditor,
+            eq(knowledgeAgentEditor.id, knowledgeEntries.updatedByAgentId),
+          )
+          .where(
+            scope === "trash"
+              ? and(
+                  eq(knowledgeEntries.projectId, projectId),
+                  isNotNull(knowledgeEntries.deletedAt),
+                  isNull(knowledgeEntries.purgedAt),
+                  gt(knowledgeEntries.deletedAt, THIRTY_DAYS_AGO),
+                )
+              : and(eq(knowledgeEntries.projectId, projectId), isNull(knowledgeEntries.deletedAt)),
+          )
+          .orderBy(knowledgeEntries.createdAt, knowledgeEntries.id);
+        const grouped =
+          attachmentSeams === undefined || rows.length === 0
+            ? null
+            : await attachmentSeams.listMetadata(
+                tx,
+                rows.map((row) => ({ holderType: "knowledge", holderId: row.id })),
+              );
+        return rows.map((row) => {
+          const entry = toKnowledge(row);
+          entry.attachments = grouped?.get(attachmentHolderKey("knowledge", row.id)) ?? [];
+          return entry;
+        });
       },
       { accessMode: "read only" },
     );
@@ -2721,11 +2792,27 @@ export function createProjectsService({
           .orderBy(issues.id)
           .for("update", { skipLocked: true });
         const expiredIds = expired.map((row) => row.id);
+        const expiredKnowledge = await tx
+          .select({ id: knowledgeEntries.id })
+          .from(knowledgeEntries)
+          .where(
+            and(
+              isNotNull(knowledgeEntries.deletedAt),
+              isNull(knowledgeEntries.purgedAt),
+              sql`${knowledgeEntries.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+            ),
+          )
+          .orderBy(knowledgeEntries.id)
+          .for("update", { skipLocked: true });
+        const expiredKnowledgeIds = expiredKnowledge.map((row) => row.id);
         // Collect every holder across the whole batch before locking any
         // attachment row: a per-issue purge could lock B from issue 1 then A
         // from issue 2 (A < B) and AB-BA deadlock against a save. One batch call
         // locks all candidates in a single ascending id order.
-        const attachmentHolders: { holderType: "issue" | "comment"; holderId: string }[] = [];
+        const attachmentHolders: {
+          holderType: "issue" | "comment" | "knowledge";
+          holderId: string;
+        }[] = [];
         if (expiredIds.length > 0) {
           // Comments are hard-deleted, so collect their holder ids before the
           // rows vanish. References from both the issue and its comments have to
@@ -2764,6 +2851,24 @@ export function createProjectsService({
             })
             .where(inArray(issues.id, expiredIds));
         }
+        if (expiredKnowledgeIds.length > 0) {
+          // Knowledge entries keep their attachment references while in Trash so a
+          // restore stays whole; the references drop here, at purge.
+          attachmentHolders.push(
+            ...expiredKnowledgeIds.map((entryId) => ({
+              holderType: "knowledge" as const,
+              holderId: entryId,
+            })),
+          );
+          await tx
+            .update(knowledgeEntries)
+            .set({
+              title: "[deleted]",
+              body: "",
+              purgedAt: sql`statement_timestamp()`,
+            })
+            .where(inArray(knowledgeEntries.id, expiredKnowledgeIds));
+        }
         if (attachmentSeams !== undefined && attachmentHolders.length > 0) {
           await attachmentSeams.purgeHolders(tx, attachmentHolders);
         }
@@ -2774,7 +2879,7 @@ export function createProjectsService({
             .set({ parentIssueId: null })
             .where(inArray(issues.parentIssueId, expiredIds));
         }
-        return expired.length;
+        return expired.length + expiredKnowledge.length;
       });
     },
 
@@ -3671,40 +3776,14 @@ export function createProjectsService({
     },
 
     async listKnowledge(actorArg, projectId) {
+      return readKnowledge(requireActor(actorArg), projectId);
+    },
+
+    async listKnowledgeTrash(actorArg, projectId) {
       const actor = requireActor(actorArg);
-      return db.transaction(
-        async (tx) => {
-          await requireProject(tx, projectId, actor, ProjectAccessLevel.enum.read);
-          const rows = await tx
-            .select(knowledgeColumns)
-            .from(knowledgeEntries)
-            .leftJoin(knowledgeCreator, eq(knowledgeCreator.id, knowledgeEntries.createdByHumanId))
-            .leftJoin(
-              knowledgeAgentCreator,
-              eq(knowledgeAgentCreator.id, knowledgeEntries.createdByAgentId),
-            )
-            .leftJoin(knowledgeEditor, eq(knowledgeEditor.id, knowledgeEntries.updatedByHumanId))
-            .leftJoin(
-              knowledgeAgentEditor,
-              eq(knowledgeAgentEditor.id, knowledgeEntries.updatedByAgentId),
-            )
-            .where(eq(knowledgeEntries.projectId, projectId))
-            .orderBy(knowledgeEntries.createdAt, knowledgeEntries.id);
-          const grouped =
-            attachmentSeams === undefined || rows.length === 0
-              ? null
-              : await attachmentSeams.listMetadata(
-                  tx,
-                  rows.map((row) => ({ holderType: "knowledge", holderId: row.id })),
-                );
-          return rows.map((row) => {
-            const entry = toKnowledge(row);
-            entry.attachments = grouped?.get(attachmentHolderKey("knowledge", row.id)) ?? [];
-            return entry;
-          });
-        },
-        { accessMode: "read only" },
-      );
+
+      if (actor.kind !== "human") throw new ProjectsError("insufficient_project_access");
+      return readKnowledge(actor, projectId, "trash");
     },
 
     async knowledgeProjectId(entryId) {
@@ -3858,6 +3937,112 @@ export function createProjectsService({
             current.createdByHandle,
           ),
           updatedBy: actorForWrite(actor),
+          attachments: await metadataFor(tx, "knowledge", entryId),
+        };
+      });
+    },
+
+    async deleteKnowledge(actorArg, entryId) {
+      const actor = requireActor(actorArg);
+
+      if (actor.kind !== "human") throw new ProjectsError("agents_cannot_delete_knowledge");
+      return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({ projectId: knowledgeEntries.projectId })
+          .from(knowledgeEntries)
+          .where(eq(knowledgeEntries.id, entryId))
+          .limit(1);
+        if (target === undefined) throw new ProjectsError("knowledge_entry_not_found");
+        // Lock the parent project before the entry, matching updateKnowledge and
+        // transfers.accept's projects -> child lock order.
+        await lockProjectForMutation(tx, target.projectId);
+        await tx
+          .select({ id: knowledgeEntries.id })
+          .from(knowledgeEntries)
+          .where(eq(knowledgeEntries.id, entryId))
+          .for("update");
+        const current = await requireKnowledge(
+          tx,
+          entryId,
+          actor,
+          ProjectAccessLevel.enum.contribute,
+        );
+        // Attachment references stay until purge: the 24-hour unreferenced sweep
+        // would otherwise break images on an entry restored on day 2.
+        await tx
+          .update(knowledgeEntries)
+          .set({
+            deletedAt: sql`statement_timestamp()`,
+            deletedByHumanId: actor.account.humanId,
+            updatedAt: sql`statement_timestamp()`,
+          })
+          .where(eq(knowledgeEntries.id, entryId));
+        await recordActivity(tx, {
+          projectId: current.projectId,
+          type: "knowledge_deleted",
+          actor,
+          knowledgeEntryId: entryId,
+          summary: current.title,
+        });
+      });
+    },
+
+    async restoreKnowledge(actorArg, entryId) {
+      const actor = requireActor(actorArg);
+
+      if (actor.kind !== "human") throw new ProjectsError("insufficient_project_access");
+      return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({ projectId: knowledgeEntries.projectId })
+          .from(knowledgeEntries)
+          .where(eq(knowledgeEntries.id, entryId))
+          .limit(1);
+        if (target === undefined) throw new ProjectsError("knowledge_entry_not_found");
+        await lockProjectForMutation(tx, target.projectId);
+        await tx
+          .select({ id: knowledgeEntries.id })
+          .from(knowledgeEntries)
+          .where(eq(knowledgeEntries.id, entryId))
+          .for("update");
+        const current = await requireKnowledge(
+          tx,
+          entryId,
+          actor,
+          ProjectAccessLevel.enum.manage,
+          true,
+        );
+        if (current.deletedAt === null) throw new ProjectsError("knowledge_entry_not_found");
+        const [expired] = await tx
+          .select({ id: knowledgeEntries.id })
+          .from(knowledgeEntries)
+          .where(
+            and(
+              eq(knowledgeEntries.id, entryId),
+              sql`${knowledgeEntries.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+            ),
+          )
+          .limit(1);
+        if (current.purgedAt !== null || expired !== undefined) {
+          throw new ProjectsError("knowledge_entry_purged");
+        }
+        await tx
+          .update(knowledgeEntries)
+          .set({
+            deletedAt: null,
+            deletedByHumanId: null,
+            updatedAt: sql`statement_timestamp()`,
+          })
+          .where(eq(knowledgeEntries.id, entryId));
+        await recordActivity(tx, {
+          projectId: current.projectId,
+          type: "knowledge_restored",
+          actor,
+          knowledgeEntryId: entryId,
+          summary: current.title,
+        });
+        const restored = await requireKnowledge(tx, entryId, actor, ProjectAccessLevel.enum.manage);
+        return {
+          ...toKnowledge(restored),
           attachments: await metadataFor(tx, "knowledge", entryId),
         };
       });

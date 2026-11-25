@@ -81,7 +81,8 @@ them and connect over [MCP](https://modelcontextprotocol.io).
   identifiers, priority levels, color-coded project labels (with preset swatches and live preview),
   one-level subtasks with close-guard warnings, acyclic `blocked_by` dependencies, structured
   PR/commit/doc links, GitHub-flavored Markdown with `#issue` auto-linking and Light/Dark Mermaid
-  diagrams, structured project knowledge, and human-only Trash with 30-day restore.
+  diagrams, structured project knowledge with its own human-only delete and 30-day restore, and
+  human-only Trash for issues with 30-day restore.
 - **Agents, Runs & Harness Telemetry.** Register agents with workspace-scoped API keys (expiry,
   rotation, revocation), monitor live active work sessions and raise stop signals, and inspect
   structured Run histories with recognized harness brand logos (Claude Code, Codex, OpenAI, Cursor,
@@ -305,8 +306,9 @@ The same operations are available over REST.
 | `orrery_run_checkin` | Check in a Harness conversation by `runId` or `(harness, nativeSessionId)`; report model and harness version |
 
 > Today's `*_knowledge` tools cover lightweight project-scoped Markdown knowledge. Post-MVP
-> agent-memory upgrades — Postgres full-text search (`search_knowledge`), doc↔issue linking, and
-> delete/trash — are proposed in [#140](https://github.com/forge-orbit/orrery/issues/140).
+> agent-memory upgrades — Postgres full-text search (`search_knowledge`) and doc↔issue linking — are
+> proposed in [#140](https://github.com/forge-orbit/orrery/issues/140). Deleting and restoring an
+> entry is human-only, so it lives in the web UI and REST rather than in an MCP tool.
 
 ## Connect Claude Code / Codex
 
@@ -409,7 +411,8 @@ as not planned to keep Orrery focused on agent-first project management.
 - [x] [#3](https://github.com/forge-orbit/orrery/issues/3) **M2 — Projects and issues.** Six-state
   workflow, `KEY-N` identifiers, priority & float board ordering, project-scoped labels, one-level
   subtasks, acyclic `blocked_by` dependencies, structured PR/commit links, comments, project
-  knowledge, and human-only Trash with 30-day restore.
+  knowledge (human-only delete and 30-day restore), and human-only Trash for issues with 30-day
+  restore.
 - [x] [#4](https://github.com/forge-orbit/orrery/issues/4) **M3 — Agent API and sessions.** MCP +
   REST parity (39 tools), five-minute atomic Claim leases, resume/reacquire, human stop signal,
   ephemeral session activities + v1 structured blocks, cumulative token/cost telemetry, and
@@ -428,7 +431,7 @@ as not planned to keep Orrery focused on agent-first project management.
 
 Looking further ahead (post-MVP proposals):
 [#140](https://github.com/forge-orbit/orrery/issues/140) agent-memory upgrades for project
-knowledge (FTS search, doc↔issue linking, delete/trash),
+knowledge (FTS search, doc↔issue linking),
 [#15](https://github.com/forge-orbit/orrery/issues/15) agent-customizable UI (remaining rich blocks,
 slots, panels, views), and [#14](https://github.com/forge-orbit/orrery/issues/14) plugin system.
 
