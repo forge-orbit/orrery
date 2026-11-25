@@ -117,6 +117,13 @@ export function createFeatures(
     if (wiredRunnerCommand === undefined) throw new Error("runner command outbox is not wired");
     return wiredRunnerCommand(tx, input);
   };
+  // #199: work sessions end before the runners feature exists, so stream
+  // rollup is resolved lazily from the same seam style as the command outbox.
+  let wiredSessionRollup: ((sessionId: string) => Promise<void>) | undefined;
+  const rollUpEndedSession = async (sessionId: string): Promise<void> => {
+    if (wiredSessionRollup === undefined) return; // thin tests without runners
+    await wiredSessionRollup(sessionId);
+  };
   let dueQuestionIssueIds: (() => Promise<string[]>) | undefined;
   const sweepDueQuestions = (): Promise<string[]> => {
     if (dueQuestionIssueIds === undefined) throw new Error("question deadline is not wired");
@@ -225,6 +232,7 @@ export function createFeatures(
     notifyActivity: notifications.notifyActivity,
     onActivity: webhooks.enqueueForActivity,
     onRunnerCommand: enqueueRunnerCommandForIssue,
+    onSessionEnd: rollUpEndedSession,
     log,
   });
   sessionGate = (tx, agentId, workspaceId, issueId) =>
@@ -252,6 +260,8 @@ export function createFeatures(
   const runners = createRunnersFeature({
     db: database.db,
     sql: database.sql,
+    store: storage,
+    log,
     sessionReader: accounts.sessionReader,
     publicUrl: config.PUBLIC_URL,
     projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
@@ -268,6 +278,9 @@ export function createFeatures(
       }),
   });
   wiredRunnerCommand = enqueueCommandForIssue;
+  wiredSessionRollup = async (sessionId) => {
+    await runners.service.rollUpSession(sessionId);
+  };
 
   return [
     createSystemFeature({ ping: database.ping, checkStorage: () => storage.checkHealth() }),

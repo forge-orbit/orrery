@@ -6655,6 +6655,514 @@
         "required": [
           "upToSeq"
         ]
+      },
+      "StreamBatchResponse": {
+        "type": "object",
+        "properties": {
+          "ackedSeq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "ackedSeq"
+        ]
+      },
+      "StreamBatchRequest": {
+        "type": "object",
+        "properties": {
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "fromSeq": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "toSeq": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "chunks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StreamChunk"
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": [
+          "dispatchAttemptId",
+          "fromSeq",
+          "toSeq",
+          "chunks"
+        ]
+      },
+      "StreamChunk": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/StreamChunkKind"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/StreamChunkVisibility"
+          },
+          "eventType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "diagnostic": {
+            "$ref": "#/components/schemas/SessionDiagnostic"
+          }
+        },
+        "required": [
+          "seq",
+          "kind"
+        ]
+      },
+      "StreamChunkKind": {
+        "type": "string",
+        "enum": [
+          "event",
+          "diagnostic",
+          "raw_output"
+        ]
+      },
+      "StreamChunkVisibility": {
+        "type": "string",
+        "enum": [
+          "project_readers",
+          "owner_only"
+        ],
+        "default": "project_readers"
+      },
+      "SessionDiagnostic": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AcpNotInstalledDiagnostic"
+          },
+          {
+            "$ref": "#/components/schemas/AcpSpawnFailedDiagnostic"
+          },
+          {
+            "$ref": "#/components/schemas/AcpCrashedDiagnostic"
+          },
+          {
+            "$ref": "#/components/schemas/AuthExpiredDiagnostic"
+          },
+          {
+            "$ref": "#/components/schemas/UsageLimitDiagnostic"
+          },
+          {
+            "$ref": "#/components/schemas/ProviderOverloadDiagnostic"
+          },
+          {
+            "$ref": "#/components/schemas/PermissionDeniedDiagnostic"
+          },
+          {
+            "$ref": "#/components/schemas/RunnerDisconnectedDiagnostic"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "acp_not_installed": "#/components/schemas/AcpNotInstalledDiagnostic",
+            "acp_spawn_failed": "#/components/schemas/AcpSpawnFailedDiagnostic",
+            "acp_crashed": "#/components/schemas/AcpCrashedDiagnostic",
+            "auth_expired": "#/components/schemas/AuthExpiredDiagnostic",
+            "usage_limit": "#/components/schemas/UsageLimitDiagnostic",
+            "provider_overload": "#/components/schemas/ProviderOverloadDiagnostic",
+            "permission_denied": "#/components/schemas/PermissionDeniedDiagnostic",
+            "runner_disconnected": "#/components/schemas/RunnerDisconnectedDiagnostic"
+          }
+        }
+      },
+      "AcpNotInstalledDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "acp_not_installed"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "harness": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message"
+        ]
+      },
+      "AcpSpawnFailedDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "acp_spawn_failed"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "exitCode": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message"
+        ]
+      },
+      "AcpCrashedDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "acp_crashed"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "exitCode": {
+            "type": "integer"
+          },
+          "signal": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message"
+        ]
+      },
+      "AuthExpiredDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auth_expired"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "remediation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message",
+          "remediation"
+        ]
+      },
+      "UsageLimitDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "usage_limit"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "resetsAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message"
+        ]
+      },
+      "ProviderOverloadDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "provider_overload"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "attempt": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "nextRetryAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "countdownSeconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message",
+          "attempt"
+        ]
+      },
+      "PermissionDeniedDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "permission_denied"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "tool": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message"
+        ]
+      },
+      "RunnerDisconnectedDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "runner_disconnected"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "lastSeq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message"
+        ]
+      },
+      "StreamResponse": {
+        "type": "object",
+        "properties": {
+          "chunks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StreamChunk"
+            }
+          },
+          "nextAfterSeq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rolledUp": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "chunks",
+          "nextAfterSeq",
+          "rolledUp"
+        ]
+      },
+      "ReconnectResponse": {
+        "type": "object",
+        "properties": {
+          "resolutions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReconnectResolution"
+            }
+          }
+        },
+        "required": [
+          "resolutions"
+        ]
+      },
+      "ReconnectResolution": {
+        "type": "object",
+        "properties": {
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DispatchState"
+          },
+          "resumed": {
+            "type": "boolean"
+          },
+          "lastSeq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "dispatchId",
+          "dispatchAttemptId",
+          "state",
+          "resumed",
+          "lastSeq"
+        ]
+      },
+      "ReconnectRequest": {
+        "type": "object",
+        "properties": {
+          "activeAttempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReconnectAttempt"
+            },
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "activeAttempts"
+        ]
+      },
+      "ReconnectAttempt": {
+        "type": "object",
+        "properties": {
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "lastSeq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "dispatchAttemptId",
+          "lastSeq"
+        ]
+      },
+      "ResolveUncertainRequest": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "released",
+              "completed"
+            ]
+          }
+        },
+        "required": [
+          "outcome"
+        ]
       }
     },
     "parameters": {}
@@ -17140,6 +17648,431 @@
           },
           "429": {
             "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/{runnerId}/dispatches/{dispatchId}/stream": {
+      "post": {
+        "summary": "Flush an idempotent stream batch from the local spool",
+        "description": "Runner host credential only. Chunks are keyed by (work session, seq); replaying fromSeq..toSeq returns the contiguous ackedSeq or 429 Retry-After backpressure.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/RunnerId"
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "$ref": "#/components/schemas/DispatchId"
+            },
+            "required": true,
+            "name": "dispatchId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StreamBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The contiguous acknowledged sequence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The stream batch or cursor is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the Runner host credential is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The viewer cannot read this project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Runner or Dispatch is accessible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The attempt fenced by dispatchAttemptId is not active",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Backpressure: retry after the Retry-After interval",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Read the live or archived session stream after a sequence cursor",
+        "description": "A human with project Read access or the Runner host may poll ?afterSeq=N. owner_only raw chunks are removed server-side for every viewer who is not the Runner host owner, including administrators.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/RunnerId"
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "$ref": "#/components/schemas/DispatchId"
+            },
+            "required": true,
+            "name": "dispatchId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0
+            },
+            "required": false,
+            "name": "afterSeq",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The visible chunks and the next cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The stream batch or cursor is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the Runner host credential is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The viewer cannot read this project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Runner or Dispatch is accessible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The attempt fenced by dispatchAttemptId is not active",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Backpressure: retry after the Retry-After interval",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/{runnerId}/reconnect": {
+      "post": {
+        "summary": "Reconcile active dispatch attempts after a Runner reconnects",
+        "description": "An uncertain attempt absent from activeAttempts stays uncertain and blocks further dispatch until explicit human resolution.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/RunnerId"
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconnectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One resolution per active or uncertain dispatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconnectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The reconnect report is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The Runner host credential is invalid or was revoked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The Runner host cannot access this workspace",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Runner is accessible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Runner lost workspace or project access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many reconnect reports; try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/dispatches/{dispatchId}/resolve": {
+      "post": {
+        "summary": "Explicitly resolve an uncertain Dispatch",
+        "description": "Only a human who owns the request/host or has project Manage access may settle an uncertain attempt, releasing its claim before any re-dispatch.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/DispatchId"
+            },
+            "required": true,
+            "name": "dispatchId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveUncertainRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settled Dispatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dispatch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The resolution request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the requester, host owner or a project manager may resolve",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Dispatch is accessible to you",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Dispatch is not uncertain",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many resolution attempts; try again later",
             "content": {
               "application/problem+json": {
                 "schema": {

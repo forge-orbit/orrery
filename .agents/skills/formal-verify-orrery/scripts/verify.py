@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Orrery Formal Verification Model Checker (M1-M36).
+Orrery Formal Verification Model Checker (M1-M45).
 
 Extracts critical concurrency, locking, and state-transition guards directly from
 Orrery's server source and SQL migrations, then runs an exhaustive BFS finite-state
@@ -3225,6 +3225,103 @@ def extract_code_facts() -> dict[str, Any]:
         and "c.req.raw.signal" in runners_rest_src
     )
 
+    # M45 (#199): structured stream ingestion, server-enforced owner_only ACL,
+    # disconnect/reconnect reconciliation and claim-first ObjectStore rollup.
+    m45_stream_src = read_text("apps/server/src/features/runners/stream.ts")
+    m45_rollup_fn = slice_between(
+        runners_src, "async function rollUpSessionById(", "function createStreamHelpers("
+    )
+    m45_read_fn = slice_between(runners_src, "async function read(", "async function reconnect(")
+    m45_reconnect_fn = slice_between(
+        runners_src, "async function reconnect(", "/** Missed heartbeats"
+    )
+    m45_disconnect_fn = slice_between(
+        runners_src, "/** Missed heartbeats", "/** Explicit human settlement"
+    )
+    m45_resolve_fn = slice_between(
+        runners_src, "/** Explicit human settlement", "/** Called at session end"
+    )
+    m45_settle_fn = slice_between(
+        runners_src,
+        "async function endDispatchesWithoutLiveSession(",
+        "/** The existing claim rules",
+    )
+    m45_rollup_sweep_fn = slice_between(runners_src, "async function rollUp(limit", "  return {")
+    m45_migration = read_text("db/migrations/0053_early_tyrannus.sql")
+
+    m45_owner_filter = (
+        'chunk.kind === "raw_output" ? { ...chunk, visibility: "owner_only" } : chunk' in runners_src
+        and "snapshot.isOwner" in m45_read_fn
+        and 'chunk.visibility !== "owner_only"' in m45_read_fn
+        and 'chunk.kind !== "raw_output"' in m45_read_fn
+    )
+    m45_live_archive = (
+        m45_read_fn.find("await objectStore.get(object.key)") >= 0
+        and m45_read_fn.find("await objectStore.get(object.key)")
+        < m45_read_fn.find("return db.transaction(async (tx)")
+        and "mergeChunks(" in m45_read_fn
+    )
+    m45_disconnect_diag = (
+        'state: "uncertain"' in m45_disconnect_fn
+        and '"runner_disconnected"' in m45_disconnect_fn
+        and "diagnostic }" in m45_disconnect_fn
+    )
+    m45_absent_lock = (
+        "Absent from the active list" in m45_reconnect_fn
+        and "needsHumanResolution: true" in m45_reconnect_fn
+        and 'state: "uncertain"' in m45_reconnect_fn
+    )
+    m45_lease_fence = (
+        "${workSessions.leaseExpiresAt} > statement_timestamp()" in m45_reconnect_fn
+        and "claimLive" in m45_reconnect_fn
+        and "lastSeq: durableSeq" in m45_reconnect_fn
+        and "lastUpSeq: sql`greatest(" not in m45_reconnect_fn
+    )
+    m45_no_auto_settle = (
+        'eq(runnerDispatches.state, "active")' in m45_settle_fn
+        and 'inArray(runnerDispatches.state, ["active", "uncertain"])' not in m45_settle_fn
+        and 'if (dispatch.state !== "uncertain")' in m45_resolve_fn
+        and m45_resolve_fn.find("dispatch_not_found") < m45_resolve_fn.find("dispatch_not_uncertain")
+    )
+    m45_claim_first = (
+        'status: "pending"' in m45_rollup_fn
+        and m45_rollup_fn.find("await objectStore.put(key, bytes, STREAM_CONTENT_TYPE)") >= 0
+        and m45_rollup_fn.find("await objectStore.put(key, bytes, STREAM_CONTENT_TYPE)")
+        < m45_rollup_fn.find("db.transaction(async (tx)")
+        and '.set({ status: "active", deletedAt: null })' in m45_rollup_fn
+        and "await discardObject(db, objectStore, discard, isDeleted)" in m45_rollup_fn
+        and "streamObjectKey(sessionId, objectId)" in m45_rollup_fn
+        and all(
+            marker in m45_rollup_fn
+            for marker in (
+                ".from(issues)",
+                ".from(runners)",
+                ".from(runnerDispatches)",
+                ".from(workSessions)",
+            )
+        )
+    )
+    m45_late_abort = "if (late.length > 0) return abort();" in m45_rollup_fn
+    m45_zero_chunk = (
+        "if (hot.length === 0) return false;" in m45_rollup_fn
+        and "hasHotChunks" in m45_rollup_sweep_fn
+        and "exists(" in m45_rollup_sweep_fn
+    )
+    m45_ack_gap = (
+        "let ack = previousAck;" in m45_stream_src
+        and "gt(workSessionStreamChunks.seq, dispatch.lastUpSeq)" in runners_src
+    )
+    m45_recheck = (
+        "!fresh.stillStale" in m45_disconnect_fn
+        and "fresh.runnerRevoked !== null" in m45_disconnect_fn
+    )
+    m45_contract = (
+        "SessionDiagnostic" in runners_contract_src
+        and "dispatches/{dispatchId}/stream" in runners_openapi_src
+        and "work_session_stream_chunks" in m45_migration
+        and "stream_object_id" in m45_migration
+    )
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -3723,6 +3820,20 @@ def extract_code_facts() -> dict[str, Any]:
         "m44_lease_fence": m44_lease_fence,
         "m44_contract_surface": m44_contract_surface,
         "m44_sse": m44_sse,
+
+        # M45 (#199): stream ACL, reconciliation and claim-first rollup.
+        "m45_owner_filter": m45_owner_filter,
+        "m45_live_archive": m45_live_archive,
+        "m45_disconnect_diag": m45_disconnect_diag,
+        "m45_absent_lock": m45_absent_lock,
+        "m45_lease_fence": m45_lease_fence,
+        "m45_no_auto_settle": m45_no_auto_settle,
+        "m45_claim_first": m45_claim_first,
+        "m45_late_abort": m45_late_abort,
+        "m45_zero_chunk": m45_zero_chunk,
+        "m45_ack_gap": m45_ack_gap,
+        "m45_recheck": m45_recheck,
+        "m45_contract": m45_contract,
     }
 
 
@@ -9723,6 +9834,143 @@ def check_m44(facts: dict[str, Any]) -> CheckResult:
     )
 
 
+def check_m45(facts: dict[str, Any]) -> CheckResult:
+    """#199: stream ACL, disconnect reconciliation and claim-first rollup.
+
+    Every guard is extracted from the live runner service, stream helpers,
+    contract and generated migration; flipping a single guard must break the
+    invariant, so the model cannot pass with a deleted safety check.
+    """
+    files = [
+        "apps/server/src/features/runners/service.ts",
+        "apps/server/src/features/runners/stream.ts",
+        "apps/server/src/features/runners/rest.ts",
+        "apps/server/src/features/index.ts",
+        "apps/server/src/features/work-sessions/service.ts",
+        "apps/server/src/db/schema.ts",
+        "packages/contract/src/runners.ts",
+        "contract/openapi.json",
+        "db/migrations/0053_early_tyrannus.sql",
+    ]
+    g = {k: v for k, v in facts.items() if k.startswith("m45_")}
+
+    actions = (
+        "ingest",
+        "read_owner",
+        "read_teammate",
+        "read_admin",
+        "disconnect",
+        "reconnect_report_live",
+        "reconnect_absent",
+        "lease_expire",
+        "list_dispatches",
+        "rollup_nonempty",
+        "rollup_empty",
+        "late_batch_during_rollup",
+        "contract_surface",
+    )
+
+    def violations_for(action: str, _applied: frozenset[str]) -> set[str]:
+        bad: set[str] = set()
+        if action == "ingest" and not g["m45_ack_gap"]:
+            bad.add("cross_batch_gap_acked_without_persisted_chunks")
+        if action in ("read_owner", "read_teammate", "read_admin"):
+            if not g["m45_owner_filter"]:
+                bad.add("owner_only_raw_chunk_leaked_to_non_owner")
+            if not g["m45_live_archive"]:
+                bad.add("archived_blob_read_inside_write_transaction_or_not_merged")
+        if action == "disconnect":
+            if not g["m45_disconnect_diag"]:
+                bad.add("missing_runner_disconnected_diagnostic")
+            if not g["m45_recheck"]:
+                bad.add("racing_heartbeat_clobbered_into_uncertain")
+        if action == "reconnect_report_live" and not g["m45_lease_fence"]:
+            bad.add("expired_claim_reactivated_or_last_up_seq_corrupted")
+        if action == "reconnect_absent" and not g["m45_absent_lock"]:
+            bad.add("absent_attempt_assumed_not_written")
+        if action in ("lease_expire", "list_dispatches") and not g["m45_no_auto_settle"]:
+            bad.add("uncertain_dispatch_settled_without_human_resolution")
+        if action == "rollup_nonempty" and not g["m45_claim_first"]:
+            bad.add("blob_put_inside_transaction_or_active_key_overwritten")
+        if action in ("rollup_nonempty", "rollup_empty") and not g["m45_zero_chunk"]:
+            bad.add("zero_chunk_session_created_an_object_or_starved_the_sweep")
+        if action == "late_batch_during_rollup":
+            if not g["m45_late_abort"]:
+                bad.add("late_chunk_silently_orphaned_after_rollup")
+            if not g["m45_claim_first"]:
+                bad.add("pending_blob_not_claimed_before_put")
+        if action == "contract_surface" and not g["m45_contract"]:
+            bad.add("stream_contract_or_migration_missing")
+        return bad
+
+    def run(check_id: str) -> CheckResult:
+        init = (frozenset(), frozenset())
+
+        def next_states(state):
+            applied, _violations = state
+            for action in actions:
+                if action in applied:
+                    continue
+                found = violations_for(action, applied)
+                yield f"{action} (after {sorted(applied)})", (applied | {action}, frozenset(found))
+
+        def invariant(state):
+            _applied, violations = state
+            if violations:
+                return False, f"stream invariant broken: {sorted(violations)[0]}"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Structured Stream Ingestion, Owner-Only ACL & ObjectStore Rollup (#199)",
+            "Spooled batches ack only a contiguous durable prefix; raw stdout is tagged owner_only and filtered server-side for every non-owner including admins, live and archived chunks merge under one cursor; missed heartbeats make attempts uncertain and only a live-lease reconnect or explicit human resolution clears them; rollups claim a unique pending blob before the put, activate under the global row lock after rechecking for late chunks, skip zero-chunk sessions, and prune only the rolled-up rows",
+            "safety",
+            init,
+            next_states,
+            invariant,
+            files,
+        )
+
+    result = run("M45")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M45-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M45",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M45",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -9771,6 +10019,7 @@ def main() -> None:
         check_m42(facts),
         check_m43(facts),
         check_m44(facts),
+        check_m45(facts),
     ]
 
     if "--json" in sys.argv:

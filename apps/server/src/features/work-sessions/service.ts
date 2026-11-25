@@ -132,6 +132,8 @@ export interface SessionsDeps {
   notifyActivity?: NotifyActivity | undefined;
   onActivity?: EnqueueWebhookActivity | undefined;
   onRunnerCommand?: EnqueueIssueCommand | undefined;
+  /** #199: roll a session's hot stream into ObjectStore after its end commits. */
+  onSessionEnd?: ((sessionId: string) => Promise<void>) | undefined;
   log?: Logger | undefined;
 }
 
@@ -213,6 +215,7 @@ const sessionColumns = {
   inputTokens: workSessions.inputTokens,
   outputTokens: workSessions.outputTokens,
   costUsdMicros: workSessions.costUsdMicros,
+  streamObjectId: workSessions.streamObjectId,
   createdAt: workSessions.createdAt,
   updatedAt: workSessions.updatedAt,
   endedAt: workSessions.endedAt,
@@ -489,6 +492,7 @@ async function expireStale(
   notify: NotifyActivity,
   onActivity: EnqueueWebhookActivity,
   knownProjectId?: string,
+  onExpired?: (sessionIds: readonly string[]) => void,
 ): Promise<void> {
   const projectId =
     knownProjectId ??
@@ -516,6 +520,7 @@ async function expireStale(
     .returning({ id: workSessions.id, agentId: workSessions.agentId });
 
   if (expired.length > 0) await revertIssueToTodo(tx, issueId);
+  if (expired.length > 0) onExpired?.(expired.map((row) => row.id));
   if (expired.length > 0 && projectId !== undefined) {
     const activityId = randomUUID();
     const summary = "Work session expired: the five-minute claim lease lapsed";
@@ -875,12 +880,32 @@ export function createSessionsService({
   notifyActivity: notifyActivityDep,
   onActivity = async () => {},
   onRunnerCommand,
+  onSessionEnd,
   log,
 }: SessionsDeps): SessionsService {
   const leaseDeadline = questionLeaseDeadline ?? (async () => null);
   const checkDeadline = evaluateQuestionDeadline ?? (async () => {});
   const dueQuestionIssueIds = dueQuestionIssueIdsDep ?? (async () => []);
   const notifyActivity: NotifyActivity = notifyActivityDep ?? (async () => {});
+
+  // #199: collect sessions expired by an inner transaction and roll them up
+  // only after the outer transaction commits (the rollup uses its own txns).
+  const expiredSessions = new Set<string>();
+  const trackExpired = (ids: readonly string[]): void => {
+    for (const id of ids) expiredSessions.add(id);
+  };
+  const flushRollups = async (): Promise<void> => {
+    if (expiredSessions.size === 0) return;
+    const ids = [...expiredSessions];
+    expiredSessions.clear();
+    for (const id of ids) {
+      try {
+        await onSessionEnd?.(id);
+      } catch {
+        // The background rollup safety-net sweep retries transient ObjectStore errors.
+      }
+    }
+  };
 
   // Only lock the issue when an expired lease actually exists (matching
   // deadlineCommitted and expireCommittedForProject), and lock issues before
@@ -901,8 +926,9 @@ export function createSessionsService({
     if (stale === undefined) return;
     await db.transaction(async (tx) => {
       await lockIssue(tx, issueId);
-      await expireStale(tx, issueId, notifyActivity, onActivity);
+      await expireStale(tx, issueId, notifyActivity, onActivity, undefined, trackExpired);
     });
+    await flushRollups();
   };
 
   const deadlineCommitted = async (issueId: string) => {
@@ -946,9 +972,10 @@ export function createSessionsService({
         .for("update");
 
       for (const issueId of issueIds) {
-        await expireStale(tx, issueId, notifyActivity, onActivity, projectId);
+        await expireStale(tx, issueId, notifyActivity, onActivity, projectId, trackExpired);
       }
     });
+    await flushRollups();
   };
 
   const withLiveSession = async <T>(
@@ -964,11 +991,11 @@ export function createSessionsService({
     const identity = requireAgent(actor);
     await deadlineCommitted(issueId);
     await expireCommitted(issueId);
-    return db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       await lockAgentWorkspaceAccess(tx, identity);
       const requireAccess = requireAccessArgs(tx, projectAccessCeiling, projectAccessAtLeast);
       const issue = await lockIssue(tx, issueId);
-      await expireStale(tx, issue.id, notifyActivity, onActivity);
+      await expireStale(tx, issue.id, notifyActivity, onActivity, undefined, trackExpired);
 
       await checkDeadline(tx, issue.id);
       await requireAccess(
@@ -994,10 +1021,12 @@ export function createSessionsService({
         .limit(1);
 
       if (session === undefined) throw new SessionsError("session_required");
-      const result = await write(tx, session, issue);
-      if (result === undefined) throw new SessionsError("session_required");
-      return result;
+      const written = await write(tx, session, issue);
+      if (written === undefined) throw new SessionsError("session_required");
+      return written;
     });
+    await flushRollups();
+    return result;
   };
 
   return {
@@ -1070,7 +1099,7 @@ export function createSessionsService({
       const issueOutcome: WorkCompletionOutcome | null =
         outcome === "released" ? null : outcome === "done" ? "done" : "review";
       const nextStatus = workSessionMachine.assertTransition("active", sessionOutcome);
-      return withLiveSession(actor, issueId, sessionId, async (tx, session, issue) => {
+      const ended = await withLiveSession(actor, issueId, sessionId, async (tx, session, issue) => {
         if (issueOutcome !== null) {
           const [fresh] = await tx
             .select({ status: issues.status, needsInput: issues.needsInput })
@@ -1138,6 +1167,14 @@ export function createSessionsService({
         }
         return toSession(updated);
       });
+      // #199: roll the stream up immediately after the end commits; transient
+      // ObjectStore failures fall back to the background safety-net sweep.
+      try {
+        await onSessionEnd?.(ended.id);
+      } catch {
+        // The commit already succeeded; background sweep will complete the rollup.
+      }
+      return ended;
     },
 
     async logActivity(actor, input) {
@@ -1171,7 +1208,7 @@ export function createSessionsService({
           humanId,
           issueId,
         );
-        await expireStale(tx, issue.id, notifyActivity, onActivity);
+        await expireStale(tx, issue.id, notifyActivity, onActivity, undefined, trackExpired);
 
         const [session] = await tx
           .select(sessionColumns)
@@ -1228,6 +1265,7 @@ export function createSessionsService({
         });
         return { session: toSession(updated) };
       });
+      await flushRollups();
       if ("error" in outcome) throw new SessionsError(outcome.error);
       return outcome.session;
     },
@@ -1351,11 +1389,11 @@ export function createSessionsService({
 
       await deadlineCommitted(input.issueId);
       await expireCommitted(input.issueId);
-      return db.transaction(async (tx) => {
+      const reacquired = await db.transaction(async (tx) => {
         await lockAgentWorkspaceAccess(tx, identity);
         const requireAccess = requireAccessArgs(tx, projectAccessCeiling, projectAccessAtLeast);
         const issue = await lockIssue(tx, input.issueId);
-        await expireStale(tx, issue.id, notifyActivity, onActivity);
+        await expireStale(tx, issue.id, notifyActivity, onActivity, undefined, trackExpired);
         await checkDeadline(tx, issue.id);
 
         const [fresh] = await tx
@@ -1431,6 +1469,9 @@ export function createSessionsService({
 
         throw new SessionsError("issue_claimed");
       });
+      // expireCommitted above already flushed; this covers expiry seen here.
+      await flushRollups();
+      return reacquired;
     },
 
     async getSession(actorArg, issueId) {
@@ -1637,8 +1678,9 @@ export function createSessionsService({
             // A 1-hour require_human question pause releases the claim itself; running the
             // deadline first avoids a spurious issue_session_expired for that clean pause.
             await checkDeadline(tx, issueId);
-            await expireStale(tx, issueId, notifyActivity, onActivity);
+            await expireStale(tx, issueId, notifyActivity, onActivity, undefined, trackExpired);
           });
+          await flushRollups();
         } catch (error) {
           log?.warn("expiry sweep skipped an issue", {
             issueId,
@@ -1666,7 +1708,7 @@ export function createSessionsService({
     },
 
     async issueHasLiveSession(tx, issueId) {
-      await expireStale(tx, issueId, notifyActivity, onActivity);
+      await expireStale(tx, issueId, notifyActivity, onActivity, undefined, trackExpired);
       return (await findActive(tx, issueId)) !== undefined;
     },
   };

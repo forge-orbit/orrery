@@ -21,12 +21,59 @@ export interface RunnersFeature extends Feature {
 }
 
 export function createRunnersFeature(deps: RunnersDeps): RunnersFeature {
-  const service = createRunnersService(deps);
+  let clearTimers: (() => void) | undefined;
+  // service.close() clears the #199 ticks through onClose, so the feature's
+  // stop hook stays the single outbox-notifier seam used by the M44 model.
+  const service = createRunnersService({ ...deps, onClose: () => clearTimers?.() });
+  let disconnectTimer: NodeJS.Timeout | undefined;
+  let rollupTimer: NodeJS.Timeout | undefined;
+  clearTimers = () => {
+    if (disconnectTimer !== undefined) clearInterval(disconnectTimer);
+    if (rollupTimer !== undefined) clearInterval(rollupTimer);
+    disconnectTimer = undefined;
+    rollupTimer = undefined;
+  };
   return {
     name: "runners",
     rest: createRunnersRest(service, deps.sessionReader),
     service,
-    // Release the replica's dedicated LISTEN connection on clean shutdown.
+    // #199: missed heartbeats make dispatches uncertain; ended/expired sessions
+    // roll their hot stream chunks into ObjectStore. Both ticks are guarded and
+    // unref'd so tests and short-lived workers can exit cleanly.
+    startBackgroundTasks: () => {
+      if (disconnectTimer !== undefined || rollupTimer !== undefined) return;
+      let disconnectSweep = false;
+      disconnectTimer = setInterval(() => {
+        if (disconnectSweep) return;
+        disconnectSweep = true;
+        void service
+          .markDisconnectedDispatches()
+          .catch((error: unknown) => {
+            deps.log?.warn("runner disconnect sweep failed", { error: String(error) });
+          })
+          .finally(() => {
+            disconnectSweep = false;
+          });
+      }, 10 * 1000);
+      disconnectTimer.unref();
+
+      let rollupSweep = false;
+      rollupTimer = setInterval(() => {
+        if (rollupSweep) return;
+        rollupSweep = true;
+        void service
+          .rollUpStreams()
+          .catch((error: unknown) => {
+            deps.log?.warn("stream rollup sweep failed", { error: String(error) });
+          })
+          .finally(() => {
+            rollupSweep = false;
+          });
+      }, 60 * 1000);
+      rollupTimer.unref();
+    },
+    // Registers the timer cleanup used by service.close(), then stops the
+    // replica's LISTEN connection through the original outbox seam.
     stop: () => service.close(),
   };
 }

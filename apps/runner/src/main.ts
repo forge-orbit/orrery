@@ -2,6 +2,7 @@
 import { hostname } from "node:os";
 import { parseArgs } from "node:util";
 import { readCredential } from "./credential.ts";
+import { loadSupervisionConfig } from "./config.ts";
 import { login } from "./login.ts";
 import { start } from "./start.ts";
 
@@ -25,9 +26,14 @@ Options:
   --agent ID                Default Agent id (start; otherwise the host owner's first Agent)
   --name NAME               Runner display name (start)
   --capability NAME         Declared capability, repeatable (start)
-  --concurrency N           Max concurrent local slots, 1-64 (start)
+  --concurrency N           Max concurrent local slots, 1-64 (start; default: 1)
   --repo PATH               Local checkout path (start; default: current directory)
   --heartbeat-ms N          Heartbeat interval (start; default: 5000)
+  --acp-command NAME        ACP harness command (default: opencode; env: ORRERY_ACP_COMMAND)
+  --acp-arg ARG             ACP harness argument, repeatable (default: acp)
+  --lease-renew-ms N        Work-session lease renewal interval (default: 60000)
+  --cancel-grace-ms N       SIGTERM -> SIGKILL grace period (default: 2000)
+  --worktree-root PATH      Parent directory for isolated git worktrees
   -h, --help                Show this help
 `;
 
@@ -47,6 +53,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       concurrency: { type: "string" },
       repo: { type: "string" },
       "heartbeat-ms": { type: "string" },
+      "acp-command": { type: "string" },
+      "acp-arg": { type: "string", multiple: true },
+      "lease-renew-ms": { type: "string" },
+      "cancel-grace-ms": { type: "string" },
+      "worktree-root": { type: "string" },
       help: { type: "boolean", short: "h" },
     },
     allowPositionals: true,
@@ -91,6 +102,30 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         if (!Number.isInteger(heartbeatMs) || heartbeatMs < 10) {
           fail("--heartbeat-ms must be an integer of at least 10");
         }
+        const positive = (raw: string | undefined, flag: string): number | undefined => {
+          if (raw === undefined) return undefined;
+          const parsed = Number(raw);
+          if (!Number.isInteger(parsed) || parsed <= 0) {
+            fail(`${flag} must be a positive integer`);
+          }
+          return parsed;
+        };
+        const leaseRenewMs = positive(values["lease-renew-ms"], "--lease-renew-ms");
+        const cancelGraceMs = positive(values["cancel-grace-ms"], "--cancel-grace-ms");
+        // Each flag overrides only its own field, preserving the env default
+        // (or the other flag) for the field it does not mention.
+        const acp = {
+          ...(values["acp-command"] === undefined ? {} : { command: values["acp-command"] }),
+          ...(values["acp-arg"] === undefined ? {} : { args: values["acp-arg"] }),
+        };
+        const supervision = loadSupervisionConfig({
+          ...(Object.keys(acp).length === 0 ? {} : { acp }),
+          ...(leaseRenewMs === undefined ? {} : { leaseRenewMs }),
+          ...(cancelGraceMs === undefined ? {} : { cancelGraceMs }),
+          ...(values["worktree-root"] === undefined
+            ? {}
+            : { worktreeRoot: values["worktree-root"] }),
+        });
         await start({
           server,
           workspaceId,
@@ -102,6 +137,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           heartbeatMs,
           ...(values.repo === undefined ? {} : { repoPath: values.repo }),
           signal: controller.signal,
+          supervision,
         });
         return;
       }
