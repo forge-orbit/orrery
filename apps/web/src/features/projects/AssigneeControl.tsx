@@ -3,6 +3,7 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
+import { Token } from "@astryxdesign/core/Token";
 import type { Assignee, Issue, IssueDetail } from "@orrery/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -67,7 +68,7 @@ export function AssigneeControl({
 
   const assigneeIdentity =
     issue.assignee === null ? null : (
-      <Stack direction="horizontal" gap={1.5} vAlign="center">
+      <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
         {issue.assignee.agentId !== undefined ? (
           <AgentAvatar name={issue.assignee.displayName} harness={activeHarness} size={16} />
         ) : (
@@ -81,6 +82,12 @@ export function AssigneeControl({
         <Text type="supporting" color="primary" weight="medium">
           {issue.assignee.displayName}
         </Text>
+        {issue.assignee.agentId !== undefined && <Token label="Agent" color="orange" size="sm" />}
+        {issue.assignee.agentId !== undefined && issue.assignee.ownerDisplayName != null && (
+          <Text type="supporting" color="secondary">
+            · {issue.assignee.ownerDisplayName}
+          </Text>
+        )}
       </Stack>
     );
 

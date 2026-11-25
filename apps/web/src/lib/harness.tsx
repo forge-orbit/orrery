@@ -1,6 +1,7 @@
-import { Avatar } from "@astryxdesign/core/Avatar";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
+import { Bot } from "lucide-react";
 import { createElement } from "react";
 
 export type HarnessKind =
@@ -423,5 +424,5 @@ export function AgentAvatar({
   if (kind !== null) {
     return <HarnessLogo kind={kind} size={size} title={name} />;
   }
-  return <Avatar name={name} shape="rounded" size="xsm" />;
+  return <Icon icon={Bot} size={size <= 14 ? "xsm" : "sm"} color="accent" label={name} />;
 }

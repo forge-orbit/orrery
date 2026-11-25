@@ -1,6 +1,7 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
 import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -72,16 +73,26 @@ function ValidDeviceApproval({ code }: { code: string }) {
 
       <Section padding={4}>
         <Stack gap={4}>
-          <Stack gap={1}>
-            <Text color="secondary">Device code</Text>
-            <Text>{preview.userCode}</Text>
+          <Stack gap={1} hAlign="start">
+            <Text type="supporting" color="secondary">
+              Device code
+            </Text>
+            <Text type="code" weight="semibold" color="primary">
+              {preview.userCode}
+            </Text>
           </Stack>
-          <Stack gap={1}>
-            <Text color="secondary">Host display name</Text>
-            <Text>{preview.hostDisplayName}</Text>
+          <Stack gap={1} hAlign="start">
+            <Text type="supporting" color="secondary">
+              Host display name
+            </Text>
+            <Text weight="medium" color="primary">
+              {preview.hostDisplayName}
+            </Text>
           </Stack>
-          <Stack gap={1}>
-            <Text color="secondary">Platform</Text>
+          <Stack gap={1} hAlign="start">
+            <Text type="supporting" color="secondary">
+              Platform
+            </Text>
             <Token label={preview.platform} color="gray" size="sm" data-device-platform="" />
           </Stack>
 
@@ -111,7 +122,9 @@ function ValidDeviceApproval({ code }: { code: string }) {
             <Button
               type="button"
               label="Approve this Runner host"
+              icon={<Icon icon="check" />}
               variant="primary"
+              width="100%"
               isLoading={approve.isPending}
               data-device-approve=""
               onClick={() => approve.mutate()}
@@ -120,9 +133,9 @@ function ValidDeviceApproval({ code }: { code: string }) {
         </Stack>
       </Section>
 
-      <Text as="p" display="block" type="supporting">
-        <Link to="/">Back to workspaces</Link>
-      </Text>
+      <Link to="/" color="secondary" weight="medium" isStandalone>
+        Back to workspaces
+      </Link>
     </Stack>
   );
 }

@@ -137,6 +137,8 @@ export const Actor = z
     handle: Handle.nullable().optional(),
     agentId: z.string().nullable().optional(),
     agentName: z.string().nullable().optional(),
+    /** Display name (email) of the human who owns this agent; omitted for human actors. */
+    ownerDisplayName: z.string().nullable().optional(),
     displayName: z.string(),
     deactivated: z.boolean().optional(),
     /** The human's current profile photo; null for agents and humans without one. */

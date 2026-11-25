@@ -113,7 +113,7 @@ export function DelegateToRunner({
         isDisabled={owned.length === 0 || mutation.isPending}
       />
       <Selector
-        label="Agent (optional)"
+        label="Agent"
         isOptional
         placeholder="Use the Runner's default Agent"
         options={agents.map((agent) => ({ value: agent.id, label: agent.name }))}

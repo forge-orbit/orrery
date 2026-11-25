@@ -196,6 +196,23 @@ function ActorAvatar({ actor }: { actor: Actor }) {
   );
 }
 
+function ActorLabel({ actor }: { actor: Actor }) {
+  const isAgent = actor.agentId != null;
+  return (
+    <Stack as="span" direction="horizontal" gap={1} vAlign="center" wrap="wrap">
+      <Text type="body" weight="semibold" color="primary">
+        {actor.displayName}
+      </Text>
+      {isAgent && <Token label="Agent" color="orange" size="sm" data-actor-agent="" />}
+      {isAgent && actor.ownerDisplayName != null && (
+        <Text type="supporting" color="secondary" data-agent-owner="">
+          · {actor.ownerDisplayName}
+        </Text>
+      )}
+    </Stack>
+  );
+}
+
 function TimelineRow({
   entry,
   projectId,
@@ -215,11 +232,9 @@ function TimelineRow({
         <Card variant="muted" padding={3}>
           <Stack gap={2}>
             <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" vAlign="center">
-              <Stack direction="horizontal" gap={1.5} vAlign="center">
+              <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
                 <ActorAvatar actor={entry.comment.author} />
-                <Text type="body" weight="semibold" color="primary">
-                  {entry.comment.author.displayName}
-                </Text>
+                <ActorLabel actor={entry.comment.author} />
                 <Text type="supporting" color="secondary">
                   commented
                 </Text>
@@ -268,9 +283,7 @@ function TimelineRow({
         <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
           <ActorAvatar actor={entry.actor} />
           <Stack direction="horizontal" gap={1.5} wrap="wrap" vAlign="center">
-            <Text type="body" weight="semibold" color="primary">
-              {entry.actor.displayName}
-            </Text>
+            <ActorLabel actor={entry.actor} />
             <Text type="supporting" color="secondary">
               {entry.action === "added" ? "added" : "removed"}
             </Text>
@@ -297,9 +310,7 @@ function TimelineRow({
     >
       <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
         <ActorAvatar actor={entry.activity.actor} />
-        <Text type="body" weight="semibold" color="primary">
-          {entry.activity.actor.displayName}
-        </Text>
+        <ActorLabel actor={entry.activity.actor} />
         <Text type="supporting" color="secondary">
           {describeActivity(entry.activity)}
         </Text>

@@ -359,6 +359,7 @@ function actorFromRow(
   deactivatedAt: Date | null = null,
   avatarObjectId: string | null = null,
   handle: string | null = null,
+  agentOwnerEmail: string | null = null,
 ): Actor {
   if (humanId !== null && email !== null) {
     const deactivated = deactivatedAt !== null;
@@ -372,7 +373,13 @@ function actorFromRow(
     };
   }
   if (agentId !== null && agentName !== null) {
-    return { agentId, agentName, displayName: agentName, avatarUrl: null };
+    return {
+      agentId,
+      agentName,
+      ...(agentOwnerEmail === null ? {} : { ownerDisplayName: agentOwnerEmail }),
+      displayName: agentName,
+      avatarUrl: null,
+    };
   }
 
   return { displayName: "Unknown author", avatarUrl: null };
@@ -385,6 +392,7 @@ function assigneeFromRow(row: {
   assigneeHumanDeactivatedAt: Date | null;
   assigneeHumanAvatarObjectId: string | null;
   assigneeAgentName: string | null;
+  assigneeAgentOwnerEmail?: string | null;
 }): Actor | null {
   if (row.assigneeType === "human" && row.assigneeId !== null && row.assigneeHumanEmail !== null) {
     return actorFromRow(
@@ -397,7 +405,16 @@ function assigneeFromRow(row: {
     );
   }
   if (row.assigneeType === "agent" && row.assigneeId !== null && row.assigneeAgentName !== null) {
-    return actorFromRow(null, null, row.assigneeId, row.assigneeAgentName);
+    return actorFromRow(
+      null,
+      null,
+      row.assigneeId,
+      row.assigneeAgentName,
+      null,
+      null,
+      null,
+      row.assigneeAgentOwnerEmail ?? null,
+    );
   }
   return null;
 }
@@ -414,15 +431,20 @@ const accessGrantor = alias(humans, "access_grantor");
 const labelCreator = alias(humans, "label_creator");
 
 const issueAgentCreator = alias(agents, "issue_agent_creator");
+const issueAgentCreatorOwner = alias(humans, "issue_agent_creator_owner");
 const issueAgentEditor = alias(agents, "issue_agent_editor");
+const issueAgentEditorOwner = alias(humans, "issue_agent_editor_owner");
 
 const assigneeHuman = alias(humans, "assignee_human");
 const assigneeAgent = alias(agents, "assignee_agent");
+const assigneeAgentOwner = alias(humans, "assignee_agent_owner");
 const commentAgentAuthor = alias(agents, "comment_agent_author");
+const commentAgentAuthorOwner = alias(humans, "comment_agent_author_owner");
 const linkAgentCreator = alias(agents, "link_agent_creator");
 const knowledgeAgentCreator = alias(agents, "knowledge_agent_creator");
 const knowledgeAgentEditor = alias(agents, "knowledge_agent_editor");
 const activityAgentActor = alias(agents, "activity_agent_actor");
+const activityAgentActorOwner = alias(humans, "activity_agent_actor_owner");
 const labelAgentCreator = alias(agents, "label_agent_creator");
 
 const dependencyHumanCreator = alias(humans, "dependency_human_creator");
@@ -471,6 +493,7 @@ const issueColumns = {
   assigneeHumanDeactivatedAt: assigneeHuman.deactivatedAt,
   assigneeHumanAvatarObjectId: assigneeHuman.avatarObjectId,
   assigneeAgentName: assigneeAgent.name,
+  assigneeAgentOwnerEmail: assigneeAgentOwner.email,
   fallbackPolicyOverride: issues.fallbackPolicyOverride,
   createdAt: issues.createdAt,
   updatedAt: issues.updatedAt,
@@ -485,6 +508,7 @@ const issueColumns = {
   createdByAvatarObjectId: issueCreator.avatarObjectId,
   createdByAgentId: issues.createdByAgentId,
   createdByAgentName: issueAgentCreator.name,
+  createdByAgentOwnerEmail: issueAgentCreatorOwner.email,
   updatedByHumanId: issues.updatedByHumanId,
   updatedByEmail: issueEditor.email,
   updatedByHandle: issueEditor.handle,
@@ -492,6 +516,7 @@ const issueColumns = {
   updatedByAvatarObjectId: issueEditor.avatarObjectId,
   updatedByAgentId: issues.updatedByAgentId,
   updatedByAgentName: issueAgentEditor.name,
+  updatedByAgentOwnerEmail: issueAgentEditorOwner.email,
 };
 
 const commentColumns = {
@@ -506,6 +531,7 @@ const commentColumns = {
   authorAvatarObjectId: commentAuthor.avatarObjectId,
   authorAgentId: issueComments.createdByAgentId,
   authorAgentName: commentAgentAuthor.name,
+  authorAgentOwnerEmail: commentAgentAuthorOwner.email,
 };
 
 const linkColumns = {
@@ -573,6 +599,7 @@ const activityColumns = {
   actorAvatarObjectId: activityActor.avatarObjectId,
   actorAgentId: projectActivity.actorAgentId,
   actorAgentName: activityAgentActor.name,
+  actorAgentOwnerEmail: activityAgentActorOwner.email,
 };
 
 type ProjectRow = {
@@ -622,6 +649,7 @@ type IssueRow = {
   assigneeHumanDeactivatedAt: Date | null;
   assigneeHumanAvatarObjectId: string | null;
   assigneeAgentName: string | null;
+  assigneeAgentOwnerEmail?: string | null;
   fallbackPolicyOverride: FallbackPolicy | null;
 
   projectFallbackPolicy: FallbackPolicy;
@@ -637,6 +665,7 @@ type IssueRow = {
   createdByAvatarObjectId: string | null;
   createdByAgentId: string | null;
   createdByAgentName: string | null;
+  createdByAgentOwnerEmail?: string | null;
   updatedByHumanId: string | null;
   updatedByEmail: string | null;
   updatedByHandle: string | null;
@@ -644,6 +673,7 @@ type IssueRow = {
   updatedByAvatarObjectId: string | null;
   updatedByAgentId: string | null;
   updatedByAgentName: string | null;
+  updatedByAgentOwnerEmail?: string | null;
 };
 
 type IssueDependencyRow = {
@@ -670,6 +700,7 @@ type CommentRow = {
   authorAvatarObjectId: string | null;
   authorAgentId: string | null;
   authorAgentName: string | null;
+  authorAgentOwnerEmail?: string | null;
 };
 
 type LinkRow = {
@@ -701,6 +732,7 @@ type KnowledgeRow = {
   createdByAvatarObjectId: string | null;
   createdByAgentId: string | null;
   createdByAgentName: string | null;
+  createdByAgentOwnerEmail?: string | null;
   updatedByHumanId: string | null;
   updatedByEmail: string | null;
   updatedByHandle: string | null;
@@ -708,6 +740,7 @@ type KnowledgeRow = {
   updatedByAvatarObjectId: string | null;
   updatedByAgentId: string | null;
   updatedByAgentName: string | null;
+  updatedByAgentOwnerEmail?: string | null;
 };
 
 type ActivityRow = {
@@ -725,6 +758,7 @@ type ActivityRow = {
   actorAvatarObjectId: string | null;
   actorAgentId: string | null;
   actorAgentName: string | null;
+  actorAgentOwnerEmail?: string | null;
 };
 
 function toProject(row: ProjectRow): Project {
@@ -797,6 +831,7 @@ function toIssue(row: IssueRow, labels: ProjectLabel[] = [], blockedByIds: strin
       row.createdByDeactivatedAt,
       row.createdByAvatarObjectId,
       row.createdByHandle,
+      row.createdByAgentOwnerEmail ?? null,
     ),
     updatedBy: actorFromRow(
       row.updatedByHumanId,
@@ -806,6 +841,7 @@ function toIssue(row: IssueRow, labels: ProjectLabel[] = [], blockedByIds: strin
       row.updatedByDeactivatedAt,
       row.updatedByAvatarObjectId,
       row.updatedByHandle,
+      row.updatedByAgentOwnerEmail ?? null,
     ),
   };
 }
@@ -889,6 +925,7 @@ function toComment(row: CommentRow): IssueComment {
       row.authorDeactivatedAt,
       row.authorAvatarObjectId,
       row.authorHandle,
+      row.authorAgentOwnerEmail ?? null,
     ),
     attachments: [],
   };
@@ -940,6 +977,7 @@ function toKnowledge(row: KnowledgeRow): KnowledgeEntry {
       row.createdByDeactivatedAt,
       row.createdByAvatarObjectId,
       row.createdByHandle,
+      row.createdByAgentOwnerEmail ?? null,
     ),
     updatedBy: actorFromRow(
       row.updatedByHumanId,
@@ -949,6 +987,7 @@ function toKnowledge(row: KnowledgeRow): KnowledgeEntry {
       row.updatedByDeactivatedAt,
       row.updatedByAvatarObjectId,
       row.updatedByHandle,
+      row.updatedByAgentOwnerEmail ?? null,
     ),
     attachments: [],
   };
@@ -971,6 +1010,8 @@ function toActivity(row: ActivityRow): ProjectActivity {
       row.actorAgentName,
       row.actorDeactivatedAt,
       row.actorAvatarObjectId,
+      null,
+      row.actorAgentOwnerEmail ?? null,
     ),
   };
 }
@@ -1095,8 +1136,10 @@ async function requireIssue(
     .innerJoin(workspaces, eq(workspaces.id, projects.workspaceId))
     .leftJoin(issueCreator, eq(issueCreator.id, issues.createdByHumanId))
     .leftJoin(issueAgentCreator, eq(issueAgentCreator.id, issues.createdByAgentId))
+    .leftJoin(issueAgentCreatorOwner, eq(issueAgentCreatorOwner.id, issueAgentCreator.humanId))
     .leftJoin(issueEditor, eq(issueEditor.id, issues.updatedByHumanId))
     .leftJoin(issueAgentEditor, eq(issueAgentEditor.id, issues.updatedByAgentId))
+    .leftJoin(issueAgentEditorOwner, eq(issueAgentEditorOwner.id, issueAgentEditor.humanId))
     .leftJoin(
       assigneeHuman,
       and(eq(assigneeHuman.id, issues.assigneeId), eq(issues.assigneeType, "human")),
@@ -1105,6 +1148,7 @@ async function requireIssue(
       assigneeAgent,
       and(eq(assigneeAgent.id, issues.assigneeId), eq(issues.assigneeType, "agent")),
     )
+    .leftJoin(assigneeAgentOwner, eq(assigneeAgentOwner.id, assigneeAgent.humanId))
     .leftJoin(
       workspaceMemberships,
       and(eq(workspaceMemberships.workspaceId, projects.workspaceId), membershipMatch),
@@ -1935,8 +1979,13 @@ export function createProjectsService({
           .innerJoin(projects, eq(projects.id, issues.projectId))
           .leftJoin(issueCreator, eq(issueCreator.id, issues.createdByHumanId))
           .leftJoin(issueAgentCreator, eq(issueAgentCreator.id, issues.createdByAgentId))
+          .leftJoin(
+            issueAgentCreatorOwner,
+            eq(issueAgentCreatorOwner.id, issueAgentCreator.humanId),
+          )
           .leftJoin(issueEditor, eq(issueEditor.id, issues.updatedByHumanId))
           .leftJoin(issueAgentEditor, eq(issueAgentEditor.id, issues.updatedByAgentId))
+          .leftJoin(issueAgentEditorOwner, eq(issueAgentEditorOwner.id, issueAgentEditor.humanId))
           .leftJoin(
             assigneeHuman,
             and(eq(assigneeHuman.id, issues.assigneeId), eq(issues.assigneeType, "human")),
@@ -1945,6 +1994,7 @@ export function createProjectsService({
             assigneeAgent,
             and(eq(assigneeAgent.id, issues.assigneeId), eq(issues.assigneeType, "agent")),
           )
+          .leftJoin(assigneeAgentOwner, eq(assigneeAgentOwner.id, assigneeAgent.humanId))
           .where(
             scope === "trash"
               ? and(
@@ -3470,6 +3520,10 @@ export function createProjectsService({
             .from(issueComments)
             .leftJoin(commentAuthor, eq(commentAuthor.id, issueComments.createdByHumanId))
             .leftJoin(commentAgentAuthor, eq(commentAgentAuthor.id, issueComments.createdByAgentId))
+            .leftJoin(
+              commentAgentAuthorOwner,
+              eq(commentAgentAuthorOwner.id, commentAgentAuthor.humanId),
+            )
             .where(eq(issueComments.issueId, issueId))
             .orderBy(issueComments.createdAt, issueComments.id);
           const grouped =
@@ -3644,6 +3698,10 @@ export function createProjectsService({
             .from(projectActivity)
             .leftJoin(activityActor, eq(activityActor.id, projectActivity.actorHumanId))
             .leftJoin(activityAgentActor, eq(activityAgentActor.id, projectActivity.actorAgentId))
+            .leftJoin(
+              activityAgentActorOwner,
+              eq(activityAgentActorOwner.id, activityAgentActor.humanId),
+            )
             .where(eq(projectActivity.projectId, projectId))
             .orderBy(projectActivity.createdAt, projectActivity.id);
           return rows.map(toActivity);
@@ -3662,6 +3720,10 @@ export function createProjectsService({
             .from(projectActivity)
             .leftJoin(activityActor, eq(activityActor.id, projectActivity.actorHumanId))
             .leftJoin(activityAgentActor, eq(activityAgentActor.id, projectActivity.actorAgentId))
+            .leftJoin(
+              activityAgentActorOwner,
+              eq(activityAgentActorOwner.id, activityAgentActor.humanId),
+            )
             .where(eq(projectActivity.issueId, issue.id))
             .orderBy(projectActivity.createdAt, projectActivity.id);
           return rows.map(toActivity);
