@@ -3,6 +3,7 @@ import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { Bot } from "lucide-react";
 import { createElement } from "react";
+import { hermesLogoPaths } from "./hermes-logo.ts";
 
 export type HarnessKind =
   | "codex"
@@ -14,10 +15,15 @@ export type HarnessKind =
   | "grok"
   | "copilot"
   | "windsurf"
-  | "cline";
+  | "cline"
+  | "hermes"
+  | "omp"
+  | "antigravity"
+  | "pi";
 
 type HarnessLogoSpec = {
   fill: string;
+  viewBox?: string;
   paths: readonly {
     d: string;
     clipRule?: "evenodd";
@@ -270,6 +276,37 @@ const harnessLogos: Record<HarnessKind, HarnessLogoSpec> = {
       },
     ],
   },
+  hermes: {
+    fill: "currentColor",
+    viewBox: "0 0 24 24",
+    paths: hermesLogoPaths,
+  },
+  omp: {
+    fill: "currentColor",
+    viewBox: "0 0 64 64",
+    paths: [{ d: "M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z" }],
+  },
+  antigravity: {
+    fill: "currentColor",
+    viewBox: "0 0 16 16",
+    paths: [
+      {
+        d: "M14.1452 14.6818C14.9937 15.3182 16.2664 14.894 15.0997 13.7273C11.5998 10.3333 12.3421 1 7.99366 1C3.64518 1 4.3876 10.3333 0.887603 13.7273C-0.385123 15 0.993664 15.3182 1.84215 14.6818C5.13002 12.4545 4.9179 8.5303 7.99366 8.5303C11.0694 8.5303 10.8573 12.4545 14.1452 14.6818Z",
+      },
+    ],
+  },
+  pi: {
+    fill: "currentColor",
+    viewBox: "100 100 600 600",
+    paths: [
+      {
+        d: "M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z",
+      },
+      {
+        d: "M517.36 400H634.72V634.72H517.36Z",
+      },
+    ],
+  },
 };
 
 export function resolveHarnessKind(harness: string | null | undefined): HarnessKind | null {
@@ -345,6 +382,43 @@ export function resolveHarnessKind(harness: string | null | undefined): HarnessK
     return "cline";
   }
 
+  if (
+    normalized === "hermes" ||
+    normalized === "hermes-agent" ||
+    normalized === "acp-hermes-agent" ||
+    normalized === "nous-hermes" ||
+    /^hermes(?:[-_/\s]|$)/.test(normalized)
+  ) {
+    return "hermes";
+  }
+
+  if (
+    normalized === "omp" ||
+    normalized === "oh-my-pi" ||
+    normalized === "oh_my_pi" ||
+    normalized === "ohmypi" ||
+    normalized === "acp-omp" ||
+    /^omp(?:[-_/\s]|$)/.test(normalized)
+  ) {
+    return "omp";
+  }
+
+  if (
+    normalized === "antigravity" ||
+    normalized === "antigravity-acp" ||
+    normalized === "acp-antigravity-acp" ||
+    normalized === "google-antigravity" ||
+    normalized === "agy" ||
+    /^(?:google[-_\s]?)?antigravity(?:[-_/\s]|$)/.test(normalized) ||
+    /^agy(?:[-_/\s]|$)/.test(normalized)
+  ) {
+    return "antigravity";
+  }
+
+  if (normalized === "pi" || /^pi(?:[-_/\s]|$)/.test(normalized)) {
+    return "pi";
+  }
+
   return null;
 }
 
@@ -363,7 +437,7 @@ export function HarnessLogo({
     {
       width: size,
       height: size,
-      viewBox: "0 0 24 24",
+      viewBox: spec.viewBox ?? "0 0 24 24",
       fill: spec.fill,
       fillRule: "evenodd",
       "aria-hidden": title === undefined ? "true" : undefined,

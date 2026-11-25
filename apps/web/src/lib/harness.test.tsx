@@ -28,6 +28,17 @@ describe("resolveHarnessKind", () => {
     expect(resolveHarnessKind("github-copilot")).toBe("copilot");
     expect(resolveHarnessKind("windsurf")).toBe("windsurf");
     expect(resolveHarnessKind("cline")).toBe("cline");
+    expect(resolveHarnessKind("hermes")).toBe("hermes");
+    expect(resolveHarnessKind("hermes-agent")).toBe("hermes");
+    expect(resolveHarnessKind("acp-hermes-agent")).toBe("hermes");
+    expect(resolveHarnessKind("omp")).toBe("omp");
+    expect(resolveHarnessKind("oh-my-pi")).toBe("omp");
+    expect(resolveHarnessKind("acp-omp")).toBe("omp");
+    expect(resolveHarnessKind("antigravity")).toBe("antigravity");
+    expect(resolveHarnessKind("acp-antigravity-acp")).toBe("antigravity");
+    expect(resolveHarnessKind("agy")).toBe("antigravity");
+    expect(resolveHarnessKind("pi")).toBe("pi");
+    expect(resolveHarnessKind("pi-coding-agent")).toBe("pi");
   });
 
   it("returns null for unknown or empty harness names", () => {
@@ -60,6 +71,24 @@ describe("HarnessBadge", () => {
     const claude = renderToStaticMarkup(<HarnessBadge harness="claude" />);
     expect(claude).toContain('data-harness-logo="claude"');
     expect(claude).toContain(">claude</");
+  });
+
+  it("renders logos for hermes, omp, antigravity, and pi with their viewBoxes", () => {
+    const hermes = renderToStaticMarkup(<HarnessBadge harness="hermes-agent" />);
+    expect(hermes).toContain('data-harness-logo="hermes"');
+    expect(hermes).toContain('viewBox="0 0 24 24"');
+
+    const omp = renderToStaticMarkup(<HarnessBadge harness="oh-my-pi" />);
+    expect(omp).toContain('data-harness-logo="omp"');
+    expect(omp).toContain('viewBox="0 0 64 64"');
+
+    const antigravity = renderToStaticMarkup(<HarnessBadge harness="antigravity" />);
+    expect(antigravity).toContain('data-harness-logo="antigravity"');
+    expect(antigravity).toContain('viewBox="0 0 16 16"');
+
+    const pi = renderToStaticMarkup(<HarnessBadge harness="pi" />);
+    expect(pi).toContain('data-harness-logo="pi"');
+    expect(pi).toContain('viewBox="100 100 600 600"');
   });
 
   it("renders plain text with no logo for unknown or empty harnesses", () => {
