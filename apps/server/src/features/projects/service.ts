@@ -30,6 +30,7 @@ import {
   IssuePriority,
   type KnowledgeEntry,
   type Project,
+  type ProjectAccessCandidate,
   type ProjectAccessGrant,
   type ProjectActivity,
   type ProjectActivityType,
@@ -1766,6 +1767,10 @@ export interface ProjectsService {
     account: SessionAccount | null,
     projectId: string,
   ): Promise<ProjectAccessGrant[]>;
+  listProjectAccessCandidates(
+    account: SessionAccount | null,
+    projectId: string,
+  ): Promise<ProjectAccessCandidate[]>;
   projectAccessHumanIds(account: SessionAccount | null, projectId: string): Promise<string[]>;
   setProjectAccess(
     account: SessionAccount | null,
@@ -2321,6 +2326,57 @@ export function createProjectsService({
           return rows.map(toProjectGrant);
         },
         { accessMode: "read only" },
+      );
+    },
+
+    async listProjectAccessCandidates(account, projectId) {
+      const actor = requireAccount(account);
+      const workActor: WorkActor = { kind: "human", account: actor };
+      return db.transaction(
+        async (tx) => {
+          const project = await requireProject(
+            tx,
+            projectId,
+            workActor,
+            ProjectAccessLevel.enum.manage,
+          );
+          // A personal project has no collaborators, so there is nobody to suggest.
+          if (project.workspaceKind === WorkspaceKind.enum.personal) return [];
+          const rows = await tx
+            .select({
+              humanId: humans.id,
+              email: humans.email,
+              displayName: humans.displayName,
+              avatarObjectId: humans.avatarObjectId,
+            })
+            .from(workspaceMemberships)
+            .innerJoin(humans, eq(humans.id, workspaceMemberships.humanId))
+            .leftJoin(
+              projectAccessGrants,
+              and(
+                eq(projectAccessGrants.projectId, projectId),
+                eq(projectAccessGrants.humanId, workspaceMemberships.humanId),
+              ),
+            )
+            .where(
+              and(
+                eq(workspaceMemberships.workspaceId, project.workspaceId),
+                eq(workspaceMemberships.isOwner, false),
+                isNull(workspaceMemberships.suspendedAt),
+                isNull(humans.deactivatedAt),
+                isNull(projectAccessGrants.id),
+              ),
+            )
+            .orderBy(humans.email, humans.id);
+          return rows.map((row) => ({
+            humanId: row.humanId,
+            email: row.email,
+            displayName: row.displayName,
+            avatarUrl:
+              row.avatarObjectId === null ? null : avatarUrlFor(row.humanId, row.avatarObjectId),
+          }));
+        },
+        { isolationLevel: "repeatable read", accessMode: "read only" },
       );
     },
 

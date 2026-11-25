@@ -202,7 +202,11 @@ test("owner manages webhooks and inspects deliveries while non-owners do not see
     await expect(webhooksTab).toBeVisible();
     await webhooksTab.click();
 
-    await ownerPage.getByRole("button", { name: "Add webhook" }).first().click();
+    await expect(
+      ownerPage.getByRole("heading", { name: "No outgoing webhooks yet" }),
+    ).toBeVisible();
+    await expect(ownerPage.getByRole("button", { name: "Add webhook" })).toHaveCount(1);
+    await ownerPage.getByRole("button", { name: "Add webhook" }).click();
     await ownerPage.getByLabel(/Endpoint URL/).fill(receiverUrl);
     await ownerPage.getByLabel("Description").fill("E2E webhook receiver");
     await ownerPage.getByRole("button", { name: "Create webhook" }).click();
@@ -221,6 +225,7 @@ test("owner manages webhooks and inspects deliveries while non-owners do not see
     const row = ownerPage.locator("[data-webhook-id]").first();
     await expect(row).toContainText(receiverUrl);
     await expect(row).toContainText("Active");
+    await expect(ownerPage.getByRole("button", { name: "Add webhook" })).toHaveCount(1);
 
     // Send test -> opens deliveries drawer and verifies live signed delivery.
     await row.getByRole("button", { name: "Send test" }).click();
@@ -259,8 +264,9 @@ test("owner manages webhooks and inspects deliveries while non-owners do not see
     await alertDialog.getByRole("button", { name: "Delete webhook" }).click();
     await expect(ownerPage.locator("[data-webhook-id]")).toHaveCount(0);
     await expect(
-      ownerPage.locator("#panel-webhooks").getByText("No outgoing webhooks yet"),
+      ownerPage.getByRole("heading", { name: "No outgoing webhooks yet" }),
     ).toBeVisible();
+    await expect(ownerPage.getByRole("button", { name: "Add webhook" })).toHaveCount(1);
   } finally {
     for (const cookie of await ownerCtx.cookies()) await recordSecret(cookie.value);
     await ownerCtx.close();

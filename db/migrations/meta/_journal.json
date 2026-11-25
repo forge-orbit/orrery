@@ -379,6 +379,13 @@
       "when": 1795572670226,
       "tag": "0053_early_tyrannus",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795601199921,
+      "tag": "0054_simple_quasar",
+      "breakpoints": true
     }
   ]
 }

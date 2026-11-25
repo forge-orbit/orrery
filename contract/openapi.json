@@ -1860,6 +1860,38 @@
           "updatedAt"
         ]
       },
+      "ProjectAccessCandidatesResponse": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/ProjectAccessCandidate"
+        }
+      },
+      "ProjectAccessCandidate": {
+        "type": "object",
+        "properties": {
+          "humanId": {
+            "type": "string"
+          },
+          "email": {
+            "$ref": "#/components/schemas/Email"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
+          }
+        },
+        "required": [
+          "humanId",
+          "email",
+          "displayName",
+          "avatarUrl"
+        ]
+      },
       "ProjectAccessHumanIds": {
         "type": "array",
         "items": {
@@ -3597,6 +3629,9 @@
               }
             ]
           },
+          "endedReason": {
+            "$ref": "#/components/schemas/RunEndReason"
+          },
           "lastHeartbeatAt": {
             "allOf": [
               {
@@ -3638,6 +3673,7 @@
           "createdAt",
           "updatedAt",
           "endedAt",
+          "endedReason",
           "lastHeartbeatAt",
           "agentName",
           "modelHistory",
@@ -3649,6 +3685,17 @@
         "enum": [
           "active",
           "ended"
+        ]
+      },
+      "RunEndReason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "reported",
+          "stale",
+          null
         ]
       },
       "RunModelChange": {
@@ -6339,6 +6386,9 @@
               }
             ]
           },
+          "endedReason": {
+            "$ref": "#/components/schemas/RunEndReason"
+          },
           "lastHeartbeatAt": {
             "allOf": [
               {
@@ -6365,6 +6415,7 @@
           "createdAt",
           "updatedAt",
           "endedAt",
+          "endedReason",
           "lastHeartbeatAt"
         ]
       },
@@ -11250,6 +11301,76 @@
         }
       }
     },
+    "/api/projects/{projectId}/access/candidates": {
+      "get": {
+        "summary": "Workspace members who can still be granted project access",
+        "description": "Manage only. Lists active members of the project's shared workspace who are not workspace owners and do not already hold a grant, so a Project manager can search for a person without reading the full member directory. Suspended and deactivated people are never suggested, and a personal project has no collaborators.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The members who can still receive a grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAccessCandidatesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The project id is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Read or Contribute access cannot manage project access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No project with this id is accessible to the caller",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{projectId}/access/humans": {
       "get": {
         "summary": "The Humans who currently hold project access",
@@ -13776,7 +13897,7 @@
     "/api/runs/hook": {
       "post": {
         "summary": "Report a harness run event with an agent key",
-        "description": "A harness hook POSTs `schema: orrery.run.hook.v1` with `Authorization: Bearer <agent-api-key>`. The key decides the agent and workspace; the run is keyed by the harness and native session id, so concurrent clients stay distinct and a resume reuses the run. Missing model or version fields stay unknown. This endpoint does not claim work or renew a lease.",
+        "description": "A harness hook POSTs `schema: orrery.run.hook.v1` with `Authorization: Bearer <agent-api-key>`. The key decides the agent and workspace; the run is keyed by the harness and native session id, so concurrent clients stay distinct and a resume reuses the run. Missing model or version fields stay unknown. A start or heartbeat refreshes the run's last-seen time, and either can revive a run that expired on staleness; a heartbeat never undoes an explicit `run_ended`. This endpoint does not claim work or renew a lease.",
         "requestBody": {
           "required": true,
           "content": {
@@ -13844,7 +13965,7 @@
     "/api/workspaces/{workspaceId}/runs": {
       "get": {
         "summary": "List the runs and child workers in one workspace",
-        "description": "A human with access to the workspace sees each run's reported harness, model (or `unknown`), model-change history, and child workers. Runs are attributed to agents, never to a transport session.",
+        "description": "A human with access to the workspace sees each run's reported harness, model (or `unknown`), model-change history, and child workers. Runs are attributed to agents, never to a transport session. Before listing, active runs with no start, heartbeat or check-in for 30 minutes and no live work session are expired with `endedReason: stale`; a later heartbeat or start resumes them.",
         "parameters": [
           {
             "schema": {

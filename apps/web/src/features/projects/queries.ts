@@ -6,6 +6,7 @@ import {
   KnowledgeEntriesResponse,
   KnowledgeEntry,
   Project,
+  ProjectAccessCandidatesResponse,
   ProjectAccessGrantsResponse,
   ProjectAccessHumanIds,
   ProjectActivityResponse,
@@ -39,6 +40,15 @@ export const projectAccessQuery = (projectId: string) =>
     queryFn: () =>
       getJson(`/api/projects/${encodeURIComponent(projectId)}/access`, (value) =>
         ProjectAccessGrantsResponse.parse(value),
+      ),
+  });
+
+export const projectAccessCandidatesQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: ["projects", projectId, "access", "candidates"],
+    queryFn: () =>
+      getJson(`/api/projects/${encodeURIComponent(projectId)}/access/candidates`, (value) =>
+        ProjectAccessCandidatesResponse.parse(value),
       ),
   });
 

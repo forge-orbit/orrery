@@ -12,10 +12,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   agents,
   humans,
+  issues,
+  projects,
   runModelChanges,
   runs as runRows,
   workspaceMemberships,
   workspaces,
+  workSessions,
 } from "../../db/schema.ts";
 import { createDb, type Database } from "../../platform/db.ts";
 import { createApp } from "../../platform/http.ts";
@@ -26,6 +29,7 @@ import type { AgentAuthenticator } from "../agents/index.ts";
 import { createAgentsFeature } from "../agents/index.ts";
 import { createProjectsFeature } from "../projects/index.ts";
 import { createRunsFeature, type RunsService } from "./index.ts";
+import { RUN_STALE_AFTER_SECONDS } from "./state-machine.ts";
 
 const SECRET = "correct horse battery staple staple";
 const ADMIN_EMAIL = "runs-admin@example.com";
@@ -88,6 +92,47 @@ function listedRuns(workspace = workspaceId): Promise<RunDetail[]> {
   return runsService.listWorkspaceRuns(adminAccount(), workspace);
 }
 
+function staleAt(): Date {
+  return new Date(Date.now() - (RUN_STALE_AFTER_SECONDS + 5 * 60) * 1000);
+}
+
+async function backdateRun(runId: string, at: Date): Promise<void> {
+  await database.db
+    .update(runRows)
+    .set({ createdAt: at, updatedAt: at, lastHeartbeatAt: at })
+    .where(eq(runRows.id, runId));
+}
+
+async function addLiveWorkSession(runId: string, leaseSeconds = 300): Promise<void> {
+  const projectId = randomUUID();
+  const issueId = randomUUID();
+  await database.db.insert(projects).values({
+    id: projectId,
+    workspaceId,
+    name: "Run staleness",
+    key: `RUN${randomUUID().slice(0, 6).toUpperCase()}`,
+    createdByHumanId: adminHumanId,
+  });
+  await database.db.insert(issues).values({
+    id: issueId,
+    projectId,
+    number: 1,
+    title: "Leased work",
+    status: "todo",
+    sortOrder: 1,
+    createdByHumanId: adminHumanId,
+    updatedByHumanId: adminHumanId,
+  });
+  await database.db.insert(workSessions).values({
+    id: randomUUID(),
+    agentId,
+    runId,
+    workspaceId,
+    issueId,
+    leaseExpiresAt: new Date(Date.now() + leaseSeconds * 1000),
+  });
+}
+
 beforeAll(async () => {
   pg = await new PostgreSqlContainer("postgres:18").start();
   database = createDb(pg.getConnectionUri());
@@ -141,9 +186,12 @@ afterAll(async () => {
 
 afterEach(async () => {
   await database.db.transaction(async (tx) => {
+    await tx.execute(sql`delete from work_sessions`);
     await tx.execute(sql`delete from run_children`);
     await tx.execute(sql`delete from run_model_changes`);
     await tx.execute(sql`delete from runs`);
+    await tx.execute(sql`delete from issues`);
+    await tx.execute(sql`delete from projects`);
     await tx.execute(sql`delete from agent_key_events`);
     await tx.execute(sql`delete from agent_api_keys`);
     await tx.execute(sql`delete from agents`);
@@ -496,6 +544,199 @@ describe("runs service against real Postgres", () => {
     await expect(report({ event: "run_heartbeat", runId: own.runId ?? "" })).rejects.toMatchObject({
       kind: "key_revoked",
     });
+  });
+
+  it("expires a stale run with no live work session and ends its active children", async () => {
+    await bootstrap();
+    const created = await report({
+      event: "run_started",
+      runKey: { harness: "codex", nativeSessionId: "stale-with-child" },
+    });
+    const runId = created.runId ?? "";
+    await report({
+      event: "child_started",
+      runId,
+      agentId: "stale-child",
+      agentType: "default",
+    });
+    const stale = staleAt();
+    await backdateRun(runId, stale);
+
+    const listed = await listedRuns();
+    const run = listed.find((entry) => entry.id === runId);
+    expect(run).toMatchObject({ status: "ended", endedReason: "stale" });
+    expect(run?.endedAt).toBe(stale.toISOString());
+    expect(run?.children).toHaveLength(1);
+    expect(run?.children[0]?.status).toBe("ended");
+    expect(run?.children[0]?.endedAt).not.toBeNull();
+    expect(new Date(run?.children[0]?.endedAt ?? 0).getTime()).toBeGreaterThanOrEqual(
+      new Date(run?.children[0]?.startedAt ?? 0).getTime(),
+    );
+
+    const [stored] = await database.db.select().from(runRows).where(eq(runRows.id, runId));
+    expect(stored).toMatchObject({ status: "ended", endedReason: "stale" });
+    expect(stored?.endedAt?.toISOString()).toBe(stale.toISOString());
+  });
+
+  it("keeps a stale heartbeat active while a work session lease is live, then expires it", async () => {
+    await bootstrap();
+    const created = await report({
+      event: "run_started",
+      runKey: { harness: "codex", nativeSessionId: "stale-with-lease" },
+    });
+    const runId = created.runId ?? "";
+    await addLiveWorkSession(runId);
+    await backdateRun(runId, staleAt());
+
+    const live = await listedRuns();
+    expect(live.find((entry) => entry.id === runId)).toMatchObject({
+      status: "active",
+      endedReason: null,
+      endedAt: null,
+    });
+
+    await database.db
+      .update(workSessions)
+      .set({ leaseExpiresAt: new Date(Date.now() - 1000) })
+      .where(eq(workSessions.runId, runId));
+    const expired = await listedRuns();
+    expect(expired.find((entry) => entry.id === runId)).toMatchObject({
+      status: "ended",
+      endedReason: "stale",
+    });
+  });
+
+  it("does not expire a run whose heartbeat is recent even when it started long ago", async () => {
+    await bootstrap();
+    const created = await report({
+      event: "run_started",
+      runKey: { harness: "codex", nativeSessionId: "recent-heartbeat" },
+    });
+    const runId = created.runId ?? "";
+    await database.db
+      .update(runRows)
+      .set({ createdAt: staleAt(), updatedAt: staleAt(), lastHeartbeatAt: staleAt() })
+      .where(eq(runRows.id, runId));
+    await report({ event: "run_heartbeat", runId });
+
+    const listed = await listedRuns();
+    expect(listed.find((entry) => entry.id === runId)).toMatchObject({
+      status: "active",
+      endedReason: null,
+      endedAt: null,
+    });
+  });
+
+  it("resumes a stale-expired run on a heartbeat and clears the expiry", async () => {
+    await bootstrap();
+    const created = await report({
+      event: "run_started",
+      runKey: { harness: "codex", nativeSessionId: "stale-resume-heartbeat" },
+    });
+    const runId = created.runId ?? "";
+    await backdateRun(runId, staleAt());
+
+    const expired = (await listedRuns()).find((entry) => entry.id === runId);
+    expect(expired).toMatchObject({ status: "ended", endedReason: "stale" });
+
+    const resumed = await report({ event: "run_heartbeat", runId });
+    expect(resumed.runId).toBe(runId);
+    const active = (await listedRuns()).find((entry) => entry.id === runId);
+    expect(active).toMatchObject({ status: "active", endedReason: null, endedAt: null });
+    expect(active?.lastHeartbeatAt).not.toBeNull();
+    expect(new Date(active?.lastHeartbeatAt ?? 0).getTime()).toBeGreaterThan(
+      new Date(expired?.endedAt ?? 0).getTime(),
+    );
+
+    const [stored] = await database.db.select().from(runRows).where(eq(runRows.id, runId));
+    expect(stored).toMatchObject({ status: "active", endedReason: null, endedAt: null });
+  });
+
+  it("does not let a heartbeat undo an explicit run_ended, but a fresh start resumes it", async () => {
+    await bootstrap();
+    const created = await report({
+      event: "run_started",
+      runKey: { harness: "codex", nativeSessionId: "reported-end" },
+    });
+    const runId = created.runId ?? "";
+    await report({ event: "run_ended", runId });
+
+    const ended = (await listedRuns()).find((entry) => entry.id === runId);
+    expect(ended).toMatchObject({ status: "ended", endedReason: "reported" });
+
+    await report({ event: "run_heartbeat", runId });
+    const stillEnded = (await listedRuns()).find((entry) => entry.id === runId);
+    expect(stillEnded).toMatchObject({
+      status: "ended",
+      endedReason: "reported",
+      endedAt: ended?.endedAt,
+    });
+
+    await report({ event: "run_started", runId });
+    const resumed = (await listedRuns()).find((entry) => entry.id === runId);
+    expect(resumed).toMatchObject({ status: "active", endedReason: null, endedAt: null });
+  });
+
+  it("marks a stale-expired run reported when run_ended arrives afterwards", async () => {
+    await bootstrap();
+    const created = await report({
+      event: "run_started",
+      runKey: { harness: "codex", nativeSessionId: "stale-then-ended" },
+    });
+    const runId = created.runId ?? "";
+    const stale = staleAt();
+    await backdateRun(runId, stale);
+    expect((await listedRuns()).find((entry) => entry.id === runId)).toMatchObject({
+      status: "ended",
+      endedReason: "stale",
+    });
+
+    await report({ event: "run_ended", runId });
+    const ended = (await listedRuns()).find((entry) => entry.id === runId);
+    expect(ended).toMatchObject({ status: "ended", endedReason: "reported" });
+    expect(new Date(ended?.endedAt ?? 0).getTime()).toBeGreaterThan(stale.getTime());
+
+    await report({ event: "run_heartbeat", runId });
+    expect((await listedRuns()).find((entry) => entry.id === runId)).toMatchObject({
+      status: "ended",
+      endedReason: "reported",
+    });
+  });
+
+  it("sweeps stale runs without waiting for a workspace read and is idempotent", async () => {
+    await bootstrap();
+    const created = await report({
+      event: "run_started",
+      runKey: { harness: "codex", nativeSessionId: "sweep-only" },
+    });
+    const runId = created.runId ?? "";
+    await backdateRun(runId, staleAt());
+
+    expect(await runsService.expireStaleRuns()).toBe(1);
+    expect(await runsService.expireStaleRuns()).toBe(0);
+
+    const [stored] = await database.db.select().from(runRows).where(eq(runRows.id, runId));
+    expect(stored).toMatchObject({ status: "ended", endedReason: "stale" });
+  });
+
+  it("uses createdAt as the last-seen time for a run that never sent a heartbeat", async () => {
+    await bootstrap();
+    const runId = randomUUID();
+    const createdAt = staleAt();
+    await database.db.insert(runRows).values({
+      id: runId,
+      agentId,
+      workspaceId,
+      harness: "runner",
+      nativeSessionId: "runner-no-heartbeat",
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    const run = (await listedRuns()).find((entry) => entry.id === runId);
+    expect(run).toMatchObject({ status: "ended", endedReason: "stale" });
+    expect(run?.endedAt).toBe(createdAt.toISOString());
+    expect(run?.lastHeartbeatAt).toBeNull();
   });
 });
 

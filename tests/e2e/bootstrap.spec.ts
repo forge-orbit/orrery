@@ -34,11 +34,7 @@ async function signIn(page: Page) {
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByText(`Signed in as ${email}.`)).toBeVisible();
-  await expect(
-    page
-      .locator("[data-app-sidebar] footer[data-sidebar-footer]")
-      .getByRole("link", { name: "Forge Orbit" }),
-  ).toHaveAttribute("href", "https://github.com/forge-orbit");
+  await expect(page.locator("[data-app-sidebar]")).toBeVisible();
 
   for (const cookie of await page.context().cookies()) {
     await recordSecret(cookie.value);

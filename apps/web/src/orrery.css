@@ -54,6 +54,22 @@
   }
 }
 
+/* Sidebar */
+/*
+ * The SideNav drawer keeps its footer slot on the content area's bottom edge
+ * (margin-block-start: auto), which only works when that area is a flex
+ * column. The desktop sidebar has its own sticky footer, so this targets the
+ * mobile drawer's dialog.
+ */
+dialog[data-app-sidebar] nav {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog[data-app-sidebar] nav > * {
+  flex-shrink: 0;
+}
+
 /* Access layout */
 [data-access-layout] {
   min-block-size: 100svh;

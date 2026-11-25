@@ -18,6 +18,10 @@ export type RunEventType = z.infer<typeof RunEventType>;
 export const RunStatus = z.enum(["active", "ended"]).meta({ id: "RunStatus" });
 export type RunStatus = z.infer<typeof RunStatus>;
 
+/** Why a run ended: an explicit `run_ended`, or a stale heartbeat with no live work session. */
+export const RunEndReason = z.enum(["reported", "stale"]).meta({ id: "RunEndReason" });
+export type RunEndReason = z.infer<typeof RunEndReason>;
+
 
 
 
@@ -109,6 +113,7 @@ export const Run = z
     createdAt: Timestamp,
     updatedAt: Timestamp,
     endedAt: Timestamp.nullable(),
+    endedReason: RunEndReason.nullable(),
     lastHeartbeatAt: Timestamp.nullable(),
   })
   .meta({ id: "Run" });

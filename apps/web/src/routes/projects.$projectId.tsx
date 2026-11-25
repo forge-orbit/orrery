@@ -39,6 +39,7 @@ import {
   IssuePriorityControls,
   issuesQuery,
   projectAccessCandidates,
+  projectAccessCandidatesQuery,
   issueStatusLabels,
   knowledgeEntriesQuery,
   LabelPill,
@@ -57,7 +58,6 @@ import {
 } from "../features/projects/index.ts";
 import { workspaceRunsQuery } from "../features/runs/index.ts";
 import { activeSessionsQuery } from "../features/work-sessions/index.ts";
-import { workspaceMembersQuery, workspaceQuery } from "../features/workspaces/index.ts";
 import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextAreaField, TextField } from "../lib/fields.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
@@ -74,7 +74,10 @@ export const Route = createFileRoute("/projects/$projectId")({
       context.queryClient.ensureQueryData(knowledgeEntriesQuery(project.id)),
       context.queryClient.ensureQueryData(projectActivityQuery(project.id)),
       ...(project.accessLevel === "manage" && project.workspaceKind === "shared"
-        ? [context.queryClient.ensureQueryData(projectAccessQuery(project.id))]
+        ? [
+            context.queryClient.ensureQueryData(projectAccessQuery(project.id)),
+            context.queryClient.ensureQueryData(projectAccessCandidatesQuery(project.id)),
+          ]
         : []),
     ]);
   },
@@ -229,7 +232,7 @@ function ProjectPage() {
                 </Stack>
               </Link>
             </Stack>
-            {canContribute && (
+            {canContribute && !(activeTab === "issues" && issues.length === 0) && (
               <Button
                 type="button"
                 label="New issue"
@@ -453,7 +456,7 @@ function ProjectPage() {
                 <Heading level={2} color="inherit">
                   Knowledge
                 </Heading>
-                {canContribute && (
+                {canContribute && knowledge.length > 0 && (
                   <Button
                     type="button"
                     label="New document"
@@ -706,19 +709,9 @@ function ProjectSettings({ project }: { project: Project }) {
 
 function ProjectAccess({ projectId }: { projectId: string }) {
   const { data: grants } = useSuspenseQuery(projectAccessQuery(projectId));
-  const { data: project } = useSuspenseQuery(projectQuery(projectId));
-  const { data: workspace } = useSuspenseQuery(workspaceQuery(project.workspaceId));
-  // A project manager who is not a workspace permission manager cannot read the
-  // member directory, so keep the email field for them instead of an empty picker.
-  const canReadMembers =
-    project.workspaceKind === "shared" &&
-    (workspace.isOwner || workspace.canManageMemberPermissions || workspace.canRemoveMembers);
-  const { data: members = [] } = useQuery({
-    ...workspaceMembersQuery(project.workspaceId),
-    enabled: canReadMembers,
-  });
+  const { data: eligibleMembers } = useSuspenseQuery(projectAccessCandidatesQuery(projectId));
   const candidates = projectAccessCandidates(
-    members,
+    eligibleMembers,
     grants.map((grant) => grant.humanId),
   );
   const queryClient = useQueryClient();
@@ -731,7 +724,10 @@ function ProjectAccess({ projectId }: { projectId: string }) {
   const [confirmRevoke, setConfirmRevoke] = useState<ProjectAccessGrant>();
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: projectAccessQuery(projectId).queryKey });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: projectAccessQuery(projectId).queryKey }),
+      queryClient.invalidateQueries({ queryKey: projectAccessCandidatesQuery(projectId).queryKey }),
+    ]);
   }
 
   async function onGrant(event: FormEvent<HTMLFormElement>) {
@@ -874,13 +870,23 @@ function ProjectAccess({ projectId }: { projectId: string }) {
 
         <Divider />
 
-        <form onSubmit={(event) => void onGrant(event)}>
-          <Stack gap={3} hAlign="start">
-            <Heading level={3} color="inherit">
-              Grant project access
-            </Heading>
-            <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="end">
-              {canReadMembers ? (
+        <Heading level={3} color="inherit">
+          Grant project access
+        </Heading>
+        {error !== undefined && (
+          <Banner status="error" role="alert" title="Could not update access" description={error} />
+        )}
+        {candidates.length === 0 ? (
+          <EmptyState
+            title="All workspace members already have access to this project."
+            description="When someone new joins the workspace, you can grant them access here."
+            isCompact
+            headingLevel={4}
+          />
+        ) : (
+          <form onSubmit={(event) => void onGrant(event)}>
+            <Stack gap={3} hAlign="start">
+              <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="end">
                 <Selector
                   label="Member"
                   id="access-member"
@@ -891,7 +897,7 @@ function ProjectAccess({ projectId }: { projectId: string }) {
                   value={email}
                   onChange={setEmail}
                   isRequired
-                  isDisabled={saving || candidates.length === 0}
+                  isDisabled={saving}
                   options={candidates.map((candidate) => ({
                     value: candidate.email,
                     label: candidate.label,
@@ -906,54 +912,33 @@ function ProjectAccess({ projectId }: { projectId: string }) {
                   }))}
                   width="min(100%, 22rem)"
                 />
-              ) : (
-                <TextField
-                  label="Email"
-                  id="access-email"
-                  htmlName="email"
-                  type="email"
-                  value={email}
-                  onChange={setEmail}
-                  required
-                  autoComplete="off"
-                  placeholder="member@example.com"
-                  width="min(100%, 20rem)"
+                <Selector
+                  label="Access level"
+                  id="access-level"
+                  htmlName="level"
+                  value={level}
+                  onChange={(value) => {
+                    const next = ProjectAccessLevel.safeParse(value);
+                    if (next.success) setLevel(next.data);
+                  }}
+                  options={[
+                    { value: "read", label: "Read" },
+                    { value: "contribute", label: "Contribute" },
+                    { value: "manage", label: "Manage" },
+                  ]}
                 />
-              )}
-              <Selector
-                label="Access level"
-                id="access-level"
-                htmlName="level"
-                value={level}
-                onChange={(value) => {
-                  const next = ProjectAccessLevel.safeParse(value);
-                  if (next.success) setLevel(next.data);
-                }}
-                options={[
-                  { value: "read", label: "Read" },
-                  { value: "contribute", label: "Contribute" },
-                  { value: "manage", label: "Manage" },
-                ]}
+              </Stack>
+              <Button
+                type="submit"
+                isDisabled={saving}
+                isLoading={saving}
+                label="Grant access"
+                icon={<Icon icon={UserPlus} />}
+                variant="primary"
               />
             </Stack>
-            {error !== undefined && (
-              <Banner
-                status="error"
-                role="alert"
-                title="Could not update access"
-                description={error}
-              />
-            )}
-            <Button
-              type="submit"
-              isDisabled={saving}
-              isLoading={saving}
-              label="Grant access"
-              icon={<Icon icon={UserPlus} />}
-              variant="primary"
-            />
-          </Stack>
-        </form>
+          </form>
+        )}
       </Stack>
 
       <AlertDialog

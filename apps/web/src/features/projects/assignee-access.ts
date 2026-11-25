@@ -1,24 +1,24 @@
-import type { WorkspaceMember } from "@orrery/contract";
-
-export type ProjectAccessCandidate = Pick<
+import type {
+  ProjectAccessCandidate as ProjectAccessCandidateRecord,
   WorkspaceMember,
-  "humanId" | "email" | "displayName" | "avatarUrl"
-> & { label: string };
+} from "@orrery/contract";
 
-/** Members who can still be granted access: no owner, no existing grant. */
+export type ProjectAccessCandidate = ProjectAccessCandidateRecord & { label: string };
+
+/** Label eligible members and drop any grant made since the candidate list loaded. */
 export function projectAccessCandidates(
-  members: readonly WorkspaceMember[],
+  candidates: readonly ProjectAccessCandidateRecord[],
   grantedHumanIds: readonly string[],
 ): ProjectAccessCandidate[] {
   const granted = new Set(grantedHumanIds);
-  return members
-    .filter((member) => !member.isOwner && !granted.has(member.humanId))
-    .map((member) => ({
-      humanId: member.humanId,
-      email: member.email,
-      displayName: member.displayName,
-      avatarUrl: member.avatarUrl,
-      label: member.displayName ?? member.email,
+  return candidates
+    .filter((candidate) => !granted.has(candidate.humanId))
+    .map((candidate) => ({
+      humanId: candidate.humanId,
+      email: candidate.email,
+      displayName: candidate.displayName,
+      avatarUrl: candidate.avatarUrl,
+      label: candidate.displayName ?? candidate.email,
     }));
 }
 
