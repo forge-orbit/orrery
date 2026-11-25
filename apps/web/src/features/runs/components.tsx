@@ -75,6 +75,15 @@ function formatActivityCounts(run: RunDetail): string {
   return parts.length > 0 ? parts.join(" · ") : "—";
 }
 
+function runStatusToken(run: Pick<RunDetail, "status" | "endedReason">): {
+  label: string;
+  color: "green" | "orange" | "gray";
+} {
+  if (run.status === "active") return { label: "Active", color: "green" };
+  if (run.endedReason === "stale") return { label: "Expired", color: "orange" };
+  return { label: "Ended", color: "gray" };
+}
+
 function ModelHistory({ changes }: { changes: readonly RunModelChange[] }) {
   if (changes.length === 0) {
     return (
@@ -173,6 +182,7 @@ function ChildWorkers({ workers }: { workers: readonly RunChild[] }) {
 }
 
 function RunDetailDrawer({ run, onClose }: { run: RunDetail; onClose: () => void }) {
+  const status = runStatusToken(run);
   return (
     <Layout
       height="auto"
@@ -190,11 +200,7 @@ function RunDetailDrawer({ run, onClose }: { run: RunDetail; onClose: () => void
       <LayoutContent>
         <Stack gap={4} data-run-detail-drawer="">
           <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-            <Token
-              size="sm"
-              color={run.status === "active" ? "green" : "gray"}
-              label={run.status === "active" ? "Active" : "Ended"}
-            />
+            <Token size="sm" color={status.color} label={status.label} />
             <Text type="supporting">
               {run.status === "active"
                 ? `Running for ${formatDuration(run.createdAt, null)}`
@@ -354,69 +360,74 @@ export function RunsSection({ workspaceId }: { workspaceId: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((run) => (
-                <TableRow
-                  key={run.id}
-                  data-run-id={run.id}
-                  data-harness={run.harness ?? "unknown"}
-                  data-model={run.model ?? "unknown"}
-                >
-                  <TableCell>
-                    <Stack gap={0}>
-                      <Text type="label" color="primary" data-agent-name="">
-                        {run.agentName}
-                      </Text>
-                      <Text type="supporting" data-run-label="">
-                        <code title={run.id}>{run.id.slice(0, 8)}</code>
-                      </Text>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Token
-                      size="sm"
-                      color={run.status === "active" ? "green" : "gray"}
-                      label={run.status === "active" ? "Active" : "Ended"}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Text type="supporting" color="primary">
-                      <HarnessBadge harness={run.harness} version={run.harnessVersion} empty="—" />
-                    </Text>
-                  </TableCell>
-                  <TableCell>
-                    {run.model !== null ? (
-                      <code>{run.model}</code>
-                    ) : (
-                      <Text type="supporting">Unknown</Text>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Text type="supporting">{formatActivityCounts(run)}</Text>
-                  </TableCell>
-                  <TableCell>
-                    <Stack gap={0}>
+              {filtered.map((run) => {
+                const status = runStatusToken(run);
+                return (
+                  <TableRow
+                    key={run.id}
+                    data-run-id={run.id}
+                    data-run-status={run.status}
+                    data-ended-reason={run.endedReason ?? ""}
+                    data-harness={run.harness ?? "unknown"}
+                    data-model={run.model ?? "unknown"}
+                  >
+                    <TableCell>
+                      <Stack gap={0}>
+                        <Text type="label" color="primary" data-agent-name="">
+                          {run.agentName}
+                        </Text>
+                        <Text type="supporting" data-run-label="">
+                          <code title={run.id}>{run.id.slice(0, 8)}</code>
+                        </Text>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Token size="sm" color={status.color} label={status.label} />
+                    </TableCell>
+                    <TableCell>
                       <Text type="supporting" color="primary">
-                        <time
-                          dateTime={run.createdAt}
-                          title={new Date(run.createdAt).toLocaleString()}
-                        >
-                          {relativeTime(run.createdAt)}
-                        </time>
+                        <HarnessBadge
+                          harness={run.harness}
+                          version={run.harnessVersion}
+                          empty="—"
+                        />
                       </Text>
-                      <Text type="supporting">{formatDuration(run.createdAt, run.endedAt)}</Text>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      label="Inspect"
-                      onClick={() => setSelectedId(run.id)}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell>
+                      {run.model !== null ? (
+                        <code>{run.model}</code>
+                      ) : (
+                        <Text type="supporting">Unknown</Text>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Text type="supporting">{formatActivityCounts(run)}</Text>
+                    </TableCell>
+                    <TableCell>
+                      <Stack gap={0}>
+                        <Text type="supporting" color="primary">
+                          <time
+                            dateTime={run.createdAt}
+                            title={new Date(run.createdAt).toLocaleString()}
+                          >
+                            {relativeTime(run.createdAt)}
+                          </time>
+                        </Text>
+                        <Text type="supporting">{formatDuration(run.createdAt, run.endedAt)}</Text>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        label="Inspect"
+                        onClick={() => setSelectedId(run.id)}
+                      />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

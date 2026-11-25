@@ -579,6 +579,7 @@ export class TestOrrery {
           createdAt: stamp,
           updatedAt: stamp,
           endedAt: null,
+          endedReason: null,
           lastHeartbeatAt: stamp,
         },
         session: {

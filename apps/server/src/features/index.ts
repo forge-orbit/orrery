@@ -356,6 +356,7 @@ export function createFeatures(
       db: database.db,
       sessionReader: accounts.sessionReader,
       authenticate: agentAuthenticator,
+      log,
     }),
     sessions,
     inbox,

@@ -3597,6 +3597,9 @@
               }
             ]
           },
+          "endedReason": {
+            "$ref": "#/components/schemas/RunEndReason"
+          },
           "lastHeartbeatAt": {
             "allOf": [
               {
@@ -3638,6 +3641,7 @@
           "createdAt",
           "updatedAt",
           "endedAt",
+          "endedReason",
           "lastHeartbeatAt",
           "agentName",
           "modelHistory",
@@ -3649,6 +3653,17 @@
         "enum": [
           "active",
           "ended"
+        ]
+      },
+      "RunEndReason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "enum": [
+          "reported",
+          "stale",
+          null
         ]
       },
       "RunModelChange": {
@@ -6339,6 +6354,9 @@
               }
             ]
           },
+          "endedReason": {
+            "$ref": "#/components/schemas/RunEndReason"
+          },
           "lastHeartbeatAt": {
             "allOf": [
               {
@@ -6365,6 +6383,7 @@
           "createdAt",
           "updatedAt",
           "endedAt",
+          "endedReason",
           "lastHeartbeatAt"
         ]
       },
@@ -13776,7 +13795,7 @@
     "/api/runs/hook": {
       "post": {
         "summary": "Report a harness run event with an agent key",
-        "description": "A harness hook POSTs `schema: orrery.run.hook.v1` with `Authorization: Bearer <agent-api-key>`. The key decides the agent and workspace; the run is keyed by the harness and native session id, so concurrent clients stay distinct and a resume reuses the run. Missing model or version fields stay unknown. This endpoint does not claim work or renew a lease.",
+        "description": "A harness hook POSTs `schema: orrery.run.hook.v1` with `Authorization: Bearer <agent-api-key>`. The key decides the agent and workspace; the run is keyed by the harness and native session id, so concurrent clients stay distinct and a resume reuses the run. Missing model or version fields stay unknown. A start or heartbeat refreshes the run's last-seen time, and either can revive a run that expired on staleness; a heartbeat never undoes an explicit `run_ended`. This endpoint does not claim work or renew a lease.",
         "requestBody": {
           "required": true,
           "content": {
@@ -13844,7 +13863,7 @@
     "/api/workspaces/{workspaceId}/runs": {
       "get": {
         "summary": "List the runs and child workers in one workspace",
-        "description": "A human with access to the workspace sees each run's reported harness, model (or `unknown`), model-change history, and child workers. Runs are attributed to agents, never to a transport session.",
+        "description": "A human with access to the workspace sees each run's reported harness, model (or `unknown`), model-change history, and child workers. Runs are attributed to agents, never to a transport session. Before listing, active runs with no start, heartbeat or check-in for 30 minutes and no live work session are expired with `endedReason: stale`; a later heartbeat or start resumes them.",
         "parameters": [
           {
             "schema": {

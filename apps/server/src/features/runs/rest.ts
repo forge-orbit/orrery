@@ -10,13 +10,14 @@ import type { SessionReader } from "../accounts/index.ts";
 import { agentErrorStatus, isAgentError, type AgentAuthenticator } from "../agents/index.ts";
 import { assertDispatchRestAllowed } from "../agents/index.ts";
 import { RunsError, type RunsErrorKind, type RunsService } from "./service.ts";
+import { RUN_STALE_AFTER_SECONDS } from "./state-machine.ts";
 
 const report = createRoute({
   method: "post",
   path: "/api/runs/hook",
   summary: "Report a harness run event with an agent key",
   description:
-    "A harness hook POSTs `schema: orrery.run.hook.v1` with `Authorization: Bearer <agent-api-key>`. The key decides the agent and workspace; the run is keyed by the harness and native session id, so concurrent clients stay distinct and a resume reuses the run. Missing model or version fields stay unknown. This endpoint does not claim work or renew a lease.",
+    "A harness hook POSTs `schema: orrery.run.hook.v1` with `Authorization: Bearer <agent-api-key>`. The key decides the agent and workspace; the run is keyed by the harness and native session id, so concurrent clients stay distinct and a resume reuses the run. Missing model or version fields stay unknown. A start or heartbeat refreshes the run's last-seen time, and either can revive a run that expired on staleness; a heartbeat never undoes an explicit `run_ended`. This endpoint does not claim work or renew a lease.",
   request: {
     body: { required: true, content: { "application/json": { schema: RunHookEvent } } },
   },
@@ -36,8 +37,7 @@ const workspaceRuns = createRoute({
   method: "get",
   path: "/api/workspaces/{workspaceId}/runs",
   summary: "List the runs and child workers in one workspace",
-  description:
-    "A human with access to the workspace sees each run's reported harness, model (or `unknown`), model-change history, and child workers. Runs are attributed to agents, never to a transport session.",
+  description: `A human with access to the workspace sees each run's reported harness, model (or \`unknown\`), model-change history, and child workers. Runs are attributed to agents, never to a transport session. Before listing, active runs with no start, heartbeat or check-in for ${RUN_STALE_AFTER_SECONDS / 60} minutes and no live work session are expired with \`endedReason: stale\`; a later heartbeat or start resumes them.`,
   request: { params: z.object({ workspaceId: z.string().min(1).max(200) }) },
   responses: {
     200: {
