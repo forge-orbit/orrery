@@ -4835,7 +4835,9 @@
             "issue_deleted",
             "issue_restored",
             "knowledge_created",
-            "knowledge_edited"
+            "knowledge_edited",
+            "knowledge_deleted",
+            "knowledge_restored"
           ]
         },
         "Timestamp": {

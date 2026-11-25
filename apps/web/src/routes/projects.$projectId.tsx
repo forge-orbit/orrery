@@ -81,6 +81,10 @@ export const Route = createFileRoute("/projects/$projectId")({
         : []),
     ]);
   },
+  validateSearch: (search: Record<string, unknown>): { tab?: ProjectTab } => {
+    const tab = search.tab;
+    return typeof tab === "string" && isProjectTab(tab) ? { tab } : {};
+  },
   component: ProjectPage,
   errorComponent: ({ error }) => <ResourceLoadError resource="project" error={error} />,
 });
@@ -129,9 +133,23 @@ const activityLabels: Record<ProjectActivityType, string> = {
   issue_restored: "restored issue from trash",
   knowledge_created: "created knowledge",
   knowledge_edited: "edited knowledge",
+  knowledge_deleted: "moved knowledge to trash",
+  knowledge_restored: "restored knowledge from trash",
 };
 
 type ProjectTab = "issues" | "knowledge" | "labels" | "activity" | "settings";
+
+const projectTabs: readonly ProjectTab[] = [
+  "issues",
+  "knowledge",
+  "labels",
+  "activity",
+  "settings",
+];
+
+function isProjectTab(value: string): value is ProjectTab {
+  return projectTabs.some((tab) => tab === value);
+}
 
 function ProjectPage() {
   const { projectId } = Route.useParams();
@@ -150,8 +168,19 @@ function ProjectPage() {
   const canContribute = project.accessLevel !== "read";
   const canManage = project.accessLevel === "manage";
   const navigate = useNavigate();
-  const [tab, setTab] = useState<ProjectTab>("issues");
+  const search = Route.useSearch();
+  const [tab, setTab] = useState<ProjectTab>(search.tab ?? "issues");
+  const [knowledgeFilter, setKnowledgeFilter] = useState("");
   const activeTab: ProjectTab = tab === "settings" && !canManage ? "issues" : tab;
+  const knowledgeNeedle = knowledgeFilter.trim().toLowerCase();
+  const visibleKnowledge =
+    knowledgeNeedle === ""
+      ? knowledge
+      : knowledge.filter(
+          (entry) =>
+            entry.title.toLowerCase().includes(knowledgeNeedle) ||
+            entry.body.toLowerCase().includes(knowledgeNeedle),
+        );
 
   return (
     <Stack gap={5}>
@@ -468,6 +497,16 @@ function ProjectPage() {
                   />
                 )}
               </Stack>
+              {knowledge.length > 0 && (
+                <TextField
+                  label="Search knowledge"
+                  id="knowledge-search"
+                  value={knowledgeFilter}
+                  onChange={setKnowledgeFilter}
+                  placeholder="Filter by title or body"
+                  width="min(100%, 28rem)"
+                />
+              )}
               {knowledge.length === 0 ? (
                 <EmptyState
                   title="No knowledge entries yet"
@@ -486,6 +525,13 @@ function ProjectPage() {
                     ) : undefined
                   }
                 />
+              ) : visibleKnowledge.length === 0 ? (
+                <EmptyState
+                  title="No matching documents"
+                  description={`Nothing matches “${knowledgeFilter.trim()}”.`}
+                  isCompact
+                  headingLevel={3}
+                />
               ) : (
                 <Table aria-label="Knowledge documents">
                   <TableHeader>
@@ -496,7 +542,7 @@ function ProjectPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {knowledge.map((entry) => (
+                    {visibleKnowledge.map((entry) => (
                       <TableRow key={entry.id} data-knowledge-id={entry.id}>
                         <TableCell>
                           <Link

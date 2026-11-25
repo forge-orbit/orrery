@@ -386,6 +386,13 @@
       "when": 1795601199921,
       "tag": "0054_simple_quasar",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795613441468,
+      "tag": "0055_loose_the_fury",
+      "breakpoints": true
     }
   ]
 }

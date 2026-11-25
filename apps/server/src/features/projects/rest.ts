@@ -931,6 +931,65 @@ const updateKnowledge = createRoute({
   },
 });
 
+const deleteKnowledge = createRoute({
+  method: "delete",
+  path: "/api/knowledge/{entryId}",
+  summary: "Move a knowledge entry to the project's trash",
+  description:
+    "Human Contribute or Manage only; agents cannot delete knowledge. A soft-deleted entry leaves the project's knowledge list and the MCP tools immediately, keeps its attachment references, and a Project manager can restore it within 30 days. Trashing records knowledge_deleted in the project activity in the same transaction.",
+  request: { params: knowledgeParams },
+  responses: {
+    204: { description: "The knowledge entry was moved to trash" },
+    400: problem("The entry id is invalid"),
+    401: problem(
+      "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+    ),
+    403: problem("Read access cannot delete knowledge, and agents cannot delete knowledge"),
+    404: problem("No active knowledge entry with this id is accessible to the caller"),
+  },
+});
+
+const restoreKnowledge = createRoute({
+  method: "post",
+  path: "/api/knowledge/{entryId}/restore",
+  summary: "Restore a trashed knowledge entry",
+  description:
+    "Human Manage (Project manager) only. Restores an entry from trash within 30 days, clearing its deletion metadata and recording knowledge_restored in the project activity in the same transaction. An already purged entry, or one past the 30-day boundary in database time, answers 409. Agents and members below Manage answer 403; non-members answer 404.",
+  request: { params: knowledgeParams },
+  responses: {
+    200: {
+      description: "The restored knowledge entry",
+      content: { "application/json": { schema: KnowledgeEntry } },
+    },
+    400: problem("The entry id is invalid"),
+    401: problem(
+      "Not signed in, or the agent key is invalid, revoked, expired, or unusable in its workspace",
+    ),
+    403: problem("Only a Project manager can restore a trashed knowledge entry"),
+    404: problem("No knowledge entry with this id is accessible to the caller"),
+    409: problem("The knowledge entry has already been purged"),
+  },
+});
+
+const listKnowledgeTrash = createRoute({
+  method: "get",
+  path: "/api/projects/{projectId}/knowledge/trash",
+  summary: "The project's recoverable trashed knowledge entries",
+  description:
+    "Manage only. Lists soft-deleted knowledge entries that have not been purged, so a Project manager can decide what to restore. Purged tombstones never appear here.",
+  request: { params: projectParams },
+  responses: {
+    200: {
+      description: "The recoverable trashed knowledge entries",
+      content: { "application/json": { schema: KnowledgeEntriesResponse } },
+    },
+    400: problem("The project id is invalid"),
+    401: problem("Not signed in"),
+    403: problem("Only a Project manager can read the knowledge trash"),
+    404: problem("No project with this id is accessible to the caller"),
+  },
+});
+
 export const routes = [
   listProjects,
   createProject,
@@ -971,6 +1030,9 @@ export const routes = [
   createKnowledge,
   getKnowledge,
   updateKnowledge,
+  deleteKnowledge,
+  restoreKnowledge,
+  listKnowledgeTrash,
 ];
 
 const statusFor = {
@@ -999,9 +1061,11 @@ const statusFor = {
   cross_project_parent: 400,
   subtask_depth_exceeded: 409,
   agents_cannot_delete_issues: 403,
+  agents_cannot_delete_knowledge: 403,
   issue_active_session_exists: 409,
   issue_needs_input: 409,
   issue_purged: 409,
+  knowledge_entry_purged: 409,
 } as const satisfies Record<ProjectsErrorKind, number>;
 
 function isKind<K extends readonly ProjectsErrorKind[]>(
@@ -1098,6 +1162,21 @@ const linkAddKinds = [...commentWriteKinds, "issue_link_exists"] as const;
 const linkRemoveKinds = [...commentWriteKinds, "issue_link_not_found"] as const;
 const knowledgeReadKinds = ["not_signed_in", "knowledge_entry_not_found"] as const;
 const knowledgeWriteKinds = [...knowledgeReadKinds, "insufficient_project_access"] as const;
+const knowledgeDeleteKinds = [
+  ...knowledgeReadKinds,
+  "insufficient_project_access",
+  "agents_cannot_delete_knowledge",
+] as const;
+const knowledgeRestoreKinds = [
+  ...knowledgeReadKinds,
+  "insufficient_project_access",
+  "knowledge_entry_purged",
+] as const;
+const knowledgeTrashKinds = [
+  "not_signed_in",
+  "project_not_found",
+  "insufficient_project_access",
+] as const;
 
 function failure<K extends readonly ProjectsErrorKind[]>(c: Context, error: unknown, kinds: K) {
   if (isAgentError(error)) {
@@ -1548,6 +1627,38 @@ export function createProjectsRest(
       return c.json(await service.updateKnowledge(actor, entryId, c.req.valid("json")), 200);
     } catch (error) {
       return failure(c, error, knowledgeWriteKinds);
+    }
+  });
+
+  app.openapi(listKnowledgeTrash, async (c) => {
+    try {
+      const { projectId } = c.req.valid("param");
+      return c.json(await service.listKnowledgeTrash(await workActor(c), projectId), 200);
+    } catch (error) {
+      return failure(c, error, knowledgeTrashKinds);
+    }
+  });
+
+  app.openapi(deleteKnowledge, async (c) => {
+    try {
+      const { entryId } = c.req.valid("param");
+      const actor = await workActor(c);
+      await fenceKnowledgeEntry(actor, entryId);
+      await service.deleteKnowledge(actor, entryId);
+      return c.body(null, 204);
+    } catch (error) {
+      return failure(c, error, knowledgeDeleteKinds);
+    }
+  });
+
+  app.openapi(restoreKnowledge, async (c) => {
+    try {
+      const { entryId } = c.req.valid("param");
+      const actor = await workActor(c);
+      await fenceKnowledgeEntry(actor, entryId);
+      return c.json(await service.restoreKnowledge(actor, entryId), 200);
+    } catch (error) {
+      return failure(c, error, knowledgeRestoreKinds);
     }
   });
 

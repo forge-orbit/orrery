@@ -84,6 +84,8 @@ const eventLabels: Record<WebhookEvent, string> = {
   issue_restored: "Issue restored from Trash",
   knowledge_created: "Knowledge created",
   knowledge_edited: "Knowledge edited",
+  knowledge_deleted: "Knowledge moved to Trash",
+  knowledge_restored: "Knowledge restored from Trash",
 };
 
 const eventGroups: readonly {
@@ -137,7 +139,7 @@ const eventGroups: readonly {
   },
   {
     title: "Knowledge",
-    events: ["knowledge_created", "knowledge_edited"],
+    events: ["knowledge_created", "knowledge_edited", "knowledge_deleted", "knowledge_restored"],
   },
 ];
 

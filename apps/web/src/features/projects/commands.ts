@@ -20,7 +20,7 @@ import {
   type UpdateProjectLabelRequest,
   type UpdateProjectRequest,
 } from "@orrery/contract";
-import { deleteJson, deleteRequest, patchJson, postJson } from "../../lib/api.ts";
+import { deleteJson, deleteRequest, patchJson, post, postJson } from "../../lib/api.ts";
 
 export function createProject(workspaceId: string, input: CreateProjectRequest): Promise<Project> {
   return postJson(`/api/workspaces/${encodeURIComponent(workspaceId)}/projects`, input, (value) =>
@@ -168,6 +168,16 @@ export function updateKnowledgeEntry(
   input: UpdateKnowledgeEntryRequest,
 ): Promise<KnowledgeEntry> {
   return patchJson(`/api/knowledge/${encodeURIComponent(entryId)}`, input, (value) =>
+    KnowledgeEntry.parse(value),
+  );
+}
+
+export function deleteKnowledgeEntry(entryId: string): Promise<void> {
+  return deleteRequest(`/api/knowledge/${encodeURIComponent(entryId)}`);
+}
+
+export function restoreKnowledgeEntry(entryId: string): Promise<KnowledgeEntry> {
+  return post(`/api/knowledge/${encodeURIComponent(entryId)}/restore`, (value) =>
     KnowledgeEntry.parse(value),
   );
 }

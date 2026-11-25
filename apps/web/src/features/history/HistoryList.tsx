@@ -73,6 +73,8 @@ const labels: Record<string, string> = {
   issue_restored: "restored issue from trash",
   knowledge_created: "created knowledge",
   knowledge_edited: "edited knowledge",
+  knowledge_deleted: "moved knowledge to trash",
+  knowledge_restored: "restored knowledge from trash",
   installation_bootstrap: "bootstrapped the installation",
   installation_invitation_created: "invited",
   installation_invitation_accepted: "accepted an invitation from",

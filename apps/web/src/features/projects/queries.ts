@@ -176,3 +176,12 @@ export const knowledgeEntryQuery = (entryId: string) =>
         KnowledgeEntry.parse(value),
       ),
   });
+
+export const knowledgeTrashQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: ["projects", projectId, "knowledge", "trash"],
+    queryFn: () =>
+      getJson(`/api/projects/${encodeURIComponent(projectId)}/knowledge/trash`, (value) =>
+        KnowledgeEntriesResponse.parse(value),
+      ),
+  });

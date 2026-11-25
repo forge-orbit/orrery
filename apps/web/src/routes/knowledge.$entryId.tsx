@@ -1,3 +1,4 @@
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -5,14 +6,16 @@ import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { useToast } from "@astryxdesign/core/Toast";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { Pencil } from "lucide-react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
+  deleteKnowledgeEntry,
   issuesQuery,
   MentionMarkdown,
   knowledgeEntriesQuery,
   knowledgeEntryQuery,
+  knowledgeTrashQuery,
   projectActivityQuery,
   projectQuery,
   ResourceLoadError,
@@ -39,8 +42,48 @@ function KnowledgePage() {
   const { data: projectIssues = [] } = useQuery(issuesQuery(entry.projectId));
   const queryClient = useQueryClient();
   const toast = useToast();
+  const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
+  const [confirmTrashOpen, setConfirmTrashOpen] = useState(false);
+  const [trashing, setTrashing] = useState(false);
   const canContribute = project.accessLevel !== "read";
+
+  async function onDelete() {
+    if (trashing) return;
+    setTrashing(true);
+    try {
+      await deleteKnowledgeEntry(entry.id);
+      setConfirmTrashOpen(false);
+      toast({ body: "Moved the knowledge entry to Trash." });
+      // Leave the entry route before dropping its cached query: while this page
+      // is mounted, an invalidation would refetch the now-trashed entry.
+      await navigate({
+        to: "/projects/$projectId",
+        params: { projectId: entry.projectId },
+        search: { tab: "knowledge" },
+      });
+      queryClient.removeQueries({ queryKey: knowledgeEntryQuery(entry.id).queryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: knowledgeEntriesQuery(entry.projectId).queryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: knowledgeTrashQuery(entry.projectId).queryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: projectActivityQuery(entry.projectId).queryKey,
+        }),
+      ]);
+    } catch (cause) {
+      setConfirmTrashOpen(false);
+      toast({
+        body: cause instanceof Error ? cause.message : "Could not move the entry to trash.",
+        type: "error",
+      });
+    } finally {
+      setTrashing(false);
+    }
+  }
 
   return (
     <Stack gap={5} maxWidth="56rem" width="100%">
@@ -68,16 +111,29 @@ function KnowledgePage() {
           </>
         }
         actions={
-          canContribute && !isEditing ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              label="Edit"
-              icon={<Icon icon={Pencil} />}
-              data-knowledge-edit=""
-              onClick={() => setIsEditing(true)}
-            />
+          canContribute ? (
+            <>
+              {!isEditing && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  label="Edit"
+                  icon={<Icon icon={Pencil} />}
+                  data-knowledge-edit=""
+                  onClick={() => setIsEditing(true)}
+                />
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                label="Move to Trash"
+                icon={<Icon icon={Trash2} />}
+                data-knowledge-trash=""
+                onClick={() => setConfirmTrashOpen(true)}
+              />
+            </>
           ) : undefined
         }
       />
@@ -149,6 +205,19 @@ function KnowledgePage() {
             </MentionMarkdown>
           </Stack>
         </Section>
+      )}
+
+      {canContribute && (
+        <AlertDialog
+          isOpen={confirmTrashOpen}
+          onOpenChange={setConfirmTrashOpen}
+          title={`Move "${entry.title}" to Trash?`}
+          description="Trashed knowledge entries stay recoverable from project Trash for 30 days."
+          actionLabel="Move to Trash"
+          actionVariant="destructive"
+          isActionLoading={trashing}
+          onAction={() => void onDelete()}
+        />
       )}
     </Stack>
   );

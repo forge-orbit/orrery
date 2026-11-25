@@ -120,6 +120,8 @@ export const ProjectActivityType = z
     "issue_restored",
     "knowledge_created",
     "knowledge_edited",
+    "knowledge_deleted",
+    "knowledge_restored",
   ])
   .meta({ id: "ProjectActivityType" });
 export type ProjectActivityType = z.infer<typeof ProjectActivityType>;
