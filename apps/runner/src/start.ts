@@ -6,7 +6,7 @@ import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
-import { SlotPool } from "./slots.ts";
+import { SlotPool, type SlotController } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
 export interface StartOptions {
@@ -23,6 +23,8 @@ export interface StartOptions {
   signal?: AbortSignal | undefined;
   write?: ((line: string) => void) | undefined;
   supervision?: SupervisionConfig | undefined;
+  /** Test/observability seam: called as soon as a dispatch controller exists. */
+  onController?: ((controller: SlotController) => void) | undefined;
   /** Opt-in autonomous pickup from the bound project's ready queue. */
   autoClaim?: boolean | undefined;
   autoClaimFilter?: ReadyWorkFilter | undefined;
@@ -203,6 +205,7 @@ export async function start(options: StartOptions): Promise<void> {
               pool,
               signal: controller.signal,
               write,
+              onController: options.onController,
             });
             pending.add(running);
             void running.finally(() => pending.delete(running));
@@ -230,9 +233,20 @@ export async function start(options: StartOptions): Promise<void> {
           replayed.add(command.seq);
           continue;
         }
-        // input_resolved resumes belong to the parked-session layer; acknowledge
-        // the durable command so the outbox does not replay it forever.
-        write(`Input resolved for ${command.dispatchId} (${command.payload.resolution}).`);
+        // Wake a parked slot even when every slot is taken by a queued
+        // `dispatch`: this branch never acquires a slot and is never pinned by
+        // `blockedSeq`, so an answer cannot be head-of-line blocked.
+        const parked = pool.controllerFor(command.dispatchAttemptId);
+        if (parked === undefined) {
+          write(
+            `Input resolved for ${command.dispatchId} (${command.payload.resolution}); no live slot to wake.`,
+          );
+        } else {
+          write(
+            `Input resolved for ${command.dispatchId} (${command.payload.resolution}); waking parked slot.`,
+          );
+          parked.requestResumeInput(command.payload);
+        }
         replayed.add(command.seq);
       }
 

@@ -7,7 +7,6 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
-import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -17,12 +16,12 @@ import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import type { WorkSession } from "@orrery/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Square } from "lucide-react";
+import { ArrowLeft, Square, Terminal } from "lucide-react";
 import { useState } from "react";
 import { TextField } from "../../lib/fields.tsx";
-import { Link } from "../../lib/Link.tsx";
 import {
   chunkPath,
+  coalesceAcpChunks,
   defaultOpenFor,
   extractChangedFiles,
   extractDiagnostics,
@@ -33,10 +32,12 @@ import {
   telemetryText,
   type StudioFilter,
 } from "./stream.ts";
+import { issueQuestionsQuery } from "../inbox/index.ts";
 import { requestStop } from "../work-sessions/index.ts";
 import { sessionsQuery } from "../work-sessions/index.ts";
 import { workspaceRunsQuery } from "../runs/index.ts";
 import { resolveUncertainDispatch } from "./commands.ts";
+import { NeedsInputComposer, PausedNeedsInput } from "./NeedsInput.tsx";
 import { ContextRail, DiagnosticBanners, LeaseCountdown, StreamCard } from "./StudioParts.tsx";
 import {
   issueDispatchesQuery,
@@ -103,6 +104,26 @@ export function LiveStudio({
   const active = session !== undefined ? session.status === "active" : dispatchActive;
   const ended = hasMetadata && !active;
 
+  // Polled question state drives the inline Needs Input composer; the deadline
+  // clock itself lives in a leaf so this root does not re-render every second.
+  // Replays are settled, so there is nothing to poll there.
+  const questions = useQuery({
+    ...issueQuestionsQuery(issueId),
+    enabled: hasIssue,
+    refetchInterval: ended ? false : 4000,
+  });
+  const openQuestion = questions.data?.find((entry) => entry.status === "open");
+  const currentRunId = dispatch?.runId ?? session?.runId;
+  // A historical paused question must not stick around on a new active dispatch.
+  const pausedQuestion =
+    openQuestion === undefined && !active
+      ? questions.data?.find(
+          (entry) =>
+            entry.status === "paused" &&
+            (currentRunId === undefined || entry.runId === currentRunId),
+        )
+      : undefined;
+
   const fleet = useQuery({
     ...workspaceRunnersQuery(workspaceId, !ended),
     enabled: workspaceId !== "",
@@ -138,11 +159,18 @@ export function LiveStudio({
   const primaryStream = useLiveStream ? live : replay;
   const streamError = primaryStream.isError;
   const isStreamLoading = useLiveStream ? live.isPending : replay.isPending;
-  const chunks = mergeStreamChunks(live.data?.chunks ?? [], replay.data?.chunks ?? []);
+  const rawChunks = mergeStreamChunks(live.data?.chunks ?? [], replay.data?.chunks ?? []);
+  const chunks = coalesceAcpChunks(rawChunks);
   const rolledUp = live.data?.rolledUp === true || replay.data?.rolledUp === true;
 
   const filter = asFilter(searchFilter);
   const diagnostics = extractDiagnostics(chunks);
+  // Once a human resolves the dispatch (or the session ends), hide the active
+  // "Runner disconnected — parked until resolved" banner; the event stays in the stream log.
+  const activeDiagnostics =
+    dispatch?.state === "ended"
+      ? diagnostics.filter((entry) => entry.diagnostic.kind !== "runner_disconnected")
+      : diagnostics;
   const plan = extractPlan(chunks);
   const files = extractChangedFiles(chunks);
   const visible = filterChunks(chunks, filter, { showRaw, file: selectedFile });
@@ -229,7 +257,8 @@ export function LiveStudio({
 
   return (
     <Layout
-      height="fill"
+      contentWidth="78rem"
+      padding={6}
       data-live-studio=""
       header={
         <LayoutHeader hasDivider>
@@ -248,65 +277,62 @@ export function LiveStudio({
                 {sessionStatus !== undefined && (
                   <Token label={sessionStatus} size="sm" color={active ? "orange" : "gray"} />
                 )}
+                {openQuestion !== undefined && (
+                  <Token label="Needs input" size="sm" color="orange" data-studio-needs-input="" />
+                )}
+                {pausedQuestion !== undefined && (
+                  <Token label="Paused" size="sm" color="orange" data-studio-paused="" />
+                )}
                 {rolledUp && (
                   <Token label="Archived replay" size="sm" color="blue" data-studio-replay="" />
                 )}
               </Stack>
               {hasIssue ? (
-                <Link to="/issues/$issueId" params={{ issueId }} color="accent" hasUnderline>
-                  Leave Studio · back to issue
-                </Link>
-              ) : (
-                <Link to="/" color="accent" hasUnderline>
-                  Back to workspaces
-                </Link>
-              )}
-            </Stack>
-
-            <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
-              <Token label={host?.displayName ?? "Runner host"} size="sm" color="gray" />
-              <Token
-                label={dispatch?.branchName ?? "branch unknown"}
-                size="sm"
-                color="gray"
-                data-studio-branch=""
-              />
-              <Token
-                label={dispatch?.dirtyWorktree === true ? "dirty worktree" : "clean worktree"}
-                size="sm"
-                color={dispatch?.dirtyWorktree === true ? "orange" : "gray"}
-              />
-              {active && session !== null && session !== undefined && (
-                <LeaseCountdown leaseExpiresAt={session.leaseExpiresAt} enabled={active} />
-              )}
-              <Text type="supporting" color="secondary">
-                {run?.agentName ?? "Agent"} · {run?.model ?? "model unknown"} · {telemetry.tokens}{" "}
-                tokens · {telemetry.cost}
-              </Text>
-            </Stack>
-
-            <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" vAlign="center">
-              {isOwner ? (
-                <ToggleButton
-                  label="Raw output"
-                  isPressed={showRaw}
-                  onPressedChange={setShowRaw}
+                <Button
+                  type="button"
                   size="sm"
-                  data-raw-toggle=""
-                >
-                  Raw output
-                </ToggleButton>
-              ) : fleet.isPending && workspaceId !== "" ? (
-                <Text type="supporting" color="secondary">
-                  Checking Runner host access…
-                </Text>
+                  variant="secondary"
+                  icon={<Icon icon={ArrowLeft} />}
+                  label="Back to issue"
+                  onClick={() => void navigate({ to: "/issues/$issueId", params: { issueId } })}
+                />
               ) : (
-                <Text type="supporting" color="secondary" data-raw-restricted="">
-                  Raw output is restricted to the Runner host owner.
-                </Text>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  icon={<Icon icon={ArrowLeft} />}
+                  label="Back to workspaces"
+                  onClick={() => void navigate({ to: "/" })}
+                />
               )}
+            </Stack>
+
+            <Stack direction="horizontal" gap={3} wrap="wrap" justify="between" vAlign="end">
+              <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
+                <Token label={host?.displayName ?? "Runner host"} size="sm" color="gray" />
+                <Token
+                  label={dispatch?.branchName ?? "branch unknown"}
+                  size="sm"
+                  color="gray"
+                  data-studio-branch=""
+                />
+                <Token
+                  label={dispatch?.dirtyWorktree === true ? "dirty worktree" : "clean worktree"}
+                  size="sm"
+                  color={dispatch?.dirtyWorktree === true ? "orange" : "gray"}
+                />
+                {active && session !== null && session !== undefined && (
+                  <LeaseCountdown leaseExpiresAt={session.leaseExpiresAt} enabled={active} />
+                )}
+                <Text type="supporting" color="secondary">
+                  {run?.agentName ?? "Agent"} · {run?.model ?? "model unknown"} · {telemetry.tokens}{" "}
+                  tokens · {telemetry.cost}
+                </Text>
+              </Stack>
+
               {active && session !== null && session !== undefined && (
-                <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
+                <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="end">
                   <TextField
                     label="Stop reason (optional)"
                     id={`studio-stop-reason-${dispatchId}`}
@@ -362,9 +388,21 @@ export function LiveStudio({
         </LayoutHeader>
       }
       content={
-        <LayoutContent isScrollable padding={4}>
-          <Stack gap={3}>
-            <DiagnosticBanners entries={diagnostics} />
+        <LayoutContent isScrollable>
+          <Stack gap={4}>
+            <DiagnosticBanners entries={activeDiagnostics} />
+            {openQuestion !== undefined && (
+              <NeedsInputComposer question={openQuestion} issueId={issueId} />
+            )}
+            {pausedQuestion !== undefined && (
+              <PausedNeedsInput
+                question={pausedQuestion}
+                issueId={issueId}
+                runnerId={runnerId}
+                workspaceId={workspaceId}
+                isOwner={isOwner}
+              />
+            )}
             {streamError && (
               <Banner
                 status="error"
@@ -417,17 +455,40 @@ export function LiveStudio({
                 collapsible={false}
               />
             )}
-            <SegmentedControl
-              label="Stream filter"
-              value={filter}
-              onChange={setFilter}
-              size="sm"
-              data-stream-filter=""
-            >
-              {FILTERS.map((entry) => (
-                <SegmentedControlItem key={entry.value} value={entry.value} label={entry.label} />
-              ))}
-            </SegmentedControl>
+            <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" vAlign="center">
+              <SegmentedControl
+                label="Stream filter"
+                value={filter}
+                onChange={setFilter}
+                size="sm"
+                data-stream-filter=""
+              >
+                {FILTERS.map((entry) => (
+                  <SegmentedControlItem key={entry.value} value={entry.value} label={entry.label} />
+                ))}
+              </SegmentedControl>
+              {isOwner ? (
+                <ToggleButton
+                  label="Raw output"
+                  icon={<Icon icon={Terminal} />}
+                  elevation="low"
+                  isPressed={showRaw}
+                  onPressedChange={setShowRaw}
+                  size="sm"
+                  data-raw-toggle=""
+                >
+                  Raw output
+                </ToggleButton>
+              ) : fleet.isPending && workspaceId !== "" ? (
+                <Text type="supporting" color="secondary">
+                  Checking Runner host access…
+                </Text>
+              ) : (
+                <Text type="supporting" color="secondary" data-raw-restricted="">
+                  Raw output is restricted to the Runner host owner.
+                </Text>
+              )}
+            </Stack>
             {filter === "edits" && selectedFile !== undefined && (
               <Banner
                 status="info"
@@ -485,10 +546,14 @@ export function LiveStudio({
       }
       end={
         isNarrow ? undefined : (
-          <LayoutPanel width={320} hasDivider role="complementary" label="Studio context">
-            <ScrollableArea label="Studio context" axis="block" height="100%">
-              {contextRail}
-            </ScrollableArea>
+          <LayoutPanel
+            width={320}
+            hasDivider
+            isScrollable
+            role="complementary"
+            label="Studio context"
+          >
+            {contextRail}
           </LayoutPanel>
         )
       }

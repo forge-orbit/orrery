@@ -78,11 +78,20 @@ export function computeAckedSeq(
   return ack;
 }
 
+const NOISY_STREAM_EVENT_TYPES = new Set([
+  "available_commands_update",
+  "agent_thought_chunk",
+  "agent_message_chunk",
+  "tool_call_update",
+  "usage_update",
+]);
+
 /** Curated, coalesced timeline entries derived from a batch of raw chunks. */
 export function milestonesFor(chunks: readonly StreamChunk[]): StreamMilestone[] {
   const bySummary = new Map<string, StreamMilestone>();
   for (const chunk of chunks) {
     if (chunk.kind === "raw_output") continue;
+    if (chunk.eventType !== undefined && NOISY_STREAM_EVENT_TYPES.has(chunk.eventType)) continue;
     const summary =
       chunk.summary ?? (chunk.kind === "diagnostic" ? chunk.diagnostic?.message : undefined);
     if (summary === undefined) continue;

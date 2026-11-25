@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadSupervisionConfig } from "./config.ts";
+import type { SlotController } from "./slots.ts";
 import { start } from "./start.ts";
 import { TestOrrery, type TestActivity, type TestSession } from "./test-orrery.ts";
 
@@ -17,6 +18,7 @@ interface Fixture {
   stop: AbortController;
   lines: string[];
   done: Promise<void>;
+  controller?: SlotController | undefined;
 }
 
 interface MarkerEvent {
@@ -31,6 +33,7 @@ interface FixtureOptions {
   leaseRenewMs?: number;
   cancelGraceMs?: number;
   sleepMs?: number;
+  onController?: ((controller: SlotController) => void) | undefined;
 }
 
 const stubPath = fileURLToPath(new URL("./stub-acp.ts", import.meta.url));
@@ -125,6 +128,7 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
     signal: stop.signal,
     supervision: config,
     write: (line) => lines.push(line),
+    onController: options.onController,
   });
   const result: Fixture = { root, repo, worktrees, marker, control, stop, lines, done };
   fixtures.push(result);
@@ -364,6 +368,196 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
     );
     expect(attempt).toBeDefined();
     expect(attempt?.lastSeq).toBeGreaterThan(0);
+  });
+
+  it("parks on an open question and resumes the same ACP session after a human answer", async () => {
+    const fixture = await makeFixture({ mode: "needs-input", leaseRenewMs: 40 });
+    fixture.control.enqueueDispatch("TEST-NEEDS-INPUT", "attempt-needs-input");
+    await until(async () => (await events(fixture)).some((item) => item.event === "asked"));
+    const question = fixture.control.questionsFor("TEST-NEEDS-INPUT")[0];
+    expect(question?.status).toBe("open");
+    const renewalsWhileParked = sessions(fixture)[0]?.renewals ?? 0;
+    await until(() => (sessions(fixture)[0]?.renewals ?? 0) > renewalsWhileParked);
+
+    fixture.control.enqueueInputResolved("attempt-needs-input", {
+      questionId: question?.id ?? "",
+      resolution: "answered",
+      answer: "Use the additive migration",
+    });
+    await until(async () => (await events(fixture)).some((item) => item.event === "resumed"));
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    expect(session.stopOutcome).toBe("review");
+    expect(fixture.control.recordedStopCalls()).toEqual(["review"]);
+
+    const recorded = await events(fixture);
+    const turns = recorded.filter(
+      (item) => item.event === "prompt" && typeof item.turn === "number",
+    );
+    expect(turns).toHaveLength(2);
+    expect(str(turns[0]?.cwd)).toBe(str(turns[1]?.cwd));
+    expect(str(turns[1]?.text)).toContain("Use the additive migration");
+  });
+
+  it("resumes a parked session with an authorized fallback_used answer", async () => {
+    const fixture = await makeFixture({ mode: "needs-input" });
+    fixture.control.enqueueDispatch("TEST-FALLBACK", "attempt-fallback");
+    await until(async () => (await events(fixture)).some((item) => item.event === "asked"));
+    const question = fixture.control.questionsFor("TEST-FALLBACK")[0];
+    fixture.control.enqueueInputResolved("attempt-fallback", {
+      questionId: question?.id ?? "",
+      resolution: "fallback_used",
+      answer: question?.proposedFallback ?? "Use the additive migration",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    expect(session.stopOutcome).toBe("review");
+    const resumed = (await events(fixture)).find(
+      (item) => item.event === "prompt" && item.turn === 2,
+    );
+    expect(str(resumed?.text)).toContain("deadline passed");
+    expect(str(resumed?.text)).toContain("Use the additive migration");
+  });
+
+  it("stops renewing, terminates ACP and preserves the worktree on a require_human deadline pause", async () => {
+    const fixture = await makeFixture({
+      mode: "needs-input",
+      leaseRenewMs: 40,
+      cancelGraceMs: 80,
+    });
+    fixture.control.enqueueDispatch("TEST-PAUSED", "attempt-paused");
+    await until(async () => (await events(fixture)).some((item) => item.event === "asked"));
+    const hanging = (await events(fixture)).find((item) => item.event === "asked");
+    const stubPid = Number(hanging?.pid ?? -1);
+    const renewalsBefore = sessions(fixture)[0]?.renewals ?? 0;
+    await until(() => (sessions(fixture)[0]?.renewals ?? 0) > renewalsBefore);
+
+    fixture.control.enqueueCancel("attempt-paused", "question_paused");
+    await until(() => fixture.lines.some((line) => line.includes("question deadline paused")));
+    const linesAfter = sessions(fixture)[0]?.renewals ?? 0;
+    expect(sessions(fixture)[0]?.renewals ?? 0).toBe(linesAfter);
+    expect(sessions(fixture)[0]?.status).toBe("released");
+    expect(fixture.control.recordedStopCalls()).toEqual([]);
+    const activity = activities(fixture).find((item) => item.summary.includes("Worktree"));
+    expect(recordOf(activity?.detail?.worktree)?.preserved).toBe(true);
+    const branch = str(recordOf(activity?.detail?.worktree)?.branch);
+    const worktreeList = spawnSync("git", ["-C", fixture.repo, "worktree", "list", "--porcelain"], {
+      encoding: "utf8",
+    }).stdout;
+    expect(worktreeList).toContain(branch);
+    if (stubPid > 0) await until(() => !alive(stubPid));
+  });
+
+  it("wakes a parked slot even while a dispatch waits for the only slot", async () => {
+    const fixture = await makeFixture({ mode: "needs-input", concurrency: 1 });
+    fixture.control.enqueueDispatch("TEST-HEAD-OF-LINE", "attempt-parked");
+    await until(async () => (await events(fixture)).some((item) => item.event === "asked"));
+    // With maxConcurrency=1 this dispatch cannot get a slot until the parked
+    // one finishes; the input_resolved below must still reach the parked one.
+    // The queued stub runs a normal turn so it can complete once unblocked.
+    process.env.STUB_ACP_MODE = "normal";
+    fixture.control.enqueueDispatch("TEST-QUEUED", "attempt-queued");
+    const question = fixture.control.questionsFor("TEST-HEAD-OF-LINE")[0];
+    fixture.control.enqueueInputResolved("attempt-parked", {
+      questionId: question?.id ?? "",
+      resolution: "answered",
+      answer: "Proceed",
+    });
+    await until(
+      () => sessions(fixture).filter((session) => session.status === "completed").length === 2,
+    );
+    expect((await events(fixture)).some((item) => item.event === "resumed")).toBe(true);
+  });
+
+  it("rejects an oversized permission request without selecting a standing grant", async () => {
+    const fixture = await makeFixture({ mode: "oversized-permission" });
+    fixture.control.enqueueDispatch("TEST-BIG-PERMISSION", "attempt-big-permission");
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    expect(session.stopOutcome).toBe("review");
+    const result = (await events(fixture)).find((item) => item.event === "permission_result");
+    expect(result).toMatchObject({ id: 9100, outcome: "cancelled" });
+    expect(result?.optionId).toBeUndefined();
+  });
+
+  it("does not park when a normal turn only mentions ask_for_input in its text", async () => {
+    const fixture = await makeFixture({ mode: "mentions-input" });
+    fixture.control.enqueueDispatch("TEST-MENTIONS", "attempt-mentions");
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    expect(session.stopOutcome).toBe("review");
+    expect(fixture.control.questionsFor("TEST-MENTIONS")).toHaveLength(0);
+    expect(fixture.lines.some((line) => line.includes("parked the ACP session"))).toBe(false);
+  });
+
+  it("deduplicates a buffered input_resolved and ignores stale question ids", async () => {
+    const fixture = await makeFixture({ mode: "needs-input" });
+    fixture.control.enqueueDispatch("TEST-DEDUP", "attempt-dedup");
+    await until(async () => (await events(fixture)).some((item) => item.event === "asked"));
+    const question = fixture.control.questionsFor("TEST-DEDUP")[0];
+    for (let index = 0; index < 3; index += 1) {
+      fixture.control.enqueueInputResolved("attempt-dedup", {
+        questionId: question?.id ?? "",
+        resolution: "answered",
+        answer: "Only once",
+      });
+    }
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    const prompts = (await events(fixture)).filter(
+      (item) => item.event === "prompt" && typeof item.turn === "number",
+    );
+    expect(prompts).toHaveLength(2);
+    expect(str(prompts[1]?.text)).toContain("Only once");
+  });
+
+  it("does not lose an input_resolved that arrives before the parked check", async () => {
+    const fixture = await makeFixture({ mode: "needs-input" });
+    fixture.control.enqueueDispatch("TEST-EARLY-ANSWER", "attempt-early-answer");
+    fixture.control.enqueueInputResolved("attempt-early-answer", {
+      questionId: "question-queued-before-park",
+      resolution: "answered",
+      answer: "Queued before the question was recorded",
+    });
+    const session = await settledSession(fixture).catch(async (error) => {
+      throw new Error(
+        `${String(error)} lines=${fixture.lines.join(" | ")} events=${JSON.stringify(await events(fixture))}`,
+      );
+    });
+    expect(session.status).toBe("completed");
+    expect(session.stopOutcome).toBe("review");
+    const resumed = (await events(fixture)).find(
+      (item) => item.event === "prompt" && item.turn === 2,
+    );
+    expect(str(resumed?.text)).toContain("Queued before the question was recorded");
+  });
+
+  it("preserves a clean worktree when a deadline pause follows a racing 401 cancel", async () => {
+    let controller: SlotController | undefined;
+    const fixture = await makeFixture({
+      mode: "needs-input",
+      cancelGraceMs: 80,
+      onController: (attached) => {
+        controller = attached;
+      },
+    });
+    fixture.control.enqueueDispatch("TEST-PAUSE-AFTER-401", "attempt-pause-after-401");
+    await until(async () => (await events(fixture)).some((item) => item.event === "asked"));
+    expect(controller).toBeDefined();
+    controller?.requestCancel("revoked");
+    controller?.requestCancel("question_paused");
+    await until(() => fixture.lines.some((line) => line.includes("question deadline paused")));
+    const activity = activities(fixture).find((item) =>
+      item.summary.includes("Worktree preserved"),
+    );
+    expect(activity?.summary).toContain("paused=true");
+    expect(recordOf(activity?.detail?.worktree)?.preserved).toBe(true);
+    const branch = str(recordOf(activity?.detail?.worktree)?.branch);
+    const worktreeList = spawnSync("git", ["-C", fixture.repo, "worktree", "list", "--porcelain"], {
+      encoding: "utf8",
+    }).stdout;
+    expect(worktreeList).toContain(branch);
+    expect(fixture.control.recordedStopCalls()).toEqual([]);
   });
 
   it("drains a disconnected slot before shutdown completes", async () => {

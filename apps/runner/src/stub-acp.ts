@@ -40,7 +40,33 @@ const recordOf = (value: unknown): Record<string, unknown> | undefined =>
 let cancelled = false;
 let sessionId = "stub-session-1";
 let promptId: unknown;
+let promptCount = 0;
+let lastPromptText = "";
 let grandchild: ReturnType<typeof spawn> | undefined;
+
+async function callMcp(name: string, args: Record<string, unknown>): Promise<number> {
+  const url = process.env.ORRERY_MCP_URL;
+  const token = process.env.ORRERY_DISPATCH_TOKEN;
+  if (url === undefined || token === undefined) return -1;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 5100 + promptCount,
+      method: "tools/call",
+      params: { name, arguments: args },
+    }),
+  });
+  // Streamable HTTP can send headers before the tool transaction commits.
+  // Drain the body so the question is visible before the turn ends.
+  await response.text();
+  return response.status;
+}
 
 if (mode === "ignore-term") {
   process.on("SIGTERM", () => record({ event: "sigterm" }));
@@ -99,6 +125,88 @@ async function onPrompt(id: unknown): Promise<void> {
         cwd: process.cwd(),
       },
     );
+  }
+  if (mode === "mentions-input") {
+    // Text that merely mentions the tool name must never make the Runner park:
+    // only a real question in Orrery does.
+    send({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "I considered ask_for_input but decided to finish the turn instead.",
+          },
+        },
+      },
+    });
+    reply(id, { stopReason: "end_turn" });
+    record({ event: "end_turn" });
+    await wait(20);
+    process.exit(0);
+  }
+  if (mode === "needs-input") {
+    promptCount += 1;
+    record({ event: "prompt", cwd: process.cwd(), turn: promptCount, text: lastPromptText });
+    if (promptCount === 1) {
+      const status = await callMcp("ask_for_input", {
+        issueId: process.env.ORRERY_ISSUE_ID,
+        runId: process.env.ORRERY_RUN_ID,
+        question: "Which migration strategy should the agent use?",
+        proposedFallback: "Use the additive migration",
+      });
+      send({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            title: "ask_for_input",
+            status: "completed",
+          },
+        },
+      });
+      reply(id, { stopReason: "end_turn" });
+      record({ event: "asked", status, pid: process.pid });
+      return;
+    }
+    // The follow-up arrives on this same session and worktree after the runner
+    // woke from its park; finish the turn so supervision ends as review.
+    send({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "resumed" },
+        },
+      },
+    });
+    reply(id, { stopReason: "end_turn" });
+    record({ event: "resumed" });
+    await wait(20);
+    process.exit(0);
+  }
+  if (mode === "oversized-permission") {
+    send({
+      jsonrpc: "2.0",
+      id: 9100,
+      method: "session/request_permission",
+      params: {
+        sessionId,
+        toolCall: { toolName: "stub.edit", arguments: { blob: "x".repeat(40 * 1024) } },
+        options: [
+          { optionId: "always", name: "Always allow", kind: "allow_always" },
+          { optionId: "once", name: "Allow", kind: "allow_once" },
+        ],
+      },
+    });
+    return;
   }
   if (mode === "self-stop") {
     const url = process.env.ORRERY_MCP_URL;
@@ -178,6 +286,15 @@ function handle(message: Record<string, unknown>): void {
     return;
   }
   if (method === "session/prompt") {
+    const items = recordOf(message.params)?.prompt;
+    lastPromptText = Array.isArray(items)
+      ? items
+          .map((item) => {
+            const field = recordOf(item);
+            return typeof field?.text === "string" ? field.text : "";
+          })
+          .join("\n")
+      : "";
     void onPrompt(id);
     return;
   }
@@ -198,7 +315,7 @@ function handle(message: Record<string, unknown>): void {
     const value = typeof outcome?.outcome === "string" ? outcome.outcome : "unknown";
     const optionId = typeof outcome?.optionId === "string" ? outcome.optionId : undefined;
     record({ event: "permission_result", id, outcome: value, optionId });
-    if (id === 9003) {
+    if (id === 9003 || id === 9100) {
       reply(promptId, { stopReason: "end_turn" });
       record({ event: "end_turn" });
       void wait(20).then(() => process.exit(0));

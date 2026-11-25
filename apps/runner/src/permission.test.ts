@@ -135,6 +135,60 @@ describe("local worktree permission policy", () => {
     });
   });
 
+  it("never selects a standing allow_always grant, even when it is offered first", async () => {
+    const root = await worktree();
+    const allowed = decision({ path: join(root, "notes.txt") }, root);
+    const standingFirst = {
+      options: [
+        { optionId: "always", name: "Always allow", kind: "allow_always" },
+        { optionId: "once", name: "Allow", kind: "allow_once" },
+      ],
+    };
+    expect(respondToPermission(standingFirst, allowed)).toMatchObject({
+      outcome: { outcome: "selected", optionId: "once" },
+    });
+    const onlyStanding = {
+      options: [
+        { optionId: "always", name: "Always allow", kind: "allow_always" },
+        { optionId: "reject", name: "Reject", kind: "reject_once" },
+      ],
+    };
+    expect(respondToPermission(onlyStanding, allowed)).toEqual({
+      ...allowed,
+      outcome: { outcome: "cancelled" },
+    });
+    // A name without a kind that says "once" is accepted; "always" is not.
+    expect(
+      respondToPermission({ options: [{ optionId: "named", name: "Allow this once" }] }, allowed)
+        .outcome,
+    ).toEqual({ outcome: "selected", optionId: "named" });
+    expect(
+      respondToPermission({ options: [{ optionId: "named", name: "Always allow" }] }, allowed)
+        .outcome,
+    ).toEqual({ outcome: "cancelled" });
+  });
+
+  it("does not throw on non-string permission option fields from an untrusted agent", async () => {
+    const root = await worktree();
+    const allowed = decision({ path: join(root, "notes.txt") }, root);
+    const hostile = {
+      options: [
+        { optionId: 42, name: { value: "Allow" }, kind: "allow_once" },
+        { optionId: null, name: "Allow once", kind: { value: "allow_once" } },
+        { optionId: "once", name: "Allow once", kind: "allow_once" },
+      ],
+    };
+    expect(respondToPermission(hostile, allowed)).toMatchObject({
+      outcome: { outcome: "selected", optionId: "once" },
+    });
+    expect(
+      respondToPermission(
+        { options: [{ optionId: 7, name: "Allow", kind: "allow_once" }] },
+        allowed,
+      ).outcome,
+    ).toEqual({ outcome: "cancelled" });
+  });
+
   it("creates a nested directory inside the worktree safely", async () => {
     const root = await worktree();
     expect(confinedPath(join(root, "new", "deep", "file.txt"), root)).toBe(

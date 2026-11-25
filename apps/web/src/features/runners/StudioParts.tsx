@@ -15,6 +15,7 @@ import {
   chunkDetail,
   chunkDiff,
   chunkPath,
+  chunkStatus,
   commandSummary,
   diagnosticView,
   formatCountdown,
@@ -91,6 +92,7 @@ export function DiagnosticBanners({ entries }: { entries: readonly DiagnosticEnt
 
 function cardLabel(chunk: StreamChunk): string {
   const category = categorizeChunk(chunk);
+  if (chunk.eventType === "agent_message") return "Assistant";
   switch (category) {
     case "edit":
       return `Edit · ${chunkPath(chunk) ?? "worktree file"}`;
@@ -109,6 +111,25 @@ function cardLabel(chunk: StreamChunk): string {
   }
 }
 
+function cardBadge(chunk: StreamChunk): {
+  label: string;
+  color: "gray" | "green" | "orange" | "red" | "blue";
+} {
+  const category = categorizeChunk(chunk);
+  if (chunk.eventType === "agent_message") return { label: "assistant", color: "blue" };
+  if (category === "edit") return { label: "edit", color: "green" };
+  if (category === "raw") return { label: "owner only", color: "orange" };
+  if (category === "diagnostic") return { label: "diagnostic", color: "red" };
+  if (category === "command") {
+    const status = chunkStatus(chunk);
+    if (status === "passed") return { label: "passed", color: "green" };
+    if (status === "failed") return { label: "failed", color: "red" };
+    if (status === "running") return { label: "running", color: "orange" };
+    return { label: "command", color: "gray" };
+  }
+  return { label: category, color: "gray" };
+}
+
 /** A progressive-disclosure stream card; diffs render as collapsible unified diffs. */
 export function StreamCard({
   chunk,
@@ -122,18 +143,20 @@ export function StreamCard({
   highlighted: boolean;
 }) {
   const category = categorizeChunk(chunk);
+  const badge = cardBadge(chunk);
+  const detail = chunkDetail(chunk);
   const trigger = (
     <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+      <Token label={badge.label} size="sm" color={badge.color} />
       <Text type="body" weight="semibold">
         {cardLabel(chunk)}
       </Text>
-      <Token label={category} size="sm" color="gray" />
     </Stack>
   );
 
   return (
     <Card
-      padding={2}
+      padding={3}
       variant={highlighted ? "orange" : "default"}
       data-stream-card=""
       data-stream-seq={String(chunk.seq)}
@@ -157,9 +180,17 @@ export function StreamCard({
               size="sm"
               maxHeight={420}
             />
+          ) : category === "command" || category === "raw" ? (
+            <CodeBlock
+              code={detail}
+              language="plaintext"
+              container="section"
+              size="sm"
+              maxHeight={320}
+            />
           ) : (
-            <Text type="supporting" color="secondary">
-              {chunkDetail(chunk)}
+            <Text type="body" color={category === "thought" ? "secondary" : "primary"}>
+              {detail}
             </Text>
           )}
         </Stack>

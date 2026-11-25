@@ -95,6 +95,7 @@ export function chunkStatus(chunk: StreamChunk): ChunkStatus {
 export function defaultOpenFor(chunk: StreamChunk): boolean {
   const category = categorizeChunk(chunk);
   if (category === "diagnostic" || category === "raw") return true;
+  if (chunk.eventType === "agent_message") return true;
   if (category !== "command") return false;
   return chunkStatus(chunk) === "running" || chunkStatus(chunk) === "failed";
 }
@@ -331,6 +332,179 @@ export function mergeStreamChunks(...groups: readonly (readonly StreamChunk[])[]
     for (const chunk of group) bySeq.set(chunk.seq, chunk);
   }
   return [...bySeq.values()].toSorted((a, b) => a.seq - b.seq);
+}
+
+function acpUpdateOf(chunk: StreamChunk): Record<string, unknown> | undefined {
+  if (chunk.kind !== "event") return undefined;
+  const params = asRecord(asRecord(chunk.data).params);
+  const update = asRecord(params.update);
+  return typeof update.sessionUpdate === "string" ? update : undefined;
+}
+
+function previewLine(text: string, fallback: string): string {
+  const line = text.trim().split(/\r?\n/, 1)[0]?.trim() ?? "";
+  if (line === "") return fallback;
+  return line.length > 88 ? `${line.slice(0, 85)}…` : line;
+}
+
+function formatToolContent(content: unknown): {
+  text: string;
+  diff?: { path: string; diff: string };
+} {
+  if (!Array.isArray(content)) return { text: "" };
+  const parts: string[] = [];
+  let diff: { path: string; diff: string } | undefined;
+  for (const raw of content) {
+    const item = asRecord(raw);
+    if (item.type === "diff" && typeof item.path === "string") {
+      const oldText = typeof item.oldText === "string" ? item.oldText : "";
+      const newText = typeof item.newText === "string" ? item.newText : "";
+      const lines = [
+        `--- a/${item.path}`,
+        `+++ b/${item.path}`,
+        ...oldText.split("\n").map((line) => `-${line}`),
+        ...newText.split("\n").map((line) => `+${line}`),
+      ];
+      diff = { path: item.path, diff: lines.join("\n") };
+    } else if (item.type === "content") {
+      const inner = asRecord(item.content);
+      if (typeof inner.text === "string" && inner.text !== "") parts.push(inner.text);
+    } else if (typeof item.text === "string" && item.text !== "") {
+      parts.push(item.text);
+    }
+  }
+  return { text: parts.join("\n"), ...(diff === undefined ? {} : { diff }) };
+}
+
+/**
+ * Coalesce raw ACP v1 `session/update` token/status chunks into readable cards
+ * (messages, thoughts, tool calls, diffs, and plan updates) while passing
+ * already-structured non-ACP chunks through untouched.
+ */
+export function coalesceAcpChunks(chunks: readonly StreamChunk[]): StreamChunk[] {
+  const result: StreamChunk[] = [];
+  const messageIndex = new Map<string, number>();
+  const toolIndex = new Map<string, number>();
+
+  for (const chunk of chunks) {
+    const update = acpUpdateOf(chunk);
+    if (update === undefined) {
+      result.push(chunk);
+      continue;
+    }
+    const kind = String(update.sessionUpdate);
+    if (kind === "available_commands_update") continue;
+
+    if (kind === "agent_thought_chunk" || kind === "agent_message_chunk") {
+      const text = readText(asRecord(update.content), ["text"]) ?? "";
+      if (text === "") continue;
+      const isThought = kind === "agent_thought_chunk";
+      const messageId =
+        typeof update.messageId === "string" && update.messageId !== ""
+          ? `${kind}:${update.messageId}`
+          : `${kind}:${chunk.seq}`;
+      const existing = messageIndex.get(messageId);
+      if (existing !== undefined) {
+        const prev = result[existing];
+        if (prev !== undefined) {
+          const prevText = readText(asRecord(prev.data), ["text"]) ?? "";
+          const combined = `${prevText}${text}`;
+          result[existing] = {
+            ...prev,
+            summary: previewLine(combined, isThought ? "Thinking…" : "Assistant"),
+            data: { text: combined },
+          };
+          continue;
+        }
+      }
+      messageIndex.set(messageId, result.length);
+      result.push({
+        ...chunk,
+        eventType: isThought ? "thought" : "agent_message",
+        summary: previewLine(text, isThought ? "Thinking…" : "Assistant"),
+        data: { text },
+      });
+      continue;
+    }
+
+    if (kind === "tool_call" || kind === "tool_call_update") {
+      const toolCallId =
+        typeof update.toolCallId === "string" && update.toolCallId !== ""
+          ? update.toolCallId
+          : String(chunk.seq);
+      const existing = toolIndex.get(toolCallId);
+      const prev = existing === undefined ? undefined : result[existing];
+      const prevData = prev === undefined ? {} : asRecord(prev.data);
+      const title =
+        readText(update, ["title", "name"]) ??
+        (prev !== undefined ? prev.summary : undefined) ??
+        "tool call";
+      const status =
+        readText(update, ["status"]) ?? readText(prevData, ["status"]) ?? "in_progress";
+      const rawInput =
+        update.rawInput !== undefined && Object.keys(asRecord(update.rawInput)).length > 0
+          ? update.rawInput
+          : prevData.rawInput;
+      const formatted = formatToolContent(update.content);
+      const inputStr = rawInput !== undefined ? JSON.stringify(rawInput, null, 2) : "";
+      const prevOut = readText(prevData, ["output"]) ?? "";
+      const output = [inputStr, formatted.text || prevOut]
+        .filter((part) => part !== "")
+        .join("\n\n");
+
+      const next: StreamChunk =
+        formatted.diff !== undefined
+          ? {
+              ...(prev ?? chunk),
+              eventType: "file_edit",
+              summary: formatted.diff.path,
+              data: {
+                path: formatted.diff.path,
+                diff: formatted.diff.diff,
+                status,
+              },
+            }
+          : {
+              ...(prev ?? chunk),
+              eventType: "tool_call",
+              summary: title,
+              data: {
+                status,
+                ...(rawInput === undefined ? {} : { rawInput }),
+                output: output || title,
+              },
+            };
+
+      if (existing !== undefined) {
+        result[existing] = next;
+      } else {
+        toolIndex.set(toolCallId, result.length);
+        result.push(next);
+      }
+      continue;
+    }
+
+    if (kind === "plan" && Array.isArray(update.entries)) {
+      const items = update.entries.map((entry) => {
+        const rec = asRecord(entry);
+        return {
+          label: readText(rec, ["content", "label", "title"]) ?? "",
+          status: readText(rec, ["status"]) ?? "pending",
+        };
+      });
+      result.push({
+        ...chunk,
+        eventType: "plan",
+        summary: `Plan (${items.length} steps)`,
+        data: { items },
+      });
+      continue;
+    }
+
+    result.push(chunk);
+  }
+
+  return result;
 }
 
 /** Fold the next cursor page into the accumulated stream without a React effect. */
