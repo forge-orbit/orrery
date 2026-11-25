@@ -512,7 +512,9 @@ const readDispatch = async (tx: DbTransaction, dispatchId: string) => {
 /**
  * A dispatch whose work session is no longer live is no longer "Running" in
  * the UI, even if no explicit end command arrived: derive the settled state
- * from the session in database time and persist it.
+ * from the session in database time and persist it. Also settle any pending
+ * dispatch whose outbox command has expired in database time so it never
+ * permanently blocks auto-claim or leaks a concurrency slot.
  */
 async function endDispatchesWithoutLiveSession(
   tx: DbTransaction,
@@ -526,8 +528,16 @@ async function endDispatchesWithoutLiveSession(
         where,
         // An uncertain attempt is NEVER settled by a lapsed lease: only an
         // explicit human resolution (or a live-lease reconnect) may clear it.
-        eq(runnerDispatches.state, "active"),
-        sql`not exists (select 1 from ${workSessions} ws where ws.id = ${runnerDispatches.workSessionId} and ws.status = 'active' and ws.lease_expires_at > statement_timestamp())`,
+        or(
+          and(
+            eq(runnerDispatches.state, "active"),
+            sql`not exists (select 1 from ${workSessions} ws where ws.id = ${runnerDispatches.workSessionId} and ws.status = 'active' and ws.lease_expires_at > statement_timestamp())`,
+          ),
+          and(
+            eq(runnerDispatches.state, "pending"),
+            sql`exists (select 1 from ${runnerCommands} rc where rc.dispatch_id = ${runnerDispatches.id} and rc.kind = 'dispatch' and rc.expires_at <= statement_timestamp())`,
+          ),
+        ),
       ),
     );
 }
@@ -1614,6 +1624,7 @@ async function assertIssueStillDispatchable(
     .limit(1);
   if (blocker !== undefined) throw new RunnersError("issue_not_claimable");
 
+  await endDispatchesWithoutLiveSession(tx, eq(runnerDispatches.issueId, issueId));
   const [dispatch] = await tx
     .select({ id: runnerDispatches.id })
     .from(runnerDispatches)
@@ -2357,6 +2368,18 @@ export function createRunnersService(deps: RunnersDeps) {
           )
           .limit(1);
         if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
+        await endDispatchesWithoutLiveSession(tx, eq(runnerDispatches.issueId, issueId));
+        const [inFlight] = await tx
+          .select({ id: runnerDispatches.id })
+          .from(runnerDispatches)
+          .where(
+            and(
+              eq(runnerDispatches.issueId, issueId),
+              inArray(runnerDispatches.state, ["pending", "active"]),
+            ),
+          )
+          .limit(1);
+        if (inFlight !== undefined) throw new RunnersError("issue_not_claimable");
         // Validate with Orrery's claim rules, without mutating issues.assignee.
         await assertIssueDispatchable(tx, issueId, agentId);
 
@@ -2505,6 +2528,7 @@ export function createRunnersService(deps: RunnersDeps) {
           "contribute",
         );
         if (runner.agentId !== scannedAgentId) return { dispatch: null };
+        await endDispatchesWithoutLiveSession(tx, eq(runnerDispatches.runnerId, runnerId));
 
         const [active] = await tx
           .select({ count: sql<number>`count(*)::int` })
@@ -2714,228 +2738,246 @@ export function createRunnersService(deps: RunnersDeps) {
       runnerId: string,
       dispatchId: string,
     ): Promise<DispatchAcceptance> {
-      return db.transaction(async (tx) => {
-        const host = await readHostByCredential(tx, credential);
-        const [joined] = await tx
-          .select({
-            runner: runnerFields,
-            hostRevokedAt: runnerHosts.revokedAt,
-            projectName: projects.name,
-          })
-          .from(runners)
-          .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
-          .innerJoin(humans, eq(runnerHosts.humanId, humans.id))
-          .innerJoin(projects, eq(runners.projectId, projects.id))
-          .where(eq(runners.id, runnerId))
-          .limit(1);
-        if (joined === undefined || joined.runner.hostId !== host.host.id) {
-          throw new RunnersError("runner_not_found");
-        }
-        if (joined.runner.revokedAt !== null || joined.hostRevokedAt !== null) {
-          throw new RunnersError("runner_revoked");
-        }
-        if (!(await canSeeWorkspace(tx, joined.runner.workspaceId, host.humanId))) {
-          throw new RunnersError("runner_revoked");
-        }
-        const hostCeiling = await projectAccessCeiling(
-          tx,
-          joined.runner.workspaceId,
-          host.humanId,
-          [joined.runner.projectId],
-        );
-        const hostLevel = hostCeiling.get(joined.runner.projectId);
-        if (!hasAccess(hostLevel, "contribute", projectAccessAtLeast)) {
-          throw new RunnersError("runner_revoked");
-        }
-
-        // Global lock order: issues -> runners -> runner_dispatches. Read the
-        // dispatch's issue without locking, then lock the issue row before the
-        // dispatch row so this path cannot AB-BA against requestStop/inbox/seq.
-        const [peek] = await tx
-          .select({ issueId: runnerDispatches.issueId })
-          .from(runnerDispatches)
-          .where(and(eq(runnerDispatches.id, dispatchId), eq(runnerDispatches.runnerId, runnerId)))
-          .limit(1);
-        if (peek === undefined) throw new RunnersError("dispatch_not_found");
-        await tx
-          .select({ id: issues.id })
-          .from(issues)
-          .where(eq(issues.id, peek.issueId))
-          .limit(1)
-          .for("update");
-        const [dispatch] = await tx
-          .select()
-          .from(runnerDispatches)
-          .where(and(eq(runnerDispatches.id, dispatchId), eq(runnerDispatches.runnerId, runnerId)))
-          .limit(1)
-          .for("update");
-        if (dispatch === undefined) throw new RunnersError("dispatch_not_found");
-        if (dispatch.state !== "pending") {
-          // A redelivered dispatch command (the ack had not committed) must be
-          // idempotent: reuse the existing Run and Work session, never claim a
-          // second one. A fresh fenced token is minted for this same scope.
-          if (
-            dispatch.state === "active" &&
-            dispatch.runId !== null &&
-            dispatch.workSessionId !== null
-          ) {
-            const [existingSession] = await tx
-              .select()
-              .from(workSessions)
-              .where(
-                and(
-                  eq(workSessions.id, dispatch.workSessionId),
-                  eq(workSessions.status, WorkSessionStatus.enum.active),
-                  gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
-                ),
-              )
-              .limit(1);
-            const [existingRun] = await tx
-              .select()
-              .from(runs)
-              .where(eq(runs.id, dispatch.runId))
-              .limit(1);
-            if (existingSession !== undefined && existingRun !== undefined) {
-              const retrySecret = newDispatchToken();
-              await tx.insert(dispatchTokens).values({
-                id: randomUUID(),
-                tokenHash: tokenHash(retrySecret),
-                runnerHostId: joined.runner.hostId,
-                runnerId,
-                dispatchId,
-                dispatchAttemptId: dispatch.dispatchAttemptId,
-                agentId: dispatch.agentId,
-                workspaceId: joined.runner.workspaceId,
-                projectId: joined.runner.projectId,
-                issueId: dispatch.issueId,
-                runId: dispatch.runId,
-                workSessionId: dispatch.workSessionId,
-                createdAt: sql`statement_timestamp()`,
-              });
-              return {
-                dispatch: toDispatch({ ...dispatch, hostId: joined.runner.hostId }),
-                run: toRun(existingRun),
-                session: toSession({
-                  ...existingSession,
-                  effectiveStatus: existingSession.status,
-                }),
-                dispatchToken: retrySecret,
-              };
-            }
-            // An accepted dispatch whose Work session is no longer live (lease
-            // lapsed in DB time) must never be resumed by a redelivered command.
-            throw new RunnersError("issue_not_dispatchable");
+      const outcome = await db.transaction(
+        async (tx): Promise<DispatchAcceptance | { error: "issue_not_dispatchable" }> => {
+          const host = await readHostByCredential(tx, credential);
+          const [joined] = await tx
+            .select({
+              runner: runnerFields,
+              hostRevokedAt: runnerHosts.revokedAt,
+              projectName: projects.name,
+            })
+            .from(runners)
+            .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
+            .innerJoin(humans, eq(runnerHosts.humanId, humans.id))
+            .innerJoin(projects, eq(runners.projectId, projects.id))
+            .where(eq(runners.id, runnerId))
+            .limit(1);
+          if (joined === undefined || joined.runner.hostId !== host.host.id) {
+            throw new RunnersError("runner_not_found");
           }
-          throw new RunnersError("dispatch_not_pending");
-        }
-        const [agent] = await tx
-          .select({ id: agents.id, name: agents.name })
-          .from(agents)
-          .where(and(eq(agents.id, dispatch.agentId), eq(agents.humanId, host.humanId)))
-          .limit(1);
-        if (agent === undefined) throw new RunnersError("agent_not_found");
+          if (joined.runner.revokedAt !== null || joined.hostRevokedAt !== null) {
+            throw new RunnersError("runner_revoked");
+          }
+          if (!(await canSeeWorkspace(tx, joined.runner.workspaceId, host.humanId))) {
+            throw new RunnersError("runner_revoked");
+          }
+          const hostCeiling = await projectAccessCeiling(
+            tx,
+            joined.runner.workspaceId,
+            host.humanId,
+            [joined.runner.projectId],
+          );
+          const hostLevel = hostCeiling.get(joined.runner.projectId);
+          if (!hasAccess(hostLevel, "contribute", projectAccessAtLeast)) {
+            throw new RunnersError("runner_revoked");
+          }
 
-        const harness = joined.runner.capabilities[0] ?? "opencode";
-        const runId = randomUUID();
-        const [insertedRun] = await tx
-          .insert(runs)
-          .values({
-            id: runId,
-            agentId: agent.id,
-            workspaceId: joined.runner.workspaceId,
-            harness,
-            nativeSessionId: dispatch.dispatchAttemptId,
-            createdAt: sql`statement_timestamp()`,
-            updatedAt: sql`statement_timestamp()`,
-          })
-          .onConflictDoNothing()
-          .returning();
-        let runRow = insertedRun;
-        if (runRow === undefined) {
-          const [existing] = await tx
-            .select()
-            .from(runs)
+          // Global lock order: issues -> runners -> runner_dispatches. Read the
+          // dispatch's issue without locking, then lock the issue row before the
+          // dispatch row so this path cannot AB-BA against requestStop/inbox/seq.
+          const [peek] = await tx
+            .select({ issueId: runnerDispatches.issueId })
+            .from(runnerDispatches)
             .where(
-              and(
-                eq(runs.agentId, agent.id),
-                eq(runs.workspaceId, joined.runner.workspaceId),
-                eq(runs.harness, harness),
-                eq(runs.nativeSessionId, dispatch.dispatchAttemptId),
-              ),
+              and(eq(runnerDispatches.id, dispatchId), eq(runnerDispatches.runnerId, runnerId)),
+            )
+            .limit(1);
+          if (peek === undefined) throw new RunnersError("dispatch_not_found");
+          await tx
+            .select({ id: issues.id })
+            .from(issues)
+            .where(eq(issues.id, peek.issueId))
+            .limit(1)
+            .for("update");
+          const [dispatch] = await tx
+            .select()
+            .from(runnerDispatches)
+            .where(
+              and(eq(runnerDispatches.id, dispatchId), eq(runnerDispatches.runnerId, runnerId)),
             )
             .limit(1)
             .for("update");
-          if (existing === undefined) throw new RunnersError("dispatch_not_found");
-          runRow = existing;
-        }
+          if (dispatch === undefined) throw new RunnersError("dispatch_not_found");
+          if (dispatch.state !== "pending") {
+            // A redelivered dispatch command (the ack had not committed) must be
+            // idempotent: reuse the existing Run and Work session, never claim a
+            // second one. A fresh fenced token is minted for this same scope.
+            if (
+              dispatch.state === "active" &&
+              dispatch.runId !== null &&
+              dispatch.workSessionId !== null
+            ) {
+              const [existingSession] = await tx
+                .select()
+                .from(workSessions)
+                .where(
+                  and(
+                    eq(workSessions.id, dispatch.workSessionId),
+                    eq(workSessions.status, WorkSessionStatus.enum.active),
+                    gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+                  ),
+                )
+                .limit(1);
+              const [existingRun] = await tx
+                .select()
+                .from(runs)
+                .where(eq(runs.id, dispatch.runId))
+                .limit(1);
+              if (existingSession !== undefined && existingRun !== undefined) {
+                const retrySecret = newDispatchToken();
+                await tx.insert(dispatchTokens).values({
+                  id: randomUUID(),
+                  tokenHash: tokenHash(retrySecret),
+                  runnerHostId: joined.runner.hostId,
+                  runnerId,
+                  dispatchId,
+                  dispatchAttemptId: dispatch.dispatchAttemptId,
+                  agentId: dispatch.agentId,
+                  workspaceId: joined.runner.workspaceId,
+                  projectId: joined.runner.projectId,
+                  issueId: dispatch.issueId,
+                  runId: dispatch.runId,
+                  workSessionId: dispatch.workSessionId,
+                  createdAt: sql`statement_timestamp()`,
+                });
+                return {
+                  dispatch: toDispatch({ ...dispatch, hostId: joined.runner.hostId }),
+                  run: toRun(existingRun),
+                  session: toSession({
+                    ...existingSession,
+                    effectiveStatus: existingSession.status,
+                  }),
+                  dispatchToken: retrySecret,
+                };
+              }
+              // An accepted dispatch whose Work session is no longer live (lease
+              // lapsed in DB time) must never be resumed by a redelivered command.
+              throw new RunnersError("issue_not_dispatchable");
+            }
+            throw new RunnersError("dispatch_not_pending");
+          }
+          const [agent] = await tx
+            .select({ id: agents.id, name: agents.name })
+            .from(agents)
+            .where(and(eq(agents.id, dispatch.agentId), eq(agents.humanId, host.humanId)))
+            .limit(1);
+          if (agent === undefined) throw new RunnersError("agent_not_found");
 
-        const secret = newDispatchToken();
-        const tokenId = randomUUID();
-        // Claim first so the scope carries the real work-session id, never a
-        // placeholder. The claim uses Orrery's own rules inside this transaction.
-        const claimIdentity: AgentIdentity = {
-          agentId: agent.id,
-          name: agent.name,
-          humanId: host.humanId,
-          keyId: tokenId,
-          workspaceId: joined.runner.workspaceId,
-          validity: "never",
-          projects: [
-            {
-              projectId: joined.runner.projectId,
-              projectName: joined.projectName,
-              level: hostLevel!,
-            },
-          ],
-        };
-        let session: WorkSession;
-        try {
-          session = await claimWorkSession(tx, claimIdentity, {
+          const harness = joined.runner.capabilities[0] ?? "opencode";
+          const runId = randomUUID();
+          const [insertedRun] = await tx
+            .insert(runs)
+            .values({
+              id: runId,
+              agentId: agent.id,
+              workspaceId: joined.runner.workspaceId,
+              harness,
+              nativeSessionId: dispatch.dispatchAttemptId,
+              createdAt: sql`statement_timestamp()`,
+              updatedAt: sql`statement_timestamp()`,
+            })
+            .onConflictDoNothing()
+            .returning();
+          let runRow = insertedRun;
+          if (runRow === undefined) {
+            const [existing] = await tx
+              .select()
+              .from(runs)
+              .where(
+                and(
+                  eq(runs.agentId, agent.id),
+                  eq(runs.workspaceId, joined.runner.workspaceId),
+                  eq(runs.harness, harness),
+                  eq(runs.nativeSessionId, dispatch.dispatchAttemptId),
+                ),
+              )
+              .limit(1)
+              .for("update");
+            if (existing === undefined) throw new RunnersError("dispatch_not_found");
+            runRow = existing;
+          }
+
+          const secret = newDispatchToken();
+          const tokenId = randomUUID();
+          // Claim first so the scope carries the real work-session id, never a
+          // placeholder. The claim uses Orrery's own rules inside this transaction.
+          const claimIdentity: AgentIdentity = {
+            agentId: agent.id,
+            name: agent.name,
+            humanId: host.humanId,
+            keyId: tokenId,
+            workspaceId: joined.runner.workspaceId,
+            validity: "never",
+            projects: [
+              {
+                projectId: joined.runner.projectId,
+                projectName: joined.projectName,
+                level: hostLevel!,
+              },
+            ],
+          };
+          let session: WorkSession;
+          try {
+            session = await claimWorkSession(tx, claimIdentity, {
+              issueId: dispatch.issueId,
+              runId: runRow.id,
+            });
+          } catch (error) {
+            if (error instanceof SessionsError) {
+              // Commit the dispatch settlement so a refused accept never leaves
+              // the row stranded in `pending` (which would block auto-claim and
+              // leak a concurrency slot forever). Clean up the unused Run row.
+              if (insertedRun !== undefined) {
+                await tx.delete(runs).where(eq(runs.id, insertedRun.id));
+              }
+              await tx
+                .update(runnerDispatches)
+                .set({ state: "ended", endedAt: sql`statement_timestamp()` })
+                .where(eq(runnerDispatches.id, dispatchId));
+              return { error: "issue_not_dispatchable" as const };
+            }
+            throw error;
+          }
+          const scope = {
+            runnerHostId: joined.runner.hostId,
+            runnerId,
+            dispatchId,
+            dispatchAttemptId: dispatch.dispatchAttemptId,
+            agentId: agent.id,
+            workspaceId: joined.runner.workspaceId,
+            projectId: joined.runner.projectId,
             issueId: dispatch.issueId,
             runId: runRow.id,
-          });
-        } catch (error) {
-          if (error instanceof SessionsError) {
-            throw new RunnersError("issue_not_dispatchable");
-          }
-          throw error;
-        }
-        const scope = {
-          runnerHostId: joined.runner.hostId,
-          runnerId,
-          dispatchId,
-          dispatchAttemptId: dispatch.dispatchAttemptId,
-          agentId: agent.id,
-          workspaceId: joined.runner.workspaceId,
-          projectId: joined.runner.projectId,
-          issueId: dispatch.issueId,
-          runId: runRow.id,
-          workSessionId: session.id,
-        };
-        await tx.insert(dispatchTokens).values({
-          id: tokenId,
-          tokenHash: tokenHash(secret),
-          ...scope,
-          createdAt: sql`statement_timestamp()`,
-        });
-        const [updated] = await tx
-          .update(runnerDispatches)
-          .set({
-            state: "active",
-            runId: runRow.id,
             workSessionId: session.id,
-            acceptedAt: sql`statement_timestamp()`,
-          })
-          .where(eq(runnerDispatches.id, dispatchId))
-          .returning(dispatchBaseFields);
-        if (updated === undefined) throw new RunnersError("dispatch_not_found");
-        return {
-          dispatch: toDispatch({ ...updated, hostId: joined.runner.hostId }),
-          run: toRun(runRow),
-          session,
-          dispatchToken: secret,
-        };
-      });
+          };
+          await tx.insert(dispatchTokens).values({
+            id: tokenId,
+            tokenHash: tokenHash(secret),
+            ...scope,
+            createdAt: sql`statement_timestamp()`,
+          });
+          const [updated] = await tx
+            .update(runnerDispatches)
+            .set({
+              state: "active",
+              runId: runRow.id,
+              workSessionId: session.id,
+              acceptedAt: sql`statement_timestamp()`,
+            })
+            .where(eq(runnerDispatches.id, dispatchId))
+            .returning(dispatchBaseFields);
+          if (updated === undefined) throw new RunnersError("dispatch_not_found");
+          return {
+            dispatch: toDispatch({ ...updated, hostId: joined.runner.hostId }),
+            run: toRun(runRow),
+            session,
+            dispatchToken: secret,
+          };
+        },
+      );
+      if ("error" in outcome) throw new RunnersError(outcome.error);
+      return outcome;
     },
 
     async revokeRunnerHost(account: SessionAccount | null, hostId: string) {

@@ -53,22 +53,27 @@ agent can sit silent for hours waiting for an answer.
 
 Orrery puts Humans and Agents on one board and gives them a protocol for working together:
 
-- **Pull-based MCP + REST.** Agents run on teammates' machines and pull work over HTTP with a
-  workspace-scoped API key. No inbound agent webhooks, no open ports on developer laptops, no
-  orchestration daemon — it works behind NAT.
+- **Pull-based MCP + REST, or optional local runner.** Agents run on teammates' machines and pull
+  work over HTTP with a workspace-scoped API key — or run locally under
+  [`orrery-runner`](docs/guides/local-runner.md) in isolated git worktrees with short-lived
+  single-issue Dispatch tokens and **Live Session Studio**. No inbound webhooks to laptops, no open
+  ports — everything works behind NAT.
 - **Atomic five-minute Claim leases.** `claim_issue` reserves an issue for one Work session; a
   laptop that crashes simply releases the Claim when the lease expires. No two agents duplicate an
   issue.
-- **Live steering.** A Human can raise a stop signal that the agent sees on its next check-in.
-  Ephemeral `thought` / `action` / `status` entries feed a sidecar inspector, and a blocked agent
-  opens a Needs-input question with a proposed fallback; after one hour the project's policy either
-  pauses the issue for a Human or applies the authorized fallback.
+- **Live steering.** A Human can raise a stop signal that the agent sees on its next check-in (or
+  immediately over the runner outbox). Ephemeral `thought` / `action` / `status` entries feed a
+  sidecar inspector, Live Session Studio streams structured ACP output with owner-only raw logs, and
+  a blocked agent opens a Needs-input question with a proposed fallback; after one hour the
+  project's policy either pauses the issue for a Human or applies the authorized fallback.
 - **Security and correctness by construction.** API keys are scoped to one Workspace and capped by
-  the Human owner's live permissions, every change carries an actor in the audit trail, and 36
-  state-machine models are formally verified with `formal-verify-orrery`.
+  the Human owner's live permissions, Dispatch tokens are fenced to a single issue and session,
+  every change carries an actor in the audit trail, and 47 state-machine models (`M1`–`M46`) are
+  formally verified with `formal-verify-orrery`.
 
-Orrery **tracks** agents; it does not run them. Agents keep working wherever your team already uses
-them and connect over [MCP](https://modelcontextprotocol.io).
+Orrery never forces a hosted sandbox: agents always run on your own machines — either connecting
+directly over [MCP](https://modelcontextprotocol.io) or supervised locally via
+[`orrery-runner`](docs/guides/local-runner.md).
 
 > An **orrery** is a model of the solar system that shows every planet on its own orbit, moving in
 > one system. Here the planets are your issues, your people and your agents.
@@ -83,6 +88,13 @@ them and connect over [MCP](https://modelcontextprotocol.io).
   PR/commit/doc links, GitHub-flavored Markdown with `#issue` auto-linking and Light/Dark Mermaid
   diagrams, structured project knowledge with its own human-only delete and 30-day restore, and
   human-only Trash for issues with 30-day restore.
+- **Local Agent Runner & Live Session Studio.** Enroll a laptop with `orrery-runner login`
+  (device-code flow, no workspace API key on disk), run a persistent project runner
+  (`orrery-runner start`, optional `--auto-claim`) or one-shot `orrery-runner work <ISSUE>`,
+  supervise ACP agents (OpenCode and other ACP stdio harnesses) in isolated `git worktree`s, watch
+  live structured streams and diffs in **Live Session Studio** (with owner-only raw output and
+  ObjectStore JSONL replay), and answer **Needs input** questions inline to resume parked sessions.
+  See the [Local agent runner guide](docs/guides/local-runner.md).
 - **Agents, Runs & Harness Telemetry.** Register agents with workspace-scoped API keys (expiry,
   rotation, revocation), monitor live active work sessions and raise stop signals, and inspect
   structured Run histories with recognized harness brand logos (Claude Code, Codex, OpenAI, Cursor,
@@ -386,13 +398,14 @@ delivery guarantees.
   six-state workflow in the database, not just in application code.
 - **RFC 9457 Problem Details.** Errors are `application/problem+json` with a stable `code`, built
   through one platform helper; successes return the resource itself.
-- **Generated contracts.** OpenAPI 3.1 (`contract/openapi.json` — 123 REST operations across 100
+- **Generated contracts.** OpenAPI 3.1 (`contract/openapi.json` — 154 REST operations across 128
   endpoints) and MCP tool JSON Schemas (`contract/mcp-tools.json` — 39 tools) are generated from Zod
   schemas in `packages/contract/`; a mounted route missing from the contract fails CI.
-- **Formal verification & black-box E2E.** `formal-verify-orrery` exhaustively checks 36
-  state-machine models (`M1`–`M35`) across claims, leases, invitations, API keys, runs, inbox
-  questions, ownership transfers, sweeper notifications, and outgoing webhooks, complemented by 110+
-  Playwright and Vitest E2E tests run against the production Docker image in CI.
+- **Formal verification & black-box E2E.** `formal-verify-orrery` exhaustively checks 47
+  state-machine models (`M1`–`M46`) across claims, leases, invitations, API keys, runs, inbox
+  questions, ownership transfers, sweeper notifications, outgoing webhooks, attachments, mentions,
+  and the local agent runner, complemented by Playwright and Vitest E2E tests run against the
+  production Docker image in CI.
 - **Stack.** TypeScript on Node 26 · Hono with `@hono/zod-openapi` · Drizzle ORM on PostgreSQL 18 ·
   React, Vite, TanStack Router, TanStack Query and the Astryx Design System (`@astryxdesign/core`) ·
   Model Context Protocol HTTP server.

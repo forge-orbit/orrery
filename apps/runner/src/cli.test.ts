@@ -327,6 +327,129 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
     }
   });
 
+  it("acknowledges commands whose seq starts above 1 after a runner restart", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: "http://orrery.test",
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
+    const acked: number[] = [];
+    let pollCount = 0;
+    const stub = await listen(async (req, res) => {
+      if (req.method === "POST" && req.url === "/api/runners/register") {
+        json(res, 201, {
+          id: "runner-restart",
+          hostId: "host-1",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          agentId: "agent-1",
+          displayName: "TestLaptop",
+          repoFingerprint: sha256("checkout"),
+          capabilities: [],
+          maxConcurrency: 1,
+          activeSlotCount: 0,
+          lastSeenAt: new Date().toISOString(),
+          disconnectedAt: null,
+          revokedAt: null,
+          createdAt: new Date().toISOString(),
+          presence: "online",
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/runner-restart/reconnect") {
+        json(res, 200, { resolutions: [] });
+        return;
+      }
+      if (req.method === "GET" && req.url?.startsWith("/api/runners/runner-restart/commands")) {
+        pollCount += 1;
+        const url = new URL(req.url, "http://127.0.0.1");
+        const afterSeq = Number(url.searchParams.get("afterSeq") ?? "0");
+        if (afterSeq < 6) {
+          json(res, 200, {
+            commands: [
+              {
+                commandId: "cmd-6",
+                runnerId: "runner-restart",
+                seq: 6,
+                dispatchId: "disp-6",
+                dispatchAttemptId: "att-6",
+                kind: "cancel",
+                payload: {
+                  dispatchId: "disp-6",
+                  dispatchAttemptId: "att-6",
+                  issueId: "issue-6",
+                  reason: "stale",
+                },
+                createdAt: new Date().toISOString(),
+                expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              },
+            ],
+          });
+          return;
+        }
+        // Once seq 6 is acked, revoke so the runner exits cleanly.
+        json(res, 401, { status: 401, code: "runner_revoked", title: "Revoked" });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/runner-restart/commands/ack") {
+        const body = z.object({ upToSeq: z.number() }).parse(await bodyOf(req));
+        acked.push(body.upToSeq);
+        json(res, 200, { ackedSeq: body.upToSeq });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/runner-restart/heartbeat") {
+        json(res, 200, {
+          id: "runner-restart",
+          hostId: "host-1",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          agentId: "agent-1",
+          displayName: "TestLaptop",
+          repoFingerprint: sha256("checkout"),
+          capabilities: [],
+          maxConcurrency: 1,
+          activeSlotCount: 0,
+          lastSeenAt: new Date().toISOString(),
+          disconnectedAt: null,
+          revokedAt: null,
+          createdAt: new Date().toISOString(),
+          presence: "online",
+        });
+        return;
+      }
+      json(res, 404, { status: 404, code: "not_found", title: "Not found" });
+    });
+
+    try {
+      const result = await run(
+        [
+          "start",
+          "--server",
+          stub.url,
+          "--workspace",
+          "workspace-1",
+          "--project",
+          "project-1",
+          "--heartbeat-ms",
+          "5000",
+        ],
+        { ORRERY_RUNNER_CONFIG_DIR: dir },
+      );
+      expect(result.code).toBe(0);
+      expect(acked).toEqual([6]);
+      expect(pollCount).toBe(2);
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("refuses to start without a host credential", async () => {
     const dir = await makeDir();
     const result = await run(
