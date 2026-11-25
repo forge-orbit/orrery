@@ -53,6 +53,7 @@ export function createSessionsFeature(deps: SessionsFeatureDeps): SessionsFeatur
     dueQuestionIssueIds: deps.dueQuestionIssueIds,
     notifyActivity: deps.notifyActivity,
     onActivity: deps.onActivity,
+    onRunnerCommand: deps.onRunnerCommand,
     log: deps.log,
   });
   return {

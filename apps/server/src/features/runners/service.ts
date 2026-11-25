@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type {
+  AckCommandsResponse,
   AgentIdentity,
   CreateDeviceCodeRequest,
   CreateDispatchRequest,
@@ -14,13 +15,14 @@ import type {
   ProjectAccessLevel,
   RegisterRunnerRequest,
   Runner,
+  RunnerCommandsResponse,
   RunnerHost,
   RunnerPresence,
   WorkSession,
   WorkspaceRunnersFleet,
 } from "@orrery/contract";
-import { WorkSessionStatus } from "@orrery/contract";
-import { and, eq, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { RunnerCommand, WorkSessionStatus } from "@orrery/contract";
+import { and, asc, eq, gt, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   agents,
@@ -28,6 +30,7 @@ import {
   humans,
   issues,
   projects,
+  runnerCommands,
   runnerDeviceCodeAttempts,
   runnerDeviceCodes,
   runnerDispatches,
@@ -38,12 +41,14 @@ import {
   workspaces,
   workspaceMemberships,
 } from "../../db/schema.ts";
-import type { DbTransaction } from "../../platform/db.ts";
+import type { DbTransaction, Sql } from "../../platform/db.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import type { SessionAccount, SessionReader } from "../accounts/index.ts";
 import { newDispatchToken } from "../agents/index.ts";
 import { toRun } from "../runs/index.ts";
-import { SessionsError } from "../work-sessions/index.ts";
+import { SessionsError, toSession } from "../work-sessions/index.ts";
+import { createCommandNotifier } from "./notifier.ts";
+import { cancelDispatchesForRunners, enqueueRunnerCommand } from "./outbox.ts";
 
 const HOST_CREDENTIAL_PREFIX = "orr_rh_";
 const DEVICE_CODE_PREFIX = "orr_dc_";
@@ -141,6 +146,8 @@ export type ClaimWorkSession = (
 
 export interface RunnersDeps {
   db: PostgresJsDatabase;
+  /** Raw client for the dedicated LISTEN connection; optional for thin tests. */
+  sql?: Sql | undefined;
   sessionReader: SessionReader;
   publicUrl: string;
   projectAccessCeiling: ProjectAccessCeiling;
@@ -264,7 +271,11 @@ async function joinRunner(tx: DbTransaction, runnerId: string) {
   return row;
 }
 
-async function readHostByCredential(tx: DbTransaction, credential: string | undefined) {
+async function readHostByCredential(
+  tx: DbTransaction,
+  credential: string | undefined,
+  allowRevoked = false,
+) {
   if (credential === undefined || !credential.startsWith(HOST_CREDENTIAL_PREFIX)) {
     throw new RunnersError("invalid_credential");
   }
@@ -273,7 +284,10 @@ async function readHostByCredential(tx: DbTransaction, credential: string | unde
     .from(runnerHosts)
     .innerJoin(humans, eq(runnerHosts.humanId, humans.id))
     .where(
-      and(eq(runnerHosts.credentialHash, tokenHash(credential)), isNull(runnerHosts.revokedAt)),
+      and(
+        eq(runnerHosts.credentialHash, tokenHash(credential)),
+        allowRevoked ? undefined : isNull(runnerHosts.revokedAt),
+      ),
     );
   if (host === undefined || host.deactivatedAt !== null)
     throw new RunnersError("invalid_credential");
@@ -479,21 +493,46 @@ async function assertIssueDispatchable(
 async function revokeDispatchTokensForRunners(
   tx: DbTransaction,
   runnerIds: readonly string[],
+  reason: string,
 ): Promise<void> {
   if (runnerIds.length === 0) return;
   await tx
     .update(dispatchTokens)
     .set({ revokedAt: sql`statement_timestamp()` })
     .where(and(inArray(dispatchTokens.runnerId, [...runnerIds]), isNull(dispatchTokens.revokedAt)));
+  // Cancel commands and dispatch settlement share this transaction with the
+  // host/member/human revocation that called us.
+  await cancelDispatchesForRunners(tx, runnerIds, reason);
+}
+
+/** One ack write shared by implicit cursor advance and the explicit ack route. */
+async function acknowledgeCommands(tx: DbTransaction, runnerId: string, upToSeq: number) {
   await tx
-    .update(runnerDispatches)
-    .set({ state: "ended", endedAt: sql`statement_timestamp()` })
+    .update(runnerCommands)
+    .set({ ackedAt: sql`statement_timestamp()` })
     .where(
       and(
-        inArray(runnerDispatches.runnerId, [...runnerIds]),
-        inArray(runnerDispatches.state, ["active", "uncertain"]),
+        eq(runnerCommands.runnerId, runnerId),
+        lte(runnerCommands.seq, upToSeq),
+        isNull(runnerCommands.ackedAt),
       ),
     );
+}
+
+async function hasUnackedCancel(tx: DbTransaction, runnerId: string) {
+  const [row] = await tx
+    .select({ id: runnerCommands.id })
+    .from(runnerCommands)
+    .where(
+      and(
+        eq(runnerCommands.runnerId, runnerId),
+        eq(runnerCommands.kind, "cancel"),
+        isNull(runnerCommands.ackedAt),
+        gt(runnerCommands.expiresAt, sql`statement_timestamp()`),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
 }
 
 const deviceCodeNotExpired = sql<boolean>`${runnerDeviceCodes.expiresAt} > statement_timestamp()`;
@@ -501,6 +540,49 @@ const attemptWindowExpired = sql<boolean>`${runnerDeviceCodeAttempts.windowStart
 
 export function createRunnersService(deps: RunnersDeps) {
   const { db, publicUrl, projectAccessCeiling, projectAccessAtLeast, claimWorkSession } = deps;
+  // ONE listener for the whole replica, lazily started on the first long-poll.
+  const notifier = deps.sql === undefined ? undefined : createCommandNotifier(deps.sql);
+
+  /** Live host/runner/workspace/project check shared by poll and ack. */
+  const readRunnerAccessForCommands = async (
+    tx: DbTransaction,
+    credential: string | undefined,
+    runnerId: string,
+  ) => {
+    const host = await readHostByCredential(tx, credential, true);
+    const [joined] = await tx
+      .select({
+        hostId: runners.hostId,
+        workspaceId: runners.workspaceId,
+        projectId: runners.projectId,
+        runnerRevokedAt: runners.revokedAt,
+        hostRevokedAt: runnerHosts.revokedAt,
+      })
+      .from(runners)
+      .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
+      .innerJoin(humans, eq(runnerHosts.humanId, humans.id))
+      .where(eq(runners.id, runnerId))
+      .limit(1);
+    if (joined === undefined || joined.hostId !== host.host.id) {
+      throw new RunnersError("runner_not_found");
+    }
+    let revoked =
+      joined.runnerRevokedAt !== null ||
+      joined.hostRevokedAt !== null ||
+      host.deactivatedAt !== null;
+    if (!revoked && !(await canSeeWorkspace(tx, joined.workspaceId, host.humanId))) {
+      revoked = true;
+    }
+    if (!revoked) {
+      const ceiling = await projectAccessCeiling(tx, joined.workspaceId, host.humanId, [
+        joined.projectId,
+      ]);
+      if (!hasAccess(ceiling.get(joined.projectId), "read", projectAccessAtLeast)) {
+        revoked = true;
+      }
+    }
+    return { host, joined, revoked };
+  };
 
   return {
     async createDeviceCode(input: CreateDeviceCodeRequest): Promise<DeviceCodeResponse> {
@@ -974,7 +1056,21 @@ export function createRunnersService(deps: RunnersDeps) {
             createdAt: sql`statement_timestamp()`,
           })
           .returning({ id: runnerDispatches.id });
-        return toDispatch(await readDispatch(tx, created!.id));
+        const row = await readDispatch(tx, created!.id);
+        await enqueueRunnerCommand(tx, {
+          runnerId,
+          dispatch: { id: row.id, dispatchAttemptId: row.dispatchAttemptId },
+          kind: "dispatch",
+          payload: {
+            dispatchId: row.id,
+            dispatchAttemptId: row.dispatchAttemptId,
+            issueId,
+            projectId: issue.projectId,
+            workspaceId: issue.workspaceId,
+            agentId,
+          },
+        });
+        return toDispatch(row);
       });
     },
 
@@ -1065,6 +1161,21 @@ export function createRunnersService(deps: RunnersDeps) {
           throw new RunnersError("runner_revoked");
         }
 
+        // Global lock order: issues -> runners -> runner_dispatches. Read the
+        // dispatch's issue without locking, then lock the issue row before the
+        // dispatch row so this path cannot AB-BA against requestStop/inbox/seq.
+        const [peek] = await tx
+          .select({ issueId: runnerDispatches.issueId })
+          .from(runnerDispatches)
+          .where(and(eq(runnerDispatches.id, dispatchId), eq(runnerDispatches.runnerId, runnerId)))
+          .limit(1);
+        if (peek === undefined) throw new RunnersError("dispatch_not_found");
+        await tx
+          .select({ id: issues.id })
+          .from(issues)
+          .where(eq(issues.id, peek.issueId))
+          .limit(1)
+          .for("update");
         const [dispatch] = await tx
           .select()
           .from(runnerDispatches)
@@ -1072,7 +1183,64 @@ export function createRunnersService(deps: RunnersDeps) {
           .limit(1)
           .for("update");
         if (dispatch === undefined) throw new RunnersError("dispatch_not_found");
-        if (dispatch.state !== "pending") throw new RunnersError("dispatch_not_pending");
+        if (dispatch.state !== "pending") {
+          // A redelivered dispatch command (the ack had not committed) must be
+          // idempotent: reuse the existing Run and Work session, never claim a
+          // second one. A fresh fenced token is minted for this same scope.
+          if (
+            dispatch.state !== "ended" &&
+            dispatch.runId !== null &&
+            dispatch.workSessionId !== null
+          ) {
+            const [existingSession] = await tx
+              .select()
+              .from(workSessions)
+              .where(
+                and(
+                  eq(workSessions.id, dispatch.workSessionId),
+                  eq(workSessions.status, WorkSessionStatus.enum.active),
+                  gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+                ),
+              )
+              .limit(1);
+            const [existingRun] = await tx
+              .select()
+              .from(runs)
+              .where(eq(runs.id, dispatch.runId))
+              .limit(1);
+            if (existingSession !== undefined && existingRun !== undefined) {
+              const retrySecret = newDispatchToken();
+              await tx.insert(dispatchTokens).values({
+                id: randomUUID(),
+                tokenHash: tokenHash(retrySecret),
+                runnerHostId: joined.runner.hostId,
+                runnerId,
+                dispatchId,
+                dispatchAttemptId: dispatch.dispatchAttemptId,
+                agentId: dispatch.agentId,
+                workspaceId: joined.runner.workspaceId,
+                projectId: joined.runner.projectId,
+                issueId: dispatch.issueId,
+                runId: dispatch.runId,
+                workSessionId: dispatch.workSessionId,
+                createdAt: sql`statement_timestamp()`,
+              });
+              return {
+                dispatch: toDispatch({ ...dispatch, hostId: joined.runner.hostId }),
+                run: toRun(existingRun),
+                session: toSession({
+                  ...existingSession,
+                  effectiveStatus: existingSession.status,
+                }),
+                dispatchToken: retrySecret,
+              };
+            }
+            // An accepted dispatch whose Work session is no longer live (lease
+            // lapsed in DB time) must never be resumed by a redelivered command.
+            throw new RunnersError("issue_not_dispatchable");
+          }
+          throw new RunnersError("dispatch_not_pending");
+        }
         const [agent] = await tx
           .select({ id: agents.id, name: agents.name })
           .from(agents)
@@ -1209,9 +1377,107 @@ export function createRunnersService(deps: RunnersDeps) {
         await revokeDispatchTokensForRunners(
           tx,
           revoked.map((row) => row.id),
+          "host_revoked",
         );
         return { hostId, revokedRunners: revoked.length };
       });
+    },
+
+    /**
+     * Query-before-wait delivery from the durable outbox. Advancing `afterSeq`
+     * acknowledges everything below it; a revoked runner may drain ONLY cancel
+     * commands, then every later poll is a 401 stop-all-slots signal.
+     */
+    async pollCommands(
+      credential: string | undefined,
+      runnerId: string,
+      afterSeq: number,
+      waitMs: number,
+      signal?: AbortSignal,
+    ): Promise<RunnerCommandsResponse> {
+      const read = () =>
+        db.transaction(async (tx) => {
+          const { revoked } = await readRunnerAccessForCommands(tx, credential, runnerId);
+          await acknowledgeCommands(tx, runnerId, afterSeq);
+          const rows = await tx
+            .select()
+            .from(runnerCommands)
+            .where(
+              and(
+                eq(runnerCommands.runnerId, runnerId),
+                gt(runnerCommands.seq, afterSeq),
+                isNull(runnerCommands.ackedAt),
+                gt(runnerCommands.expiresAt, sql`statement_timestamp()`),
+              ),
+            )
+            .orderBy(asc(runnerCommands.seq))
+            .limit(200);
+
+          // A revoked host/runner never receives dispatch or input_resolved.
+          const visible = revoked ? rows.filter((row) => row.kind === "cancel") : rows;
+          if (revoked && visible.length === 0) {
+            throw new RunnersError("runner_revoked");
+          }
+          return visible.map((row) => {
+            const base = {
+              commandId: row.id,
+              runnerId: row.runnerId,
+              seq: row.seq,
+              dispatchId: row.dispatchId,
+              dispatchAttemptId: row.dispatchAttemptId,
+              createdAt: row.createdAt.toISOString(),
+              expiresAt: row.expiresAt.toISOString(),
+            };
+            // The kind/payload correlation is enforced by a Postgres CHECK and
+            // re-validated here at the contract boundary.
+            return RunnerCommand.parse(
+              Object.assign(base, { kind: row.kind, payload: row.payload }),
+            );
+          });
+        });
+
+      const controller = new AbortController();
+      const abortSignal =
+        signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
+      try {
+        let commands = await read();
+        const deadline = Date.now() + waitMs;
+        while (commands.length === 0 && Date.now() < deadline) {
+          // pg_notify is a latency doorbell; the one-second cap is the fallback
+          // poll that recovers from dropped notifications or a listener restart.
+          const slice = Math.min(1000, deadline - Date.now());
+          if (notifier === undefined) {
+            await new Promise((resolve) => setTimeout(resolve, slice));
+          } else {
+            await notifier.wait(runnerId, slice, abortSignal);
+          }
+          commands = await read();
+        }
+        return { commands };
+      } finally {
+        // Always drop this poller's waiter; the LISTEN connection is shared.
+        controller.abort();
+      }
+    },
+
+    async ackCommands(
+      credential: string | undefined,
+      runnerId: string,
+      upToSeq: number,
+    ): Promise<AckCommandsResponse> {
+      return db.transaction(async (tx) => {
+        const { revoked } = await readRunnerAccessForCommands(tx, credential, runnerId);
+        // A revoked runner may only acknowledge while final cancels remain.
+        if (revoked && !(await hasUnackedCancel(tx, runnerId))) {
+          throw new RunnersError("runner_revoked");
+        }
+        await acknowledgeCommands(tx, runnerId, upToSeq);
+        return { ackedSeq: upToSeq };
+      });
+    },
+
+    async close(): Promise<void> {
+      await notifier?.close();
     },
   };
 }
@@ -1242,6 +1508,7 @@ export async function revokeRunnerHostsForHuman(
   await revokeDispatchTokensForRunners(
     tx,
     revoked.map((row) => row.id),
+    "human_deactivated",
   );
   return ids.length;
 }
@@ -1280,6 +1547,7 @@ export async function revokeWorkspaceRunnersForMember(
   await revokeDispatchTokensForRunners(
     tx,
     active.map((row) => row.id),
+    "member_removed",
   );
   return active.length;
 }

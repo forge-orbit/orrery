@@ -23,6 +23,7 @@ import {
 } from "../../db/schema.ts";
 import type { Logger } from "../../platform/log.ts";
 import type { NotifyActivity } from "../notifications/index.ts";
+import type { EnqueueIssueCommand } from "../runners/index.ts";
 import type { EnqueueWebhookActivity } from "../webhooks/index.ts";
 import { renderEmail, type OutgoingMail } from "../settings/index.ts";
 import type { WorkActor } from "../projects/index.ts";
@@ -83,6 +84,7 @@ export interface InboxDeps {
   log: Logger;
   notifyActivity?: NotifyActivity | undefined;
   onActivity?: EnqueueWebhookActivity | undefined;
+  onRunnerCommand?: EnqueueIssueCommand | undefined;
 }
 
 const noNotify: NotifyActivity = async () => {};
@@ -345,6 +347,7 @@ const evaluateDeadline = async (
   issueId: string,
   notify: NotifyActivity = noNotify,
   onActivity: EnqueueWebhookActivity = noEnqueue,
+  onRunnerCommand?: EnqueueIssueCommand,
 ): Promise<void> => {
   const [due] = await tx
     .select({ id: questions.id })
@@ -421,6 +424,13 @@ const evaluateDeadline = async (
       notify,
       onActivity,
     );
+    await onRunnerCommand?.(tx, {
+      issueId,
+      kind: "input_resolved",
+      resolution: "fallback_used",
+      answer: used.proposedFallback,
+      questionId: used.id,
+    });
     return;
   }
 
@@ -481,6 +491,12 @@ const evaluateDeadline = async (
     notify,
     onActivity,
   );
+  // A require_human deadline releases the claim: notify the runner to park.
+  await onRunnerCommand?.(tx, {
+    issueId,
+    kind: "cancel",
+    reason: "question_paused",
+  });
 };
 
 const questionDeadline: InboxService["questionDeadline"] = async (tx, issueId) => {
@@ -498,6 +514,7 @@ const questionDeadline: InboxService["questionDeadline"] = async (tx, issueId) =
 
 export function createInboxService(deps: InboxDeps): InboxService {
   const { db } = deps;
+  const outbox = deps.onRunnerCommand;
 
   return {
     async ask(actorArg, input) {
@@ -506,7 +523,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
 
       const outcome = await db.transaction(async (tx) => {
         const issue = await lockIssue(tx, input.issueId);
-        await evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity);
+        await evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity, outbox);
         const access = await requireAccess(
           tx,
           actor,
@@ -670,7 +687,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
             canAnswer: true,
           });
 
-        await evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity);
+        await evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity, outbox);
         const freshRow = async () => {
           const [fresh] = await tx
             .select()
@@ -724,7 +741,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
         const [first] = await resolveAnswered();
         let answered = first;
         if (answered === undefined) {
-          await evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity);
+          await evaluateDeadline(tx, issue.id, deps.notifyActivity, deps.onActivity, outbox);
           const retried = await freshRow();
           if (retried.status === "fallback_used") return questionView(await followUp());
           if (retried.status === "answered") throw new InboxError("question_resolved");
@@ -783,6 +800,13 @@ export function createInboxService(deps: InboxDeps): InboxService {
           noNotify,
           deps.onActivity,
         );
+        await deps.onRunnerCommand?.(tx, {
+          issueId: issue.id,
+          kind: "input_resolved",
+          resolution: "answered",
+          answer,
+          questionId: questionId,
+        });
         return questionView(answered);
       });
     },
@@ -915,7 +939,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
 
     questionDeadline,
     evaluateDeadline: (tx, issueId) =>
-      evaluateDeadline(tx, issueId, deps.notifyActivity, deps.onActivity),
+      evaluateDeadline(tx, issueId, deps.notifyActivity, deps.onActivity, deps.onRunnerCommand),
 
     async findDueQuestionIssueIds() {
       return db.transaction(

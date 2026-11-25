@@ -51,6 +51,7 @@ import {
   workspaces,
 } from "../../db/schema.ts";
 import type { NotifyActivity } from "../notifications/index.ts";
+import type { EnqueueIssueCommand } from "../runners/index.ts";
 import type { EnqueueWebhookActivity } from "../webhooks/index.ts";
 import { ProjectsError, type WorkActor } from "../projects/index.ts";
 import { decideReacquire, resumeDispositionFor, workSessionMachine } from "./state-machine.ts";
@@ -130,6 +131,7 @@ export interface SessionsDeps {
   dueQuestionIssueIds?: (() => Promise<string[]>) | undefined;
   notifyActivity?: NotifyActivity | undefined;
   onActivity?: EnqueueWebhookActivity | undefined;
+  onRunnerCommand?: EnqueueIssueCommand | undefined;
   log?: Logger | undefined;
 }
 
@@ -872,6 +874,7 @@ export function createSessionsService({
   dueQuestionIssueIds: dueQuestionIssueIdsDep,
   notifyActivity: notifyActivityDep,
   onActivity = async () => {},
+  onRunnerCommand,
   log,
 }: SessionsDeps): SessionsService {
   const leaseDeadline = questionLeaseDeadline ?? (async () => null);
@@ -1215,6 +1218,14 @@ export function createSessionsService({
         });
         await onActivity(tx, activityId);
 
+        // Any project contributor/manager may stop an agent, even without
+        // owning the Runner host. The cancel command is enqueued in this very
+        // transaction, so the stop record and the command commit together.
+        await onRunnerCommand?.(tx, {
+          issueId: issue.id,
+          kind: "cancel",
+          reason: normalized ?? "stop_requested",
+        });
         return { session: toSession(updated) };
       });
       if ("error" in outcome) throw new SessionsError(outcome.error);

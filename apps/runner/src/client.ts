@@ -1,8 +1,13 @@
 import { z } from "zod";
 import {
+  AckCommandsResponse,
   DeviceCodeResponse,
+  DispatchAcceptance,
   HostCredentialResponse,
   Runner,
+  RunnerCommandsResponse,
+  type AckCommandsRequest,
+  type CommandsQuery,
   type CreateDeviceCodeRequest,
   type ExchangeDeviceCodeRequest,
   type HeartbeatRequest,
@@ -110,6 +115,36 @@ export class OrreryClient {
         method: "POST",
         body: JSON.stringify(input),
       }),
+    );
+  }
+
+  /** Poll the durable outbox; `waitMs > 0` uses long-poll with a periodic fallback. */
+  async pollCommands(runnerId: string, query: Partial<CommandsQuery> = {}) {
+    const params = new URLSearchParams();
+    params.set("afterSeq", String(query.afterSeq ?? 0));
+    if (query.waitMs !== undefined) params.set("waitMs", String(query.waitMs));
+    return RunnerCommandsResponse.parse(
+      await this.request(
+        `/api/runners/${encodeURIComponent(runnerId)}/commands?${params.toString()}`,
+      ),
+    );
+  }
+
+  async ackCommands(runnerId: string, input: AckCommandsRequest) {
+    return AckCommandsResponse.parse(
+      await this.request(`/api/runners/${encodeURIComponent(runnerId)}/commands/ack`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async acceptDispatch(runnerId: string, dispatchId: string) {
+    return DispatchAcceptance.parse(
+      await this.request(
+        `/api/runners/${encodeURIComponent(runnerId)}/dispatches/${encodeURIComponent(dispatchId)}/accept`,
+        { method: "POST" },
+      ),
     );
   }
 }

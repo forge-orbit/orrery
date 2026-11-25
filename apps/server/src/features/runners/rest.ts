@@ -1,7 +1,10 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import {
+  AckCommandsRequest,
+  AckCommandsResponse,
   ApproveDeviceCodeResponse,
+  CommandsQuery,
   CreateDeviceCodeRequest,
   CreateDispatchRequest,
   DispatchId,
@@ -16,6 +19,7 @@ import {
   RegisterRunnerRequest,
   RevokeRunnerHostResponse,
   Runner,
+  RunnerCommandsResponse,
   RunnerHostId,
   RunnerId,
   UserCode,
@@ -241,6 +245,43 @@ const acceptDispatch = createRoute({
   },
 });
 
+const pollCommands = createRoute({
+  method: "get",
+  path: "/api/runners/{runnerId}/commands",
+  summary: "Read a Runner's durable command outbox",
+  description:
+    "Authenticates the host credential and live ACLs on every poll. Queries unacknowledged, unexpired commands with seq > afterSeq before waiting on pg_notify; Accept: text/event-stream returns one SSE batch.",
+  request: { params: runnerParams, query: CommandsQuery },
+  responses: {
+    200: {
+      description: "Commands after the supplied sequence cursor",
+      content: {
+        "application/json": { schema: RunnerCommandsResponse },
+        "text/event-stream": { schema: RunnerCommandsResponse },
+      },
+    },
+    ...enrollErrors,
+  },
+});
+
+const ackCommands = createRoute({
+  method: "post",
+  path: "/api/runners/{runnerId}/commands/ack",
+  summary: "Acknowledge commands up to a sequence cursor",
+  description: "Marks every unacknowledged command with seq <= upToSeq acknowledged.",
+  request: {
+    params: runnerParams,
+    body: { content: { "application/json": { schema: AckCommandsRequest } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "The acknowledged cursor",
+      content: { "application/json": { schema: AckCommandsResponse } },
+    },
+    ...enrollErrors,
+  },
+});
+
 const bearer = (c: Context) => readBearerToken(c.req.raw.headers.get("authorization")) ?? undefined;
 
 type Status = 400 | 401 | 403 | 404 | 409 | 429;
@@ -296,6 +337,8 @@ export const routes = [
   createDispatch,
   listIssueDispatches,
   acceptDispatch,
+  pollCommands,
+  ackCommands,
 ];
 
 export function createRunnersRest(service: RunnersService, sessionReader: SessionReader) {
@@ -398,6 +441,42 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
     try {
       const { runnerId, dispatchId } = c.req.valid("param");
       return c.json(await service.acceptDispatch(bearer(c), runnerId, dispatchId), 200);
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(pollCommands, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      const { afterSeq, waitMs } = c.req.valid("query");
+      const result = await service.pollCommands(
+        bearer(c),
+        runnerId,
+        afterSeq,
+        waitMs,
+        c.req.raw.signal,
+      );
+      if (c.req.header("accept")?.includes("text/event-stream")) {
+        const body = `event: commands\ndata: ${JSON.stringify(result)}\n\n`;
+        return new Response(body, {
+          status: 200,
+          headers: { "content-type": "text/event-stream; charset=utf-8" },
+        });
+      }
+      return c.json(result, 200);
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(ackCommands, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      return c.json(
+        await service.ackCommands(bearer(c), runnerId, c.req.valid("json").upToSeq),
+        200,
+      );
     } catch (error) {
       return failure(c, error);
     }

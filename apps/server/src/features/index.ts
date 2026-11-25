@@ -33,8 +33,10 @@ import { createProjectsFeature, projectAccessAtLeast, projectsRoutes } from "./p
 import { createRecoveryFeature, recoveryRoutes } from "./recovery/index.ts";
 import {
   createRunnersFeature,
+  enqueueCommandForIssue,
   revokeWorkspaceRunnersForMember,
   runnersRoutes,
+  type EnqueueIssueCommand,
 } from "./runners/index.ts";
 import { createRunsFeature, runsRoutes } from "./runs/index.ts";
 import { createSettingsFeature, settingsRoutes } from "./settings/index.ts";
@@ -107,6 +109,13 @@ export function createFeatures(
   const evaluateDeadline = (tx: DbTransaction, issueId: string): Promise<void> => {
     if (questionEvaluateDeadline === undefined) throw new Error("question deadline is not wired");
     return questionEvaluateDeadline(tx, issueId);
+  };
+  // The runner outbox is built after inbox/work-sessions, but their writes must
+  // enqueue commands inside their own transaction.
+  let wiredRunnerCommand: EnqueueIssueCommand | undefined;
+  const enqueueRunnerCommandForIssue: EnqueueIssueCommand = (tx, input) => {
+    if (wiredRunnerCommand === undefined) throw new Error("runner command outbox is not wired");
+    return wiredRunnerCommand(tx, input);
   };
   let dueQuestionIssueIds: (() => Promise<string[]>) | undefined;
   const sweepDueQuestions = (): Promise<string[]> => {
@@ -215,6 +224,7 @@ export function createFeatures(
     dueQuestionIssueIds: sweepDueQuestions,
     notifyActivity: notifications.notifyActivity,
     onActivity: webhooks.enqueueForActivity,
+    onRunnerCommand: enqueueRunnerCommandForIssue,
     log,
   });
   sessionGate = (tx, agentId, workspaceId, issueId) =>
@@ -233,6 +243,7 @@ export function createFeatures(
     log,
     notifyActivity: notifications.notifyActivity,
     onActivity: webhooks.enqueueForActivity,
+    onRunnerCommand: enqueueRunnerCommandForIssue,
   });
   questionLeaseDeadline = (tx, issueId) => inbox.questionDeadline(tx, issueId);
   questionEvaluateDeadline = (tx, issueId) => inbox.evaluateDeadline(tx, issueId);
@@ -240,6 +251,7 @@ export function createFeatures(
 
   const runners = createRunnersFeature({
     db: database.db,
+    sql: database.sql,
     sessionReader: accounts.sessionReader,
     publicUrl: config.PUBLIC_URL,
     projectAccessCeiling: (tx, workspaceId, humanId, projectIds) =>
@@ -255,6 +267,7 @@ export function createFeatures(
         onActivity: webhooks.enqueueForActivity,
       }),
   });
+  wiredRunnerCommand = enqueueCommandForIssue;
 
   return [
     createSystemFeature({ ping: database.ping, checkStorage: () => storage.checkHealth() }),

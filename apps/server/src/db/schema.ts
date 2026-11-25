@@ -17,6 +17,8 @@ import {
   ProjectAccessLevel,
   ProjectActivityType,
   QuestionStatus,
+  RunnerCommandKind,
+  type RunnerCommandPayload,
   RunStatus,
   SessionActivityKind,
   TransferAuthorizationStatus,
@@ -1632,7 +1634,9 @@ export const runnerDispatches = pgTable(
     check(
       "runner_dispatches_accepted_fields",
       sql`(${t.state} = 'pending' and ${t.acceptedAt} is null and ${t.runId} is null and ${t.workSessionId} is null)
-          or (${t.state} in ('active', 'uncertain', 'ended') and ${t.acceptedAt} is not null and ${t.runId} is not null and ${t.workSessionId} is not null)`,
+          or (${t.state} in ('active', 'uncertain') and ${t.acceptedAt} is not null and ${t.runId} is not null and ${t.workSessionId} is not null)
+          or (${t.state} = 'ended' and (((${t.acceptedAt} is not null) and (${t.runId} is not null) and (${t.workSessionId} is not null))
+            or ((${t.acceptedAt} is null) and (${t.runId} is null) and (${t.workSessionId} is null))))`,
     ),
     uniqueIndex("runner_dispatches_one_attempt").on(t.dispatchAttemptId),
     index("runner_dispatches_runner_created").on(t.runnerId, t.createdAt),
@@ -1690,5 +1694,43 @@ export const dispatchTokens = pgTable(
     index("dispatch_tokens_session_active")
       .on(t.workSessionId)
       .where(sql`${t.revokedAt} is null`),
+  ],
+);
+
+/**
+ * Durable per-runner command mailbox (#197, ADR-0010). A row is inserted inside
+ * the same transaction as the domain write that triggered it; `pg_notify`
+ * carries only the runner id as a latency doorbell, never the payload.
+ */
+export const runnerCommands = pgTable(
+  "runner_commands",
+  {
+    id: text("id").primaryKey(),
+    runnerId: text("runner_id")
+      .notNull()
+      .references(() => runners.id, { onDelete: "cascade" }),
+    dispatchId: text("dispatch_id")
+      .notNull()
+      .references(() => runnerDispatches.id, { onDelete: "cascade" }),
+    dispatchAttemptId: text("dispatch_attempt_id").notNull(),
+    seq: integer("seq").notNull(),
+    kind: text("kind").$type<RunnerCommandKind>().notNull(),
+    payload: jsonb("payload").$type<RunnerCommandPayload>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    ackedAt: timestamp("acked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("one_runner_command_seq_per_runner").on(t.runnerId, t.seq),
+    check("runner_commands_seq_positive", sql`${t.seq} > 0`),
+    check(
+      "runner_commands_kind",
+      sql`${t.kind} in (${sql.raw(sqlLiteralList(RunnerCommandKind))})`,
+    ),
+    check("runner_commands_expires_after_created", sql`${t.expiresAt} > ${t.createdAt}`),
+    index("runner_commands_runner_unacked")
+      .on(t.runnerId, t.seq)
+      .where(sql`${t.ackedAt} is null`),
+    index("runner_commands_attempt_kind").on(t.dispatchAttemptId, t.kind),
   ],
 );
