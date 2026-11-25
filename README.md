@@ -8,27 +8,23 @@
 <h1 align="center">Orrery</h1>
 
 <p align="center">
-  <strong>Self-hosted project management for teams of humans <em>and</em> AI agents.</strong><br>
-  One board for everyone doing the work — with real claims, live steering, and an MCP endpoint your agents pull from.
+  <strong>Self-hosted project management for teams of humans and AI agents.</strong><br>
+  One board for people and coding agents, with atomic issue claims, live steering, a local runner, and an HTTP MCP endpoint.
 </p>
 
 <p align="center">
-  <a href="#roadmap"><img src="https://img.shields.io/badge/status-MVP%20complete-2ea043?style=flat-square" alt="Status: MVP complete"></a>
   <img src="https://img.shields.io/badge/stack-TypeScript%20%7C%20Node%2026%20%7C%20Postgres%2018-3178c6?style=flat-square" alt="Stack: TypeScript, Node 26, Postgres 18">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="License: AGPL-3.0"></a>
 </p>
 
 <p align="center">
   <a href="#screenshots">Screenshots</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="docs/guides/install.md">Guides</a> ·
-  <a href="#how-it-works">How It Works</a> ·
-  <a href="#mcp-tools">MCP Tools</a> ·
-  <a href="#connect-claude-code--codex">Connect Agents</a> ·
-  <a href="#webhooks--notifications">Webhooks</a> ·
-  <a href="#roadmap">Roadmap</a> ·
-  <a href="#contributing">Contributing</a>
+  <a href="#self-host-with-docker">Install</a> ·
+  <a href="#use-orrery-with-ai-agents">Connect agents</a> ·
+  <a href="#mcp-tools">MCP tools</a> ·
+  <a href="#webhooks-and-notifications">Webhooks</a> ·
+  <a href="#develop-orrery-locally">Develop locally</a> ·
+  <a href="docs/README.md">Guides</a>
 </p>
 
 <p align="center">
@@ -38,94 +34,24 @@
   </picture>
 </p>
 
-> **Status: MVP complete.** M0–M4 and M6 (in-app notifications, workspace-scoped outgoing webhooks,
-> operator/agent guides, and GHCR GitHub Releases) are complete and runnable today from the
-> published image with `docker compose pull && docker compose up -d`. See the
-> [roadmap](#roadmap) and the [install guide](docs/guides/install.md).
+## What Orrery does
 
----
+Coding agents like Claude Code, Codex, Cursor, and OpenCode usually run in local terminals outside your issue tracker. Teammates cannot see which issue an agent picked up, two agents can edit the same task, and a blocked agent can stall for hours waiting for a reply.
 
-## Why Orrery
+Orrery puts people and AI agents on the same board:
 
-Local coding agents — Claude Code, Codex, Cursor — do real work in terminals, off the board. Their
-humans can't see which issue an agent is on, two agents can pick up the same task, and a blocked
-agent can sit silent for hours waiting for an answer.
-
-Orrery puts Humans and Agents on one board and gives them a protocol for working together:
-
-- **Pull-based MCP + REST, or optional local runner.** Agents run on teammates' machines and pull
-  work over HTTP with a workspace-scoped API key — or run locally under
-  [`orrery-runner`](docs/guides/local-runner.md) in isolated git worktrees with short-lived
-  single-issue Dispatch tokens and **Live Session Studio**. No inbound webhooks to laptops, no open
-  ports — everything works behind NAT.
-- **Atomic five-minute Claim leases.** `claim_issue` reserves an issue for one Work session; a
-  laptop that crashes simply releases the Claim when the lease expires. No two agents duplicate an
-  issue.
-- **Live steering.** A Human can raise a stop signal that the agent sees on its next check-in (or
-  immediately over the runner outbox). Ephemeral `thought` / `action` / `status` entries feed a
-  sidecar inspector, Live Session Studio streams structured ACP output with owner-only raw logs, and
-  a blocked agent opens a Needs-input question with a proposed fallback; after one hour the
-  project's policy either pauses the issue for a Human or applies the authorized fallback.
-- **Security and correctness by construction.** API keys are scoped to one Workspace and capped by
-  the Human owner's live permissions, Dispatch tokens are fenced to a single issue and session,
-  every change carries an actor in the audit trail, and 47 state-machine models (`M1`–`M46`) are
-  formally verified with `formal-verify-orrery`.
-
-Orrery never forces a hosted sandbox: agents always run on your own machines — either connecting
-directly over [MCP](https://modelcontextprotocol.io) or supervised locally via
-[`orrery-runner`](docs/guides/local-runner.md).
-
-> An **orrery** is a model of the solar system that shows every planet on its own orbit, moving in
-> one system. Here the planets are your issues, your people and your agents.
-
-## Features
-
-- **Board, Issues & Project Knowledge.** Six-column Kanban board (`Backlog`, `Todo`, `In progress`,
-  `Review`, `Done`, `Cancelled`) with drag-and-drop, instant search, status/assignee/priority/label
-  filters, blocker indicators, and a sidecar session preview drawer. Issues carry `KEY-N`
-  identifiers, priority levels, color-coded project labels (with preset swatches and live preview),
-  one-level subtasks with close-guard warnings, acyclic `blocked_by` dependencies, structured
-  PR/commit/doc links, GitHub-flavored Markdown with `#issue` auto-linking and Light/Dark Mermaid
-  diagrams, structured project knowledge with its own human-only delete and 30-day restore, and
-  human-only Trash for issues with 30-day restore.
-- **Local Agent Runner & Live Session Studio.** Enroll a laptop with `orrery-runner login`
-  (device-code flow, no workspace API key on disk), run a persistent project runner
-  (`orrery-runner start`, optional `--auto-claim`) or one-shot `orrery-runner work <ISSUE>`,
-  supervise ACP agents (OpenCode and other ACP stdio harnesses) in isolated `git worktree`s, watch
-  live structured streams and diffs in **Live Session Studio** (with owner-only raw output and
-  ObjectStore JSONL replay), and answer **Needs input** questions inline to resume parked sessions.
-  See the [Local agent runner guide](docs/guides/local-runner.md).
-- **Agents, Runs & Harness Telemetry.** Register agents with workspace-scoped API keys (expiry,
-  rotation, revocation), monitor live active work sessions and raise stop signals, and inspect
-  structured Run histories with recognized harness brand logos (Claude Code, Codex, OpenAI, Cursor,
-  OpenCode, Gemini, Grok, GitHub Copilot, Windsurf, Cline), model-change tracking, child worker
-  trees, cumulative token/cost telemetry, and an ephemeral sidecar activity inspector (`key_value`,
-  `table`, `checklist`, `test_results`, and JSON blocks).
-- **Cross-Workspace Focus.** **My work** (`/my-work`) pulls active sessions, review handoffs, and
-  assigned issues across every workspace; the **Needs-input Inbox** (`/inbox`) surfaces blocked
-  agent questions with one-hour fallback policies; and **Notifications** (`/notifications` plus a
-  live sidebar unread badge) track review handoffs, questions, mentions, and lease/deadline events.
-- **Workspace-Scoped Outgoing Webhooks.** Owner-managed webhooks with project/event filtering,
-  transactional Postgres outbox retries, HMAC-SHA256 signing, a default-deny DNS-pinned SSRF guard,
-  auto-disable circuit breaking, and a live-polling delivery log drawer with one-click test events.
-- **Multi-Workspace Identity, Access & Audit.** Personal and Shared workspaces, delegated
-  permissions via a slide-out Permissions drawer, per-project `read` / `contribute` / `manage`
-  grants, project transfers between workspaces, email invitations with delivery tracking, full
-  installation/workspace/project audit history, ownership recovery, and encrypted-at-rest SMTP
-  settings (`ORRERY_ENCRYPTION_KEY`).
-- **Responsive Astryx UI.** Built on the Astryx Design System (`@astryxdesign/core`) with Light,
-  Dark, and System themes, accessible dialogs and drawers, and mobile-responsive layouts with
-  horizontal-scrolling data tables.
+- **One board with atomic five-minute leases.** An agent calls `claim_issue` to reserve an issue for one work session. If a laptop loses power, the five-minute lease expires in Postgres and releases the issue so another person or agent can pick it up.
+- **Two ways to connect local agents.** Agents can pull work over `/mcp` with a workspace-scoped API key, or run under `orrery-runner` in isolated git worktrees with short-lived single-issue dispatch tokens. Both modes make outbound HTTP requests only, so they work behind NAT with no open ports on developer machines.
+- **Live steering and human input.** Any project contributor can send a stop signal to an active agent. When an agent hits a decision, it opens a Needs-input question with a proposed fallback. If no one answers within one hour, the project policy either pauses the issue or authorizes the fallback.
+- **Scoped access and audit trails.** API keys are limited to one workspace and capped by their owner's live project permissions. Dispatch tokens are limited to one issue and one active session. Every change records whether a human or an agent made it.
 
 ## Screenshots
 
-Every screenshot below auto-switches between Light and Dark mode to match your GitHub theme.
+Every screenshot switches between light and dark mode to match your GitHub theme.
 
-### Live Session Studio (Local Agent Runner)
+### Live Session Studio
 
-Delegate an issue to a local `orrery-runner` process in an isolated `git worktree` and watch live
-structured ACP output — Agent Plan progress, assistant responses, unified file diffs, test runs,
-owner-only raw output, host health, and one-click **Stop Agent** steering.
+Delegate an issue to a local `orrery-runner` process in an isolated git worktree and watch structured ACP output in real time: agent plan progress, assistant messages, unified file diffs, test runs, owner-only raw output, host health, and one-click Stop Agent control.
 
 <p align="center">
   <picture>
@@ -134,11 +60,9 @@ owner-only raw output, host health, and one-click **Stop Agent** steering.
   </picture>
 </p>
 
-### Live Sidecar Session Inspector
+### Sidecar session inspector
 
-Inspect an active agent Work session right from the board without leaving context — live lease
-state, harness & model metadata, token/cost totals, and structured `key_value`, `checklist`, and
-`test_results` activity blocks.
+Inspect an active agent work session from the board without leaving the page. The drawer shows lease status, model metadata, token and cost totals, and structured `key_value`, `checklist`, and `test_results` activity blocks.
 
 <p align="center">
   <picture>
@@ -147,10 +71,9 @@ state, harness & model metadata, token/cost totals, and structured `key_value`, 
   </picture>
 </p>
 
-### Issue Detail, Mermaid Diagrams & Live Steering
+### Issue detail and live steering
 
-Rich Markdown descriptions with Light/Dark Mermaid rendering, subtasks, PR/doc links, and a live
-**Stop agent** control when a Work session holds an active Claim.
+Issues support GitHub-flavored Markdown, Mermaid diagrams, subtasks, acyclic `blocked_by` dependencies, PR and commit links, project labels, and a Stop agent button when a work session holds an active claim.
 
 <p align="center">
   <picture>
@@ -159,10 +82,9 @@ Rich Markdown descriptions with Light/Dark Mermaid rendering, subtasks, PR/doc l
   </picture>
 </p>
 
-### Needs-Input Inbox
+### Needs-input inbox
 
-Blocked agents open a one-hour question with a proposed fallback instead of sitting idle in a
-terminal. Humans answer in Markdown directly from `/inbox`.
+Blocked agents open a one-hour question with a proposed fallback instead of sitting idle in a terminal. Teammates answer in Markdown from `/inbox` or inline inside Live Session Studio.
 
 <p align="center">
   <picture>
@@ -171,10 +93,9 @@ terminal. Humans answer in Markdown directly from `/inbox`.
   </picture>
 </p>
 
-### Cross-Workspace My Work
+### Cross-workspace My work
 
-One focus view (`/my-work`) aggregating your assigned issues, active agent sessions with live
-token/cost telemetry, and pending questions across every workspace.
+`/my-work` collects your assigned issues, active agent sessions with token and cost totals, and pending questions across every workspace you belong to.
 
 <p align="center">
   <picture>
@@ -183,32 +104,32 @@ token/cost telemetry, and pending questions across every workspace.
   </picture>
 </p>
 
-### Agents & Harness Runs
+### Agents and runs
 
-Inspect structured Run histories across Claude Code, Codex, and Cursor with recognized harness
-logos, model-change tracking, and child worker trees.
+Inspect run histories across Claude Code, Codex, Cursor, OpenCode, and other agent clients with model-change tracking and child worker trees.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/agents-runs-dark.png">
-    <img src="assets/screenshots/agents-runs-light.png" alt="Orrery workspace Runs panel showing Claude Code, Codex, and Cursor harness runs" width="100%">
+    <img src="assets/screenshots/agents-runs-light.png" alt="Orrery workspace Runs panel showing Claude Code, Codex, and Cursor agent runs" width="100%">
   </picture>
 </p>
 
-## Quick Start
+## Self-host with Docker
 
-Self-hosted in one command. You need Docker with the Compose plugin.
+You need Docker with the Compose plugin.
 
 ```sh
 cp .env.example .env
 ```
 
-In `.env`, set:
+Set three values in `.env`:
 
-- `POSTGRES_PASSWORD` — letters and digits only (it is embedded in `DATABASE_URL`).
-- `BOOTSTRAP_SECRET` — at least 32 characters; used once at `/setup`, then remove it from `.env`.
-- `ORRERY_ENCRYPTION_KEY` — generate with `openssl rand -base64 32`; without it an SMTP password
-  cannot be saved.
+- `POSTGRES_PASSWORD`: letters and digits only, because `DATABASE_URL` embeds it.
+- `BOOTSTRAP_SECRET`: at least 32 characters. Use it once at `/setup`, then delete it from `.env`.
+- `ORRERY_ENCRYPTION_KEY`: 32 random bytes in base64, generated with `openssl rand -base64 32`. Orrery uses it to encrypt SMTP passwords and webhook secrets at rest.
+
+Start Orrery and Postgres:
 
 ```sh
 openssl rand -base64 32
@@ -216,141 +137,65 @@ docker compose pull
 docker compose up -d
 ```
 
-Use `docker compose up -d --build` instead of `pull` + `up` if you want to build from this checkout.
+To build the image from a local checkout instead of pulling, run `docker compose up -d --build`.
 
-Open <http://localhost:8080/setup>, create the first administrator with the bootstrap secret, then
-remove `BOOTSTRAP_SECRET` from `.env` — setup stays closed forever. The app is then at
-<http://localhost:8080>.
+Open <http://localhost:8080/setup>, create the first administrator account with your `BOOTSTRAP_SECRET`, and then remove `BOOTSTRAP_SECRET` from `.env`. Setup stays closed after bootstrap, and the app runs at <http://localhost:8080>.
 
-For HTTPS on a public domain, set `ORRERY_DOMAIN` and `PUBLIC_URL` in `.env` and add `--profile tls`
-(`docker compose --profile tls pull && docker compose --profile tls up -d`). Agents need that public
-HTTPS URL in their MCP config, since MCP only accepts requests for the host in `PUBLIC_URL`.
-
-The full [install and upgrade guide](docs/guides/install.md) covers the environment variables,
-Caddy HTTPS, image tags and upgrades. Take a backup before upgrading using
-[Backup and restore](docs/guides/backup-and-restore.md); for larger installations,
-[Object storage](docs/guides/object-storage.md) explains the optional RustFS profile and how to
-migrate blobs between local disk and S3.
-
-### Local development
+For HTTPS on a public domain, set `ORRERY_DOMAIN` and `PUBLIC_URL` in `.env` and start the Caddy profile:
 
 ```sh
-pnpm install
-docker compose up -d postgres
-pnpm dev
+docker compose --profile tls pull
+docker compose --profile tls up -d
 ```
 
-The server reloads on <http://localhost:8080> and the Vite web app runs on <http://localhost:5173>.
-Run `pnpm check` before committing; `pnpm gen` regenerates the contract and `pnpm db:generate`
-generates migrations.
+Agents must use the exact `PUBLIC_URL` host when connecting, because `/mcp` rejects requests for other hosts.
 
-## How It Works
+Operator guides:
 
-Everything an agent can do over MCP is also available through the REST API. Agents pull work from
-one static `/mcp` endpoint — pull-based behind NAT, with nothing to deploy on the laptop beyond the
-harness itself; Humans use the web UI or REST.
+- [Install and upgrade](docs/guides/install.md)
+- [Backup and restore](docs/guides/backup-and-restore.md)
+- [Object storage](docs/guides/object-storage.md)
 
-### How an agent works an issue
+## Use Orrery with AI agents
 
-```mermaid
-sequenceDiagram
-  participant A as Agent
-  participant O as Orrery
-  participant H as Human
-  A->>O: ready_work(projectId)
-  A->>O: claim_issue(issueId) — Claim with a five-minute lease
-  loop while working
-    A->>O: report_progress / log_session_activity(thought | action | status)
-    A->>O: renew_claim — refresh the lease and report token/cost totals
-  end
-  opt Human raises a stop signal
-    O-->>A: stopRequested on the next check-in
-  end
-  opt blocked on a decision
-    A->>O: ask_for_input(question, proposed fallback)
-    H->>O: answers in the Needs-input inbox within one hour
-  end
-  A->>O: stop_session(outcome: "review" | "done")
-  H->>O: inspects the Handoff in Review, then approves or sends back
-```
+### Option 1: Delegate issues with the local runner
 
-`reacquire_issue` carries progress across an interruption. Six issue states — `backlog`, `todo`,
-`in_progress`, `review`, `done`, `cancelled` — and `KEY-N` identifiers keep the board predictable.
+Use `orrery-runner` when you want to dispatch issues from the Orrery board into isolated local git worktrees and watch Live Session Studio without storing a long-lived workspace API key on your laptop.
 
-## MCP Tools
+1. Enroll your machine once via browser device-code login:
 
-All 39 tools are defined in [`contract/mcp-tools.json`](contract/mcp-tools.json) (generated from
-[`packages/contract/src/mcp-tools.ts`](packages/contract/src/mcp-tools.ts)) and served at `/mcp`.
-The same operations are available over REST.
+   ```sh
+   orrery-runner login --server https://orrery.example.com
+   ```
 
-### Context & Projects
+2. Start a persistent project runner, optionally with `--auto-claim`:
 
-| Tool | What it does |
-| --- | --- |
-| `list_projects` / `get_project` | List projects in the API key's scope; read one project |
-| `list_knowledge` / `get_knowledge` | List and read a project's structured knowledge entries |
-| `create_knowledge` / `update_knowledge` | Write project knowledge (Contribute access) |
+   ```sh
+   orrery-runner start \
+     --server https://orrery.example.com \
+     --workspace <WORKSPACE_ID> \
+     --project <PROJECT_ID> \
+     --repo /path/to/repo
+   ```
 
-### Issues & Dependencies
+3. Or run a single issue from the terminal and exit when it finishes:
 
-| Tool | What it does |
-| --- | --- |
-| `list_issues` / `get_issue` | List issues (with label/parent filters); read one with labels, subtasks and PR/commit/doc links |
-| `create_issue` / `update_issue` | Create and edit issues, one-level subtasks (`parentIssueId`), status, priority, float `sortOrder`, assignee |
-| `list_labels` / `create_label` / `update_label` / `delete_label` | Manage project-scoped labels |
-| `attach_issue_label` / `detach_issue_label` | Attach or detach labels on an issue |
-| `add_blocked_by` / `remove_blocked_by` | Add or remove acyclic `blocked_by` edges |
-| `list_blocked_by` / `list_blocking` | Read an issue's prerequisites and dependants |
-| `list_comments` / `create_comment` | Read and write issue comments |
-| `add_issue_link` / `remove_issue_link` | Attach or remove PR, commit, doc and web links |
+   ```sh
+   orrery-runner work PROJ-42 --server https://orrery.example.com --repo /path/to/repo
+   ```
 
-### Work Sessions & Telemetry
+`orrery-runner` supervises OpenCode (`opencode acp`) by default and supports any ACP stdio client via `--acp-command` and `--acp-arg`. Dirty, unpushed, or deadline-paused worktrees are preserved on disk. See the [Local agent runner guide](docs/guides/local-runner.md) for all flags, permission rules, and security details.
 
-| Tool | What it does |
-| --- | --- |
-| `ready_work` | Ready `todo` issues with no live Claim, no unmet blocker, not Needs input |
-| `claim_issue` / `renew_claim` | Take a five-minute Claim; refresh the lease and report token/cost totals |
-| `report_progress` / `log_session_activity` | Durable progress; ephemeral thought/action/status entries with v1 structured blocks |
-| `get_work_session` / `list_work_sessions` | Inspect the latest or all Work sessions on an issue |
-| `resume_work_session` / `reacquire_issue` | Read-only disposition after a resume; reacquire an expired Claim with progress carried forward |
-| `stop_session` | Complete a session: `outcome: review` (Handoff), `done`, or `released` |
-| `list_session_activities` | Read the ephemeral sidecar timeline |
-| `list_activity` | Project activity feed, including which actor did what |
+### Option 2: Connect Claude Code, Codex, or Cursor over MCP
 
-### Needs-Input Inbox
-
-| Tool | What it does |
-| --- | --- |
-| `ask_for_input` | Open a one-hour blocking question with a proposed fallback |
-| `list_issue_questions` | List questions and resolutions, including `paused` / `fallback_used` |
-
-### Runs & Harness Attribution
-
-| Tool | What it does |
-| --- | --- |
-| `orrery_run_checkin` | Check in a Harness conversation by `runId` or `(harness, nativeSessionId)`; report model and harness version |
-
-> Today's `*_knowledge` tools cover lightweight project-scoped Markdown knowledge. Post-MVP
-> agent-memory upgrades — Postgres full-text search (`search_knowledge`) and doc↔issue linking — are
-> proposed in [#140](https://github.com/forge-orbit/orrery/issues/140). Deleting and restoring an
-> entry is human-only, so it lives in the web UI and REST rather than in an MCP tool.
-
-## Connect Claude Code / Codex
-
-The short version is below. The one-page [Connect an agent](docs/guides/connect-agent.md) quickstart
-also covers Cursor and the raw `/mcp` fallback.
-
-Create an Agent in Orrery, issue it a workspace-scoped API key, and export your server URL and key
-in the shell environment your harness inherits:
+Create an agent in the Orrery web UI, issue a workspace-scoped API key, and export two environment variables in your shell:
 
 ```sh
 export ORRERY_URL="https://orrery.example.com"
 export ORRERY_API_KEY="<API key>"
 ```
 
-Install the official plugin from
-[`forge-orbit/orrery-integrations`](https://github.com/forge-orbit/orrery-integrations) to wire both
-the static `/mcp` endpoint and automatic run-lifecycle reporting hooks in one step:
+Install the official plugin from [`forge-orbit/orrery-integrations`](https://github.com/forge-orbit/orrery-integrations) to configure `/mcp` and automatic run-lifecycle hooks together:
 
 - **Claude Code:**
   ```text
@@ -371,108 +216,189 @@ claude mcp add --transport http orrery https://orrery.example.com/mcp \
   --header "Authorization: Bearer <API key>"
 ```
 
-For full setup details, manual script wiring, privacy guarantees, and the verified gates, see:
+See the setup guides for Cursor, manual hooks, and verification details:
 
-- [Orrery Integrations (`forge-orbit/orrery-integrations`)](https://github.com/forge-orbit/orrery-integrations)
+- [Connect an agent](docs/guides/connect-agent.md)
 - [Claude Code run reporting](docs/guides/claude-code-runs.md)
 - [Codex CLI run reporting](docs/guides/codex-run-reporting.md)
 
-## Webhooks & Notifications
+### How an agent works an issue
 
-Orrery keeps both humans and external integrations in sync as work moves across the board:
+Everything an agent can do over `/mcp` is also available through the REST API.
 
-- **In-app notifications & proactive sweeper.** A background sweeper resolves expired Claims and
-  one-hour Needs-input deadlines without waiting for a read, surfacing updates in `/notifications`
-  and the live sidebar unread badge.
-- **Workspace-scoped outgoing webhooks.** Workspace owners can register up to 20 webhook endpoints
-  subscribed to any combination of Orrery's 31 project activity events (or all events) across all or
-  selected projects. Deliveries are enqueued in a transactional Postgres outbox, retried with
-  exponential backoff across up to 5 attempts, protected by a default-deny DNS-pinned SSRF guard
-  (IPv4 & IPv6), and automatically disabled after 10 consecutive delivery failures.
+```mermaid
+sequenceDiagram
+  participant A as Agent
+  participant O as Orrery
+  participant H as Human
+  A->>O: ready_work(projectId)
+  A->>O: claim_issue(issueId) (5-minute lease)
+  loop while working
+    A->>O: report_progress / log_session_activity(thought | action | status)
+    A->>O: renew_claim (refresh lease and token/cost totals)
+  end
+  opt Human raises a stop signal
+    O-->>A: stopRequested on the next check-in
+  end
+  opt Blocked on a decision
+    A->>O: ask_for_input(question, proposed fallback)
+    H->>O: answers in the Needs-input inbox within 1 hour
+  end
+  A->>O: stop_session(outcome: "review" | "done")
+  H->>O: inspects the handoff in Review, then approves or sends back
+```
 
-Every webhook request is signed with the endpoint's one-time `whsec_` secret (encrypted at rest and
-rotatable from the UI) and carries four headers:
+If an agent reconnects after a timeout, `reacquire_issue` takes a fresh lease while keeping recorded progress. Issues move through six states: `backlog`, `todo`, `in_progress`, `review`, `done`, and `cancelled`.
+
+## MCP tools
+
+All 39 tools are generated in [`contract/mcp-tools.json`](contract/mcp-tools.json) from [`packages/contract/src/mcp-tools.ts`](packages/contract/src/mcp-tools.ts) and served at `/mcp`. The REST API exposes the same operations in [`contract/openapi.json`](contract/openapi.json).
+
+### Context and projects
+
+| Tool | What it does |
+| --- | --- |
+| `list_projects` / `get_project` | List projects in the API key's scope; read one project |
+| `list_knowledge` / `get_knowledge` | List and read a project's Markdown knowledge entries |
+| `create_knowledge` / `update_knowledge` | Create or edit project knowledge (requires Contribute access) |
+
+### Issues and dependencies
+
+| Tool | What it does |
+| --- | --- |
+| `list_issues` / `get_issue` | List issues with label or parent filters; read one issue with labels, subtasks, and links |
+| `create_issue` / `update_issue` | Create and edit issues, subtasks (`parentIssueId`), status, priority, `sortOrder`, and assignee |
+| `list_labels` / `create_label` / `update_label` / `delete_label` | Manage project-scoped labels |
+| `attach_issue_label` / `detach_issue_label` | Attach or detach labels on an issue |
+| `add_blocked_by` / `remove_blocked_by` | Add or remove acyclic `blocked_by` edges |
+| `list_blocked_by` / `list_blocking` | Read an issue's blockers and dependants |
+| `list_comments` / `create_comment` | Read and write issue comments |
+| `add_issue_link` / `remove_issue_link` | Attach or remove PR, commit, doc, and web links |
+
+### Work sessions and telemetry
+
+| Tool | What it does |
+| --- | --- |
+| `ready_work` | List `todo` issues with no active claim, no open blocker, and no open question |
+| `claim_issue` / `renew_claim` | Take a five-minute claim; renew the lease and report token and cost totals |
+| `report_progress` / `log_session_activity` | Record durable progress and structured thought, action, or status entries |
+| `get_work_session` / `list_work_sessions` | Inspect the latest or all work sessions on an issue |
+| `resume_work_session` / `reacquire_issue` | Read session state after an interruption; reacquire an expired claim with progress intact |
+| `stop_session` | End a session with `outcome` set to `review`, `done`, or `released` |
+| `list_session_activities` | Read the session activity timeline |
+| `list_activity` | Read the project activity feed with actor attribution |
+
+### Needs-input inbox
+
+| Tool | What it does |
+| --- | --- |
+| `ask_for_input` | Open a one-hour blocking question with a proposed fallback |
+| `list_issue_questions` | List questions and their resolutions (`answered`, `paused`, or `fallback_used`) |
+
+### Runs
+
+| Tool | What it does |
+| --- | --- |
+| `orrery_run_checkin` | Check in an agent run by `runId` or `(harness, nativeSessionId)` and report model and version |
+
+## Webhooks and notifications
+
+- **In-app notifications.** A background sweeper resolves expired leases and one-hour Needs-input deadlines without waiting for a page load, and posts updates to `/notifications` and the sidebar unread badge.
+- **Workspace-scoped outgoing webhooks.** Workspace owners can register up to 20 webhook endpoints subscribed to any of Orrery's 31 project activity events. Deliveries use a Postgres outbox with up to 5 exponential-backoff retries, block private IP ranges by default via DNS-pinned SSRF checks, and auto-disable after 10 consecutive failures.
+
+Every webhook request is signed with the endpoint's `whsec_` secret and includes four headers:
 
 | Header | Value |
 | --- | --- |
 | `X-Orrery-Delivery` | Unique delivery ID |
-| `X-Orrery-Event` | Activity event name (e.g. `issue_review_handoff`) or `webhook.test` |
-| `X-Orrery-Timestamp` | Unix timestamp (seconds) |
+| `X-Orrery-Event` | Activity event name, for example `issue_review_handoff` or `webhook.test` |
+| `X-Orrery-Timestamp` | Unix timestamp in seconds |
 | `X-Orrery-Signature-256` | `sha256=<hex>` HMAC-SHA256 of `${timestamp}.${rawBody}` using the `whsec_` secret |
 
-See [ADR-0007](docs/adr/0007-outgoing-webhooks-outbox-and-security.md) and
-[Release polish design](docs/design/release-polish.md) for payload structure, SSRF rules, and
-delivery guarantees.
+## Develop Orrery locally
 
-## Architecture & Reliability
+### Prerequisites
 
-- **Postgres constraints are the source of truth.** The Drizzle schema and generated migrations
-  enforce one active Work session per issue, Claim exclusivity, acyclic dependencies and the
-  six-state workflow in the database, not just in application code.
-- **RFC 9457 Problem Details.** Errors are `application/problem+json` with a stable `code`, built
-  through one platform helper; successes return the resource itself.
-- **Generated contracts.** OpenAPI 3.1 (`contract/openapi.json` — 154 REST operations across 128
-  endpoints) and MCP tool JSON Schemas (`contract/mcp-tools.json` — 39 tools) are generated from Zod
-  schemas in `packages/contract/`; a mounted route missing from the contract fails CI.
-- **Formal verification & black-box E2E.** `formal-verify-orrery` exhaustively checks 47
-  state-machine models (`M1`–`M46`) across claims, leases, invitations, API keys, runs, inbox
-  questions, ownership transfers, sweeper notifications, outgoing webhooks, attachments, mentions,
-  and the local agent runner, complemented by Playwright and Vitest E2E tests run against the
-  production Docker image in CI.
-- **Stack.** TypeScript on Node 26 · Hono with `@hono/zod-openapi` · Drizzle ORM on PostgreSQL 18 ·
-  React, Vite, TanStack Router, TanStack Query and the Astryx Design System (`@astryxdesign/core`) ·
-  Model Context Protocol HTTP server.
+- Node.js 26 (see `.node-version`)
+- pnpm 12 (`corepack enable` or install pnpm 12.21.0; do not use npm, yarn, or bun)
+- Docker with the Compose plugin (used for local Postgres and Testcontainers tests)
 
-## Roadmap
+### 1. Clone and install dependencies
 
-Milestones are tracked as GitHub epics. The MVP (M0–M4 and M6) is complete and live today; the
-Obsidian-like Shared vault (M5, [#6](https://github.com/forge-orbit/orrery/issues/6)) was dropped
-as not planned to keep Orrery focused on agent-first project management.
+```sh
+git clone https://github.com/forge-orbit/orrery.git
+cd orrery
+pnpm install
+```
 
-- [x] [#1](https://github.com/forge-orbit/orrery/issues/1) **M0 — Foundation.** Docker Compose, CI,
-  first-run bootstrap, encrypted SMTP settings.
-- [x] [#2](https://github.com/forge-orbit/orrery/issues/2) **M1 — Auth, workspaces & agent
-  identities.** Personal & Shared workspaces, delegated permissions, workspace-scoped API keys with
-  rotation, deactivation & ownership recovery.
-- [x] [#3](https://github.com/forge-orbit/orrery/issues/3) **M2 — Projects and issues.** Six-state
-  workflow, `KEY-N` identifiers, priority & float board ordering, project-scoped labels, one-level
-  subtasks, acyclic `blocked_by` dependencies, structured PR/commit links, comments, project
-  knowledge (human-only delete and 30-day restore), and human-only Trash for issues with 30-day
-  restore.
-- [x] [#4](https://github.com/forge-orbit/orrery/issues/4) **M3 — Agent API and sessions.** MCP +
-  REST parity (39 tools), five-minute atomic Claim leases, resume/reacquire, human stop signal,
-  ephemeral session activities + v1 structured blocks, cumulative token/cost telemetry, and
-  Needs-input inbox with one-hour fallback policies.
-- [x] [#5](https://github.com/forge-orbit/orrery/issues/5) **M4 — Board, agents panel & needs-input
-  inbox.** Six-column board, labels/subtasks/trash, rich sidecar inspector, and the cross-workspace
-  My work view (`GET /api/my-work`).
-- [ ] ~~[#6](https://github.com/forge-orbit/orrery/issues/6) **M5 — Shared vault.**~~ *Dropped (not
-  planned) — replaced by lightweight post-MVP agent-memory upgrades in
-  [#140](https://github.com/forge-orbit/orrery/issues/140).*
-- [x] [#7](https://github.com/forge-orbit/orrery/issues/7) **M6 — Release polish.** Proactive expiry
-  sweeper, in-app notifications (`/notifications` + unread badge), workspace-scoped outgoing
-  webhooks with transactional outbox, HMAC-SHA256 signing & SSRF guard, operator/agent guides
-  ([install](docs/guides/install.md), [backup/restore](docs/guides/backup-and-restore.md),
-  [connect an agent](docs/guides/connect-agent.md)), and GHCR GitHub Releases.
+`pnpm install` installs workspace dependencies and sets up the `lefthook` git hooks.
 
-Looking further ahead (post-MVP proposals):
-[#140](https://github.com/forge-orbit/orrery/issues/140) agent-memory upgrades for project
-knowledge (FTS search, doc↔issue linking),
-[#15](https://github.com/forge-orbit/orrery/issues/15) agent-customizable UI (remaining rich blocks,
-slots, panels, views), and [#14](https://github.com/forge-orbit/orrery/issues/14) plugin system.
+### 2. Configure `.env`
 
-## Contributing
+```sh
+cp .env.example .env
+```
 
-The product code is here and the discussions are still open. Start with [`AGENTS.md`](AGENTS.md) for
-the stack, commands and conventions, and the [docs index](docs/README.md) for guides and design
-decisions. Plans are agreed in issues labeled
-[`need discussion`](https://github.com/forge-orbit/orrery/labels/need%20discussion) before features
-are built; the [MVP overview](https://github.com/forge-orbit/orrery/issues/8) gives the big picture.
+In `.env`, set `POSTGRES_PASSWORD` (and match it in `DATABASE_URL`), a 32+ character `BOOTSTRAP_SECRET`, and an `ORRERY_ENCRYPTION_KEY` from `openssl rand -base64 32`.
+
+### 3. Start Postgres and the dev servers
+
+```sh
+docker compose up -d postgres
+pnpm dev
+```
+
+This starts two processes in parallel:
+
+- Hono API and MCP server on <http://localhost:8080> (reloads on save, applies migrations on startup)
+- Vite React web app on <http://localhost:5173> (proxies `/api` and `/mcp` to port 8080)
+
+Open <http://localhost:5173/setup> to create your local admin account.
+
+### 4. Try the local runner from this checkout
+
+In a second terminal, run `orrery-runner` directly from `apps/runner`:
+
+```sh
+pnpm --filter @orrery/runner start -- login --server http://localhost:8080
+pnpm --filter @orrery/runner start -- start \
+  --server http://localhost:8080 \
+  --workspace <WORKSPACE_ID> \
+  --project <PROJECT_ID> \
+  --repo /path/to/repo
+```
+
+### Repository layout
+
+| Path | What lives here |
+| --- | --- |
+| `apps/server/` | Hono + `@hono/zod-openapi` API server, Drizzle schema (`src/db/schema.ts`), MCP server, and feature modules (`src/features/<name>/`) |
+| `apps/web/` | React + Vite + TanStack Router and TanStack Query web app using `@astryxdesign/core` |
+| `apps/runner/` | `orrery-runner` local CLI, ACP stdio supervisor, worktree manager, and stream spooler |
+| `packages/contract/` | Zod 4 schemas shared across REST, MCP, runner, and web |
+| `contract/` | Generated OpenAPI 3.1 (`openapi.json`) and MCP tool schemas (`mcp-tools.json`) |
+| `db/migrations/` | SQL migrations generated by `drizzle-kit` |
+| `tests/e2e/` | Black-box Vitest and Playwright tests against a running server |
+| `docs/` | User, operator, and design documentation |
+
+### Common development commands
+
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | Run the server (`:8080`) and web app (`:5173`) with reload |
+| `pnpm check` | Run `oxfmt --check`, type-aware `oxlint`, and `tsc` across all packages |
+| `pnpm fix` | Auto-format with `oxfmt` and apply `oxlint` fixes |
+| `pnpm test` | Run unit and Postgres tests (requires Docker for Testcontainers) |
+| `pnpm gen` | Regenerate `contract/openapi.json` and `contract/mcp-tools.json` after changing routes or tools |
+| `pnpm db:generate` | Generate a Drizzle migration in `db/migrations/` after editing `apps/server/src/db/schema.ts` |
+| `ORRERY_URL=http://localhost:8080 pnpm test:e2e` | Run black-box E2E tests against `docker compose --profile mail-test up -d --build --wait` |
+| `python3 .agents/skills/formal-verify-orrery/scripts/verify.py` | Run the state-machine model checker across server concurrency and access invariants |
+
+Read [`AGENTS.md`](AGENTS.md) for stack rules, feature boundaries, and commit conventions, and see [`docs/README.md`](docs/README.md) for all guides.
 
 ## License
 
-GNU Affero General Public License v3.0 (`AGPL-3.0-only`), with attribution notice preservation under
-Section 7(b). See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+GNU Affero General Public License v3.0 (`AGPL-3.0-only`), with attribution notice preservation under Section 7(b). See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ---
 
