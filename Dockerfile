@@ -20,7 +20,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm-store \
     pnpm install --frozen-lockfile --store-dir /pnpm-store --filter @orrery/web...
 COPY packages/contract packages/contract
 COPY apps/web apps/web
-COPY assets/orrery-mark.svg assets/orrery-mark-dark.svg assets/
+COPY assets/orrery-mark.svg assets/orrery-mark-dark.svg assets/orrery-wordmark-light.png assets/orrery-wordmark-dark.png assets/
 RUN pnpm --filter @orrery/web build
 
 # Production dependencies for the server only. Node runs the TypeScript sources directly.

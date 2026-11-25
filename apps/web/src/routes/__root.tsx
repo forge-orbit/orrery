@@ -21,8 +21,8 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { createElement } from "react";
-import markDark from "../../../../assets/orrery-mark-dark.svg";
-import markLight from "../../../../assets/orrery-mark.svg";
+import wordmarkDark from "../../../../assets/orrery-wordmark-dark.png";
+import wordmarkLight from "../../../../assets/orrery-wordmark-light.png";
 import {
   type Session,
   sessionQuery,
@@ -452,18 +452,13 @@ function OrbitDiagram() {
 function BrandHome({ forceDark = false }: { forceDark?: boolean }) {
   const appearance = useResolvedAppearance();
   return (
-    <Link to="/" color="inherit" weight="bold">
-      <Stack as="span" direction="horizontal" gap={1.5} align="center">
-        <img
-          src={forceDark || appearance === "dark" ? markDark : markLight}
-          width="22"
-          height="20"
-          alt=""
-        />
-        <Text as="span" type="large" weight="bold" color="inherit">
-          Orrery
-        </Text>
-      </Stack>
+    <Link to="/" color="inherit">
+      <img
+        src={forceDark || appearance === "dark" ? wordmarkDark : wordmarkLight}
+        width={82}
+        height={22}
+        alt="Orrery"
+      />
     </Link>
   );
 }
