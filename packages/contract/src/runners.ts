@@ -381,3 +381,194 @@ export const AckCommandsResponse = z
   .object({ ackedSeq: z.int().nonnegative() })
   .meta({ id: "AckCommandsResponse" });
 export type AckCommandsResponse = z.infer<typeof AckCommandsResponse>;
+
+/**
+ * Typed, versioned ACP/Runner diagnostics. Every variant carries `version` so a
+ * future shape can be added without misreading an older streamed event.
+ */
+const diagnosticVersion = z.literal(1);
+
+export const AcpNotInstalledDiagnostic = z
+  .object({
+    kind: z.literal("acp_not_installed"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    harness: z.string().min(1).max(64).optional(),
+  })
+  .meta({ id: "AcpNotInstalledDiagnostic" });
+
+export const AcpSpawnFailedDiagnostic = z
+  .object({
+    kind: z.literal("acp_spawn_failed"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    exitCode: z.int().optional(),
+  })
+  .meta({ id: "AcpSpawnFailedDiagnostic" });
+
+export const AcpCrashedDiagnostic = z
+  .object({
+    kind: z.literal("acp_crashed"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    exitCode: z.int().optional(),
+    signal: z.string().max(64).optional(),
+  })
+  .meta({ id: "AcpCrashedDiagnostic" });
+
+export const AuthExpiredDiagnostic = z
+  .object({
+    kind: z.literal("auth_expired"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    /** A concrete step the human can take, e.g. "Run `opencode auth login`". */
+    remediation: z.string().min(1).max(2000),
+  })
+  .meta({ id: "AuthExpiredDiagnostic" });
+
+export const UsageLimitDiagnostic = z
+  .object({
+    kind: z.literal("usage_limit"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    resetsAt: Timestamp.optional(),
+  })
+  .meta({ id: "UsageLimitDiagnostic" });
+
+export const ProviderOverloadDiagnostic = z
+  .object({
+    kind: z.literal("provider_overload"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    attempt: z.int().positive(),
+    nextRetryAt: Timestamp.optional(),
+    countdownSeconds: z.int().nonnegative().optional(),
+  })
+  .meta({ id: "ProviderOverloadDiagnostic" });
+
+export const PermissionDeniedDiagnostic = z
+  .object({
+    kind: z.literal("permission_denied"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    tool: z.string().max(64).optional(),
+    path: z.string().max(2000).optional(),
+  })
+  .meta({ id: "PermissionDeniedDiagnostic" });
+
+export const RunnerDisconnectedDiagnostic = z
+  .object({
+    kind: z.literal("runner_disconnected"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    lastSeq: z.int().nonnegative().optional(),
+  })
+  .meta({ id: "RunnerDisconnectedDiagnostic" });
+
+export const SessionDiagnostic = z
+  .discriminatedUnion("kind", [
+    AcpNotInstalledDiagnostic,
+    AcpSpawnFailedDiagnostic,
+    AcpCrashedDiagnostic,
+    AuthExpiredDiagnostic,
+    UsageLimitDiagnostic,
+    ProviderOverloadDiagnostic,
+    PermissionDeniedDiagnostic,
+    RunnerDisconnectedDiagnostic,
+  ])
+  .meta({ id: "SessionDiagnostic" });
+export type SessionDiagnostic = z.infer<typeof SessionDiagnostic>;
+
+/** `owner_only` raw stdout is only ever served to the Runner host owner. */
+export const StreamChunkVisibility = z
+  .enum(["project_readers", "owner_only"])
+  .meta({ id: "StreamChunkVisibility" });
+export type StreamChunkVisibility = z.infer<typeof StreamChunkVisibility>;
+
+export const StreamChunkKind = z
+  .enum(["event", "diagnostic", "raw_output"])
+  .meta({ id: "StreamChunkKind" });
+export type StreamChunkKind = z.infer<typeof StreamChunkKind>;
+
+/** One spooled, ordered line of a session stream (tool call, diff, plan, etc.). */
+export const StreamChunk = z
+  .object({
+    seq: z.int().positive(),
+    kind: StreamChunkKind,
+    visibility: StreamChunkVisibility.default("project_readers"),
+    eventType: z.string().min(1).max(64).optional(),
+    summary: z.string().max(2000).optional(),
+    data: z.record(z.string(), z.unknown()).optional(),
+    diagnostic: SessionDiagnostic.optional(),
+  })
+  .meta({ id: "StreamChunk" });
+export type StreamChunk = z.infer<typeof StreamChunk>;
+
+/** An idempotent `fromSeq..toSeq` window replayed by the local spool. */
+export const StreamBatchRequest = z
+  .object({
+    dispatchAttemptId: DispatchAttemptId,
+    fromSeq: z.int().positive(),
+    toSeq: z.int().positive(),
+    chunks: z.array(StreamChunk).max(1000),
+  })
+  .refine((value) => value.toSeq >= value.fromSeq, {
+    message: "toSeq must not be smaller than fromSeq.",
+  })
+  .meta({ id: "StreamBatchRequest" });
+export type StreamBatchRequest = z.infer<typeof StreamBatchRequest>;
+
+export const StreamBatchResponse = z
+  .object({ ackedSeq: z.int().nonnegative() })
+  .meta({ id: "StreamBatchResponse" });
+export type StreamBatchResponse = z.infer<typeof StreamBatchResponse>;
+
+export const StreamQuery = z
+  .object({ afterSeq: z.coerce.number().int().nonnegative().default(0) })
+  .meta({ id: "StreamQuery" });
+export type StreamQuery = z.infer<typeof StreamQuery>;
+
+export const StreamResponse = z
+  .object({
+    chunks: z.array(StreamChunk),
+    nextAfterSeq: z.int().nonnegative(),
+    rolledUp: z.boolean(),
+  })
+  .meta({ id: "StreamResponse" });
+export type StreamResponse = z.infer<typeof StreamResponse>;
+
+/** A reconnect reports the attempts still running locally and their last seq. */
+export const ReconnectAttempt = z
+  .object({
+    dispatchAttemptId: DispatchAttemptId,
+    lastSeq: z.int().nonnegative(),
+  })
+  .meta({ id: "ReconnectAttempt" });
+export type ReconnectAttempt = z.infer<typeof ReconnectAttempt>;
+
+export const ReconnectRequest = z
+  .object({ activeAttempts: z.array(ReconnectAttempt).max(64) })
+  .meta({ id: "ReconnectRequest" });
+export type ReconnectRequest = z.infer<typeof ReconnectRequest>;
+
+export const ReconnectResolution = z
+  .object({
+    dispatchId: DispatchId,
+    dispatchAttemptId: DispatchAttemptId,
+    state: DispatchState,
+    resumed: z.boolean(),
+    lastSeq: z.int().nonnegative(),
+  })
+  .meta({ id: "ReconnectResolution" });
+export type ReconnectResolution = z.infer<typeof ReconnectResolution>;
+
+export const ReconnectResponse = z
+  .object({ resolutions: z.array(ReconnectResolution) })
+  .meta({ id: "ReconnectResponse" });
+export type ReconnectResponse = z.infer<typeof ReconnectResponse>;
+
+/** Explicit human settlement of an uncertain attempt before any re-dispatch. */
+export const ResolveUncertainRequest = z
+  .object({ outcome: z.enum(["released", "completed"]) })
+  .meta({ id: "ResolveUncertainRequest" });
+export type ResolveUncertainRequest = z.infer<typeof ResolveUncertainRequest>;

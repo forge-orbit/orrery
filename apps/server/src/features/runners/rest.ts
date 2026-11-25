@@ -16,12 +16,19 @@ import {
   IssueDispatchesResponse,
   HeartbeatRequest,
   HostCredentialResponse,
+  ReconnectRequest,
+  ReconnectResponse,
   RegisterRunnerRequest,
+  ResolveUncertainRequest,
   RevokeRunnerHostResponse,
   Runner,
   RunnerCommandsResponse,
   RunnerHostId,
   RunnerId,
+  StreamBatchRequest,
+  StreamBatchResponse,
+  StreamQuery,
+  StreamResponse,
   UserCode,
   WorkspaceRunnersFleet,
 } from "@orrery/contract";
@@ -40,6 +47,7 @@ const runnerParams = z.object({ runnerId: RunnerId });
 const workspaceParams = z.object({ workspaceId: z.string().min(1).max(200) });
 const issueParams = z.object({ issueId: z.string().min(1).max(200) });
 const acceptParams = z.object({ runnerId: RunnerId, dispatchId: DispatchId });
+const resolveParams = z.object({ dispatchId: DispatchId });
 
 const dispatchErrors = {
   400: problem("The dispatch request is invalid"),
@@ -282,6 +290,110 @@ const ackCommands = createRoute({
   },
 });
 
+// 429 is a native backpressure response: the header is part of the contract.
+const streamErrors = {
+  400: problem("The stream batch or cursor is invalid"),
+  401: problem("Not signed in, or the Runner host credential is invalid"),
+  403: problem("The viewer cannot read this project"),
+  404: problem("No such Runner or Dispatch is accessible"),
+  409: problem("The attempt fenced by dispatchAttemptId is not active"),
+  429: {
+    ...problem("Backpressure: retry after the Retry-After interval"),
+    headers: z.object({ "Retry-After": z.string() }),
+  },
+};
+
+const ingestStream = createRoute({
+  method: "post",
+  path: "/api/runners/{runnerId}/dispatches/{dispatchId}/stream",
+  summary: "Flush an idempotent stream batch from the local spool",
+  description:
+    "Runner host credential only. Chunks are keyed by (work session, seq); replaying fromSeq..toSeq returns the contiguous ackedSeq or 429 Retry-After backpressure.",
+  request: {
+    params: acceptParams,
+    body: { content: { "application/json": { schema: StreamBatchRequest } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "The contiguous acknowledged sequence",
+      content: { "application/json": { schema: StreamBatchResponse } },
+    },
+    ...streamErrors,
+  },
+});
+
+const readStream = createRoute({
+  method: "get",
+  path: "/api/runners/{runnerId}/dispatches/{dispatchId}/stream",
+  summary: "Read the live or archived session stream after a sequence cursor",
+  description:
+    "A human with project Read access or the Runner host may poll ?afterSeq=N. owner_only raw chunks are removed server-side for every viewer who is not the Runner host owner, including administrators.",
+  request: { params: acceptParams, query: StreamQuery },
+  responses: {
+    200: {
+      description: "The visible chunks and the next cursor",
+      content: { "application/json": { schema: StreamResponse } },
+    },
+    ...streamErrors,
+  },
+});
+
+const reconnectErrors = {
+  400: problem("The reconnect report is invalid"),
+  401: problem("The Runner host credential is invalid or was revoked"),
+  403: problem("The Runner host cannot access this workspace"),
+  404: problem("No such Runner is accessible"),
+  409: problem("The Runner lost workspace or project access"),
+  429: problem("Too many reconnect reports; try again later"),
+};
+
+const resolveErrors = {
+  400: problem("The resolution request is invalid"),
+  401: problem("Not signed in"),
+  403: problem("Only the requester, host owner or a project manager may resolve"),
+  404: problem("No such Dispatch is accessible to you"),
+  409: problem("The Dispatch is not uncertain"),
+  429: problem("Too many resolution attempts; try again later"),
+};
+
+const reconnectRunner = createRoute({
+  method: "post",
+  path: "/api/runners/{runnerId}/reconnect",
+  summary: "Reconcile active dispatch attempts after a Runner reconnects",
+  description:
+    "An uncertain attempt absent from activeAttempts stays uncertain and blocks further dispatch until explicit human resolution.",
+  request: {
+    params: runnerParams,
+    body: { content: { "application/json": { schema: ReconnectRequest } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "One resolution per active or uncertain dispatch",
+      content: { "application/json": { schema: ReconnectResponse } },
+    },
+    ...reconnectErrors,
+  },
+});
+
+const resolveUncertain = createRoute({
+  method: "post",
+  path: "/api/runners/dispatches/{dispatchId}/resolve",
+  summary: "Explicitly resolve an uncertain Dispatch",
+  description:
+    "Only a human who owns the request/host or has project Manage access may settle an uncertain attempt, releasing its claim before any re-dispatch.",
+  request: {
+    params: resolveParams,
+    body: { content: { "application/json": { schema: ResolveUncertainRequest } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "The settled Dispatch",
+      content: { "application/json": { schema: Dispatch } },
+    },
+    ...resolveErrors,
+  },
+});
+
 const bearer = (c: Context) => readBearerToken(c.req.raw.headers.get("authorization")) ?? undefined;
 
 type Status = 400 | 401 | 403 | 404 | 409 | 429;
@@ -310,8 +422,16 @@ const statusFor = {
   insufficient_dispatch_access: 403,
   dispatch_not_found: 404,
   dispatch_not_pending: 409,
+  dispatch_uncertain: 409,
+  dispatch_not_uncertain: 409,
   issue_not_claimable: 409,
   issue_not_dispatchable: 409,
+  stream_unavailable: 409,
+  stream_attempt_mismatch: 409,
+  stream_batch_out_of_range: 400,
+  stream_batch_too_large: 400,
+  stream_rate_limited: 429,
+  stream_rollup_failed: 409,
 } as const satisfies Record<RunnersErrorKind, Status>;
 
 function failure(c: Context, error: unknown) {
@@ -323,6 +443,13 @@ function failure(c: Context, error: unknown) {
     });
   }
   throw error;
+}
+
+function streamFailure(c: Context, error: unknown) {
+  if (error instanceof RunnersError && error.kind === "stream_rate_limited") {
+    c.header("Retry-After", String(error.retryAfter ?? 60));
+  }
+  return failure(c, error);
 }
 
 export const routes = [
@@ -339,6 +466,10 @@ export const routes = [
   acceptDispatch,
   pollCommands,
   ackCommands,
+  ingestStream,
+  readStream,
+  reconnectRunner,
+  resolveUncertain,
 ];
 
 export function createRunnersRest(service: RunnersService, sessionReader: SessionReader) {
@@ -475,6 +606,61 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
       const { runnerId } = c.req.valid("param");
       return c.json(
         await service.ackCommands(bearer(c), runnerId, c.req.valid("json").upToSeq),
+        200,
+      );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(ingestStream, async (c) => {
+    try {
+      const { runnerId, dispatchId } = c.req.valid("param");
+      return c.json(
+        await service.ingestStream(bearer(c), runnerId, dispatchId, c.req.valid("json")),
+        200,
+      );
+    } catch (error) {
+      return streamFailure(c, error);
+    }
+  });
+
+  app.openapi(readStream, async (c) => {
+    try {
+      const { runnerId, dispatchId } = c.req.valid("param");
+      return c.json(
+        await service.readStream(
+          bearer(c),
+          await sessionReader(c),
+          runnerId,
+          dispatchId,
+          c.req.valid("query").afterSeq,
+        ),
+        200,
+      );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(reconnectRunner, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      return c.json(await service.reconnectRunner(bearer(c), runnerId, c.req.valid("json")), 200);
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(resolveUncertain, async (c) => {
+    try {
+      const { dispatchId } = c.req.valid("param");
+      return c.json(
+        await service.resolveUncertainDispatch(
+          await sessionReader(c),
+          dispatchId,
+          c.req.valid("json").outcome,
+        ),
         200,
       );
     } catch (error) {

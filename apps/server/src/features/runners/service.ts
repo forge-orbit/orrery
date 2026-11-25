@@ -13,16 +13,37 @@ import type {
   HeartbeatRequest,
   HostCredentialResponse,
   ProjectAccessLevel,
+  ReconnectRequest,
+  ReconnectResponse,
   RegisterRunnerRequest,
+  ResolveUncertainRequest,
   Runner,
   RunnerCommandsResponse,
   RunnerHost,
   RunnerPresence,
+  StreamBatchRequest,
+  StreamBatchResponse,
+  StreamResponse,
   WorkSession,
   WorkspaceRunnersFleet,
 } from "@orrery/contract";
-import { RunnerCommand, WorkSessionStatus } from "@orrery/contract";
-import { and, asc, eq, gt, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { RunnerCommand, SessionDiagnostic, StreamChunk, WorkSessionStatus } from "@orrery/contract";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  notInArray,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   agents,
@@ -37,18 +58,38 @@ import {
   runnerHosts,
   runners,
   runs,
+  storedObjects,
+  workSessionActivities,
+  workSessionStreamChunks,
   workSessions,
   workspaces,
   workspaceMemberships,
 } from "../../db/schema.ts";
 import type { DbTransaction, Sql } from "../../platform/db.ts";
+import type { Logger } from "../../platform/log.ts";
+import { discardObject, isDeleted } from "../../platform/object-sweep.ts";
+import type { ObjectStore } from "../../platform/storage.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import type { SessionAccount, SessionReader } from "../accounts/index.ts";
 import { newDispatchToken } from "../agents/index.ts";
 import { toRun } from "../runs/index.ts";
-import { SessionsError, toSession } from "../work-sessions/index.ts";
+import { releaseIssueWorkSessions, SessionsError, toSession } from "../work-sessions/index.ts";
 import { createCommandNotifier } from "./notifier.ts";
 import { cancelDispatchesForRunners, enqueueRunnerCommand } from "./outbox.ts";
+import {
+  computeAckedSeq,
+  DISPATCH_UNCERTAIN_AFTER_SECONDS,
+  MAX_STREAM_BATCHES_PER_WINDOW,
+  mergeChunks,
+  milestonesFor,
+  parseJsonl,
+  sha256Of,
+  STREAM_CONTENT_TYPE,
+  STREAM_MILESTONE_COALESCE_SECONDS,
+  STREAM_WINDOW_SECONDS,
+  streamObjectKey,
+  toJsonl,
+} from "./stream.ts";
 
 const HOST_CREDENTIAL_PREFIX = "orr_rh_";
 const DEVICE_CODE_PREFIX = "orr_dc_";
@@ -84,8 +125,16 @@ export type RunnersErrorKind =
   | "insufficient_dispatch_access"
   | "dispatch_not_found"
   | "dispatch_not_pending"
+  | "dispatch_uncertain"
+  | "dispatch_not_uncertain"
   | "issue_not_claimable"
-  | "issue_not_dispatchable";
+  | "issue_not_dispatchable"
+  | "stream_unavailable"
+  | "stream_attempt_mismatch"
+  | "stream_batch_out_of_range"
+  | "stream_batch_too_large"
+  | "stream_rate_limited"
+  | "stream_rollup_failed";
 
 const messages: Record<RunnersErrorKind, string> = {
   not_signed_in: "Sign in to approve a Runner host.",
@@ -112,17 +161,28 @@ const messages: Record<RunnersErrorKind, string> = {
   insufficient_dispatch_access: "The Runner host owner needs Contribute access to dispatch here.",
   dispatch_not_found: "No such pending Dispatch exists for this Runner.",
   dispatch_not_pending: "This Dispatch was already accepted or ended.",
+  dispatch_uncertain: "An uncertain Dispatch must be resolved by a human before re-dispatch.",
+  dispatch_not_uncertain: "Only an uncertain Dispatch can be resolved this way.",
   issue_not_claimable: "This issue is not claimable by the selected Agent.",
   issue_not_dispatchable: "The claim could not be made for this Dispatch.",
+  stream_unavailable: "Object storage is not configured for stream rollup.",
+  stream_attempt_mismatch: "The stream batch does not belong to the active dispatch attempt.",
+  stream_batch_out_of_range: "A chunk seq lies outside the declared fromSeq..toSeq window.",
+  stream_batch_too_large: "The stream batch contains too many sequences.",
+  stream_rate_limited: "Too many stream batches; retry after the indicated interval.",
+  stream_rollup_failed: "The stream rollup expired before its blob could be activated.",
 };
 
 export class RunnersError extends Error {
   readonly kind: RunnersErrorKind;
+  /** Whole seconds for a 429 Retry-After header; only set for backpressure. */
+  readonly retryAfter: number | undefined;
 
-  constructor(kind: RunnersErrorKind) {
+  constructor(kind: RunnersErrorKind, retryAfter?: number) {
     super(messages[kind]);
     this.name = "RunnersError";
     this.kind = kind;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -148,6 +208,11 @@ export interface RunnersDeps {
   db: PostgresJsDatabase;
   /** Raw client for the dedicated LISTEN connection; optional for thin tests. */
   sql?: Sql | undefined;
+  /** Needed for ObjectStore stream rollup; optional for thin outbox/enrollment tests. */
+  store?: ObjectStore | undefined;
+  /** Lets the feature clear its #199 background ticks inside service.close(). */
+  onClose?: (() => void) | undefined;
+  log?: Logger | undefined;
   sessionReader: SessionReader;
   publicUrl: string;
   projectAccessCeiling: ProjectAccessCeiling;
@@ -410,7 +475,9 @@ async function endDispatchesWithoutLiveSession(
     .where(
       and(
         where,
-        inArray(runnerDispatches.state, ["active", "uncertain"]),
+        // An uncertain attempt is NEVER settled by a lapsed lease: only an
+        // explicit human resolution (or a live-lease reconnect) may clear it.
+        eq(runnerDispatches.state, "active"),
         sql`not exists (select 1 from ${workSessions} ws where ws.id = ${runnerDispatches.workSessionId} and ws.status = 'active' and ws.lease_expires_at > statement_timestamp())`,
       ),
     );
@@ -538,8 +605,910 @@ async function hasUnackedCancel(tx: DbTransaction, runnerId: string) {
 const deviceCodeNotExpired = sql<boolean>`${runnerDeviceCodes.expiresAt} > statement_timestamp()`;
 const attemptWindowExpired = sql<boolean>`${runnerDeviceCodeAttempts.windowStartedAt} <= statement_timestamp() - interval '10 minutes'`;
 
+/**
+ * #199: runner-to-server streams. All decisions live here; the REST layer only
+ * validates shapes. Every write serializes on the work_sessions row after the
+ * global `issues -> runners -> runner_dispatches -> work_sessions` lock order.
+ */
+/**
+ * Claim-first JSONL rollup (#199). The blob is written under a unique key,
+ * claimed as `pending` in Postgres BEFORE the put, and activated only inside
+ * the committing transaction after re-checking (under the global row lock)
+ * that no late chunk arrived. A lost race discards the pending blob and leaves
+ * every hot chunk for the next rollup — no active blob is ever overwritten.
+ */
+async function rollUpSessionById(
+  db: PostgresJsDatabase,
+  objectStore: ObjectStore,
+  sessionId: string,
+): Promise<boolean> {
+  // Step 1: snapshot outside the committing write lock.
+  const [snapshot] = await db
+    .select({
+      issueId: workSessions.issueId,
+      status: workSessions.status,
+      streamObjectId: workSessions.streamObjectId,
+    })
+    .from(workSessions)
+    .where(eq(workSessions.id, sessionId))
+    .limit(1);
+  if (snapshot === undefined || !["completed", "released", "expired"].includes(snapshot.status)) {
+    return false;
+  }
+  const hot = await db
+    .select({ seq: workSessionStreamChunks.seq, payload: workSessionStreamChunks.payload })
+    .from(workSessionStreamChunks)
+    .where(eq(workSessionStreamChunks.workSessionId, sessionId))
+    .orderBy(asc(workSessionStreamChunks.seq));
+  // Zero-chunk sessions skip rollup (stored_objects.byte_size > 0) and are not
+  // re-selected forever by the sweep.
+  if (hot.length === 0) return false;
+  const rolledSeqs = hot.map((row) => row.seq);
+  let prior: { id: string; key: string } | undefined;
+  const archived: StreamChunk[] = [];
+  if (snapshot.streamObjectId !== null) {
+    const [object] = await db
+      .select({ id: storedObjects.id, key: storedObjects.key })
+      .from(storedObjects)
+      .where(eq(storedObjects.id, snapshot.streamObjectId))
+      .limit(1);
+    if (object !== undefined) {
+      prior = object;
+      const stored = await objectStore.get(object.key);
+      if (stored !== null) archived.push(...parseJsonl(stored.data));
+    }
+  }
+  const merged = mergeChunks(
+    archived,
+    hot.map((row) => row.payload),
+  );
+  const bytes = toJsonl(merged);
+  if (merged.length === 0 || bytes.byteLength === 0) return false;
+  const sha256 = sha256Of(bytes);
+  const objectId = randomUUID();
+  const key = streamObjectKey(sessionId, objectId);
+
+  // Step 2: commit the pending claim before any blob I/O.
+  await db.insert(storedObjects).values({
+    id: objectId,
+    key,
+    status: "pending",
+    contentType: STREAM_CONTENT_TYPE,
+    byteSize: bytes.byteLength,
+    sha256,
+  });
+
+  let discard: { id: string; key: string } | undefined;
+  try {
+    // Step 3: blob I/O outside any transaction.
+    await objectStore.put(key, bytes, STREAM_CONTENT_TYPE);
+
+    // Step 4: committing transaction in global lock order.
+    const activated = await db.transaction(async (tx) => {
+      await tx
+        .select({ id: issues.id })
+        .from(issues)
+        .where(eq(issues.id, snapshot.issueId))
+        .limit(1)
+        .for("update");
+      const [dispatch] = await tx
+        .select({ id: runnerDispatches.id, runnerId: runnerDispatches.runnerId })
+        .from(runnerDispatches)
+        .where(eq(runnerDispatches.workSessionId, sessionId))
+        .orderBy(desc(runnerDispatches.createdAt))
+        .limit(1);
+      if (dispatch !== undefined) {
+        await tx
+          .select({ id: runners.id })
+          .from(runners)
+          .where(eq(runners.id, dispatch.runnerId))
+          .limit(1)
+          .for("update");
+        await tx
+          .select({ id: runnerDispatches.id })
+          .from(runnerDispatches)
+          .where(eq(runnerDispatches.id, dispatch.id))
+          .limit(1)
+          .for("update");
+      }
+      const [fresh] = await tx
+        .select({ status: workSessions.status, streamObjectId: workSessions.streamObjectId })
+        .from(workSessions)
+        .where(eq(workSessions.id, sessionId))
+        .limit(1)
+        .for("update");
+      const abort = (): false => {
+        discard = { id: objectId, key };
+        return false;
+      };
+      if (
+        fresh === undefined ||
+        !["completed", "released", "expired"].includes(fresh.status) ||
+        fresh.streamObjectId !== snapshot.streamObjectId
+      ) {
+        return abort();
+      }
+      const late = await tx
+        .select({ seq: workSessionStreamChunks.seq })
+        .from(workSessionStreamChunks)
+        .where(
+          and(
+            eq(workSessionStreamChunks.workSessionId, sessionId),
+            notInArray(workSessionStreamChunks.seq, rolledSeqs),
+          ),
+        )
+        .limit(1);
+      if (late.length > 0) return abort(); // a late or gap-filling batch arrived: retry later
+
+      const [activatedRow] = await tx
+        .update(storedObjects)
+        .set({ status: "active", deletedAt: null })
+        .where(and(eq(storedObjects.id, objectId), eq(storedObjects.status, "pending")))
+        .returning({ id: storedObjects.id });
+      if (activatedRow === undefined) return abort(); // the orphan sweep won the claim
+      if (prior !== undefined) {
+        await tx
+          .update(storedObjects)
+          .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
+          .where(and(eq(storedObjects.id, prior.id), eq(storedObjects.status, "active")));
+      }
+      await tx
+        .update(workSessions)
+        .set({ streamObjectId: objectId })
+        .where(eq(workSessions.id, sessionId));
+      await tx
+        .delete(workSessionStreamChunks)
+        .where(
+          and(
+            eq(workSessionStreamChunks.workSessionId, sessionId),
+            inArray(workSessionStreamChunks.seq, rolledSeqs),
+          ),
+        );
+      return true;
+    });
+    return activated;
+  } catch (error) {
+    discard = { id: objectId, key };
+    throw error;
+  } finally {
+    if (discard !== undefined) {
+      // Claim still-pending rows before the blob delete, then let the shared
+      // sweep finish the discarded row exactly once.
+      await db
+        .update(storedObjects)
+        .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
+        .where(and(eq(storedObjects.id, discard.id), eq(storedObjects.status, "pending")));
+      await discardObject(db, objectStore, discard, isDeleted);
+    }
+  }
+}
+
+function createStreamHelpers(deps: RunnersDeps) {
+  const { db, projectAccessCeiling, projectAccessAtLeast } = deps;
+  const store = deps.store;
+
+  function requireStore(): ObjectStore {
+    if (store === undefined) throw new RunnersError("stream_unavailable");
+    return store;
+  }
+
+  async function authenticateHostRunner(
+    tx: DbTransaction,
+    credential: string | undefined,
+    runnerId: string,
+    lock = true,
+  ) {
+    const host = await readHostByCredential(tx, credential);
+    const query = tx.select().from(runners).where(eq(runners.id, runnerId)).limit(1);
+    const [runner] = lock ? await query.for("update") : await query;
+    if (runner === undefined || runner.hostId !== host.host.id) {
+      throw new RunnersError("runner_not_found");
+    }
+    if (runner.revokedAt !== null) throw new RunnersError("runner_revoked");
+    if (!(await canSeeWorkspace(tx, runner.workspaceId, host.humanId))) {
+      throw new RunnersError("runner_revoked");
+    }
+    const ceiling = await projectAccessCeiling(tx, runner.workspaceId, host.humanId, [
+      runner.projectId,
+    ]);
+    if (!hasAccess(ceiling.get(runner.projectId), "read", projectAccessAtLeast)) {
+      throw new RunnersError("runner_revoked");
+    }
+    return { host, runner };
+  }
+
+  async function ingest(
+    credential: string | undefined,
+    runnerId: string,
+    dispatchId: string,
+    input: StreamBatchRequest,
+  ): Promise<StreamBatchResponse> {
+    return db.transaction(async (tx) => {
+      // Do not lock `runners` here: ingest only mutates runner_dispatches and
+      // work_session_stream_chunks, avoiding AB-BA deadlocks with stop/cancel.
+      await authenticateHostRunner(tx, credential, runnerId, false);
+      // runner_dispatches -> work_sessions.
+      await tx
+        .select({ id: runnerDispatches.id })
+        .from(runnerDispatches)
+        .where(eq(runnerDispatches.id, dispatchId))
+        .limit(1)
+        .for("update");
+      const dispatch = await readDispatch(tx, dispatchId);
+      if (dispatch.runnerId !== runnerId) throw new RunnersError("dispatch_not_found");
+      if (dispatch.dispatchAttemptId !== input.dispatchAttemptId) {
+        throw new RunnersError("stream_attempt_mismatch");
+      }
+      if (
+        (dispatch.state !== "active" && dispatch.state !== "uncertain") ||
+        dispatch.workSessionId === null
+      ) {
+        throw new RunnersError("dispatch_not_pending");
+      }
+      const sessionId = dispatch.workSessionId;
+      const [session] = await tx
+        .select({ id: workSessions.id, runId: workSessions.runId })
+        .from(workSessions)
+        .where(eq(workSessions.id, sessionId))
+        .limit(1)
+        .for("update");
+      if (session === undefined) throw new RunnersError("dispatch_not_pending");
+
+      if (input.toSeq - input.fromSeq + 1 > 1000) {
+        throw new RunnersError("stream_batch_too_large");
+      }
+      const [window] = await tx
+        .select({
+          expired: sql<boolean>`${runnerDispatches.streamWindowStartedAt} is null
+            or ${runnerDispatches.streamWindowStartedAt} <= statement_timestamp() - make_interval(secs => ${STREAM_WINDOW_SECONDS})`,
+        })
+        .from(runnerDispatches)
+        .where(eq(runnerDispatches.id, dispatchId));
+      if (window?.expired === true) {
+        await tx
+          .update(runnerDispatches)
+          .set({ streamWindowStartedAt: sql`statement_timestamp()`, streamBatchCount: 1 })
+          .where(eq(runnerDispatches.id, dispatchId));
+      } else {
+        const [updated] = await tx
+          .update(runnerDispatches)
+          .set({
+            streamBatchCount: sql`least(${runnerDispatches.streamBatchCount} + 1, ${MAX_STREAM_BATCHES_PER_WINDOW + 1})`,
+          })
+          .where(eq(runnerDispatches.id, dispatchId))
+          .returning({ count: runnerDispatches.streamBatchCount });
+        if ((updated?.count ?? 0) > MAX_STREAM_BATCHES_PER_WINDOW) {
+          const [wait] = await tx
+            .select({
+              seconds: sql<number>`greatest(1, ceil(extract(epoch from (
+                ${runnerDispatches.streamWindowStartedAt} + make_interval(secs => ${STREAM_WINDOW_SECONDS})
+                - statement_timestamp()))))::int`,
+            })
+            .from(runnerDispatches)
+            .where(eq(runnerDispatches.id, dispatchId));
+          throw new RunnersError("stream_rate_limited", wait?.seconds ?? STREAM_WINDOW_SECONDS);
+        }
+      }
+
+      const chunkRows = input.chunks.map((chunk) => {
+        if (chunk.seq < input.fromSeq || chunk.seq > input.toSeq) {
+          throw new RunnersError("stream_batch_out_of_range");
+        }
+        // Raw stdout is always owner_only, whatever the client declared.
+        const stored: StreamChunk =
+          chunk.kind === "raw_output" ? { ...chunk, visibility: "owner_only" } : chunk;
+        return {
+          workSessionId: sessionId,
+          seq: stored.seq,
+          kind: stored.kind,
+          visibility: stored.visibility,
+          payload: stored,
+          createdAt: sql`statement_timestamp()`,
+        };
+      });
+      if (chunkRows.length > 0) {
+        await tx.insert(workSessionStreamChunks).values(chunkRows).onConflictDoNothing();
+      }
+
+      // Curated milestones are coalesced by summary within a DB-time window:
+      // raw stdout never reaches work_session_activities.
+      for (const milestone of milestonesFor(input.chunks)) {
+        const [recent] = await tx
+          .select({ id: workSessionActivities.id })
+          .from(workSessionActivities)
+          .where(
+            and(
+              eq(workSessionActivities.workSessionId, sessionId),
+              eq(workSessionActivities.summary, milestone.summary),
+              gt(
+                workSessionActivities.createdAt,
+                sql`statement_timestamp() - make_interval(secs => ${STREAM_MILESTONE_COALESCE_SECONDS})`,
+              ),
+            ),
+          )
+          .limit(1);
+        if (recent !== undefined) continue;
+        await tx.insert(workSessionActivities).values({
+          id: randomUUID(),
+          workSessionId: sessionId,
+          runId: session.runId,
+          kind: milestone.kind,
+          summary: milestone.summary,
+          detail: milestone.detail,
+          createdAt: sql`statement_timestamp()`,
+        });
+      }
+
+      const rows = await tx
+        .select({ seq: workSessionStreamChunks.seq })
+        .from(workSessionStreamChunks)
+        .where(
+          and(
+            eq(workSessionStreamChunks.workSessionId, sessionId),
+            gt(workSessionStreamChunks.seq, dispatch.lastUpSeq),
+            lte(workSessionStreamChunks.seq, input.toSeq),
+          ),
+        )
+        .orderBy(asc(workSessionStreamChunks.seq));
+      const ackedSeq = computeAckedSeq(
+        dispatch.lastUpSeq,
+        input.toSeq,
+        rows.map((row) => row.seq),
+      );
+      if (ackedSeq > dispatch.lastUpSeq) {
+        await tx
+          .update(runnerDispatches)
+          .set({ lastUpSeq: ackedSeq })
+          .where(eq(runnerDispatches.id, dispatchId));
+      }
+      return { ackedSeq };
+    });
+  }
+
+  async function read(
+    credential: string | undefined,
+    account: SessionAccount | null,
+    runnerId: string,
+    dispatchId: string,
+    afterSeq: number,
+  ): Promise<StreamResponse> {
+    const objectStore = requireStore();
+    // Authenticate FIRST: an anonymous caller gets 401, never a 404/401 oracle
+    // that depends on whether the dispatch id exists.
+    if (account === null) {
+      await db.transaction((tx) => authenticateHostRunner(tx, credential, runnerId, false));
+    }
+
+    const snapshot = await db.transaction(async (tx) => {
+      const dispatch = await readDispatch(tx, dispatchId);
+      if (dispatch.runnerId !== runnerId) throw new RunnersError("dispatch_not_found");
+      let viewerHumanId: string;
+      if (account !== null) {
+        viewerHumanId = account.humanId;
+        if (!(await canSeeWorkspace(tx, dispatch.workspaceId, viewerHumanId))) {
+          throw new RunnersError("dispatch_not_found");
+        }
+        const ceiling = await projectAccessCeiling(tx, dispatch.workspaceId, viewerHumanId, [
+          dispatch.projectId,
+        ]);
+        if (!hasAccess(ceiling.get(dispatch.projectId), "read", projectAccessAtLeast)) {
+          throw new RunnersError("dispatch_not_found");
+        }
+      } else {
+        const host = await readHostByCredential(tx, credential);
+        if (dispatch.hostId !== host.host.id) throw new RunnersError("dispatch_not_found");
+        viewerHumanId = host.humanId;
+      }
+      // Re-check inside the same transaction as the read (no stale grant).
+      const [host] = await tx
+        .select({ humanId: runnerHosts.humanId })
+        .from(runnerHosts)
+        .where(eq(runnerHosts.id, dispatch.hostId))
+        .limit(1);
+      return { dispatch, viewerHumanId, isOwner: host?.humanId === viewerHumanId };
+    });
+
+    const sessionId = snapshot.dispatch.workSessionId;
+    if (sessionId === null) return { chunks: [], nextAfterSeq: afterSeq, rolledUp: false };
+    const [session] = await db
+      .select({ streamObjectId: workSessions.streamObjectId })
+      .from(workSessions)
+      .where(eq(workSessions.id, sessionId))
+      .limit(1);
+    if (session === undefined) throw new RunnersError("dispatch_not_found");
+
+    // Blob I/O outside any DB transaction.
+    let archived: StreamChunk[] = [];
+    if (session.streamObjectId !== null) {
+      const [object] = await db
+        .select({ key: storedObjects.key })
+        .from(storedObjects)
+        .where(eq(storedObjects.id, session.streamObjectId))
+        .limit(1);
+      if (object !== undefined) {
+        const stored = await objectStore.get(object.key);
+        if (stored !== null) archived = parseJsonl(stored.data);
+      }
+    }
+
+    return db.transaction(async (tx) => {
+      const hot = await tx
+        .select({ payload: workSessionStreamChunks.payload })
+        .from(workSessionStreamChunks)
+        .where(
+          and(
+            eq(workSessionStreamChunks.workSessionId, sessionId),
+            gt(workSessionStreamChunks.seq, afterSeq),
+          ),
+        )
+        .orderBy(asc(workSessionStreamChunks.seq));
+      const all = mergeChunks(
+        archived,
+        hot.map((row) => row.payload),
+      ).filter((chunk) => chunk.seq > afterSeq);
+      const nextAfterSeq = all.reduce((max, chunk) => Math.max(max, chunk.seq), afterSeq);
+
+      // Server diagnostics (e.g. runner_disconnected) live in the curated
+      // activity trail. Surface them as virtual chunks in the reserved high
+      // sequence range so they never collide with (or stall) spool seqs.
+      const activityRows = await tx
+        .select({ detail: workSessionActivities.detail })
+        .from(workSessionActivities)
+        .where(eq(workSessionActivities.workSessionId, sessionId))
+        .orderBy(desc(workSessionActivities.createdAt))
+        .limit(50);
+      let virtualSeq = Number.MAX_SAFE_INTEGER - 10;
+      const virtual: StreamChunk[] = [];
+      for (const row of activityRows) {
+        const parsed = SessionDiagnostic.safeParse(row.detail?.diagnostic);
+        if (!parsed.success || parsed.data.kind !== "runner_disconnected") continue;
+        virtual.push(
+          StreamChunk.parse({
+            seq: virtualSeq--,
+            kind: "diagnostic",
+            visibility: "project_readers",
+            diagnostic: parsed.data,
+          }),
+        );
+      }
+      const merged = [...all, ...virtual];
+      const chunks = snapshot.isOwner
+        ? merged
+        : merged.filter(
+            (chunk) => chunk.visibility !== "owner_only" && chunk.kind !== "raw_output",
+          );
+      return { chunks, nextAfterSeq, rolledUp: session.streamObjectId !== null };
+    });
+  }
+
+  async function reconnect(
+    credential: string | undefined,
+    runnerId: string,
+    input: ReconnectRequest,
+  ): Promise<ReconnectResponse> {
+    return db.transaction(async (tx) => {
+      const { host } = await authenticateHostRunner(tx, credential, runnerId);
+      const active = new Map(
+        input.activeAttempts.map((attempt) => [attempt.dispatchAttemptId, attempt.lastSeq]),
+      );
+      // runner is locked by authenticateHostRunner; dispatches then work
+      // sessions follow the global lock order.
+      const rows = await tx
+        .select(dispatchFields)
+        .from(runnerDispatches)
+        .innerJoin(runners, eq(runnerDispatches.runnerId, runners.id))
+        .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
+        .where(
+          and(
+            eq(runnerDispatches.runnerId, runnerId),
+            inArray(runnerDispatches.state, ["active", "uncertain"]),
+          ),
+        )
+        .orderBy(asc(runnerDispatches.id))
+        .for("update", { of: runnerDispatches });
+      const sessionIds = [
+        ...new Set(rows.map((row) => row.workSessionId).filter((id) => id !== null)),
+      ].toSorted();
+      if (sessionIds.length > 0) {
+        await tx
+          .select({ id: workSessions.id })
+          .from(workSessions)
+          .where(inArray(workSessions.id, sessionIds))
+          .orderBy(asc(workSessions.id))
+          .for("update");
+      }
+      const resolutions: ReconnectResponse["resolutions"] = [];
+      for (const row of rows) {
+        const reportedSeq = active.get(row.dispatchAttemptId);
+        let state = row.state;
+        let resumed = false;
+        // Never advance last_up_seq to a client-reported number: only ingestion
+        // that persisted those chunks may move the durable cursor.
+        const durableSeq = row.lastUpSeq;
+        const session =
+          row.workSessionId === null
+            ? undefined
+            : (
+                await tx
+                  .select({
+                    status: workSessions.status,
+                    live: sql<boolean>`${workSessions.leaseExpiresAt} > statement_timestamp()`,
+                  })
+                  .from(workSessions)
+                  .where(eq(workSessions.id, row.workSessionId))
+                  .limit(1)
+              )[0];
+        const claimLive = session?.status === "active" && session.live;
+
+        if (reportedSeq !== undefined && claimLive) {
+          if (row.state === "uncertain") {
+            await tx
+              .update(runnerDispatches)
+              .set({
+                state: "active",
+                disconnectedAt: null,
+                needsHumanResolution: false,
+              })
+              .where(eq(runnerDispatches.id, row.id));
+            state = "active";
+            resumed = true;
+          }
+          if (row.workSessionId !== null && row.runId !== null) {
+            await tx.insert(workSessionActivities).values({
+              id: randomUUID(),
+              workSessionId: row.workSessionId,
+              runId: row.runId,
+              kind: "status",
+              summary: "Runner reconnected; stream resumed",
+              detail: {
+                dispatchAttemptId: row.dispatchAttemptId,
+                serverLastUpSeq: durableSeq,
+                reportedLastSeq: reportedSeq,
+              },
+              createdAt: sql`statement_timestamp()`,
+            });
+          }
+        } else {
+          // Absent from the active list (even when still `active` because the
+          // disconnect sweep has not run yet), or the claim ended/expired:
+          // never assume the write did not happen, and require a human.
+          await tx
+            .update(runnerDispatches)
+            .set({
+              state: "uncertain",
+              needsHumanResolution: true,
+              disconnectedAt: sql`coalesce(${runnerDispatches.disconnectedAt}, statement_timestamp())`,
+            })
+            .where(eq(runnerDispatches.id, row.id));
+          state = "uncertain";
+          const message =
+            reportedSeq === undefined
+              ? "Reconnecting Runner did not report this active attempt."
+              : "The dispatch claim expired or ended; explicit human re-dispatch is required.";
+          if (row.workSessionId !== null && row.runId !== null) {
+            await tx.insert(workSessionActivities).values({
+              id: randomUUID(),
+              workSessionId: row.workSessionId,
+              runId: row.runId,
+              kind: "status",
+              summary: "Uncertain attempt requires human resolution",
+              detail: {
+                dispatchAttemptId: row.dispatchAttemptId,
+                diagnostic: { kind: "runner_disconnected", version: 1, message },
+              },
+              createdAt: sql`statement_timestamp()`,
+            });
+          }
+        }
+        resolutions.push({
+          dispatchId: row.id,
+          dispatchAttemptId: row.dispatchAttemptId,
+          state,
+          resumed,
+          // Durable server cursor: the runner replays (lastUpSeq + 1)..localLastSeq.
+          lastSeq: durableSeq,
+        });
+      }
+      // A reconnect report is also a heartbeat in database time.
+      await tx
+        .update(runners)
+        .set({ lastSeenAt: sql`statement_timestamp()`, disconnectedAt: null })
+        .where(eq(runners.id, runnerId));
+      await tx
+        .update(runnerHosts)
+        .set({ lastSeenAt: sql`statement_timestamp()` })
+        .where(eq(runnerHosts.id, host.host.id));
+      return { resolutions };
+    });
+  }
+
+  /** Missed heartbeats make an active attempt uncertain, never auto-stop it. */
+  async function markDisconnected(windowSeconds = DISPATCH_UNCERTAIN_AFTER_SECONDS) {
+    return db.transaction(async (tx) => {
+      const candidates = await tx
+        .select({
+          dispatchId: runnerDispatches.id,
+          issueId: runnerDispatches.issueId,
+          runnerId: runnerDispatches.runnerId,
+          workSessionId: runnerDispatches.workSessionId,
+          runId: runnerDispatches.runId,
+          dispatchAttemptId: runnerDispatches.dispatchAttemptId,
+        })
+        .from(runnerDispatches)
+        .innerJoin(runners, eq(runnerDispatches.runnerId, runners.id))
+        .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
+        .where(
+          and(
+            eq(runnerDispatches.state, "active"),
+            isNotNull(runnerDispatches.workSessionId),
+            isNull(runnerDispatches.disconnectedAt),
+            isNull(runners.revokedAt),
+            isNull(runnerHosts.revokedAt),
+            lt(
+              runners.lastSeenAt,
+              sql`statement_timestamp() - make_interval(secs => ${windowSeconds})`,
+            ),
+          ),
+        )
+        .orderBy(asc(runnerDispatches.id));
+      if (candidates.length === 0) return 0;
+
+      // One FOR UPDATE pass per table in global lock order, never inside a loop.
+      const issueIds = [...new Set(candidates.map((c) => c.issueId))].toSorted();
+      await tx
+        .select({ id: issues.id })
+        .from(issues)
+        .where(inArray(issues.id, issueIds))
+        .orderBy(asc(issues.id))
+        .for("update");
+      const runnerIds = [...new Set(candidates.map((c) => c.runnerId))].toSorted();
+      await tx
+        .select({ id: runners.id })
+        .from(runners)
+        .where(inArray(runners.id, runnerIds))
+        .orderBy(asc(runners.id))
+        .for("update");
+      const dispatchIds = candidates.map((c) => c.dispatchId).toSorted();
+      await tx
+        .select({ id: runnerDispatches.id })
+        .from(runnerDispatches)
+        .where(inArray(runnerDispatches.id, dispatchIds))
+        .orderBy(asc(runnerDispatches.id))
+        .for("update");
+      const sessionIds = [
+        ...new Set(candidates.map((c) => c.workSessionId).filter((id) => id !== null)),
+      ].toSorted();
+      if (sessionIds.length > 0) {
+        await tx
+          .select({ id: workSessions.id })
+          .from(workSessions)
+          .where(inArray(workSessions.id, sessionIds))
+          .orderBy(asc(workSessions.id))
+          .for("update");
+      }
+
+      let marked = 0;
+      for (const candidate of candidates) {
+        // Re-check AFTER the row locks: a heartbeat or reconnect that won the
+        // race must not be clobbered into `uncertain`.
+        const [fresh] = await tx
+          .select({
+            state: runnerDispatches.state,
+            disconnectedAt: runnerDispatches.disconnectedAt,
+            stillStale: sql<boolean>`${runners.lastSeenAt} < statement_timestamp() - make_interval(secs => ${windowSeconds})`,
+            runnerRevoked: runners.revokedAt,
+            hostRevoked: runnerHosts.revokedAt,
+          })
+          .from(runnerDispatches)
+          .innerJoin(runners, eq(runnerDispatches.runnerId, runners.id))
+          .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
+          .where(eq(runnerDispatches.id, candidate.dispatchId));
+        if (
+          fresh === undefined ||
+          fresh.state !== "active" ||
+          fresh.disconnectedAt !== null ||
+          fresh.runnerRevoked !== null ||
+          fresh.hostRevoked !== null ||
+          !fresh.stillStale
+        ) {
+          continue;
+        }
+        await tx
+          .update(runnerDispatches)
+          .set({ state: "uncertain", disconnectedAt: sql`statement_timestamp()` })
+          .where(eq(runnerDispatches.id, candidate.dispatchId));
+        if (candidate.workSessionId !== null && candidate.runId !== null) {
+          const diagnostic = {
+            kind: "runner_disconnected",
+            version: 1,
+            message: "Runner missed heartbeats during an active dispatch; state is uncertain.",
+          };
+          await tx.insert(workSessionActivities).values({
+            id: randomUUID(),
+            workSessionId: candidate.workSessionId,
+            runId: candidate.runId,
+            kind: "status",
+            summary: "Runner disconnected during dispatch",
+            detail: { dispatchAttemptId: candidate.dispatchAttemptId, diagnostic },
+            createdAt: sql`statement_timestamp()`,
+          });
+        }
+        marked += 1;
+      }
+      return marked;
+    });
+  }
+
+  /** Explicit human settlement of an uncertain attempt before any re-dispatch. */
+  async function resolveUncertain(
+    account: SessionAccount | null,
+    dispatchId: string,
+    outcome: ResolveUncertainRequest["outcome"],
+  ): Promise<Dispatch> {
+    const human = requireAccount(account);
+    // Visibility FIRST, read-only: an invisible dispatch is uniformly 404,
+    // never a 409 state oracle or a 403 that confirms the id exists.
+    await db.transaction(
+      async (tx) => {
+        const visibleDispatch = await readDispatch(tx, dispatchId);
+        const visible =
+          (await canSeeWorkspace(tx, visibleDispatch.workspaceId, human.humanId)) &&
+          hasAccess(
+            (
+              await projectAccessCeiling(tx, visibleDispatch.workspaceId, human.humanId, [
+                visibleDispatch.projectId,
+              ])
+            ).get(visibleDispatch.projectId),
+            "read",
+            projectAccessAtLeast,
+          );
+        if (!visible) throw new RunnersError("dispatch_not_found");
+      },
+      { accessMode: "read only" },
+    );
+
+    let sessionToRollUp: string | undefined;
+    const resolved = await db.transaction(async (tx) => {
+      const [peek] = await tx
+        .select({ issueId: runnerDispatches.issueId, runnerId: runnerDispatches.runnerId })
+        .from(runnerDispatches)
+        .where(eq(runnerDispatches.id, dispatchId))
+        .limit(1);
+      if (peek === undefined) throw new RunnersError("dispatch_not_found");
+      // Global lock order: issues -> runners -> runner_dispatches -> work_sessions.
+      await tx
+        .select({ id: issues.id })
+        .from(issues)
+        .where(eq(issues.id, peek.issueId))
+        .limit(1)
+        .for("update");
+      await tx
+        .select({ id: runners.id })
+        .from(runners)
+        .where(eq(runners.id, peek.runnerId))
+        .limit(1)
+        .for("update");
+      await tx
+        .select({ id: runnerDispatches.id })
+        .from(runnerDispatches)
+        .where(eq(runnerDispatches.id, dispatchId))
+        .limit(1)
+        .for("update");
+      const dispatch = await readDispatch(tx, dispatchId);
+      // Re-check visibility inside the committing transaction, before state.
+      if (
+        !(await canSeeWorkspace(tx, dispatch.workspaceId, human.humanId)) ||
+        !hasAccess(
+          (
+            await projectAccessCeiling(tx, dispatch.workspaceId, human.humanId, [
+              dispatch.projectId,
+            ])
+          ).get(dispatch.projectId),
+          "read",
+          projectAccessAtLeast,
+        )
+      ) {
+        throw new RunnersError("dispatch_not_found");
+      }
+      if (dispatch.state !== "uncertain") throw new RunnersError("dispatch_not_uncertain");
+      const ceiling = await projectAccessCeiling(tx, dispatch.workspaceId, human.humanId, [
+        dispatch.projectId,
+      ]);
+      const [host] = await tx
+        .select({ humanId: runnerHosts.humanId })
+        .from(runnerHosts)
+        .where(eq(runnerHosts.id, dispatch.hostId))
+        .limit(1);
+      const authorized =
+        human.humanId === dispatch.requestedByHumanId ||
+        human.humanId === host?.humanId ||
+        hasAccess(ceiling.get(dispatch.projectId), "manage", projectAccessAtLeast);
+      if (!authorized) throw new RunnersError("runner_forbidden");
+
+      if (dispatch.workSessionId !== null) {
+        sessionToRollUp = dispatch.workSessionId;
+        await tx
+          .select({ id: workSessions.id })
+          .from(workSessions)
+          .where(eq(workSessions.id, dispatch.workSessionId))
+          .limit(1)
+          .for("update");
+        await releaseIssueWorkSessions(tx, dispatch.issueId, outcome);
+        await tx
+          .update(issues)
+          .set({ status: "todo", updatedAt: sql`statement_timestamp()` })
+          .where(and(eq(issues.id, dispatch.issueId), eq(issues.status, "in_progress")));
+      }
+      await tx
+        .update(dispatchTokens)
+        .set({ revokedAt: sql`statement_timestamp()` })
+        .where(and(eq(dispatchTokens.dispatchId, dispatchId), isNull(dispatchTokens.revokedAt)));
+      await tx
+        .update(runnerDispatches)
+        .set({
+          state: "ended",
+          endedAt: sql`statement_timestamp()`,
+          needsHumanResolution: false,
+        })
+        .where(eq(runnerDispatches.id, dispatchId));
+      return toDispatch(await readDispatch(tx, dispatchId));
+    });
+    // The settlement ends the claim; roll its stream up immediately (after
+    // commit) instead of waiting for the background safety-net sweep.
+    if (sessionToRollUp !== undefined) {
+      try {
+        await rollUpSessionById(db, requireStore(), sessionToRollUp);
+      } catch {
+        // The settlement already committed; the background sweep will retry.
+      }
+    }
+    return resolved;
+  }
+
+  /** Called at session end and by the lease-expiry sweep; never for live rows. */
+  async function rollUp(limit = 20): Promise<number> {
+    const objectStore = requireStore();
+    // Only sessions that still have hot chunks; otherwise the first N ended
+    // sessions would be re-uploaded forever and starve the rest.
+    const hasHotChunks = exists(
+      db
+        .select({ one: sql`1` })
+        .from(workSessionStreamChunks)
+        .where(eq(workSessionStreamChunks.workSessionId, workSessions.id)),
+    );
+    const candidates = await db
+      .select({ id: workSessions.id })
+      .from(workSessions)
+      .where(
+        and(
+          inArray(workSessions.status, ["completed", "released", "expired"]),
+          isNotNull(workSessions.endedAt),
+          hasHotChunks,
+        ),
+      )
+      .orderBy(asc(workSessions.id))
+      .limit(limit);
+    let rolled = 0;
+    for (const candidate of candidates) {
+      if (await rollUpSessionById(db, objectStore, candidate.id)) rolled += 1;
+    }
+    return rolled;
+  }
+
+  return {
+    ingest,
+    read,
+    reconnect,
+    markDisconnected,
+    resolveUncertain,
+    rollUp,
+    rollUpSession: (sessionId: string) => rollUpSessionById(db, requireStore(), sessionId),
+  };
+}
+
 export function createRunnersService(deps: RunnersDeps) {
   const { db, publicUrl, projectAccessCeiling, projectAccessAtLeast, claimWorkSession } = deps;
+  const stream = createStreamHelpers(deps);
   // ONE listener for the whole replica, lazily started on the first long-poll.
   const notifier = deps.sql === undefined ? undefined : createCommandNotifier(deps.sql);
 
@@ -1038,6 +2007,24 @@ export function createRunnersService(deps: RunnersDeps) {
         if (!hasAccess(ceiling.get(issue.projectId), "contribute", projectAccessAtLeast)) {
           throw new RunnersError("insufficient_dispatch_access");
         }
+        // Lock the issue row first (global lock order) before checking uncertain
+        // dispatches so markDisconnected cannot race this check.
+        await tx
+          .select({ id: issues.id })
+          .from(issues)
+          .where(eq(issues.id, issueId))
+          .limit(1)
+          .for("update");
+        // A disconnected write may have happened but not been acknowledged.
+        // Never start a second attempt on this issue until a human resolves it.
+        const [uncertain] = await tx
+          .select({ id: runnerDispatches.id })
+          .from(runnerDispatches)
+          .where(
+            and(eq(runnerDispatches.issueId, issueId), eq(runnerDispatches.state, "uncertain")),
+          )
+          .limit(1);
+        if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
         // Validate with Orrery's claim rules, without mutating issues.assignee.
         await assertIssueDispatchable(tx, issueId, agentId);
 
@@ -1188,7 +2175,7 @@ export function createRunnersService(deps: RunnersDeps) {
           // idempotent: reuse the existing Run and Work session, never claim a
           // second one. A fresh fenced token is minted for this same scope.
           if (
-            dispatch.state !== "ended" &&
+            dispatch.state === "active" &&
             dispatch.runId !== null &&
             dispatch.workSessionId !== null
           ) {
@@ -1477,7 +2464,58 @@ export function createRunnersService(deps: RunnersDeps) {
     },
 
     async close(): Promise<void> {
+      deps.onClose?.();
       await notifier?.close();
+    },
+
+    // Structured stream ingestion & reconciliation (#199). These sit after
+    // close() so the existing command-outbox service surface stays untouched.
+    async ingestStream(
+      credential: string | undefined,
+      runnerId: string,
+      dispatchId: string,
+      input: StreamBatchRequest,
+    ): Promise<StreamBatchResponse> {
+      return stream.ingest(credential, runnerId, dispatchId, input);
+    },
+
+    async readStream(
+      credential: string | undefined,
+      account: SessionAccount | null,
+      runnerId: string,
+      dispatchId: string,
+      afterSeq: number,
+    ): Promise<StreamResponse> {
+      return stream.read(credential, account, runnerId, dispatchId, afterSeq);
+    },
+
+    async reconnectRunner(
+      credential: string | undefined,
+      runnerId: string,
+      input: ReconnectRequest,
+    ): Promise<ReconnectResponse> {
+      return stream.reconnect(credential, runnerId, input);
+    },
+
+    async markDisconnectedDispatches(windowSeconds?: number): Promise<number> {
+      return stream.markDisconnected(windowSeconds);
+    },
+
+    async resolveUncertainDispatch(
+      account: SessionAccount | null,
+      dispatchId: string,
+      outcome: ResolveUncertainRequest["outcome"],
+    ): Promise<Dispatch> {
+      return stream.resolveUncertain(account, dispatchId, outcome);
+    },
+
+    async rollUpStreams(limit?: number): Promise<number> {
+      return stream.rollUp(limit);
+    },
+
+    /** Immediate, single-session rollup wired into work-session end/expiry. */
+    async rollUpSession(sessionId: string): Promise<boolean> {
+      return stream.rollUpSession(sessionId);
     },
   };
 }

@@ -54,6 +54,7 @@ export function createSessionsFeature(deps: SessionsFeatureDeps): SessionsFeatur
     notifyActivity: deps.notifyActivity,
     onActivity: deps.onActivity,
     onRunnerCommand: deps.onRunnerCommand,
+    onSessionEnd: deps.onSessionEnd,
     log: deps.log,
   });
   return {

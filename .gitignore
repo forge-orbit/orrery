@@ -17,6 +17,9 @@ pnpm-debug.log*
 .env.*
 !.env.example
 
+# Local runner stream spools must never show up as untracked files in a worktree.
+.orrery/runs/
+
 # --- Local Docker data (docker compose volumes bound to the repo) ---
 /data/
 

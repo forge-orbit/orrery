@@ -56,7 +56,8 @@ function checkTarget(identity: AgentIdentity, target: DispatchTarget): void {
   if (
     target.outcome !== undefined &&
     target.outcome !== "review" &&
-    target.outcome !== "completed"
+    target.outcome !== "completed" &&
+    target.outcome !== "released"
   ) {
     refuse();
   }
@@ -118,6 +119,7 @@ const dispatchRestRules: readonly RestRule[] = [
     method: "GET",
     pattern: new RegExp(`^/api/issues/${issue}/work-sessions/${session}/activities$`),
   },
+  { method: "POST", pattern: new RegExp(`^/api/issues/${issue}/work-sessions/renew$`) },
   { method: "POST", pattern: new RegExp(`^/api/issues/${issue}/work-sessions/progress$`) },
   { method: "POST", pattern: new RegExp(`^/api/issues/${issue}/work-sessions/resume$`) },
   { method: "POST", pattern: new RegExp(`^/api/issues/${issue}/work-sessions/stop$`) },

@@ -478,7 +478,7 @@ describe("atomic acceptance and fenced token", () => {
     });
   });
 
-  it("allows only the dispatched issue over REST and MCP and refuses claim/renew tools", async () => {
+  it("allows only the dispatched issue over REST and MCP, including fenced lease renewal", async () => {
     const { issue, acceptance, dispatch } = await acceptedFixture();
     const other = await createIssue("other dispatched issue");
     const token = acceptance.dispatchToken;
@@ -507,8 +507,16 @@ describe("atomic acceptance and fenced token", () => {
       403,
       "dispatch_forbidden",
     );
+    // The Runner's lease watchdog renews the bound session over REST.
+    const renewed = await request(`/api/issues/${issue.id}/work-sessions/renew`, {
+      method: "POST",
+      body: { sessionId: acceptance.session.id },
+      token,
+    });
+    expect(renewed.status).toBe(200);
+    expect(field(await renewed.json(), "status")).toBe("active");
     await expectProblem(
-      await request(`/api/issues/${issue.id}/work-sessions/renew`, {
+      await request(`/api/issues/${other.id}/work-sessions/renew`, {
         method: "POST",
         body: {},
         token,
@@ -560,6 +568,37 @@ describe("atomic acceptance and fenced token", () => {
       .from(runnerDispatches)
       .where(eq(runnerDispatches.id, dispatch.id));
     expect(row?.state).toBe("active");
+  });
+
+  it("allows a fenced stop_session('released') but refuses another issue or session", async () => {
+    const { issue, acceptance } = await acceptedFixture();
+    const other = await createIssue("other released issue");
+    const token = acceptance.dispatchToken;
+    const tools = await mcpTools(token);
+    const stop = tools.get("stop_session");
+    if (stop === undefined) throw new Error("stop_session tool missing");
+
+    for (const args of [
+      { issueId: other.id, outcome: "released", sessionId: acceptance.session.id },
+      { issueId: issue.id, outcome: "released", sessionId: "other-session" },
+      { issueId: issue.id, outcome: "done", sessionId: acceptance.session.id },
+    ]) {
+      const result = await stop(args);
+      expect(result.isError, `stop_session should refuse ${JSON.stringify(args)}`).toBe(true);
+      expect(toolCode(result)).toBe("dispatch_forbidden");
+    }
+
+    const released = await stop({
+      issueId: issue.id,
+      outcome: "released",
+      sessionId: acceptance.session.id,
+    });
+    expect(released.isError).not.toBe(true);
+    const [stored] = await database.db
+      .select()
+      .from(workSessions)
+      .where(eq(workSessions.id, acceptance.session.id));
+    expect(stored?.status).toBe("released");
   });
 
   it("invalidates immediately when the work session ends", async () => {

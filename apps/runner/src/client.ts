@@ -147,4 +147,16 @@ export class OrreryClient {
       ),
     );
   }
+
+  /**
+   * Renew the five-minute lease with a Dispatch token. The MCP `renew_claim`
+   * tool is outside that token's allowlist in the current server contract, but
+   * the equivalent REST route accepts it (ADR-0010's "REST equivalent").
+   */
+  async renewWorkSession(issueId: string, sessionId: string): Promise<void> {
+    await this.request(`/api/issues/${encodeURIComponent(issueId)}/work-sessions/renew`, {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+    });
+  }
 }

@@ -26,6 +26,7 @@ import {
   WorkspaceKind,
   SmtpSecurity,
   StoredObjectStatus,
+  type StreamChunk,
 } from "@orrery/contract";
 import { sql } from "drizzle-orm";
 import {
@@ -1001,6 +1002,8 @@ export const workSessions = pgTable(
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
     costUsdMicros: integer("cost_usd_micros"),
+    /** Set only by the FOR UPDATE-guarded rollup of non-empty hot stream chunks. */
+    streamObjectId: text("stream_object_id").references(() => storedObjects.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
@@ -1063,6 +1066,37 @@ export const workSessionActivities = pgTable(
     ),
 
     index("work_session_activities_session_created").on(t.workSessionId, t.createdAt),
+  ],
+);
+
+/**
+ * Ephemeral hot stream storage (#199). Idempotent on (work_session_id, seq);
+ * pruned into an ObjectStore blob when the session ends or its lease expires.
+ * `owner_only` rows are filtered server-side for every non-owner viewer.
+ */
+export const workSessionStreamChunks = pgTable(
+  "work_session_stream_chunks",
+  {
+    workSessionId: text("work_session_id")
+      .notNull()
+      .references(() => workSessions.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    kind: text("kind").notNull(),
+    visibility: text("visibility").notNull().default("project_readers"),
+    payload: jsonb("payload").$type<StreamChunk>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workSessionId, t.seq] }),
+    check("work_session_stream_chunks_seq_positive", sql`${t.seq} > 0`),
+    check(
+      "work_session_stream_chunks_kind",
+      sql`${t.kind} in ('event', 'diagnostic', 'raw_output')`,
+    ),
+    check(
+      "work_session_stream_chunks_visibility",
+      sql`${t.visibility} in ('project_readers', 'owner_only')`,
+    ),
   ],
 );
 
@@ -1618,6 +1652,12 @@ export const runnerDispatches = pgTable(
     lastDownSeq: integer("last_down_seq").notNull().default(0),
     branchName: text("branch_name"),
     dirtyWorktree: boolean("dirty_worktree").notNull().default(false),
+    /** DB-time rate window for stream batch backpressure. */
+    streamWindowStartedAt: timestamp("stream_window_started_at", { withTimezone: true }),
+    streamBatchCount: integer("stream_batch_count").notNull().default(0),
+    /** Set once when a missed heartbeat marks an active attempt uncertain. */
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    needsHumanResolution: boolean("needs_human_resolution").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
@@ -1631,6 +1671,7 @@ export const runnerDispatches = pgTable(
       "runner_dispatches_sequence_nonnegative",
       sql`${t.lastUpSeq} >= 0 and ${t.lastDownSeq} >= 0`,
     ),
+    check("runner_dispatches_stream_batch_count_nonnegative", sql`${t.streamBatchCount} >= 0`),
     check(
       "runner_dispatches_accepted_fields",
       sql`(${t.state} = 'pending' and ${t.acceptedAt} is null and ${t.runId} is null and ${t.workSessionId} is null)
