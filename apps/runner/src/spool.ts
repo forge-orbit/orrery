@@ -57,6 +57,8 @@ export interface StreamSpoolOptions {
   maxAttempts?: number;
 }
 
+const noop = (): void => {};
+
 const defaultSleep = (milliseconds: number) =>
   new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, milliseconds);
@@ -69,6 +71,7 @@ export class StreamSpool {
   private nextSeq = 1;
   private ackedSeq = 0;
   private writeChain: Promise<void> = Promise.resolve();
+  private flushTail: Promise<void> = Promise.resolve();
   private readonly fetchFn: typeof fetch;
   private readonly sleepFn: (milliseconds: number) => Promise<void>;
   private readonly maxBatchSize: number;
@@ -128,18 +131,35 @@ export class StreamSpool {
     return chunk;
   }
 
-  /** Flush every unacknowledged line as idempotent `fromSeq..toSeq` windows. */
+  /**
+   * Flush every unacknowledged line as idempotent `fromSeq..toSeq` windows.
+   * Concurrent callers (periodic tick, final flush, reconnect) are coalesced:
+   * each waits for the previous flush instead of sending a duplicate window.
+   */
   async flush(): Promise<number> {
-    for (;;) {
-      // Re-slice from the durable cursor after every response: a partial ack
-      // must replay the unacked tail instead of skipping to the next window.
-      const pending = (await this.readSpooled())
-        .filter((chunk) => chunk.seq > this.ackedSeq)
-        .slice(0, this.maxBatchSize);
-      if (pending.length === 0) return this.ackedSeq;
-      const before = this.ackedSeq;
-      const advanced = await this.sendWindow(pending);
-      if (!advanced || this.ackedSeq === before) return this.ackedSeq;
+    const previous = this.flushTail;
+    let release: () => void = noop;
+    this.flushTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      // A fire-and-forget append may still be in flight; never read the file
+      // before its write promise has settled or the final chunk is lost.
+      await this.writeChain;
+      for (;;) {
+        // Re-slice from the durable cursor after every response: a partial ack
+        // must replay the unacked tail instead of skipping to the next window.
+        const pending = (await this.readSpooled())
+          .filter((chunk) => chunk.seq > this.ackedSeq)
+          .slice(0, this.maxBatchSize);
+        if (pending.length === 0) return this.ackedSeq;
+        const before = this.ackedSeq;
+        const advanced = await this.sendWindow(pending);
+        if (!advanced || this.ackedSeq === before) return this.ackedSeq;
+      }
+    } finally {
+      release();
     }
   }
 

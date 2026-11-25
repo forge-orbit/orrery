@@ -450,11 +450,14 @@ describe("orrery-runner against a real Orrery server (#198)", { timeout: 120_000
       return str(field(current, "status")) === "completed" ? current : undefined;
     });
     expect(str(field(ended, "status"))).toBe("completed");
+    // spooled ACP milestones may precede the worktree status activity; find
+    // the one that actually carries the worktree report.
     const activity = await until(async () => {
       const found = await activitiesOf(issueId, sessionId);
-      return found.length > 0 ? found : undefined;
+      const report = found.find((item) => field(field(item, "detail"), "worktree") !== undefined);
+      return report === undefined ? undefined : report;
     });
-    const worktree = field(field(activity[0], "detail"), "worktree");
+    const worktree = field(field(activity, "detail"), "worktree");
     const branch = str(field(worktree, "branch"));
     expect(branch).toMatch(/^orrery\//);
     expect(field(worktree, "preserved")).toBe(false);

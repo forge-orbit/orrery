@@ -2,14 +2,28 @@
 import { hostname } from "node:os";
 import { parseArgs } from "node:util";
 import { readCredential } from "./credential.ts";
+import type { ReadyWorkFilter } from "@orrery/contract";
 import { loadSupervisionConfig } from "./config.ts";
 import { login } from "./login.ts";
 import { start } from "./start.ts";
+import { work } from "./work.ts";
 
 const fail = (message: string): never => {
   process.stderr.write(`${message}\n`);
   process.exit(1);
 };
+
+const positive = (raw: string | undefined, flag: string): number | undefined => {
+  if (raw === undefined) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    fail(`${flag} must be a positive integer`);
+  }
+  return parsed;
+};
+
+const isReadyWorkFilter = (value: string): value is ReadyWorkFilter =>
+  value === "assignedToMe" || value === "unassigned" || value === "all";
 
 const usage = `orrery-runner — local agent runner for Orrery
 
@@ -17,6 +31,7 @@ Commands:
   login                     Enroll this machine as a Runner host in the browser
   start --workspace ID --project ID
                             Register a project-bound Runner and heartbeat
+  work <ISSUE>              Run one issue in an ephemeral Runner and exit
   status                    Show the locally stored host credential
 
 Options:
@@ -27,8 +42,12 @@ Options:
   --name NAME               Runner display name (start)
   --capability NAME         Declared capability, repeatable (start)
   --concurrency N           Max concurrent local slots, 1-64 (start; default: 1)
-  --repo PATH               Local checkout path (start; default: current directory)
+  --repo PATH               Local checkout path (start/work; default: current directory)
   --heartbeat-ms N          Heartbeat interval (start; default: 5000)
+  --auto-claim              Opt in to autonomous ready-work pickup (start)
+  --auto-claim-filter FILTER  assignedToMe | unassigned | all (start; default: assignedToMe)
+  --auto-claim-poll-ms N    Auto-claim poll interval (start; default: 1000)
+  --workspace SLUG-OR-ID    Disambiguate an issue key (work)
   --acp-command NAME        ACP harness command (default: opencode; env: ORRERY_ACP_COMMAND)
   --acp-arg ARG             ACP harness argument, repeatable (default: acp)
   --lease-renew-ms N        Work-session lease renewal interval (default: 60000)
@@ -51,6 +70,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       name: { type: "string" },
       capability: { type: "string", multiple: true },
       concurrency: { type: "string" },
+      "auto-claim": { type: "boolean" },
+      "auto-claim-filter": { type: "string" },
+      "auto-claim-poll-ms": { type: "string" },
       repo: { type: "string" },
       "heartbeat-ms": { type: "string" },
       "acp-command": { type: "string" },
@@ -73,6 +95,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   const stop = () => controller.abort();
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+
+  const supervision = () => {
+    const acp = {
+      ...(values["acp-command"] === undefined ? {} : { command: values["acp-command"] }),
+      ...(values["acp-arg"] === undefined ? {} : { args: values["acp-arg"] }),
+    };
+    const leaseRenewMs = positive(values["lease-renew-ms"], "--lease-renew-ms");
+    const cancelGraceMs = positive(values["cancel-grace-ms"], "--cancel-grace-ms");
+    return loadSupervisionConfig({
+      ...(Object.keys(acp).length === 0 ? {} : { acp }),
+      ...(leaseRenewMs === undefined ? {} : { leaseRenewMs }),
+      ...(cancelGraceMs === undefined ? {} : { cancelGraceMs }),
+      ...(values["worktree-root"] === undefined ? {} : { worktreeRoot: values["worktree-root"] }),
+    });
+  };
 
   const command = positionals[0] ?? "";
   try {
@@ -102,30 +139,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         if (!Number.isInteger(heartbeatMs) || heartbeatMs < 10) {
           fail("--heartbeat-ms must be an integer of at least 10");
         }
-        const positive = (raw: string | undefined, flag: string): number | undefined => {
-          if (raw === undefined) return undefined;
-          const parsed = Number(raw);
-          if (!Number.isInteger(parsed) || parsed <= 0) {
-            fail(`${flag} must be a positive integer`);
-          }
-          return parsed;
-        };
-        const leaseRenewMs = positive(values["lease-renew-ms"], "--lease-renew-ms");
-        const cancelGraceMs = positive(values["cancel-grace-ms"], "--cancel-grace-ms");
-        // Each flag overrides only its own field, preserving the env default
-        // (or the other flag) for the field it does not mention.
-        const acp = {
-          ...(values["acp-command"] === undefined ? {} : { command: values["acp-command"] }),
-          ...(values["acp-arg"] === undefined ? {} : { args: values["acp-arg"] }),
-        };
-        const supervision = loadSupervisionConfig({
-          ...(Object.keys(acp).length === 0 ? {} : { acp }),
-          ...(leaseRenewMs === undefined ? {} : { leaseRenewMs }),
-          ...(cancelGraceMs === undefined ? {} : { cancelGraceMs }),
-          ...(values["worktree-root"] === undefined
-            ? {}
-            : { worktreeRoot: values["worktree-root"] }),
-        });
+        const rawFilter = values["auto-claim-filter"];
+        const filter =
+          rawFilter === undefined
+            ? undefined
+            : isReadyWorkFilter(rawFilter)
+              ? rawFilter
+              : fail("--auto-claim-filter must be assignedToMe, unassigned or all");
+        const autoClaimPollMs = positive(values["auto-claim-poll-ms"], "--auto-claim-poll-ms");
         await start({
           server,
           workspaceId,
@@ -137,8 +158,26 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           heartbeatMs,
           ...(values.repo === undefined ? {} : { repoPath: values.repo }),
           signal: controller.signal,
-          supervision,
+          supervision: supervision(),
+          autoClaim: values["auto-claim"] === true,
+          ...(filter === undefined ? {} : { autoClaimFilter: filter }),
+          ...(autoClaimPollMs === undefined ? {} : { autoClaimPollMs }),
         });
+        return;
+      }
+      case "work": {
+        const target = positionals[1] ?? fail("work requires an issue ID, URL or KEY");
+        const outcome = await work(target, {
+          server,
+          ...(values.workspace === undefined ? {} : { workspace: values.workspace }),
+          ...(values.repo === undefined ? {} : { repoPath: values.repo }),
+          ...(values.agent === undefined ? {} : { agentId: values.agent }),
+          signal: controller.signal,
+          supervision: supervision(),
+        });
+        if (outcome !== "completed") {
+          fail(`One-shot work ended with '${outcome}'.`);
+        }
         return;
       }
       case "status": {

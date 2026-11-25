@@ -4,6 +4,8 @@ import {
   AckCommandsRequest,
   AckCommandsResponse,
   ApproveDeviceCodeResponse,
+  AutoClaimRequest,
+  AutoClaimResponse,
   CommandsQuery,
   CreateDeviceCodeRequest,
   CreateDispatchRequest,
@@ -14,6 +16,10 @@ import {
   DispatchAcceptance,
   ExchangeDeviceCodeRequest,
   IssueDispatchesResponse,
+  IssueResolveRequest,
+  IssueResolveResponse,
+  RunnerDispatchRequest,
+  RunnerOfflineResponse,
   HeartbeatRequest,
   HostCredentialResponse,
   ReconnectRequest,
@@ -338,6 +344,33 @@ const readStream = createRoute({
   },
 });
 
+const autoClaimErrors = {
+  400: problem("The auto-claim request is invalid"),
+  401: problem("The Runner host credential is invalid or was revoked"),
+  403: problem("The Runner host cannot contribute to this project"),
+  404: problem("No such Runner is accessible"),
+  409: problem("The Runner lost workspace or project access"),
+  429: problem("Too many dispatch attempts; try again later"),
+};
+
+const resolveErrorsHost = {
+  400: problem("The issue target is invalid"),
+  401: problem("The Runner host credential is invalid or was revoked"),
+  403: problem("The Runner host cannot contribute to this project"),
+  404: problem("No such issue or workspace is accessible with Contribute access"),
+  409: problem("The issue key is ambiguous; pass a workspace"),
+  429: problem("Too many resolution attempts; try again later"),
+};
+
+const offlineErrors = {
+  400: problem("The offline report is invalid"),
+  401: problem("The Runner host credential is invalid or was revoked"),
+  403: problem("The Runner host cannot access this workspace"),
+  404: problem("No such Runner is accessible"),
+  409: problem("The Runner lost workspace or project access"),
+  429: problem("Too many offline reports; try again later"),
+};
+
 const reconnectErrors = {
   400: problem("The reconnect report is invalid"),
   401: problem("The Runner host credential is invalid or was revoked"),
@@ -355,6 +388,78 @@ const resolveErrors = {
   409: problem("The Dispatch is not uncertain"),
   429: problem("Too many resolution attempts; try again later"),
 };
+
+const autoClaim = createRoute({
+  method: "post",
+  path: "/api/runners/{runnerId}/auto-claim",
+  summary: "Atomically claim the next ready issue for a Runner",
+  description:
+    "Runner host credential only. Applies Orrery's readiness and claim rules within one transaction; `assignedToMe` never claims unassigned issues. A null dispatch means no work is ready or every slot is occupied.",
+  request: {
+    params: runnerParams,
+    body: { content: { "application/json": { schema: AutoClaimRequest } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "The claimed Dispatch, or null when nothing is dispatchable",
+      content: { "application/json": { schema: AutoClaimResponse } },
+    },
+    ...autoClaimErrors,
+  },
+});
+
+const createRunnerDispatch = createRoute({
+  method: "post",
+  path: "/api/runners/{runnerId}/dispatches",
+  summary: "Create a Dispatch for an explicitly resolved issue",
+  description:
+    "Runner host credential only. Used by the ephemeral one-shot `orrery-runner work` flow; shares the human delegation Dispatch creation path.",
+  request: {
+    params: runnerParams,
+    body: { content: { "application/json": { schema: RunnerDispatchRequest } }, required: true },
+  },
+  responses: {
+    201: {
+      description: "The pending Dispatch",
+      content: { "application/json": { schema: Dispatch } },
+    },
+    ...autoClaimErrors,
+  },
+});
+
+const resolveIssue = createRoute({
+  method: "post",
+  path: "/api/runners/issue-resolve",
+  summary: "Resolve a one-shot issue target for the enrolled Runner host",
+  description:
+    "Accepts a UUID, a URL or a `KEY-42` issue key. Requires Contribute access and fails with an ambiguity problem listing workspaces when a key matches more than one.",
+  request: {
+    body: { content: { "application/json": { schema: IssueResolveRequest } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "The unambiguous issue scope",
+      content: { "application/json": { schema: IssueResolveResponse } },
+    },
+    ...resolveErrorsHost,
+  },
+});
+
+const markRunnerOffline = createRoute({
+  method: "post",
+  path: "/api/runners/{runnerId}/offline",
+  summary: "Mark an ephemeral Runner offline during one-shot teardown",
+  description:
+    "Runner host credential only. Revokes the single-use Runner and its Dispatch tokens so no credential outlives the one-shot process.",
+  request: { params: runnerParams },
+  responses: {
+    200: {
+      description: "The revoked Runner id",
+      content: { "application/json": { schema: RunnerOfflineResponse } },
+    },
+    ...offlineErrors,
+  },
+});
 
 const reconnectRunner = createRoute({
   method: "post",
@@ -416,6 +521,7 @@ const statusFor = {
   agent_not_found: 404,
   no_default_agent: 409,
   issue_not_found: 404,
+  issue_ambiguous: 409,
   runner_forbidden: 403,
   runner_unavailable: 409,
   runner_not_for_issue: 409,
@@ -440,6 +546,7 @@ function failure(c: Context, error: unknown) {
       status: statusFor[error.kind],
       code: error.kind,
       title: error.message,
+      ...(error.detail === undefined ? {} : { detail: error.detail }),
     });
   }
   throw error;
@@ -468,6 +575,10 @@ export const routes = [
   ackCommands,
   ingestStream,
   readStream,
+  autoClaim,
+  createRunnerDispatch,
+  resolveIssue,
+  markRunnerOffline,
   reconnectRunner,
   resolveUncertain,
 ];
@@ -608,6 +719,51 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
         await service.ackCommands(bearer(c), runnerId, c.req.valid("json").upToSeq),
         200,
       );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(autoClaim, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      return c.json(await service.autoClaim(bearer(c), runnerId, c.req.valid("json").filter), 200);
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(createRunnerDispatch, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      return c.json(
+        await service.createRunnerDispatch(bearer(c), runnerId, c.req.valid("json").issueId),
+        201,
+      );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(resolveIssue, async (c) => {
+    try {
+      const { target, workspace } = c.req.valid("json");
+      return c.json(
+        await service.resolveIssue(bearer(c), {
+          target,
+          ...(workspace === undefined ? {} : { workspace }),
+        }),
+        200,
+      );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(markRunnerOffline, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      return c.json(await service.markRunnerOffline(bearer(c), runnerId), 200);
     } catch (error) {
       return failure(c, error);
     }

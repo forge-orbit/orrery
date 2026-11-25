@@ -2,12 +2,16 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type {
   AckCommandsResponse,
   AgentIdentity,
+  AutoClaimResponse,
   CreateDeviceCodeRequest,
   CreateDispatchRequest,
   DeviceCodeResponse,
   Dispatch,
   DispatchAcceptance,
   ExchangeDeviceCodeRequest,
+  IssueResolveRequest,
+  IssueResolveResponse,
+  ReadyWorkFilter,
   FleetRunner,
   FleetRunnerHost,
   HeartbeatRequest,
@@ -40,15 +44,19 @@ import {
   isNull,
   lt,
   lte,
+  notExists,
   notInArray,
+  or,
   sql,
   type SQL,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   agents,
   dispatchTokens,
   humans,
+  issueDependencies,
   issues,
   projects,
   runnerCommands,
@@ -100,6 +108,9 @@ const MAX_FAILED_VERIFIER_ATTEMPTS = 5;
 /** A runner is offline once its last heartbeat is older than this in DB time. */
 export const RUNNER_ONLINE_WINDOW_SECONDS = 120;
 
+/** Alias for the blocker side of `issue_dependencies` in readiness queries. */
+const blockerIssue = alias(issues, "blocker_issue");
+
 export type RunnersErrorKind =
   | "not_signed_in"
   | "device_code_invalid"
@@ -119,6 +130,7 @@ export type RunnersErrorKind =
   | "agent_not_found"
   | "no_default_agent"
   | "issue_not_found"
+  | "issue_ambiguous"
   | "runner_forbidden"
   | "runner_unavailable"
   | "runner_not_for_issue"
@@ -155,6 +167,7 @@ const messages: Record<RunnersErrorKind, string> = {
   agent_not_found: "That Agent is not owned by the Runner host's human.",
   no_default_agent: "The host owner has no Agent to run as by default.",
   issue_not_found: "No such issue is accessible to you.",
+  issue_ambiguous: "The issue key matches more than one workspace. Pass --workspace to choose one.",
   runner_forbidden: "Only the human who owns this Runner host may dispatch to it.",
   runner_unavailable: "This Runner is offline or has no free slot.",
   runner_not_for_issue: "This Runner is not registered for the issue's project.",
@@ -177,12 +190,15 @@ export class RunnersError extends Error {
   readonly kind: RunnersErrorKind;
   /** Whole seconds for a 429 Retry-After header; only set for backpressure. */
   readonly retryAfter: number | undefined;
+  /** Optional human-readable detail, e.g. the workspaces matching an issue key. */
+  readonly detail: string | undefined;
 
-  constructor(kind: RunnersErrorKind, retryAfter?: number) {
+  constructor(kind: RunnersErrorKind, retryAfter?: number, detail?: string) {
     super(messages[kind]);
     this.name = "RunnersError";
     this.kind = kind;
     this.retryAfter = retryAfter;
+    this.detail = detail;
   }
 }
 
@@ -378,6 +394,39 @@ async function canSeeWorkspace(
       ),
     );
   return membership !== undefined;
+}
+
+/**
+ * Live host-credential authentication for runner-host endpoints: revocation,
+ * human deactivation, workspace membership and the project access ceiling are
+ * all checked inside the caller's transaction (DB time, never a cached grant).
+ */
+async function authenticateHostRunnerForDeps(
+  deps: RunnersDeps,
+  tx: DbTransaction,
+  credential: string | undefined,
+  runnerId: string,
+  lock = true,
+  minLevel: ProjectAccessLevel = "read",
+) {
+  const host = await readHostByCredential(tx, credential);
+  const query = tx.select().from(runners).where(eq(runners.id, runnerId)).limit(1);
+  const [runner] = lock ? await query.for("update") : await query;
+  if (runner === undefined || runner.hostId !== host.host.id) {
+    throw new RunnersError("runner_not_found");
+  }
+  if (runner.revokedAt !== null) throw new RunnersError("runner_revoked");
+  if (!(await canSeeWorkspace(tx, runner.workspaceId, host.humanId))) {
+    throw new RunnersError("runner_revoked");
+  }
+  const ceiling = await deps.projectAccessCeiling(tx, runner.workspaceId, host.humanId, [
+    runner.projectId,
+  ]);
+  const level = ceiling.get(runner.projectId);
+  if (!hasAccess(level, minLevel, deps.projectAccessAtLeast)) {
+    throw new RunnersError("runner_revoked");
+  }
+  return { host, runner, level };
 }
 
 /** DB-time expiry flag shared by every device-code read/write decision. */
@@ -798,23 +847,7 @@ function createStreamHelpers(deps: RunnersDeps) {
     runnerId: string,
     lock = true,
   ) {
-    const host = await readHostByCredential(tx, credential);
-    const query = tx.select().from(runners).where(eq(runners.id, runnerId)).limit(1);
-    const [runner] = lock ? await query.for("update") : await query;
-    if (runner === undefined || runner.hostId !== host.host.id) {
-      throw new RunnersError("runner_not_found");
-    }
-    if (runner.revokedAt !== null) throw new RunnersError("runner_revoked");
-    if (!(await canSeeWorkspace(tx, runner.workspaceId, host.humanId))) {
-      throw new RunnersError("runner_revoked");
-    }
-    const ceiling = await projectAccessCeiling(tx, runner.workspaceId, host.humanId, [
-      runner.projectId,
-    ]);
-    if (!hasAccess(ceiling.get(runner.projectId), "read", projectAccessAtLeast)) {
-      throw new RunnersError("runner_revoked");
-    }
-    return { host, runner };
+    return authenticateHostRunnerForDeps(deps, tx, credential, runnerId, lock);
   }
 
   async function ingest(
@@ -827,7 +860,21 @@ function createStreamHelpers(deps: RunnersDeps) {
       // Do not lock `runners` here: ingest only mutates runner_dispatches and
       // work_session_stream_chunks, avoiding AB-BA deadlocks with stop/cancel.
       await authenticateHostRunner(tx, credential, runnerId, false);
-      // runner_dispatches -> work_sessions.
+      // Global lock order: issues -> runner_dispatches -> work_sessions. The
+      // issue lock is essential: renew/rollup also lock issues before the
+      // session, so skipping it here creates a 40P01 cycle with a live lease.
+      const [peek] = await tx
+        .select({ issueId: runnerDispatches.issueId })
+        .from(runnerDispatches)
+        .where(eq(runnerDispatches.id, dispatchId))
+        .limit(1);
+      if (peek === undefined) throw new RunnersError("dispatch_not_found");
+      await tx
+        .select({ id: issues.id })
+        .from(issues)
+        .where(eq(issues.id, peek.issueId))
+        .limit(1)
+        .for("update");
       await tx
         .select({ id: runnerDispatches.id })
         .from(runnerDispatches)
@@ -1506,6 +1553,287 @@ function createStreamHelpers(deps: RunnersDeps) {
   };
 }
 
+interface DispatchCreationInput {
+  runnerId: string;
+  issueId: string;
+  workspaceId: string;
+  projectId: string;
+  agentId: string;
+  requestedByHumanId: string;
+}
+
+/**
+ * Re-check every readiness rule while the issue row is locked. This closes the
+ * scan-to-lock race between concurrent `autoClaim` and `createDispatch` calls:
+ * a second transaction waits for the lock, then sees the first Dispatch and
+ * skips the issue instead of claiming it again. The filter is also re-evaluated
+ * under the lock so a re-assignment during the scan cannot be misread.
+ */
+async function assertIssueStillDispatchable(
+  tx: DbTransaction,
+  issueId: string,
+  agentId: string,
+  filter: ReadyWorkFilter,
+): Promise<void> {
+  const [issue] = await tx
+    .select({
+      deletedAt: issues.deletedAt,
+      status: issues.status,
+      needsInput: issues.needsInput,
+      assigneeType: issues.assigneeType,
+      assigneeId: issues.assigneeId,
+    })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  if (
+    issue === undefined ||
+    issue.deletedAt !== null ||
+    issue.status !== "todo" ||
+    issue.needsInput
+  ) {
+    throw new RunnersError("issue_not_claimable");
+  }
+  const unassigned = issue.assigneeType === null && issue.assigneeId === null;
+  const mine = issue.assigneeType === "agent" && issue.assigneeId === agentId;
+  const matches =
+    filter === "unassigned" ? unassigned : filter === "assignedToMe" ? mine : unassigned || mine;
+  if (!matches) throw new RunnersError("issue_not_claimable");
+
+  const [blocker] = await tx
+    .select({ id: issueDependencies.id })
+    .from(issueDependencies)
+    .innerJoin(blockerIssue, eq(issueDependencies.blockedByIssueId, blockerIssue.id))
+    .where(
+      and(
+        eq(issueDependencies.issueId, issueId),
+        isNull(blockerIssue.deletedAt),
+        notInArray(blockerIssue.status, ["done", "cancelled"]),
+      ),
+    )
+    .limit(1);
+  if (blocker !== undefined) throw new RunnersError("issue_not_claimable");
+
+  const [dispatch] = await tx
+    .select({ id: runnerDispatches.id })
+    .from(runnerDispatches)
+    .where(
+      and(
+        eq(runnerDispatches.issueId, issueId),
+        inArray(runnerDispatches.state, ["pending", "active", "uncertain"]),
+      ),
+    )
+    .limit(1);
+  if (dispatch !== undefined) throw new RunnersError("issue_not_claimable");
+}
+
+/** Create a Dispatch when the caller already holds the issue's FOR UPDATE lock. */
+async function insertDispatchLocked(
+  tx: DbTransaction,
+  input: DispatchCreationInput,
+): Promise<Dispatch> {
+  const [uncertain] = await tx
+    .select({ id: runnerDispatches.id })
+    .from(runnerDispatches)
+    .where(
+      and(eq(runnerDispatches.issueId, input.issueId), eq(runnerDispatches.state, "uncertain")),
+    )
+    .limit(1);
+  if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
+  await assertIssueDispatchable(tx, input.issueId, input.agentId);
+
+  const [created] = await tx
+    .insert(runnerDispatches)
+    .values({
+      id: randomUUID(),
+      runnerId: input.runnerId,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      issueId: input.issueId,
+      requestedByHumanId: input.requestedByHumanId,
+      agentId: input.agentId,
+      dispatchAttemptId: randomUUID(),
+      state: "pending",
+      createdAt: sql`statement_timestamp()`,
+    })
+    .returning({ id: runnerDispatches.id });
+  const row = await readDispatch(tx, created!.id);
+  await enqueueRunnerCommand(tx, {
+    runnerId: input.runnerId,
+    dispatch: { id: row.id, dispatchAttemptId: row.dispatchAttemptId },
+    kind: "dispatch",
+    payload: {
+      dispatchId: row.id,
+      dispatchAttemptId: row.dispatchAttemptId,
+      issueId: input.issueId,
+      projectId: input.projectId,
+      workspaceId: input.workspaceId,
+      agentId: input.agentId,
+    },
+  });
+  return toDispatch(row);
+}
+
+type ParsedIssueTarget =
+  | { kind: "id"; id: string }
+  | { kind: "key"; prefix: string; number: number; projectKeyHint: string | undefined };
+
+function parseIssueTarget(target: string): ParsedIssueTarget {
+  let value = target.trim();
+  let projectKeyHint: string | undefined;
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const parsed = new URL(value);
+      const parts = parsed.pathname.split("/").filter((part) => part !== "");
+      const issueIndex = parts.lastIndexOf("issues");
+      const candidate = issueIndex >= 0 ? parts[issueIndex + 1] : parts.at(-1);
+      if (candidate === undefined) throw new Error("no issue in URL");
+      const projectIndex = parts.indexOf("projects");
+      if (projectIndex >= 0) projectKeyHint = parts[projectIndex + 1];
+      value = decodeURIComponent(candidate);
+    } catch (error) {
+      throw new RunnersError(
+        "issue_not_found",
+        undefined,
+        `Could not read an issue from the URL: ${String(error)}`,
+      );
+    }
+  }
+  const key = /^([A-Z][A-Z0-9]{1,9})-(\d+)$/i.exec(value);
+  if (key !== null && key[1] !== undefined && key[2] !== undefined) {
+    // `issues.number` is int4; an oversized key must be a clean 404, never a
+    // Postgres 22003 overflow surfacing as a 500.
+    const number = Number(key[2]);
+    if (!Number.isSafeInteger(number) || number < 1 || number > 2_147_483_647) {
+      throw new RunnersError("issue_not_found");
+    }
+    return {
+      kind: "key",
+      prefix: key[1].toUpperCase(),
+      number,
+      projectKeyHint: projectKeyHint?.toUpperCase(),
+    };
+  }
+  return { kind: "id", id: value };
+}
+
+const workspaceSlug = (name: string): string =>
+  name
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-|-$/g, "");
+
+/**
+ * Resolve a CLI target across every workspace the Runner host owner can see,
+ * requiring Contribute access. A key matching two workspaces is never guessed:
+ * the error lists them so the caller can pass --workspace.
+ */
+async function resolveIssueForHost(
+  deps: RunnersDeps,
+  tx: DbTransaction,
+  credential: string | undefined,
+  request: IssueResolveRequest,
+): Promise<IssueResolveResponse> {
+  const host = await readHostByCredential(tx, credential);
+  const parsed = parseIssueTarget(request.target);
+  const personal = await tx
+    .select({ id: workspaces.id, name: workspaces.name })
+    .from(workspaces)
+    .where(eq(workspaces.personalOwnerHumanId, host.humanId));
+  const shared = await tx
+    .select({ id: workspaces.id, name: workspaces.name })
+    .from(workspaces)
+    .innerJoin(
+      workspaceMemberships,
+      and(
+        eq(workspaceMemberships.workspaceId, workspaces.id),
+        eq(workspaceMemberships.humanId, host.humanId),
+        isNull(workspaceMemberships.suspendedAt),
+      ),
+    );
+  const scopes = [...new Map([...personal, ...shared].map((row) => [row.id, row])).values()];
+  const candidates =
+    request.workspace === undefined
+      ? scopes
+      : scopes.filter(
+          (scope) =>
+            scope.id === request.workspace ||
+            scope.name.toLowerCase() === request.workspace?.toLowerCase() ||
+            workspaceSlug(scope.name) === request.workspace?.toLowerCase(),
+        );
+  if (candidates.length === 0) throw new RunnersError("workspace_not_found");
+
+  const matches: IssueResolveResponse[] = [];
+  for (const scope of candidates) {
+    const projectsInScope = await tx
+      .select({ id: projects.id, key: projects.key })
+      .from(projects)
+      .where(eq(projects.workspaceId, scope.id));
+    if (projectsInScope.length === 0) continue;
+    const ceiling = await deps.projectAccessCeiling(
+      tx,
+      scope.id,
+      host.humanId,
+      projectsInScope.map((project) => project.id),
+    );
+    const actionable = projectsInScope.filter(
+      (project) =>
+        (parsed.kind !== "key" ||
+          parsed.projectKeyHint === undefined ||
+          project.key.toUpperCase() === parsed.projectKeyHint) &&
+        hasAccess(ceiling.get(project.id), "contribute", deps.projectAccessAtLeast),
+    );
+    if (actionable.length === 0) continue;
+    const projectIds = actionable.map((project) => project.id);
+    const rows = await tx
+      .select({
+        id: issues.id,
+        projectId: issues.projectId,
+        number: issues.number,
+        title: issues.title,
+        deletedAt: issues.deletedAt,
+        key: projects.key,
+      })
+      .from(issues)
+      .innerJoin(projects, eq(issues.projectId, projects.id))
+      .where(
+        and(
+          inArray(issues.projectId, projectIds),
+          isNull(issues.deletedAt),
+          parsed.kind === "id"
+            ? eq(issues.id, parsed.id)
+            : and(eq(projects.key, parsed.prefix), eq(issues.number, parsed.number)),
+        ),
+      )
+      .limit(5);
+    for (const row of rows) {
+      matches.push({
+        issueId: row.id,
+        workspaceId: scope.id,
+        workspaceName: scope.name,
+        projectId: row.projectId,
+        projectKey: row.key,
+        identifier: `${row.key}-${row.number}`,
+        number: row.number,
+        title: row.title,
+      });
+    }
+  }
+  if (matches.length === 0) throw new RunnersError("issue_not_found");
+  if (matches.length > 1) {
+    const listing = matches
+      .map((match) => `${match.identifier} in ${match.workspaceName} (${match.workspaceId})`)
+      .join("; ");
+    throw new RunnersError(
+      "issue_ambiguous",
+      undefined,
+      `Matches ${matches.length} workspaces: ${listing}`,
+    );
+  }
+  return matches[0]!;
+}
+
 export function createRunnersService(deps: RunnersDeps) {
   const { db, publicUrl, projectAccessCeiling, projectAccessAtLeast, claimWorkSession } = deps;
   const stream = createStreamHelpers(deps);
@@ -1779,18 +2107,22 @@ export function createRunnersService(deps: RunnersDeps) {
 
         // The runner sends an opaque digest of its checkout, never a local path.
         const fingerprint = input.repoFingerprint;
-        const [existing] = await tx
-          .select({ id: runners.id })
-          .from(runners)
-          .where(
-            and(
-              eq(runners.hostId, host.host.id),
-              eq(runners.workspaceId, input.workspaceId),
-              eq(runners.projectId, input.projectId),
-              eq(runners.repoFingerprint, fingerprint),
-              isNull(runners.revokedAt),
-            ),
-          );
+        // Ephemeral one-shot runners are single-use: never reuse or clobber a
+        // persistent Runner row (and never inherit its presence or commands).
+        const [existing] = input.ephemeral
+          ? []
+          : await tx
+              .select({ id: runners.id })
+              .from(runners)
+              .where(
+                and(
+                  eq(runners.hostId, host.host.id),
+                  eq(runners.workspaceId, input.workspaceId),
+                  eq(runners.projectId, input.projectId),
+                  eq(runners.repoFingerprint, fingerprint),
+                  isNull(runners.revokedAt),
+                ),
+              );
         if (existing !== undefined) {
           await tx
             .update(runners)
@@ -2058,6 +2390,274 @@ export function createRunnersService(deps: RunnersDeps) {
           },
         });
         return toDispatch(row);
+      });
+    },
+
+    /**
+     * `--auto-claim`: atomically pick the next ready issue for this Runner's
+     * bound project and Agent through the very same Dispatch creation path as
+     * manual delegation. A null result means "nothing dispatchable right now".
+     */
+    async autoClaim(
+      credential: string | undefined,
+      runnerId: string,
+      filter: ReadyWorkFilter = "assignedToMe",
+    ): Promise<AutoClaimResponse> {
+      return db.transaction(async (tx) => {
+        // Read-only live checks first. Locking `runners` here would invert the
+        // global issues -> runners -> runner_dispatches order when we later
+        // lock the issue row, so the locking check happens after the scan.
+        const scanned = await authenticateHostRunnerForDeps(
+          deps,
+          tx,
+          credential,
+          runnerId,
+          false,
+          "contribute",
+        );
+        const scannedAgentId = scanned.runner.agentId;
+
+        // Mirrors work-sessions' `readyWork` readiness rules, plus dispatch
+        // state: no live session, no open blocker, no pending/active/uncertain
+        // Dispatch, and never a trashed, closed or input-blocked issue.
+        const liveSession = and(
+          eq(workSessions.issueId, issues.id),
+          eq(workSessions.status, "active"),
+          gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+        );
+        const noOpenBlocker = notExists(
+          tx
+            .select({ id: issueDependencies.id })
+            .from(issueDependencies)
+            .innerJoin(blockerIssue, eq(issueDependencies.blockedByIssueId, blockerIssue.id))
+            .where(
+              and(
+                eq(issueDependencies.issueId, issues.id),
+                isNull(blockerIssue.deletedAt),
+                notInArray(blockerIssue.status, ["done", "cancelled"]),
+              ),
+            ),
+        );
+        const noActiveDispatch = notExists(
+          tx
+            .select({ id: runnerDispatches.id })
+            .from(runnerDispatches)
+            .where(
+              and(
+                eq(runnerDispatches.issueId, issues.id),
+                inArray(runnerDispatches.state, ["pending", "active", "uncertain"]),
+              ),
+            ),
+        );
+        const assignee =
+          filter === "unassigned"
+            ? isNull(issues.assigneeId)
+            : filter === "assignedToMe"
+              ? and(eq(issues.assigneeType, "agent"), eq(issues.assigneeId, scannedAgentId))
+              : or(
+                  isNull(issues.assigneeId),
+                  and(eq(issues.assigneeType, "agent"), eq(issues.assigneeId, scannedAgentId)),
+                );
+        const candidates = await tx
+          .select({ id: issues.id })
+          .from(issues)
+          .leftJoin(workSessions, liveSession)
+          .where(
+            and(
+              eq(issues.projectId, scanned.runner.projectId),
+              isNull(issues.deletedAt),
+              eq(issues.status, "todo"),
+              eq(issues.needsInput, false),
+              isNull(workSessions.id),
+              noOpenBlocker,
+              noActiveDispatch,
+              assignee,
+            ),
+          )
+          .orderBy(issues.number)
+          .limit(10);
+        if (candidates.length === 0) return { dispatch: null };
+
+        // Lock every candidate issue in ONE ascending pass (global lock order:
+        // issues first). A concurrent claimant waits here, then sees the
+        // committed Dispatch during its own re-check and skips this issue.
+        const locked = await tx
+          .select({ id: issues.id })
+          .from(issues)
+          .where(
+            inArray(
+              issues.id,
+              candidates.map((row) => row.id),
+            ),
+          )
+          .orderBy(asc(issues.id))
+          .for("update");
+        const held = new Set(locked.map((row) => row.id));
+
+        // Only now lock the runner and re-verify revocation, membership,
+        // contribute access and the slot ceiling under that lock.
+        const { host, runner } = await authenticateHostRunnerForDeps(
+          deps,
+          tx,
+          credential,
+          runnerId,
+          true,
+          "contribute",
+        );
+        if (runner.agentId !== scannedAgentId) return { dispatch: null };
+
+        const [active] = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(runnerDispatches)
+          .where(
+            and(
+              eq(runnerDispatches.runnerId, runnerId),
+              inArray(runnerDispatches.state, ["active", "uncertain"]),
+            ),
+          );
+        const [queued] = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(runnerDispatches)
+          .where(
+            and(eq(runnerDispatches.runnerId, runnerId), eq(runnerDispatches.state, "pending")),
+          );
+        // `activeSlotCount` can lag between acceptDispatch and the next
+        // heartbeat; the live active-dispatch count is the safer upper bound.
+        if (
+          Math.max(runner.activeSlotCount, active?.count ?? 0) + (queued?.count ?? 0) >=
+          runner.maxConcurrency
+        ) {
+          return { dispatch: null };
+        }
+
+        for (const candidate of candidates) {
+          if (!held.has(candidate.id)) continue;
+          try {
+            await assertIssueStillDispatchable(tx, candidate.id, runner.agentId, filter);
+            const dispatch = await insertDispatchLocked(tx, {
+              runnerId,
+              issueId: candidate.id,
+              workspaceId: runner.workspaceId,
+              projectId: runner.projectId,
+              agentId: runner.agentId,
+              requestedByHumanId: host.humanId,
+            });
+            return { dispatch };
+          } catch (error) {
+            // A candidate can become unclaimable between the scan and the
+            // lock; skip it and try the next one in the same transaction.
+            if (
+              error instanceof RunnersError &&
+              (error.kind === "issue_not_claimable" ||
+                error.kind === "issue_not_dispatchable" ||
+                error.kind === "issue_not_found" ||
+                error.kind === "dispatch_uncertain")
+            ) {
+              continue;
+            }
+            throw error;
+          }
+        }
+        return { dispatch: null };
+      });
+    },
+
+    /** One-shot `orrery-runner work`: create one Dispatch for a resolved issue. */
+    async createRunnerDispatch(
+      credential: string | undefined,
+      runnerId: string,
+      issueId: string,
+    ): Promise<Dispatch> {
+      return db.transaction(async (tx) => {
+        // Read-only live check, then lock the issue BEFORE the runner row.
+        await authenticateHostRunnerForDeps(deps, tx, credential, runnerId, false, "contribute");
+        const [issue] = await tx
+          .select({ projectId: issues.projectId, deletedAt: issues.deletedAt })
+          .from(issues)
+          .where(eq(issues.id, issueId))
+          .limit(1)
+          .for("update");
+        const { host, runner } = await authenticateHostRunnerForDeps(
+          deps,
+          tx,
+          credential,
+          runnerId,
+          true,
+          "contribute",
+        );
+        const [project] = await tx
+          .select({ workspaceId: projects.workspaceId })
+          .from(projects)
+          .where(eq(projects.id, issue?.projectId ?? ""))
+          .limit(1);
+        if (
+          issue === undefined ||
+          issue.deletedAt !== null ||
+          project === undefined ||
+          project.workspaceId !== runner.workspaceId ||
+          issue.projectId !== runner.projectId
+        ) {
+          throw new RunnersError("issue_not_found");
+        }
+        await assertIssueStillDispatchable(tx, issueId, runner.agentId, "all");
+        return await insertDispatchLocked(tx, {
+          runnerId,
+          issueId,
+          workspaceId: project.workspaceId,
+          projectId: issue.projectId,
+          agentId: runner.agentId,
+          requestedByHumanId: host.humanId,
+        });
+      });
+    },
+
+    /** Resolve a CLI target across workspaces without guessing an ambiguous key. */
+    async resolveIssue(
+      credential: string | undefined,
+      request: IssueResolveRequest,
+    ): Promise<IssueResolveResponse> {
+      return db.transaction((tx) => resolveIssueForHost(deps, tx, credential, request));
+    },
+
+    /** Ephemeral one-shot teardown: revoke the Runner and its Dispatch tokens. */
+    async markRunnerOffline(
+      credential: string | undefined,
+      runnerId: string,
+    ): Promise<{ runnerId: string; revokedRunners: number }> {
+      return db.transaction(async (tx) => {
+        const host = await readHostByCredential(tx, credential);
+        // Lock the runner first, then settle its dispatches (global order:
+        // runners -> runner_dispatches); this path holds no issue lock.
+        const [runner] = await tx
+          .select()
+          .from(runners)
+          .where(eq(runners.id, runnerId))
+          .limit(1)
+          .for("update");
+        if (runner === undefined || runner.hostId !== host.host.id) {
+          throw new RunnersError("runner_not_found");
+        }
+        if (!(await canSeeWorkspace(tx, runner.workspaceId, host.humanId))) {
+          throw new RunnersError("runner_revoked");
+        }
+        const ceiling = await deps.projectAccessCeiling(tx, runner.workspaceId, host.humanId, [
+          runner.projectId,
+        ]);
+        if (!hasAccess(ceiling.get(runner.projectId), "read", deps.projectAccessAtLeast)) {
+          throw new RunnersError("runner_revoked");
+        }
+        // Idempotent teardown: a retry (e.g. after a SIGTERM race) is a clean
+        // no-op, never a 401 that would leave an orphaned Runner behind.
+        if (runner.revokedAt !== null) return { runnerId, revokedRunners: 0 };
+
+        await tx
+          .update(runners)
+          .set({ revokedAt: sql`statement_timestamp()`, activeSlotCount: 0 })
+          .where(and(eq(runners.id, runnerId), isNull(runners.revokedAt)));
+        // Revokes every token AND enqueues cancel/settles any stranded
+        // pending/active/uncertain dispatch in this same transaction.
+        await revokeDispatchTokensForRunners(tx, [runnerId], "runner_offline");
+        return { runnerId, revokedRunners: 1 };
       });
     },
 

@@ -29,6 +29,23 @@ type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => vo
  * Newline-delimited JSON-RPC 2.0 over stdio, with the child spawned as a
  * detached process-group leader so cancellation can signal the whole tree.
  */
+/**
+ * Strip host-level `ORRERY_*` env vars (such as `ORRERY_RUNNER_CONFIG_DIR` or
+ * deployment secrets) before spawning an ACP agent, exposing only the explicit
+ * dispatch-scoped variables in `scopedEnv`.
+ */
+export function sanitizeAcpEnv(
+  hostEnv: NodeJS.ProcessEnv,
+  scopedEnv?: Record<string, string>,
+): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(hostEnv)) {
+    if (key.startsWith("ORRERY_")) continue;
+    clean[key] = value;
+  }
+  return scopedEnv === undefined ? clean : { ...clean, ...scopedEnv };
+}
+
 export class AcpStdioClient {
   readonly pid: number;
   readonly exited: Promise<AcpExit>;
@@ -92,7 +109,7 @@ export class AcpStdioClient {
   static async start(options: AcpStartOptions): Promise<AcpStdioClient> {
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: sanitizeAcpEnv(process.env, options.env),
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     });

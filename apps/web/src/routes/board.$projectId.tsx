@@ -47,6 +47,7 @@ import {
   subtasksOf,
   updateIssue,
 } from "../features/projects/index.ts";
+import { LiveStudioLink } from "../features/runners/index.ts";
 import { workspaceRunsQuery } from "../features/runs/index.ts";
 import { activeSessionsQuery, SessionInspectorDetails } from "../features/work-sessions/index.ts";
 import { workspaceQuery } from "../features/workspaces/index.ts";
@@ -936,6 +937,8 @@ function BoardPage() {
                       canContribute={canContribute}
                       open={panelOpen}
                       initialSessionId={panel.sessionId}
+                      compact
+                      liveStudioLink={<LiveStudioLink issueId={panel.issueId} />}
                     />
                   </Stack>
                 )}

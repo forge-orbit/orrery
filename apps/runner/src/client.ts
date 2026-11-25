@@ -1,17 +1,26 @@
 import { z } from "zod";
 import {
   AckCommandsResponse,
+  AutoClaimResponse,
   DeviceCodeResponse,
+  Dispatch,
   DispatchAcceptance,
   HostCredentialResponse,
+  IssueResolveResponse,
+  ReconnectResponse,
   Runner,
   RunnerCommandsResponse,
+  RunnerOfflineResponse,
   type AckCommandsRequest,
+  type AutoClaimRequest,
   type CommandsQuery,
   type CreateDeviceCodeRequest,
   type ExchangeDeviceCodeRequest,
   type HeartbeatRequest,
+  type IssueResolveRequest,
+  type ReconnectRequest,
   type RegisterRunnerRequest,
+  type RunnerDispatchRequest,
 } from "@orrery/contract";
 
 export class RunnerRequestError extends Error {
@@ -145,6 +154,51 @@ export class OrreryClient {
         `/api/runners/${encodeURIComponent(runnerId)}/dispatches/${encodeURIComponent(dispatchId)}/accept`,
         { method: "POST" },
       ),
+    );
+  }
+
+  /** Startup/recovery reconciliation so live sessions stream into the Studio. */
+  async reconnect(runnerId: string, input: ReconnectRequest) {
+    return ReconnectResponse.parse(
+      await this.request(`/api/runners/${encodeURIComponent(runnerId)}/reconnect`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async autoClaim(runnerId: string, input: AutoClaimRequest) {
+    return AutoClaimResponse.parse(
+      await this.request(`/api/runners/${encodeURIComponent(runnerId)}/auto-claim`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async createRunnerDispatch(runnerId: string, input: RunnerDispatchRequest) {
+    return Dispatch.parse(
+      await this.request(`/api/runners/${encodeURIComponent(runnerId)}/dispatches`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async resolveIssue(input: IssueResolveRequest) {
+    return IssueResolveResponse.parse(
+      await this.request("/api/runners/issue-resolve", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async markRunnerOffline(runnerId: string) {
+    return RunnerOfflineResponse.parse(
+      await this.request(`/api/runners/${encodeURIComponent(runnerId)}/offline`, {
+        method: "POST",
+      }),
     );
   }
 

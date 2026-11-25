@@ -71,7 +71,7 @@ import {
   TitleBodyForm,
   updateIssue,
 } from "../features/projects/index.ts";
-import { DelegateToRunner } from "../features/runners/index.ts";
+import { DelegateToRunner, LiveStudioLink } from "../features/runners/index.ts";
 import { workspaceRunsQuery } from "../features/runs/index.ts";
 import {
   activeSessionsQuery,
@@ -973,6 +973,7 @@ function IssuePage() {
         canContribute={canContribute}
         initialOpen={inspector}
         initialSessionId={inspectorSession}
+        liveStudioLink={<LiveStudioLink issueId={issue.id} />}
       />
 
       {canContribute && (

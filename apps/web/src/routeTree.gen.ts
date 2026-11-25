@@ -31,6 +31,7 @@ import { Route as TrashProjectIdRouteImport } from './routes/trash.$projectId'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
 import { Route as HistoryProjectProjectIdRouteImport } from './routes/history.project.$projectId'
 import { Route as HistoryWorkspaceWorkspaceIdRouteImport } from './routes/history.workspace.$workspaceId'
+import { Route as LiveRunnerIdDispatchIdRouteImport } from './routes/live.$runnerId.$dispatchId'
 import { Route as ProjectsProjectIdIssuesNewRouteImport } from './routes/projects.$projectId_.issues.new'
 import { Route as ProjectsProjectIdKnowledgeNewRouteImport } from './routes/projects.$projectId_.knowledge.new'
 
@@ -145,6 +146,11 @@ const HistoryWorkspaceWorkspaceIdRoute =
     path: '/history/workspace/$workspaceId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const LiveRunnerIdDispatchIdRoute = LiveRunnerIdDispatchIdRouteImport.update({
+  id: '/live/$runnerId/$dispatchId',
+  path: '/live/$runnerId/$dispatchId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsProjectIdIssuesNewRoute =
   ProjectsProjectIdIssuesNewRouteImport.update({
     id: '/projects/$projectId_/issues/new',
@@ -181,6 +187,7 @@ export interface FileRoutesByFullPath {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/history/project/$projectId': typeof HistoryProjectProjectIdRoute
   '/history/workspace/$workspaceId': typeof HistoryWorkspaceWorkspaceIdRoute
+  '/live/$runnerId/$dispatchId': typeof LiveRunnerIdDispatchIdRoute
   '/projects/$projectId/issues/new': typeof ProjectsProjectIdIssuesNewRoute
   '/projects/$projectId/knowledge/new': typeof ProjectsProjectIdKnowledgeNewRoute
 }
@@ -207,6 +214,7 @@ export interface FileRoutesByTo {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/history/project/$projectId': typeof HistoryProjectProjectIdRoute
   '/history/workspace/$workspaceId': typeof HistoryWorkspaceWorkspaceIdRoute
+  '/live/$runnerId/$dispatchId': typeof LiveRunnerIdDispatchIdRoute
   '/projects/$projectId/issues/new': typeof ProjectsProjectIdIssuesNewRoute
   '/projects/$projectId/knowledge/new': typeof ProjectsProjectIdKnowledgeNewRoute
 }
@@ -234,6 +242,7 @@ export interface FileRoutesById {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/history/project/$projectId': typeof HistoryProjectProjectIdRoute
   '/history/workspace/$workspaceId': typeof HistoryWorkspaceWorkspaceIdRoute
+  '/live/$runnerId/$dispatchId': typeof LiveRunnerIdDispatchIdRoute
   '/projects/$projectId_/issues/new': typeof ProjectsProjectIdIssuesNewRoute
   '/projects/$projectId_/knowledge/new': typeof ProjectsProjectIdKnowledgeNewRoute
 }
@@ -262,6 +271,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/history/project/$projectId'
     | '/history/workspace/$workspaceId'
+    | '/live/$runnerId/$dispatchId'
     | '/projects/$projectId/issues/new'
     | '/projects/$projectId/knowledge/new'
   fileRoutesByTo: FileRoutesByTo
@@ -288,6 +298,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/history/project/$projectId'
     | '/history/workspace/$workspaceId'
+    | '/live/$runnerId/$dispatchId'
     | '/projects/$projectId/issues/new'
     | '/projects/$projectId/knowledge/new'
   id:
@@ -314,6 +325,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/history/project/$projectId'
     | '/history/workspace/$workspaceId'
+    | '/live/$runnerId/$dispatchId'
     | '/projects/$projectId_/issues/new'
     | '/projects/$projectId_/knowledge/new'
   fileRoutesById: FileRoutesById
@@ -341,6 +353,7 @@ export interface RootRouteChildren {
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
   HistoryProjectProjectIdRoute: typeof HistoryProjectProjectIdRoute
   HistoryWorkspaceWorkspaceIdRoute: typeof HistoryWorkspaceWorkspaceIdRoute
+  LiveRunnerIdDispatchIdRoute: typeof LiveRunnerIdDispatchIdRoute
   ProjectsProjectIdIssuesNewRoute: typeof ProjectsProjectIdIssuesNewRoute
   ProjectsProjectIdKnowledgeNewRoute: typeof ProjectsProjectIdKnowledgeNewRoute
 }
@@ -501,6 +514,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HistoryWorkspaceWorkspaceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/live/$runnerId/$dispatchId': {
+      id: '/live/$runnerId/$dispatchId'
+      path: '/live/$runnerId/$dispatchId'
+      fullPath: '/live/$runnerId/$dispatchId'
+      preLoaderRoute: typeof LiveRunnerIdDispatchIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects/$projectId_/issues/new': {
       id: '/projects/$projectId_/issues/new'
       path: '/projects/$projectId/issues/new'
@@ -541,6 +561,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspacesWorkspaceIdRoute: WorkspacesWorkspaceIdRoute,
   HistoryProjectProjectIdRoute: HistoryProjectProjectIdRoute,
   HistoryWorkspaceWorkspaceIdRoute: HistoryWorkspaceWorkspaceIdRoute,
+  LiveRunnerIdDispatchIdRoute: LiveRunnerIdDispatchIdRoute,
   ProjectsProjectIdIssuesNewRoute: ProjectsProjectIdIssuesNewRoute,
   ProjectsProjectIdKnowledgeNewRoute: ProjectsProjectIdKnowledgeNewRoute,
 }
