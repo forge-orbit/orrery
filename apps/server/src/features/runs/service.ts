@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  RunEndReason,
   RunStatus,
   type AgentIdentity,
   type Run,
@@ -9,7 +10,7 @@ import {
   type RunReportInput,
   type RunReportResponse,
 } from "@orrery/contract";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lte, notExists, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   agents,
@@ -18,10 +19,16 @@ import {
   runs,
   workspaceMemberships,
   workspaces,
+  workSessions,
 } from "../../db/schema.ts";
 import type { DbTransaction } from "../../platform/db.ts";
 import type { SessionAccount } from "../accounts/index.ts";
-import { nextChildRunStatus, nextRunStatus } from "./state-machine.ts";
+import {
+  RUN_STALE_AFTER_SECONDS,
+  nextChildRunStatus,
+  nextRunStatus,
+  observesRunLiveness,
+} from "./state-machine.ts";
 
 export type RunsErrorKind = "not_signed_in" | "run_not_found" | "workspace_not_found";
 
@@ -54,6 +61,9 @@ export interface RunsService {
   report(identity: AgentIdentity | null, input: RunReportInput): Promise<RunReportResponse>;
 
   listWorkspaceRuns(account: SessionAccount | null, workspaceId: string): Promise<RunDetail[]>;
+
+  /** Ends active runs whose heartbeat is stale and that hold no live work session. */
+  expireStaleRuns(): Promise<number>;
 }
 
 export type RunRow = typeof runs.$inferSelect;
@@ -75,6 +85,7 @@ export function toRun(row: RunRow): Run {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     endedAt: iso(row.endedAt),
+    endedReason: row.endedReason,
     lastHeartbeatAt: iso(row.lastHeartbeatAt),
   };
 }
@@ -231,6 +242,66 @@ async function recordChild(
   }
 }
 
+function laterDate(current: Date | null, candidate: Date): Date {
+  return current !== null && current.getTime() > candidate.getTime() ? current : candidate;
+}
+
+async function expireStaleRunsInTransaction(
+  tx: DbTransaction,
+  workspaceId?: string,
+): Promise<number> {
+  const lastSeenAt = sql`greatest(${runs.createdAt}, ${runs.lastHeartbeatAt})`;
+  const expired = await tx
+    .update(runs)
+    .set({
+      status: RunStatus.enum.ended,
+      endedAt: lastSeenAt,
+      endedReason: RunEndReason.enum.stale,
+      updatedAt: sql`statement_timestamp()`,
+    })
+    .where(
+      and(
+        eq(runs.status, RunStatus.enum.active),
+        lte(
+          lastSeenAt,
+          sql`statement_timestamp() - make_interval(secs => ${RUN_STALE_AFTER_SECONDS})`,
+        ),
+        workspaceId === undefined ? undefined : eq(runs.workspaceId, workspaceId),
+        notExists(
+          tx
+            .select({ one: sql`1` })
+            .from(workSessions)
+            .where(
+              and(
+                eq(workSessions.runId, runs.id),
+                eq(workSessions.status, "active"),
+                gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+              ),
+            ),
+        ),
+      ),
+    )
+    .returning({ id: runs.id });
+  if (expired.length === 0) return 0;
+
+  const ids = expired.map((row) => row.id);
+  await tx
+    .update(runChildren)
+    .set({
+      status: RunStatus.enum.ended,
+      endedAt: sql`greatest(${runs.endedAt}, ${runChildren.startedAt})`,
+    })
+    .from(runs)
+    .where(
+      and(
+        inArray(runChildren.runId, ids),
+        eq(runChildren.runId, runs.id),
+        eq(runChildren.status, RunStatus.enum.active),
+      ),
+    );
+  return expired.length;
+}
+
 export function createRunsService({ db }: RunsDeps): RunsService {
   return {
     async report(identity, input) {
@@ -315,21 +386,27 @@ export function createRunsService({ db }: RunsDeps): RunsService {
 
         const previousModel = locked.model;
         const modelChanged = reportedModel !== null && reportedModel !== previousModel;
+        const previousStatus = RunStatus.parse(row.status);
         const updates: Partial<typeof runs.$inferInsert> = { updatedAt: at };
         if (harnessVersion !== null && harnessVersion !== undefined) {
           updates.harnessVersion = harnessVersion;
         }
         if (modelChanged) updates.model = reportedModel;
-        const nextStatus = nextRunStatus(RunStatus.parse(row.status), input.event);
+        const nextStatus = nextRunStatus(previousStatus, input.event, row.endedReason);
+        if (observesRunLiveness(input.event, input.checkIn !== undefined)) {
+          updates.lastHeartbeatAt = laterDate(row.lastHeartbeatAt, at);
+        }
         if (nextStatus === RunStatus.enum.ended && input.event === "run_ended") {
           updates.status = RunStatus.enum.ended;
-          updates.endedAt = at;
-        } else if (nextStatus === RunStatus.enum.active && row.status === RunStatus.enum.ended) {
+          updates.endedAt = laterDate(row.endedAt, at);
+          updates.endedReason = RunEndReason.enum.reported;
+        } else if (
+          nextStatus === RunStatus.enum.active &&
+          previousStatus === RunStatus.enum.ended
+        ) {
           updates.status = RunStatus.enum.active;
           updates.endedAt = null;
-        }
-        if (input.event === "run_heartbeat" || input.checkIn !== undefined) {
-          updates.lastHeartbeatAt = at;
+          updates.endedReason = null;
         }
         const [updated] = await tx
           .update(runs)
@@ -377,6 +454,7 @@ export function createRunsService({ db }: RunsDeps): RunsService {
       if (!(await humanCanReadWorkspace(db, workspaceId, actor.humanId))) {
         throw new RunsError("workspace_not_found");
       }
+      await db.transaction((tx) => expireStaleRunsInTransaction(tx, workspaceId));
       const found = await db
         .select({ run: runs, agentName: agents.name })
         .from(runs)
@@ -417,6 +495,10 @@ export function createRunsService({ db }: RunsDeps): RunsService {
           kids.get(entry.run.id) ?? [],
         ),
       );
+    },
+
+    async expireStaleRuns() {
+      return db.transaction((tx) => expireStaleRunsInTransaction(tx));
     },
   };
 }

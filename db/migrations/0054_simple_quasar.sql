@@ -1,0 +1,2 @@
+ALTER TABLE "runs" ADD COLUMN "ended_reason" text;--> statement-breakpoint
+ALTER TABLE "runs" ADD CONSTRAINT "runs_ended_reason" CHECK ("runs"."ended_reason" is null or "runs"."ended_reason" in ('reported', 'stale'));

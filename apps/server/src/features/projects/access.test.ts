@@ -4,6 +4,7 @@ import {
   IssueDetail,
   Problem,
   Project,
+  ProjectAccessCandidatesResponse,
   ProjectAccessHumanIds,
   ProjectAccessGrant,
   ProjectAccessGrantsResponse,
@@ -1069,5 +1070,68 @@ describe("shared project access", () => {
       404,
       "project_not_found",
     );
+  });
+
+  it("suggests grant candidates to a project manager without the member directory", async () => {
+    const { app, adminCookie, personalWorkspaceId: adminPersonal } = await readyApp();
+    const workspace = await createSharedWorkspace(app, adminCookie, "Candidates Lab");
+    const project = await createProject(app, adminCookie, workspace.id, "Launch");
+    const manager = await secondHuman(MEMBER_EMAIL, workspace.id);
+    const colleague = await secondHuman(COLLEAGUE_EMAIL, workspace.id);
+    const reader = await secondHuman("reader@example.com", workspace.id);
+    const suspended = await secondHuman("suspended@example.com", workspace.id);
+    const deactivated = await secondHuman("deactivated@example.com", workspace.id);
+    const outsider = await secondHuman(OUTSIDER_EMAIL);
+
+    await database.db
+      .update(workspaceMemberships)
+      .set({ suspendedAt: sql`now()` })
+      .where(eq(workspaceMemberships.humanId, suspended.human.id));
+    await database.db
+      .update(humans)
+      .set({ deactivatedAt: sql`now()` })
+      .where(eq(humans.id, deactivated.human.id));
+    await grantAccess(app, adminCookie, project.id, reader.human.email, "read");
+
+    const path = `/api/projects/${project.id}/access/candidates`;
+    await expectProblem(await getJson(app, path), 401, "not_signed_in");
+    await expectProblem(await getJson(app, path, outsider.cookie), 404, "project_not_found");
+    await expectProblem(
+      await getJson(app, path, reader.cookie),
+      403,
+      "insufficient_project_access",
+    );
+    await grantAccess(app, adminCookie, project.id, MEMBER_EMAIL, "contribute");
+    await expectProblem(
+      await getJson(app, path, manager.cookie),
+      403,
+      "insufficient_project_access",
+    );
+
+    await grantAccess(app, adminCookie, project.id, MEMBER_EMAIL, "manage");
+    const suggested = await getJson(app, path, manager.cookie);
+    expect(suggested.status).toBe(200);
+    expect(ProjectAccessCandidatesResponse.parse(await suggested.json())).toEqual([
+      {
+        humanId: colleague.human.id,
+        email: COLLEAGUE_EMAIL,
+        displayName: null,
+        avatarUrl: null,
+      },
+    ]);
+
+    await grantAccess(app, manager.cookie, project.id, COLLEAGUE_EMAIL, "read");
+    const afterGrant = await getJson(app, path, manager.cookie);
+    expect(afterGrant.status).toBe(200);
+    expect(ProjectAccessCandidatesResponse.parse(await afterGrant.json())).toEqual([]);
+
+    const personal = await createProject(app, adminCookie, adminPersonal, "Private");
+    const personalCandidates = await getJson(
+      app,
+      `/api/projects/${personal.id}/access/candidates`,
+      adminCookie,
+    );
+    expect(personalCandidates.status).toBe(200);
+    expect(await personalCandidates.json()).toEqual([]);
   });
 });

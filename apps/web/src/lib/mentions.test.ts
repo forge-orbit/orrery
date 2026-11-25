@@ -1,6 +1,11 @@
 import type { MentionAgent, MentionHuman } from "@orrery/contract";
 import { describe, expect, it } from "vitest";
-import { filterMentionCandidates, findAtMention, mentionToken } from "./mentions.ts";
+import {
+  filterMentionCandidates,
+  findAtMention,
+  mentionToken,
+  nextMentionSelection,
+} from "./mentions.ts";
 
 const alice: MentionHuman = {
   type: "human",
@@ -44,5 +49,13 @@ describe("web @mention helpers", () => {
     expect(filterMentionCandidates([alice, bob], [agent], "codex")).toEqual([agent]);
     expect(filterMentionCandidates([alice, bob], [agent], "example.com")).toEqual([alice, bob]);
     expect(filterMentionCandidates([alice, bob], [agent], "")).toEqual([alice, bob, agent]);
+  });
+
+  it("moves the suggestion selection with wrapping at both ends", () => {
+    expect(nextMentionSelection(0, 1, 3)).toBe(1);
+    expect(nextMentionSelection(2, 1, 3)).toBe(0);
+    expect(nextMentionSelection(0, -1, 3)).toBe(2);
+    expect(nextMentionSelection(1, -1, 3)).toBe(0);
+    expect(nextMentionSelection(4, 1, 0)).toBe(0);
   });
 });

@@ -91,12 +91,36 @@ test("autocompletes @mentions and renders them as badges outside code and emails
   await page.goto(`/projects/${projectId}/issues/new`);
 
   const editor = page.locator("#new-issue-body");
+  const attachBar = page.locator("[data-attach-bar]");
+  const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+
   await editor.fill("Hello @");
   const listbox = page.getByRole("listbox", { name: "Mention a teammate" });
   await expect(listbox).toBeVisible();
   await expect(listbox.getByRole("option").first()).toContainText(`@${handle}`);
+
+  // The menu floats over the composer near the textarea instead of growing the
+  // page below the attachment bar, and it leaves that layout where it was.
+  const menuBox = await listbox.boundingBox();
+  const attachBox = await attachBar.boundingBox();
+  if (menuBox === null || attachBox === null)
+    throw new Error("the mention menu or attach bar has no box");
+  expect(menuBox.y).toBeLessThan(attachBox.y);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(pageHeight);
+
+  await editor.press("ArrowDown");
+  await editor.press("Enter");
+  await expect(editor).toHaveValue(new RegExp(`@${handle}\\s`));
+
+  await editor.fill("Hello @");
+  await expect(listbox).toBeVisible();
   await listbox.getByRole("option").first().click();
   await expect(editor).toHaveValue(new RegExp(`@${handle}\\s`));
+
+  await editor.fill("Hello @");
+  await expect(listbox).toBeVisible();
+  await editor.press("Escape");
+  await expect(listbox).toBeHidden();
 
   await page.getByLabel("Issue title").fill("A mention");
   await editor.fill(

@@ -30,3 +30,9 @@ export function filterMentionCandidates(
     ...agents.filter((agent) => matches(agent.slug) || matches(agent.name)),
   ].slice(0, 6);
 }
+
+/** Move the active suggestion, wrapping at either end of the list. */
+export function nextMentionSelection(current: number, delta: number, count: number): number {
+  if (count <= 0) return 0;
+  return (current + delta + count) % count;
+}

@@ -19,6 +19,7 @@ import {
   QuestionStatus,
   RunnerCommandKind,
   type RunnerCommandPayload,
+  RunEndReason,
   RunStatus,
   SessionActivityKind,
   TransferAuthorizationStatus,
@@ -707,10 +708,15 @@ export const runs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
+    endedReason: text("ended_reason").$type<RunEndReason>(),
     lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
   },
   (t) => [
     check("runs_status", sql`${t.status} in (${sql.raw(sqlLiteralList(RunStatus))})`),
+    check(
+      "runs_ended_reason",
+      sql`${t.endedReason} is null or ${t.endedReason} in (${sql.raw(sqlLiteralList(RunEndReason))})`,
+    ),
     uniqueIndex("one_run_per_agent_workspace_harness_session")
       .on(t.agentId, t.workspaceId, t.harness, t.nativeSessionId)
       .where(sql`${t.harness} is not null and ${t.nativeSessionId} is not null`),

@@ -22,7 +22,7 @@ import {
 } from "../features/accounts/index.ts";
 import { AppearancePicker } from "../lib/appearance.tsx";
 import { HumanAvatar } from "../lib/avatar.tsx";
-import { TextField } from "../lib/fields.tsx";
+import { CurrentPasswordField, TextField } from "../lib/fields.tsx";
 import { Link } from "../lib/Link.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
 
@@ -369,11 +369,9 @@ function PasswordSection() {
         </Stack>
         <form onSubmit={onSubmit}>
           <FormLayout>
-            <TextField
+            <CurrentPasswordField
               id="account-current-password"
-              type="password"
               label="Current password"
-              autoComplete="current-password"
               width="min(100%, 28rem)"
               required
               value={currentPassword}
