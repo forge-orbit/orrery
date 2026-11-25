@@ -6363,6 +6363,298 @@
           "endedAt",
           "lastHeartbeatAt"
         ]
+      },
+      "RunnerCommandsResponse": {
+        "type": "object",
+        "properties": {
+          "commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunnerCommand"
+            }
+          }
+        },
+        "required": [
+          "commands"
+        ]
+      },
+      "RunnerCommand": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DispatchRunnerCommand"
+          },
+          {
+            "$ref": "#/components/schemas/CancelRunnerCommand"
+          },
+          {
+            "$ref": "#/components/schemas/InputResolvedRunnerCommand"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "dispatch": "#/components/schemas/DispatchRunnerCommand",
+            "cancel": "#/components/schemas/CancelRunnerCommand",
+            "input_resolved": "#/components/schemas/InputResolvedRunnerCommand"
+          }
+        }
+      },
+      "DispatchRunnerCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runnerId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "seq": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "dispatch"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/DispatchCommandPayload"
+          }
+        },
+        "required": [
+          "commandId",
+          "runnerId",
+          "seq",
+          "dispatchId",
+          "dispatchAttemptId",
+          "createdAt",
+          "expiresAt",
+          "kind",
+          "payload"
+        ]
+      },
+      "DispatchCommandPayload": {
+        "type": "object",
+        "properties": {
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "issueId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "dispatchId",
+          "dispatchAttemptId",
+          "issueId",
+          "projectId",
+          "workspaceId",
+          "agentId"
+        ]
+      },
+      "CancelRunnerCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runnerId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "seq": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "cancel"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/CancelCommandPayload"
+          }
+        },
+        "required": [
+          "commandId",
+          "runnerId",
+          "seq",
+          "dispatchId",
+          "dispatchAttemptId",
+          "createdAt",
+          "expiresAt",
+          "kind",
+          "payload"
+        ]
+      },
+      "CancelCommandPayload": {
+        "type": "object",
+        "properties": {
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "issueId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "dispatchId",
+          "dispatchAttemptId",
+          "issueId",
+          "reason"
+        ]
+      },
+      "InputResolvedRunnerCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runnerId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "seq": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "input_resolved"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/InputResolvedCommandPayload"
+          }
+        },
+        "required": [
+          "commandId",
+          "runnerId",
+          "seq",
+          "dispatchId",
+          "dispatchAttemptId",
+          "createdAt",
+          "expiresAt",
+          "kind",
+          "payload"
+        ]
+      },
+      "InputResolvedCommandPayload": {
+        "type": "object",
+        "properties": {
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
+          },
+          "issueId": {
+            "type": "string"
+          },
+          "questionId": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "answered",
+              "fallback_used"
+            ]
+          },
+          "answer": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "dispatchId",
+          "dispatchAttemptId",
+          "issueId",
+          "questionId",
+          "resolution",
+          "answer"
+        ]
+      },
+      "AckCommandsResponse": {
+        "type": "object",
+        "properties": {
+          "ackedSeq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "ackedSeq"
+        ]
+      },
+      "AckCommandsRequest": {
+        "type": "object",
+        "properties": {
+          "upToSeq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "upToSeq"
+        ]
       }
     },
     "parameters": {}
@@ -16630,6 +16922,224 @@
           },
           "429": {
             "description": "Too many failed dispatch attempts; try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/{runnerId}/commands": {
+      "get": {
+        "summary": "Read a Runner's durable command outbox",
+        "description": "Authenticates the host credential and live ACLs on every poll. Queries unacknowledged, unexpired commands with seq > afterSeq before waiting on pg_notify; Accept: text/event-stream returns one SSE batch.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/RunnerId"
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0
+            },
+            "required": false,
+            "name": "afterSeq",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 25000,
+              "default": 0
+            },
+            "required": false,
+            "name": "waitMs",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Commands after the supplied sequence cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunnerCommandsResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunnerCommandsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/{runnerId}/commands/ack": {
+      "post": {
+        "summary": "Acknowledge commands up to a sequence cursor",
+        "description": "Marks every unacknowledged command with seq <= upToSeq acknowledged.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/RunnerId"
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AckCommandsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The acknowledged cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AckCommandsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
             "content": {
               "application/problem+json": {
                 "schema": {

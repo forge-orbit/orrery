@@ -9,4 +9,6 @@ export interface Feature {
   registerTools?: (server: McpServer, request: Request) => void;
 
   startBackgroundTasks?: () => void;
+
+  stop?: () => void | Promise<void>;
 }

@@ -279,3 +279,105 @@ export const DispatchScope = z
   })
   .meta({ id: "DispatchScope" });
 export type DispatchScope = z.infer<typeof DispatchScope>;
+
+/** The three server-to-runner control commands carried by the transactional outbox. */
+export const RunnerCommandKind = z
+  .enum(["dispatch", "cancel", "input_resolved"])
+  .meta({ id: "RunnerCommandKind" });
+export type RunnerCommandKind = z.infer<typeof RunnerCommandKind>;
+
+export const DispatchCommandPayload = z
+  .object({
+    dispatchId: DispatchId,
+    dispatchAttemptId: DispatchAttemptId,
+    issueId: z.string(),
+    projectId: z.string(),
+    workspaceId: z.string(),
+    agentId: z.string(),
+  })
+  .meta({ id: "DispatchCommandPayload" });
+export type DispatchCommandPayload = z.infer<typeof DispatchCommandPayload>;
+
+export const CancelCommandPayload = z
+  .object({
+    dispatchId: DispatchId,
+    dispatchAttemptId: DispatchAttemptId,
+    issueId: z.string(),
+    reason: z.string(),
+  })
+  .meta({ id: "CancelCommandPayload" });
+export type CancelCommandPayload = z.infer<typeof CancelCommandPayload>;
+
+export const InputResolvedCommandPayload = z
+  .object({
+    dispatchId: DispatchId,
+    dispatchAttemptId: DispatchAttemptId,
+    issueId: z.string(),
+    questionId: z.string(),
+    resolution: z.enum(["answered", "fallback_used"]),
+    answer: z.string(),
+  })
+  .meta({ id: "InputResolvedCommandPayload" });
+export type InputResolvedCommandPayload = z.infer<typeof InputResolvedCommandPayload>;
+
+export const RunnerCommandPayload = z
+  .union([DispatchCommandPayload, CancelCommandPayload, InputResolvedCommandPayload])
+  .meta({ id: "RunnerCommandPayload" });
+export type RunnerCommandPayload = z.infer<typeof RunnerCommandPayload>;
+
+const runnerCommandBase = {
+  commandId: z.string().min(1),
+  runnerId: RunnerId,
+  seq: z.int().positive(),
+  dispatchId: DispatchId,
+  dispatchAttemptId: DispatchAttemptId,
+  createdAt: Timestamp,
+  expiresAt: Timestamp,
+};
+
+export const DispatchRunnerCommand = z
+  .object({ ...runnerCommandBase, kind: z.literal("dispatch"), payload: DispatchCommandPayload })
+  .meta({ id: "DispatchRunnerCommand" });
+export const CancelRunnerCommand = z
+  .object({ ...runnerCommandBase, kind: z.literal("cancel"), payload: CancelCommandPayload })
+  .meta({ id: "CancelRunnerCommand" });
+export const InputResolvedRunnerCommand = z
+  .object({
+    ...runnerCommandBase,
+    kind: z.literal("input_resolved"),
+    payload: InputResolvedCommandPayload,
+  })
+  .meta({ id: "InputResolvedRunnerCommand" });
+
+/** One durable, ordered command from a Runner's outbox. */
+export const RunnerCommand = z
+  .discriminatedUnion("kind", [
+    DispatchRunnerCommand,
+    CancelRunnerCommand,
+    InputResolvedRunnerCommand,
+  ])
+  .meta({ id: "RunnerCommand" });
+export type RunnerCommand = z.infer<typeof RunnerCommand>;
+
+export const RunnerCommandsResponse = z
+  .object({ commands: z.array(RunnerCommand) })
+  .meta({ id: "RunnerCommandsResponse" });
+export type RunnerCommandsResponse = z.infer<typeof RunnerCommandsResponse>;
+
+export const CommandsQuery = z
+  .object({
+    afterSeq: z.coerce.number().int().nonnegative().default(0),
+    waitMs: z.coerce.number().int().min(0).max(25000).default(0),
+  })
+  .meta({ id: "CommandsQuery" });
+export type CommandsQuery = z.infer<typeof CommandsQuery>;
+
+export const AckCommandsRequest = z
+  .object({ upToSeq: z.int().nonnegative() })
+  .meta({ id: "AckCommandsRequest" });
+export type AckCommandsRequest = z.infer<typeof AckCommandsRequest>;
+
+export const AckCommandsResponse = z
+  .object({ ackedSeq: z.int().nonnegative() })
+  .meta({ id: "AckCommandsResponse" });
+export type AckCommandsResponse = z.infer<typeof AckCommandsResponse>;

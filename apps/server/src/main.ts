@@ -56,6 +56,7 @@ async function shutdown(signal: string) {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
+  for (const feature of features) await feature.stop?.();
   await database.sql.end({ timeout: 5 });
   process.exit(0);
 }

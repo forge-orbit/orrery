@@ -3110,6 +3110,121 @@ def extract_code_facts() -> dict[str, Any]:
         and "dispatch_tokens" in dispatch_migration
     )
 
+    # M44 (#197): transactional command outbox, long-poll/SSE delivery and the
+    # teammate Stop cancel. Every guard is read from the live sources, so a
+    # removed row lock, doorbell, ACL filter or ack seam flips the model.
+    outbox_src = read_text("apps/server/src/features/runners/outbox.ts")
+    notifier_src = read_text("apps/server/src/features/runners/notifier.ts")
+    runners_index_src = read_text("apps/server/src/features/runners/index.ts")
+    feature_src = read_text("apps/server/src/platform/feature.ts")
+    outbox_schema_src = read_text("apps/server/src/db/schema.ts")
+    outbox_migration = read_text("db/migrations/0052_kind_chamber.sql")
+    m44_lock_fn = slice_between(
+        outbox_src, "export async function lockDispatchRows(", "export async function allocateCommandSeqs("
+    )
+    m44_alloc_fn = slice_between(
+        outbox_src, "export async function allocateCommandSeqs(", "export async function insertRunnerCommand("
+    )
+    m44_insert_fn = slice_between(
+        outbox_src, "export async function insertRunnerCommand(", "export async function enqueueRunnerCommand("
+    )
+    m44_cancel_fn = slice_between(
+        outbox_src, "export async function cancelDispatchesForRunners(", "export async function enqueueCommandForIssue("
+    )
+    m44_issue_fn = slice_between(outbox_src, "export async function enqueueCommandForIssue(")
+    m44_create_fn = slice_between(runners_src, "async createDispatch(", "async listIssueDispatches(")
+    m44_accept_fn = slice_between(runners_src, "async acceptDispatch(", "async revokeRunnerHost(")
+    m44_poll_fn = slice_between(runners_src, "async pollCommands(", "async ackCommands(")
+    m44_ack_fn = slice_between(runners_src, "async ackCommands(", "async close(")
+    m44_stop_fn = slice_between(sess_src, "async requestStop(", "async activeSessions(")
+
+    m44_seq_lock = (
+        '.for("update")' in m44_alloc_fn
+        and ".orderBy(asc(runners.id))" in m44_alloc_fn
+        and "max(${runnerCommands.seq})" in m44_alloc_fn
+    )
+    m44_seq_unique = (
+        "one_runner_command_seq_per_runner" in outbox_schema_src
+        and "runner_commands_seq_positive" in outbox_schema_src
+        and "one_runner_command_seq_per_runner" in outbox_migration
+    )
+    m44_notify_id_only = (
+        "select pg_notify('runner_commands', ${input.runnerId})" in m44_insert_fn
+        and "JSON payloads stay in the durable outbox" in m44_insert_fn
+    )
+    m44_atomic_enqueue = (
+        "db.transaction(" in m44_create_fn and "await enqueueRunnerCommand(tx, {" in m44_create_fn
+    )
+    m44_stop_enqueue = (
+        "db.transaction(" in m44_stop_fn and "await onRunnerCommand?.(tx, {" in m44_stop_fn
+    )
+    m44_cancel_idempotent = (
+        "if (pendingCancel !== undefined) return;" in m44_issue_fn
+        and "gt(runnerCommands.expiresAt" in m44_issue_fn
+        and "isNull(runnerCommands.ackedAt)" in m44_issue_fn
+    )
+    m44_inbox_enqueue = (
+        "await onRunnerCommand?.(tx, {" in q_eval_fn
+        and "await deps.onRunnerCommand?.(tx, {" in q_answer_fn
+    )
+    m44_cascade_reasons = (
+        all(reason in runners_src for reason in ("host_revoked", "human_deactivated", "member_removed"))
+        and "await cancelDispatchesForRunners(tx, runnerIds, reason);" in runners_src
+    )
+    m44_shared_notifier = (
+        "const notifier = deps.sql === undefined ? undefined : createCommandNotifier(deps.sql);" in runners_src
+        and "createCommandNotifier(deps.sql)" not in m44_poll_fn
+        and "waiters = new Map<string, Set<Waiter>>();" in notifier_src
+        and 'removeEventListener("abort"' in notifier_src
+        and "finally" in m44_poll_fn
+        and "controller.abort();" in m44_poll_fn
+        and "stop: () => service.close()" in runners_index_src
+        and "stop?:" in feature_src
+    )
+    m44_query_before_wait = (
+        "gt(runnerCommands.seq, afterSeq)" in m44_poll_fn
+        and "isNull(runnerCommands.ackedAt)" in m44_poll_fn
+        and "gt(runnerCommands.expiresAt, sql`statement_timestamp()`)" in m44_poll_fn
+        and m44_poll_fn.index("let commands = await read()") < m44_poll_fn.index("while (commands.length")
+    )
+    m44_ack = (
+        "await acknowledgeCommands(tx, runnerId, afterSeq)" in m44_poll_fn
+        and "await acknowledgeCommands(tx, runnerId, upToSeq)" in m44_ack_fn
+        and "runnerDispatches" not in m44_ack_fn
+    )
+    m44_revoked_cancel_only = (
+        'rows.filter((row) => row.kind === "cancel")' in m44_poll_fn
+        and 'throw new RunnersError("runner_revoked")' in m44_poll_fn
+        and "hasUnackedCancel(tx, runnerId)" in m44_ack_fn
+    )
+    m44_issues_idx = m44_accept_fn.find("from(issues)")
+    m44_dispatch_lock_idx = m44_accept_fn.find("from(runnerDispatches)", m44_issues_idx)
+    m44_lock_order = (
+        m44_issues_idx >= 0
+        and m44_dispatch_lock_idx > m44_issues_idx
+        and '.for("update")' in m44_accept_fn[m44_issues_idx:m44_dispatch_lock_idx]
+        and '.for("update")' in m44_accept_fn[m44_dispatch_lock_idx : m44_dispatch_lock_idx + 300]
+        and "await lockDispatchRows(" in m44_cancel_fn
+        and m44_cancel_fn.index("allocateCommandSeqs(") < m44_cancel_fn.index("await lockDispatchRows(")
+        and ".orderBy(asc(runnerDispatches.id))" in m44_lock_fn
+        and '.for("update")' in m44_lock_fn
+    )
+    m44_lease_fence = (
+        "gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`)" in m44_accept_fn
+        and 'new RunnersError("issue_not_dispatchable")' in m44_accept_fn
+    )
+    m44_contract_surface = (
+        '"/api/runners/{runnerId}/commands"' in runners_openapi_src
+        and '"/api/runners/{runnerId}/commands/ack"' in runners_openapi_src
+        and "RunnerCommandsResponse" in runners_contract_src
+        and "runner_commands" in outbox_migration
+    )
+    m44_sse = (
+        "text/event-stream" in runners_rest_src
+        and "service.pollCommands(" in runners_rest_src
+        and "c.req.raw.signal" in runners_rest_src
+    )
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -3590,6 +3705,24 @@ def extract_code_facts() -> dict[str, Any]:
         "m43_body_fence": m43_body_fence,
         "m43_state_ended": m43_state_ended,
         "m43_contract_surface": m43_contract_surface,
+
+        # M44 (#197): durable command outbox, long-poll/SSE delivery and teammate stop.
+        "m44_seq_lock": m44_seq_lock,
+        "m44_seq_unique": m44_seq_unique,
+        "m44_notify_id_only": m44_notify_id_only,
+        "m44_atomic_enqueue": m44_atomic_enqueue,
+        "m44_stop_enqueue": m44_stop_enqueue,
+        "m44_cancel_idempotent": m44_cancel_idempotent,
+        "m44_inbox_enqueue": m44_inbox_enqueue,
+        "m44_cascade_reasons": m44_cascade_reasons,
+        "m44_shared_notifier": m44_shared_notifier,
+        "m44_query_before_wait": m44_query_before_wait,
+        "m44_ack": m44_ack,
+        "m44_revoked_cancel_only": m44_revoked_cancel_only,
+        "m44_lock_order": m44_lock_order,
+        "m44_lease_fence": m44_lease_fence,
+        "m44_contract_surface": m44_contract_surface,
+        "m44_sse": m44_sse,
     }
 
 
@@ -9432,6 +9565,164 @@ def check_m43(facts: dict[str, Any]) -> CheckResult:
     )
 
 
+def check_m44(facts: dict[str, Any]) -> CheckResult:
+    """#197: transactional outbox, ordered delivery, ACL-filtered drain and stop cancel.
+
+    Each transition's outcome is derived from a guard extracted from the live
+    outbox, runner service, notifier, work-session and inbox sources. A removed
+    guard yields a named counterexample; every guard is proven sensitive below.
+    """
+    files = [
+        "apps/server/src/features/runners/outbox.ts",
+        "apps/server/src/features/runners/service.ts",
+        "apps/server/src/features/runners/notifier.ts",
+        "apps/server/src/features/runners/index.ts",
+        "apps/server/src/features/runners/rest.ts",
+        "apps/server/src/platform/feature.ts",
+        "apps/server/src/features/work-sessions/service.ts",
+        "apps/server/src/features/inbox/service.ts",
+        "apps/server/src/db/schema.ts",
+        "packages/contract/src/runners.ts",
+        "contract/openapi.json",
+        "db/migrations/0052_kind_chamber.sql",
+    ]
+    g = {k: v for k, v in facts.items() if k.startswith("m44_")}
+
+    actions = (
+        "dispatch_enqueue",
+        "teammate_stop",
+        "inbox_resolve",
+        "revocation_cascade",
+        "poll_query",
+        "poll_wait",
+        "ack",
+        "revoked_poll",
+        "accept_redelivery",
+        "lock_order",
+        "contract",
+        "sse",
+    )
+    prerequisites = {"revoked_poll": "poll_query"}
+
+    def violations_for(action: str, _applied: frozenset[str]) -> set[str]:
+        bad: set[str] = set()
+        if action == "dispatch_enqueue":
+            if not g["m44_seq_lock"]:
+                bad.add("command_seq_allocated_without_runner_row_lock")
+            if not g["m44_seq_unique"]:
+                bad.add("duplicate_seq_per_runner_allowed")
+            if not g["m44_notify_id_only"]:
+                bad.add("notify_payload_exceeded_doorbell_limit")
+            if not g["m44_atomic_enqueue"]:
+                bad.add("dispatch_command_outside_domain_transaction")
+        elif action == "teammate_stop":
+            if not g["m44_stop_enqueue"]:
+                bad.add("teammate_stop_without_cancel_command")
+            if not g["m44_cancel_idempotent"]:
+                bad.add("duplicate_cancel_on_repeated_stop")
+        elif action == "inbox_resolve":
+            if not g["m44_inbox_enqueue"]:
+                bad.add("question_resolution_without_command")
+        elif action == "revocation_cascade":
+            if not g["m44_cascade_reasons"]:
+                bad.add("revocation_without_atomic_cancel_cascade")
+        elif action == "poll_query":
+            if not g["m44_query_before_wait"]:
+                bad.add("command_lost_across_disconnect")
+        elif action == "poll_wait":
+            if not g["m44_shared_notifier"]:
+                bad.add("listener_connection_leaked_per_poll")
+        elif action == "ack":
+            if not g["m44_ack"]:
+                bad.add("ack_cursor_not_shared_by_poll_and_route")
+        elif action == "revoked_poll":
+            if not g["m44_revoked_cancel_only"]:
+                bad.add("revoked_runner_received_non_cancel_command")
+        elif action == "accept_redelivery":
+            if not g["m44_lease_fence"]:
+                bad.add("expired_session_reused_on_redelivery")
+        elif action == "lock_order":
+            if not g["m44_lock_order"]:
+                bad.add("ab_ba_deadlock_between_accept_and_cancel")
+        elif action == "contract":
+            if not g["m44_contract_surface"]:
+                bad.add("outbox_routes_missing_from_contract")
+        elif action == "sse":
+            if not g["m44_sse"]:
+                bad.add("sse_response_not_declared")
+        return bad
+
+    def run(check_id: str) -> CheckResult:
+        init = (frozenset(), frozenset())
+
+        def next_states(state):
+            applied, _violations = state
+            for action in actions:
+                if action in applied:
+                    continue
+                prereq = prerequisites.get(action)
+                if prereq is not None and prereq not in applied:
+                    continue
+                found = violations_for(action, applied)
+                yield f"{action} (after {sorted(applied)})", (applied | {action}, frozenset(found))
+
+        def invariant(state):
+            _applied, violations = state
+            if violations:
+                return False, f"outbox invariant broken: {sorted(violations)[0]}"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Transactional Command Outbox, Long-Poll/SSE & Teammate Stop Cancel (#197)",
+            "Domain writes enqueue ordered, ID-notified commands in one transaction; delivery queries Postgres before waiting, acks by cursor, drains only cancels when revoked, and teammate stop and offboarding cascades never duplicate a cancel",
+            "safety",
+            init,
+            next_states,
+            invariant,
+            files,
+        )
+
+    result = run("M44")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M44-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M44",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M44",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -9479,6 +9770,7 @@ def main() -> None:
         check_m41(facts),
         check_m42(facts),
         check_m43(facts),
+        check_m44(facts),
     ]
 
     if "--json" in sys.argv:
