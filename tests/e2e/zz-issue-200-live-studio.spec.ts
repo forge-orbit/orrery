@@ -506,7 +506,7 @@ test.describe("Live Session Studio", () => {
       await page.goto(`/live/${fixture.runnerId}/${fixture.dispatchId}`);
       await expect(page.locator("[data-live-studio]")).toBeVisible();
       await expect(page.locator("[data-stream-card]").first()).toBeVisible();
-      await expect(page.getByRole("link", { name: "Back to workspaces" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Back to workspaces" })).toBeVisible();
       expect(requested.some((url) => url.includes("/api/issues//"))).toBe(false);
       expect(requested.some((url) => url.includes("/api/workspaces//"))).toBe(false);
       expect(

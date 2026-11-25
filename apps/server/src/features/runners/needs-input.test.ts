@@ -453,10 +453,20 @@ describe(
       await setMode("needs-input");
       await setFallbackPolicy("fallback_allowed");
       const markerBefore = (await markerEvents()).length;
+      const outputBefore = world.output.length;
       const issueId = await dispatch("fallback resumes parked ACP");
       const question = await questionFor(issueId);
       const questionId = str(question.id);
       await sessionFor(issueId);
+      // Wait for the runner to finish turn 1 and enter the parked state before
+      // expiring the deadline so the sweep cannot race ahead of parking.
+      await until(
+        async () =>
+          world.output.slice(outputBefore).includes(`Question ${questionId} is open; parked`)
+            ? true
+            : undefined,
+        8000,
+      );
 
       // The deadline is one hour in production; move only this question past it.
       await database.db
