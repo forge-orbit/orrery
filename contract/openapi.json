@@ -1748,6 +1748,12 @@
               "null"
             ]
           },
+          "ownerDisplayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "displayName": {
             "type": "string"
           },
@@ -2099,6 +2105,12 @@
             ]
           },
           "agentName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ownerDisplayName": {
             "type": [
               "string",
               "null"

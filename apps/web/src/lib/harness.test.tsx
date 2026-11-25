@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { HarnessBadge, resolveHarnessKind } from "./harness.tsx";
+import { AgentAvatar, HarnessBadge, resolveHarnessKind } from "./harness.tsx";
 
 describe("resolveHarnessKind", () => {
   it("resolves codex and claude harness variants", () => {
@@ -66,5 +66,14 @@ describe("HarnessBadge", () => {
     expect(renderToStaticMarkup(<HarnessBadge harness="e2e" />)).toBe("e2e");
     expect(renderToStaticMarkup(<HarnessBadge harness={null} empty="—" />)).toBe("—");
     expect(renderToStaticMarkup(<HarnessBadge harness={null} empty="Unknown" />)).toBe("Unknown");
+  });
+});
+
+describe("AgentAvatar", () => {
+  it("renders a distinct Bot icon when no harness logo is known", () => {
+    const html = renderToStaticMarkup(<AgentAvatar name="AG" />);
+    expect(html).toContain('role="img"');
+    expect(html).toContain('aria-label="AG"');
+    expect(html).toContain('data-color="accent"');
   });
 });

@@ -134,6 +134,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -321,6 +327,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -606,6 +618,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -939,6 +957,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -1446,6 +1470,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -1859,6 +1889,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -2085,6 +2121,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -2259,6 +2301,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -2426,6 +2474,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -2722,6 +2776,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -3052,6 +3112,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -3257,6 +3323,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -3559,6 +3631,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -3889,6 +3967,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -4110,6 +4194,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -4294,6 +4384,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -4522,6 +4618,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -4777,6 +4879,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -5296,6 +5404,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -5486,6 +5600,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -5701,6 +5821,12 @@
                 "null"
               ]
             },
+            "ownerDisplayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "displayName": {
               "type": "string"
             },
@@ -5905,6 +6031,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
@@ -7956,6 +8088,12 @@
               ]
             },
             "agentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ownerDisplayName": {
               "type": [
                 "string",
                 "null"
