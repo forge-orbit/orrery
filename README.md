@@ -121,6 +121,19 @@ directly over [MCP](https://modelcontextprotocol.io) or supervised locally via
 
 Every screenshot below auto-switches between Light and Dark mode to match your GitHub theme.
 
+### Live Session Studio (Local Agent Runner)
+
+Delegate an issue to a local `orrery-runner` process in an isolated `git worktree` and watch live
+structured ACP output — Agent Plan progress, assistant responses, unified file diffs, test runs,
+owner-only raw output, host health, and one-click **Stop Agent** steering.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/live-session-studio-dark.png">
+    <img src="assets/screenshots/live-session-studio-light.png" alt="Orrery Live Session Studio showing a live local runner streaming an Agent Plan, assistant message, unified diff, passing test run, and host health" width="100%">
+  </picture>
+</p>
+
 ### Live Sidecar Session Inspector
 
 Inspect an active agent Work session right from the board without leaving context — live lease

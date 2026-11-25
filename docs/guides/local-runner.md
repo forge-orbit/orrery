@@ -138,6 +138,8 @@ normally.
 
 Open **Live Session Studio** from an active or completed delegated session to watch:
 
+![Live Session Studio showing a local runner streaming an Agent Plan, assistant response, unified diff, passing test run, and host health](./live-session-studio.png)
+
 - Structured ACP events (tool calls, plans, file diffs, child workers, and typed diagnostics such
   as `acp_not_installed`, `acp_crashed`, `auth_expired`, `usage_limit`, `provider_overload`,
   `permission_denied`, and `runner_disconnected`).
