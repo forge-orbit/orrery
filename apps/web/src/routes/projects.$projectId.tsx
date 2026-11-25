@@ -232,7 +232,7 @@ function ProjectPage() {
                 </Stack>
               </Link>
             </Stack>
-            {canContribute && (
+            {canContribute && !(activeTab === "issues" && issues.length === 0) && (
               <Button
                 type="button"
                 label="New issue"
@@ -456,7 +456,7 @@ function ProjectPage() {
                 <Heading level={2} color="inherit">
                   Knowledge
                 </Heading>
-                {canContribute && (
+                {canContribute && knowledge.length > 0 && (
                   <Button
                     type="button"
                     label="New document"

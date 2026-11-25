@@ -215,7 +215,7 @@ function WorkspacePage() {
                 onClick={() => setInviteOpen(true)}
               />
             )}
-            {canCreate && (
+            {canCreate && !(activeTab === "projects" && projects.length === 0) && (
               <Button
                 type="button"
                 label="New project"

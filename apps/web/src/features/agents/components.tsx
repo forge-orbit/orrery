@@ -256,7 +256,7 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
         />
       )}
 
-      <Section padding={3}>
+      <Section padding={3} data-registered-agents="">
         <Stack gap={3}>
           <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
             <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
@@ -268,14 +268,16 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                 {liveKeys.length === 1 ? "" : "s"}
               </Text>
             </Stack>
-            <Button
-              type="button"
-              label="Register agent"
-              icon={<Icon icon={Plus} />}
-              variant="primary"
-              size="sm"
-              onClick={() => setRegisterOpen(true)}
-            />
+            {agents.length > 0 && (
+              <Button
+                type="button"
+                label="Register agent"
+                icon={<Icon icon={Plus} />}
+                variant="primary"
+                size="sm"
+                onClick={() => setRegisterOpen(true)}
+              />
+            )}
           </Stack>
 
           {agents.length === 0 ? (
@@ -392,7 +394,7 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
         </Stack>
       </Section>
 
-      <Section padding={3}>
+      <Section padding={3} data-workspace-keys="">
         <Stack gap={3}>
           <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" align="center">
             <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
@@ -418,7 +420,7 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                   <SegmentedControlItem value="all" label="All" />
                 </SegmentedControl>
               )}
-              {agents.length > 0 && (
+              {agents.length > 0 && allKeys.length > 0 && (
                 <Button
                   type="button"
                   label="Issue key"
