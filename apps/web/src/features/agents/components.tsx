@@ -268,14 +268,16 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                 {liveKeys.length === 1 ? "" : "s"}
               </Text>
             </Stack>
-            <Button
-              type="button"
-              label="Register agent"
-              icon={<Icon icon={Plus} />}
-              variant="primary"
-              size="sm"
-              onClick={() => setRegisterOpen(true)}
-            />
+            {agents.length > 0 && (
+              <Button
+                type="button"
+                label="Register agent"
+                icon={<Icon icon={Plus} />}
+                variant="primary"
+                size="sm"
+                onClick={() => setRegisterOpen(true)}
+              />
+            )}
           </Stack>
 
           {agents.length === 0 ? (
@@ -418,13 +420,14 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                   <SegmentedControlItem value="all" label="All" />
                 </SegmentedControl>
               )}
-              {agents.length > 0 && (
+              {agents.length > 0 && allKeys.length > 0 && (
                 <Button
                   type="button"
                   label="Issue key"
                   icon={<Icon icon={KeyRound} />}
                   variant="secondary"
                   size="sm"
+                  data-workspace-keys-action=""
                   onClick={() => setIssueKeyAgentId(agents[0]?.id ?? "")}
                 />
               )}
@@ -444,6 +447,7 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                     icon={<Icon icon={KeyRound} />}
                     variant="secondary"
                     size="sm"
+                    data-workspace-keys-empty-action=""
                     onClick={() => setIssueKeyAgentId(agents[0]?.id ?? "")}
                   />
                 ) : undefined

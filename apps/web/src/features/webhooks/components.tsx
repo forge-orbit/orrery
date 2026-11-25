@@ -411,19 +411,21 @@ export function WebhooksSection({
                 {hooks.length} / {MAX_WEBHOOKS}
               </Text>
             </Stack>
-            <Button
-              type="button"
-              label="Add webhook"
-              icon={<Icon icon={Plus} />}
-              variant="primary"
-              size="sm"
-              isDisabled={atLimit}
-              onClick={() => {
-                setEditingHook(null);
-                setActionError(undefined);
-                setFormOpen(true);
-              }}
-            />
+            {hooks.length > 0 && (
+              <Button
+                type="button"
+                label="Add webhook"
+                icon={<Icon icon={Plus} />}
+                variant="primary"
+                size="sm"
+                isDisabled={atLimit}
+                onClick={() => {
+                  setEditingHook(null);
+                  setActionError(undefined);
+                  setFormOpen(true);
+                }}
+              />
+            )}
           </Stack>
 
           {atLimit && (

@@ -68,7 +68,7 @@ function KnowledgePage() {
           </>
         }
         actions={
-          canContribute && !isEditing ? (
+          canContribute && !isEditing && entry.body !== "" ? (
             <Button
               type="button"
               size="sm"

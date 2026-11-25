@@ -202,7 +202,11 @@ test("owner manages webhooks and inspects deliveries while non-owners do not see
     await expect(webhooksTab).toBeVisible();
     await webhooksTab.click();
 
-    await ownerPage.getByRole("button", { name: "Add webhook" }).first().click();
+    const webhooksPanel = ownerPage.locator("#panel-webhooks");
+    const addWebhook = webhooksPanel.getByRole("button", { name: "Add webhook", exact: true });
+    await expect(webhooksPanel.getByText("No outgoing webhooks yet")).toBeVisible();
+    await expect(addWebhook).toHaveCount(1);
+    await addWebhook.click();
     await ownerPage.getByLabel(/Endpoint URL/).fill(receiverUrl);
     await ownerPage.getByLabel("Description").fill("E2E webhook receiver");
     await ownerPage.getByRole("button", { name: "Create webhook" }).click();
@@ -221,6 +225,13 @@ test("owner manages webhooks and inspects deliveries while non-owners do not see
     const row = ownerPage.locator("[data-webhook-id]").first();
     await expect(row).toContainText(receiverUrl);
     await expect(row).toContainText("Active");
+    await expect(addWebhook).toHaveCount(1);
+    await expect(webhooksPanel.getByText("No outgoing webhooks yet")).toHaveCount(0);
+
+    // The populated header CTA opens the same create form.
+    await addWebhook.click();
+    await expect(ownerPage.getByLabel(/Endpoint URL/)).toBeVisible();
+    await ownerPage.getByRole("button", { name: "Cancel", exact: true }).click();
 
     // Send test -> opens deliveries drawer and verifies live signed delivery.
     await row.getByRole("button", { name: "Send test" }).click();
@@ -258,9 +269,13 @@ test("owner manages webhooks and inspects deliveries while non-owners do not see
     await expect(alertDialog).toBeVisible();
     await alertDialog.getByRole("button", { name: "Delete webhook" }).click();
     await expect(ownerPage.locator("[data-webhook-id]")).toHaveCount(0);
-    await expect(
-      ownerPage.locator("#panel-webhooks").getByText("No outgoing webhooks yet"),
-    ).toBeVisible();
+    await expect(webhooksPanel.getByText("No outgoing webhooks yet")).toBeVisible();
+    await expect(addWebhook).toHaveCount(1);
+
+    // Deleting the last webhook restores a working empty-state CTA.
+    await addWebhook.click();
+    await expect(ownerPage.getByLabel(/Endpoint URL/)).toBeVisible();
+    await ownerPage.getByRole("button", { name: "Cancel", exact: true }).click();
   } finally {
     for (const cookie of await ownerCtx.cookies()) await recordSecret(cookie.value);
     await ownerCtx.close();

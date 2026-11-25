@@ -531,7 +531,7 @@ function BoardPage() {
               />
             )}
           </Stack>
-          {canContribute && (
+          {canContribute && issues.length > 0 && (
             <Button
               label="New issue"
               icon={<Icon icon={Plus} />}
