@@ -1,3 +1,5 @@
+import type { InputResolvedCommandPayload } from "@orrery/contract";
+
 export type SlotState = "idle" | "running" | "draining";
 
 /** The handle a running dispatch exposes so a `cancel` command can reach it. */
@@ -16,6 +18,8 @@ export interface SlotController {
   readonly issueId: string;
   requestCancel(reason: string): void;
   readonly cancelled: Promise<string>;
+  /** Wake a slot parked on an open question with the resolved human input. */
+  requestResumeInput(payload: InputResolvedCommandPayload): void;
   readonly finished: Promise<void>;
   /** Set once supervision has settled; `finished` resolves after this is set. */
   outcome: SupervisionOutcome;

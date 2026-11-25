@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import type { DispatchAcceptance, DispatchCommandPayload } from "@orrery/contract";
+import type {
+  DispatchAcceptance,
+  DispatchCommandPayload,
+  InputResolvedCommandPayload,
+} from "@orrery/contract";
 import { AcpStdioClient } from "./acp.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import type { SupervisionConfig } from "./config.ts";
@@ -65,13 +69,54 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     resolveCancelled = resolve;
   });
   let cancelledAlready = false;
+  let cancelledReason = "";
   let revoked = false;
+  let stopRenewal = false;
+  // A deadline pause can arrive after a racing renewal 401 already cancelled
+  // the slot. Remember it independently so a clean worktree is still preserved.
+  let pausedByDeadline = false;
+  const resolvedQuestions = new Set<string>();
   const requestCancel = (reason: string): void => {
+    if (reason === "question_paused" || reason === "input_deadline_paused") {
+      pausedByDeadline = true;
+    }
     if (cancelledAlready) return;
     cancelledAlready = true;
+    cancelledReason = reason;
     if (reason === "revoked") revoked = true;
+    // A cancel (deadline pause, teammate Stop or revocation) ends the claim:
+    // no more lease renewals, even while a parked ACP process is winding down.
+    stopRenewal = true;
     pool.markDraining(slot);
     resolveCancelled?.(reason);
+  };
+
+  // `input_resolved` commands can arrive before the slot parks (the deadline
+  // sweep is fast) or be redelivered after an unacknowledged command. Keep a
+  // deduplicated queue keyed by questionId so no wakeup is lost or applied
+  // twice; stale question ids are dropped outright.
+  let resolveInput: ((payload: InputResolvedCommandPayload) => void) | undefined;
+  const bufferedInputs: InputResolvedCommandPayload[] = [];
+  const isFreshInput = (payload: InputResolvedCommandPayload): boolean =>
+    !resolvedQuestions.has(payload.questionId);
+  const requestResumeInput = (payload: InputResolvedCommandPayload): void => {
+    if (!isFreshInput(payload)) return;
+    if (bufferedInputs.some((item) => item.questionId === payload.questionId)) return;
+    const wake = resolveInput;
+    if (wake === undefined) {
+      bufferedInputs.push(payload);
+      return;
+    }
+    // `settle` clears the resolver, so a racing cancel or ACP exit cannot
+    // resolve the same park twice.
+    wake(payload);
+  };
+  const nextBufferedInput = (): InputResolvedCommandPayload | undefined =>
+    bufferedInputs.find(isFreshInput);
+  const takeBufferedInput = (): InputResolvedCommandPayload | undefined => {
+    const index = bufferedInputs.findIndex(isFreshInput);
+    if (index < 0) return undefined;
+    return bufferedInputs.splice(index, 1)[0];
   };
 
   let resolveFinished: (() => void) | undefined;
@@ -84,6 +129,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     issueId,
     requestCancel,
     cancelled,
+    requestResumeInput,
     finished,
     outcome: "unknown",
     lastSeq: 0,
@@ -114,6 +160,14 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       });
     return activeFlush;
   };
+  const STREAM_ONLY_ACP_EVENTS = new Set([
+    "available_commands_update",
+    "agent_thought_chunk",
+    "agent_message_chunk",
+    "tool_call",
+    "tool_call_update",
+    "usage_update",
+  ]);
   const spoolEvent = (method: string, params: unknown): void => {
     if (spool === undefined) return;
     const fields = recordOf(params);
@@ -121,8 +175,16 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     const name = recordOf(update)?.sessionUpdate;
     const raw = typeof name === "string" && name !== "" ? name : method.replace(/^session\//, "");
     const eventType = (raw || "update").slice(0, 64);
+    // High-frequency ACP token/tool chunks belong in Live Studio, not in the
+    // curated work_session_activities timeline (ADR-0010).
+    const summary = STREAM_ONLY_ACP_EVENTS.has(eventType) ? undefined : `ACP ${eventType}`;
     void spool
-      .append({ kind: "event", eventType, summary: `ACP ${eventType}`, data: { params } })
+      .append({
+        kind: "event",
+        eventType,
+        ...(summary === undefined ? {} : { summary }),
+        data: { params },
+      })
       .then((chunk) => {
         controller.lastSeq = Math.max(controller.lastSeq, chunk.seq);
       })
@@ -164,7 +226,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
 
     // The claim is already active; start renewing before any local work begins.
     watchdog = setInterval(() => {
-      if (renewing || !acpRunning || revoked) return;
+      if (renewing || !acpRunning || revoked || stopRenewal) return;
       renewing = true;
       void dispatchClient
         .renewWorkSession(issueId, sessionId)
@@ -176,6 +238,12 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
             revoked = true;
             write(`Dispatch token revoked; terminating local ACP process group.`);
             requestCancel("revoked");
+          } else if (error instanceof RunnerRequestError && error.status === 409) {
+            // A require_human deadline released the claim in Postgres. Stop
+            // renewing and park no longer: preserve the local worktree so a
+            // human can explicitly re-dispatch instead of losing context.
+            write(`Work session claim is no longer active; preserving local worktree.`);
+            requestCancel("question_paused");
           } else {
             write(`Lease renewal failed: ${String(error)}`);
           }
@@ -234,8 +302,98 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     acpRunning = true;
     write(`ACP ${config.acp.command} started (pid ${acp.pid}) in ${worktree.branch}.`);
 
-    const prompt = `Work on issue ${issueKey} (${issueId}). Your cwd is the isolated worktree ${worktree.path} on branch ${worktree.branch}. Orrery MCP is pre-wired with a dispatch-scoped token; use it for issue details and progress. Do not write outside this worktree.`;
-    const outcome = await raceWork(acp, prompt, cancelled, options.signal, requestCancel);
+    type ParkWake =
+      | { kind: "resume"; payload: InputResolvedCommandPayload }
+      | { kind: "cancel"; reason: string }
+      | { kind: "exit"; code: number | null; signal: NodeJS.Signals | null };
+
+    /** Ask Orrery under the Dispatch token whether the agent left an open question. */
+    const openQuestion = async (): Promise<Record<string, unknown> | undefined> => {
+      try {
+        const result = await mcp.callTool("list_issue_questions", { issueId });
+        const values = recordOf(result)?.questions;
+        const rows = Array.isArray(values) ? values : [];
+        return rows.find(
+          (row) =>
+            recordOf(row)?.status === "open" && !resolvedQuestions.has(String(recordOf(row)?.id)),
+        );
+      } catch (error) {
+        write(`Could not check issue questions; not parking: ${String(error)}`);
+        return undefined;
+      }
+    };
+
+    /** Block until a durable `input_resolved` wakes us, a cancel arrives, or ACP exits. */
+    const waitForPark = (): Promise<ParkWake> => {
+      // A cancel that arrived while openQuestion() was in flight has priority:
+      // never resume a parked session after its claim has been released.
+      if (cancelledAlready) return Promise.resolve({ kind: "cancel", reason: cancelledReason });
+      const buffered = takeBufferedInput();
+      if (buffered !== undefined) return Promise.resolve({ kind: "resume", payload: buffered });
+      return new Promise<ParkWake>((resolve) => {
+        const settle = (wake: ParkWake): void => {
+          if (resolveInput === undefined) return;
+          resolveInput = undefined;
+          resolve(wake);
+        };
+        resolveInput = (payload) => settle({ kind: "resume", payload });
+        void cancelled.then((reason) => settle({ kind: "cancel", reason }));
+        if (acp !== undefined) {
+          void acp.exited.then(({ code, signal }) => settle({ kind: "exit", code, signal }));
+        }
+      });
+    };
+
+    const prompt = `Work on issue ${issueKey} (${issueId}). Your cwd is the isolated worktree ${worktree.path} on branch ${worktree.branch}. Your Orrery work session (sessionId: ${sessionId}, runId: ${run.id}) is ALREADY claimed and active — do NOT call claim_issue. Orrery MCP is pre-wired with a dispatch-scoped token; use get_issue, report_progress, log_session_activity, create_comment, and stop_session directly. Do not write outside this worktree.`;
+    let outcome = await raceWork(acp, prompt, cancelled, options.signal, requestCancel);
+
+    // A finished turn with an open question is a park, not a handoff: keep the
+    // live ACP session and worktree intact, keep renewing the lease, and wait
+    // for the durable outbox to carry the human answer (or fallback) back.
+    // `cancelledAlready`/`revoked` can flip from a cancel command, an abort or
+    // a failed renewal while we await the parked wake-up.
+    const stillWorking = () => !cancelledAlready && !revoked;
+    while (outcome.kind === "prompt" && stillWorking()) {
+      const question = await openQuestion();
+      const queuedInput = nextBufferedInput();
+      if (question === undefined && queuedInput === undefined) break;
+      const questionId =
+        typeof question?.id === "string" ? question.id : (queuedInput?.questionId ?? "unknown");
+      write(
+        `Question ${questionId} is open; parked the ACP session and ${worktree.branch} while renewing the lease.`,
+      );
+      if (spool !== undefined) {
+        void spool
+          .append({
+            kind: "event",
+            eventType: "needs_input",
+            summary: `Needs input: ${questionId}`,
+            data: { questionId },
+          })
+          .then((chunk) => {
+            controller.lastSeq = Math.max(controller.lastSeq, chunk.seq);
+          })
+          .catch((error: unknown) => write(`Could not spool needs-input event: ${String(error)}`));
+      }
+      const wake = await waitForPark();
+      if (wake.kind !== "resume") {
+        outcome =
+          wake.kind === "cancel"
+            ? { kind: "cancel", reason: wake.reason }
+            : { kind: "exit", code: wake.code, signal: wake.signal };
+        break;
+      }
+      resolvedQuestions.add(wake.payload.questionId);
+      const answer = wake.payload.answer === "" ? "(no answer supplied)" : wake.payload.answer;
+      const followUp =
+        wake.payload.resolution === "fallback_used"
+          ? `Continue issue ${issueKey} (${issueId}). The one-hour deadline passed, so the proposed fallback was authorized. Use this fallback as the answer to question ${wake.payload.questionId}: ${answer}`
+          : `Continue issue ${issueKey} (${issueId}). A human answered question ${wake.payload.questionId}: ${answer}`;
+      write(
+        `Input resolved (${wake.payload.resolution}) for question ${wake.payload.questionId}; resuming the same ACP session in ${worktree.branch}.`,
+      );
+      outcome = await raceWork(acp, followUp, cancelled, options.signal, requestCancel);
+    }
 
     const exit =
       outcome.kind === "prompt"
@@ -255,8 +413,8 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     let pruned = false;
     try {
       const summary =
-        state.dirty || state.unpushed
-          ? `Worktree preserved: ${worktree.branch} (dirty=${state.dirty}, unpushed=${state.unpushed})`
+        state.dirty || state.unpushed || pausedByDeadline
+          ? `Worktree preserved: ${worktree.branch} (dirty=${state.dirty}, unpushed=${state.unpushed}, paused=${pausedByDeadline})`
           : `Worktree clean and pushed: ${worktree.branch}`;
       await mcp.callTool("log_session_activity", {
         issueId,
@@ -270,7 +428,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
             dirty: state.dirty,
             unpushed: state.unpushed,
             ahead: state.ahead,
-            preserved: state.dirty || state.unpushed,
+            preserved: state.dirty || state.unpushed || pausedByDeadline,
           },
         },
       });
@@ -285,7 +443,12 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       );
     }
 
-    pruned = await cleanupWorktree(worktree, state, write);
+    // A require_human deadline released the claim and told us to stop: keep
+    // even a clean worktree so re-dispatch can resume the same local context.
+    pruned = pausedByDeadline ? false : await cleanupWorktree(worktree, state, write);
+    if (pausedByDeadline) {
+      write(`Preserved ${worktree.branch} after the question deadline paused the session.`);
+    }
 
     // stop_session rolls the stream up immediately in Postgres. Every ACP
     // update and stderr line must be flushed BEFORE that call, or the final
@@ -333,9 +496,9 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       controller.outcome = "revoked";
     }
 
-    if (state.dirty || state.unpushed) {
+    if (state.dirty || state.unpushed || pausedByDeadline) {
       write(
-        `Preserved ${worktree.branch} (dirty=${state.dirty}, unpushed=${state.unpushed}, pruned=${pruned}).`,
+        `Preserved ${worktree.branch} (dirty=${state.dirty}, unpushed=${state.unpushed}, paused=${pausedByDeadline}, pruned=${pruned}).`,
       );
     }
   } catch (error) {

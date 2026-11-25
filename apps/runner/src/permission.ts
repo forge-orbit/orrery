@@ -289,6 +289,27 @@ interface PermissionOption {
   kind?: string;
 }
 
+/**
+ * ACP permission requests may offer a standing grant (`allow_always`). The
+ * Runner must never select one: every allow is one-shot and worktree-scoped,
+ * so a later call is evaluated again by the local policy. When an agent offers
+ * only a standing grant, the request is cancelled rather than widened.
+ */
+function isAllowOnce(option: PermissionOption): boolean {
+  // ACP options come from an untrusted agent: never assume a field is a string.
+  const kind = typeof option.kind === "string" ? option.kind : "";
+  if (kind !== "") return kind === "allow_once";
+  const name = typeof option.name === "string" ? option.name : "";
+  return /allow/i.test(name) && /once/i.test(name) && !/always/i.test(name);
+}
+
+function isReject(option: PermissionOption): boolean {
+  const kind = typeof option.kind === "string" ? option.kind : "";
+  if (kind !== "") return kind.startsWith("reject");
+  const name = typeof option.name === "string" ? option.name : "";
+  return /deny|reject/i.test(name);
+}
+
 /** Map a local decision onto the option ids offered by an ACP permission request. */
 export function respondToPermission(
   params: unknown,
@@ -297,18 +318,18 @@ export function respondToPermission(
   const raw =
     typeof params === "object" && params !== null ? Reflect.get(params, "options") : undefined;
   const options: PermissionOption[] = Array.isArray(raw)
-    ? raw.filter((item): item is PermissionOption => typeof item === "object" && item !== null)
+    ? raw.filter(
+        (item): item is PermissionOption =>
+          typeof item === "object" &&
+          item !== null &&
+          typeof Reflect.get(item, "optionId") === "string" &&
+          Reflect.get(item, "optionId") !== "",
+      )
     : [];
-  const wanted = (option: PermissionOption): boolean => {
-    const kind = option.kind ?? "";
-    const name = option.name ?? "";
-    return decision.allow
-      ? kind.startsWith("allow") || /allow/i.test(name)
-      : kind.startsWith("reject") || /deny|reject/i.test(name);
-  };
-  const chosen = options.find(wanted);
-  if (chosen?.optionId === undefined) {
+  const chosen = options.find(decision.allow ? isAllowOnce : isReject);
+  const optionId = chosen?.optionId;
+  if (typeof optionId !== "string" || optionId === "") {
     return { ...decision, outcome: { outcome: "cancelled" } };
   }
-  return { ...decision, outcome: { outcome: "selected", optionId: chosen.optionId } };
+  return { ...decision, outcome: { outcome: "selected", optionId } };
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Orrery Formal Verification Model Checker (M1-M45).
+Orrery Formal Verification Model Checker (M1-M46).
 
 Extracts critical concurrency, locking, and state-transition guards directly from
 Orrery's server source and SQL migrations, then runs an exhaustive BFS finite-state
@@ -751,10 +751,12 @@ def extract_code_facts() -> dict[str, Any]:
         and "input.checkIn?.at" in report_fn
         and "input.reported?.harnessVersion" in report_fn
     )
+    # Runs themselves never advertise a lease expiry or claim; runs/service.ts
+    # may read workSessions.leaseExpiresAt (#219) when checking stale runs.
     m14_no_lease = not any(
         word in source
         for word in ["leaseExpiresAt", "claimExpiresAt"]
-        for source in [run_src, run_contract_src, run_mcp_src, mig_0019]
+        for source in [run_contract_src, run_mcp_src, mig_0019]
     )
     m14_human_scope = (
         "humanCanReadWorkspace(db, workspaceId, actor.humanId)" in list_runs_fn
@@ -3322,6 +3324,128 @@ def extract_code_facts() -> dict[str, Any]:
         and "stream_object_id" in m45_migration
     )
 
+    # M46 (#202 + #201): auto-claim global lock order and under-lock recheck,
+    # slot ceiling, issue-resolve non-enumeration, offline idempotency, the
+    # Needs Input outbox writes, and the ACP permission rounding/size guards.
+    m46_inbox_src = read_text("apps/server/src/features/inbox/service.ts")
+    m46_permission_src = read_text("apps/runner/src/permission.ts")
+    m46_acp_src = read_text("apps/runner/src/acp.ts")
+    m46_supervise_src = read_text("apps/runner/src/supervise.ts")
+    m46_auto_fn = slice_between(
+        runners_src, "async autoClaim(", "    /** One-shot `orrery-runner work`"
+    )
+    m46_still_fn = slice_between(
+        runners_src,
+        "async function assertIssueStillDispatchable(",
+        "/** Create a Dispatch when the caller already holds",
+    )
+    m46_resolve_fn = slice_between(
+        runners_src, "async function resolveIssueForHost(", "export function createRunnersService("
+    )
+    m46_offline_fn = slice_between(
+        runners_src, "async markRunnerOffline(", "/** List a human's dispatches"
+    )
+    m46_answer_fn = slice_between(m46_inbox_src, "async answer(actorArg", "async list(actorArg")
+    m46_deadline_fn = slice_between(
+        m46_inbox_src, "const evaluateDeadline = async (", "const questionDeadline:"
+    )
+
+    m46_auto_lock_order = ordered(
+        m46_auto_fn, ".from(issues)", '.for("update")', "authenticateHostRunnerForDeps("
+    )
+    m46_auto_recheck = (
+        "await assertIssueStillDispatchable(tx, candidate.id, runner.agentId, filter)"
+        in m46_auto_fn
+        and ordered(m46_auto_fn, '.for("update")', "await assertIssueStillDispatchable(")
+    )
+    m46_no_pending_dispatch = (
+        'inArray(runnerDispatches.state, ["pending", "active", "uncertain"])' in m46_still_fn
+        and 'inArray(runnerDispatches.state, ["pending", "active", "uncertain"])' in m46_auto_fn
+    )
+    m46_no_open_blocker = (
+        "notExists(" in m46_auto_fn
+        and 'notInArray(blockerIssue.status, ["done", "cancelled"])' in m46_still_fn
+    )
+    m46_filter_recheck = (
+        'filter === "unassigned" ? unassigned : filter === "assignedToMe" ? mine : unassigned || mine'
+        in m46_still_fn
+    )
+    m46_slot_cap = (
+        "Math.max(runner.activeSlotCount, active?.count ?? 0) + (queued?.count ?? 0) >="
+        in m46_auto_fn
+    )
+    m46_issue_resolve = (
+        'if (candidates.length === 0) throw new RunnersError("workspace_not_found")'
+        in m46_resolve_fn
+        and 'if (matches.length === 0) throw new RunnersError("issue_not_found")' in m46_resolve_fn
+        and "if (matches.length > 1)" in m46_resolve_fn
+        and '"issue_ambiguous"' in m46_resolve_fn
+        and 'hasAccess(ceiling.get(project.id), "contribute", deps.projectAccessAtLeast)'
+        in m46_resolve_fn
+    )
+    m46_revoke_fn = slice_between(
+        runners_src,
+        "async function revokeDispatchTokensForRunners(",
+        "/** One ack write shared by implicit cursor advance",
+    )
+    m46_offline_idempotent = (
+        "if (runner.revokedAt !== null) return { runnerId, revokedRunners: 0 };" in m46_offline_fn
+        and 'revokeDispatchTokensForRunners(tx, [runnerId], "runner_offline")' in m46_offline_fn
+        and "cancelDispatchesForRunners(tx, runnerIds, reason)" in m46_revoke_fn
+    )
+    m46_answer_in_tx = (
+        "db.transaction(async (tx) =>" in m46_answer_fn
+        and 'kind: "input_resolved"' in m46_answer_fn
+        and 'resolution: "answered"' in m46_answer_fn
+        and "questionId: questionId" in m46_answer_fn
+        and "await deps.onRunnerCommand?.(tx," in m46_answer_fn
+    )
+    m46_fallback_in_tx = (
+        'resolution: "fallback_used"' in m46_deadline_fn
+        and "answer: used.proposedFallback" in m46_deadline_fn
+        and "questionId: used.id" in m46_deadline_fn
+        and "if (used === undefined) return;" in m46_deadline_fn
+        and "await onRunnerCommand?.(tx," in m46_deadline_fn
+    )
+    m46_pause_cancel_in_tx = (
+        'kind: "cancel"' in m46_deadline_fn
+        and 'reason: "question_paused"' in m46_deadline_fn
+        and "await onRunnerCommand?.(tx," in m46_deadline_fn
+        and 'status: "released",' in m46_deadline_fn
+    )
+    m46_allow_once = (
+        "function isAllowOnce(" in m46_permission_src
+        and 'if (kind !== "") return kind === "allow_once";' in m46_permission_src
+        and 'kind.startsWith("allow")' not in m46_permission_src
+    )
+    m46_permission_size = (
+        "export const MAX_PERMISSION_REQUEST_BYTES = 32 * 1024;" in m46_acp_src
+        and ordered(
+            m46_acp_src,
+            "bytes > MAX_PERMISSION_REQUEST_BYTES",
+            'outcome: { outcome: "cancelled" }',
+            "this.onPermission(params)",
+        )
+    )
+    m46_park_resume = (
+        'mcp.callTool("list_issue_questions"' in m46_supervise_src
+        and "requestResumeInput" in m46_supervise_src
+        and "raceWork(acp, followUp" in m46_supervise_src
+        and "resolvedQuestions.add(wake.payload.questionId);" in m46_supervise_src
+        and "if (!isFreshInput(payload)) return;" in m46_supervise_src
+        and "const nextBufferedInput = (): InputResolvedCommandPayload | undefined =>"
+        in m46_supervise_src
+        and "if (cancelledAlready) return Promise.resolve({ kind: \"cancel\", reason: cancelledReason });"
+        in m46_supervise_src
+    )
+    m46_contract = (
+        "InputResolvedCommandPayload" in runners_contract_src
+        and 'resolution: z.enum(["answered", "fallback_used"])' in runners_contract_src
+        and "questionId: z.string()," in runners_contract_src
+        and '"/api/questions/{questionId}/answer"' in runners_openapi_src
+        and '"/api/issues/{issueId}/dispatches"' in runners_openapi_src
+    )
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -3834,6 +3958,24 @@ def extract_code_facts() -> dict[str, Any]:
         "m45_ack_gap": m45_ack_gap,
         "m45_recheck": m45_recheck,
         "m45_contract": m45_contract,
+
+        # M46 (#202 + #201): auto-claim lock/recheck/slot cap, non-enumeration,
+        # offline idempotency, Needs Input outbox writes and ACP permissions.
+        "m46_auto_lock_order": m46_auto_lock_order,
+        "m46_auto_recheck": m46_auto_recheck,
+        "m46_no_pending_dispatch": m46_no_pending_dispatch,
+        "m46_no_open_blocker": m46_no_open_blocker,
+        "m46_filter_recheck": m46_filter_recheck,
+        "m46_slot_cap": m46_slot_cap,
+        "m46_issue_resolve": m46_issue_resolve,
+        "m46_offline_idempotent": m46_offline_idempotent,
+        "m46_answer_in_tx": m46_answer_in_tx,
+        "m46_fallback_in_tx": m46_fallback_in_tx,
+        "m46_pause_cancel_in_tx": m46_pause_cancel_in_tx,
+        "m46_allow_once": m46_allow_once,
+        "m46_permission_size": m46_permission_size,
+        "m46_park_resume": m46_park_resume,
+        "m46_contract": m46_contract,
     }
 
 
@@ -9971,6 +10113,143 @@ def check_m45(facts: dict[str, Any]) -> CheckResult:
     )
 
 
+def check_m46(facts: dict[str, Any]) -> CheckResult:
+    """#202 + #201: auto-claim serialization and the Needs Input round-trip.
+
+    Every guard is extracted from live server/runner sources and the generated
+    contract; flipping any single guard must break the bounded model.
+    """
+    files = [
+        "apps/server/src/features/runners/service.ts",
+        "apps/server/src/features/runners/outbox.ts",
+        "apps/server/src/features/inbox/service.ts",
+        "apps/runner/src/permission.ts",
+        "apps/runner/src/acp.ts",
+        "apps/runner/src/supervise.ts",
+        "packages/contract/src/runners.ts",
+        "contract/openapi.json",
+    ]
+    g = {k: v for k, v in facts.items() if k.startswith("m46_")}
+    actions = (
+        "auto_claim_scan",
+        "auto_claim_lock",
+        "auto_claim_recheck",
+        "auto_claim_filter",
+        "slot_cap",
+        "issue_resolve",
+        "offline_retry",
+        "answer_resolved",
+        "fallback_resolved",
+        "deadline_paused",
+        "allow_once",
+        "oversized_permission",
+        "park_resume",
+        "contract_surface",
+    )
+
+    def violations_for(action: str, _applied: frozenset[str]) -> set[str]:
+        bad: set[str] = set()
+        if action == "auto_claim_scan":
+            if not g["m46_no_pending_dispatch"]:
+                bad.add("duplicate_dispatch_created_for_same_issue")
+            if not g["m46_no_open_blocker"]:
+                bad.add("blocked_issue_auto_claimed")
+        elif action == "auto_claim_lock" and not g["m46_auto_lock_order"]:
+            bad.add("ab_ba_deadlock_between_auto_claim_and_accept")
+        elif action == "auto_claim_recheck" and not g["m46_auto_recheck"]:
+            bad.add("stale_candidate_claimed_after_filter_change")
+        elif action == "auto_claim_filter" and not g["m46_filter_recheck"]:
+            bad.add("unassigned_or_foreign_issue_auto_claimed")
+        elif action == "slot_cap" and not g["m46_slot_cap"]:
+            bad.add("auto_claim_exceeded_runner_concurrency")
+        elif action == "issue_resolve" and not g["m46_issue_resolve"]:
+            bad.add("ambiguous_or_invisible_issue_guessed")
+        elif action == "offline_retry" and not g["m46_offline_idempotent"]:
+            bad.add("offline_retry_left_live_token_or_uncancelled_dispatch")
+        elif action == "answer_resolved" and not g["m46_answer_in_tx"]:
+            bad.add("human_answer_not_enqueued_in_domain_transaction")
+        elif action == "fallback_resolved" and not g["m46_fallback_in_tx"]:
+            bad.add("fallback_used_without_atomic_input_resolved")
+        elif action == "deadline_paused" and not g["m46_pause_cancel_in_tx"]:
+            bad.add("require_human_pause_without_cancel_or_claim_release")
+        elif action == "allow_once" and not g["m46_allow_once"]:
+            bad.add("standing_allow_always_permission_granted")
+        elif action == "oversized_permission" and not g["m46_permission_size"]:
+            bad.add("oversized_permission_request_auto_approved")
+        elif action == "park_resume" and not g["m46_park_resume"]:
+            bad.add("parked_acp_session_resumed_in_wrong_context")
+        elif action == "contract_surface" and not g["m46_contract"]:
+            bad.add("needs_input_contract_missing")
+        return bad
+
+    def run(check_id: str) -> CheckResult:
+        init = (frozenset(), frozenset())
+
+        def next_states(state):
+            applied, _violations = state
+            for action in actions:
+                if action in applied:
+                    continue
+                found = violations_for(action, applied)
+                yield f"{action} (after {sorted(applied)})", (applied | {action}, frozenset(found))
+
+        def invariant(state):
+            _applied, violations = state
+            if violations:
+                return False, f"auto-claim / needs-input invariant broken: {sorted(violations)[0]}"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Auto-Claim Serialization & Needs Input Round-Trip (#202 + #201)",
+            "Auto-claim locks issues before runners and re-checks readiness, blocker, filter and slot cap under the lock; issue resolve never guesses an ambiguous key; offline teardown is idempotent and cancels/cleans in one transaction; human answers and fallback_used deadlines enqueue input_resolved in their domain transaction while require_human pauses release the claim and enqueue cancel; ACP permission mapping only selects allow_once and refuses oversized requests; a parked ACP session resumes on the same session and worktree",
+            "safety",
+            init,
+            next_states,
+            invariant,
+            files,
+        )
+
+    result = run("M46")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M46-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M46",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M46",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -10020,6 +10299,7 @@ def main() -> None:
         check_m43(facts),
         check_m44(facts),
         check_m45(facts),
+        check_m46(facts),
     ]
 
     if "--json" in sys.argv:

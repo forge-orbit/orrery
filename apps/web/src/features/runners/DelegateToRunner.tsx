@@ -11,6 +11,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
 import { useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
+import { Link } from "../../lib/Link.tsx";
+import { formatCompactDateTime } from "../../lib/time.ts";
 import { createDispatch } from "./commands.ts";
 import {
   issueDispatchesQuery,
@@ -139,10 +141,21 @@ export function DelegateToRunner({
             Recent dispatches
           </Text>
           {dispatchList?.dispatches.map((dispatch) => (
-            <Text key={dispatch.id} type="supporting" color="secondary">
-              {stateLabels[dispatch.state]}
-              {dispatch.acceptedAt !== null ? ` · ${dispatch.acceptedAt}` : ""}
-            </Text>
+            <Stack key={dispatch.id} direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+              <Text type="supporting" color="secondary">
+                {stateLabels[dispatch.state]}
+                {dispatch.acceptedAt !== null
+                  ? ` · ${formatCompactDateTime(dispatch.acceptedAt)}`
+                  : ""}
+              </Text>
+              <Link
+                to="/live/$runnerId/$dispatchId"
+                params={{ runnerId: dispatch.runnerId, dispatchId: dispatch.id }}
+                search={{ issueId, workspaceId }}
+              >
+                {dispatch.state === "ended" ? "Replay" : "Open Live Studio"}
+              </Link>
+            </Stack>
           ))}
         </Stack>
       )}

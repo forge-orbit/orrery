@@ -25,6 +25,9 @@ export interface AcpStartOptions {
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void };
 
+/** A permission request larger than this is refused without evaluating it. */
+export const MAX_PERMISSION_REQUEST_BYTES = 32 * 1024;
+
 /**
  * Newline-delimited JSON-RPC 2.0 over stdio, with the child spawned as a
  * detached process-group leader so cancellation can signal the whole tree.
@@ -213,6 +216,21 @@ export class AcpStdioClient {
   private handleAgentRequest(id: number, method: string, rawParams: unknown): void {
     const params = asRecord(rawParams) ?? {};
     if (method === "session/request_permission" || method === "session/requestPermission") {
+      // Fail closed on oversized payloads: a huge command must never reach the
+      // policy evaluator and be auto-approved by a shallow match.
+      let bytes = Number.POSITIVE_INFINITY;
+      try {
+        bytes = Buffer.byteLength(JSON.stringify(rawParams ?? null), "utf8");
+      } catch {
+        bytes = Number.POSITIVE_INFINITY;
+      }
+      if (bytes > MAX_PERMISSION_REQUEST_BYTES) {
+        this.onStderr(
+          `Rejected oversized ACP permission request (${bytes} bytes > ${MAX_PERMISSION_REQUEST_BYTES}).`,
+        );
+        this.reply(id, { outcome: { outcome: "cancelled" } });
+        return;
+      }
       const decision = this.onPermission(params);
       this.reply(id, { outcome: decision.outcome });
       return;

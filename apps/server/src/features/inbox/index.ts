@@ -9,7 +9,7 @@ import { createInboxMcp } from "./mcp.ts";
 import { createInboxRest, routes } from "./rest.ts";
 
 export { routes as inboxRoutes };
-export { InboxError } from "./service.ts";
+export { InboxError, createInboxService } from "./service.ts";
 export type { InboxErrorKind, InboxService } from "./service.ts";
 
 export type InboxFeatureDeps = Omit<InboxDeps, "deliver" | "log"> & {

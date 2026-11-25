@@ -21,6 +21,14 @@ export interface TestActivity {
   detail: Record<string, unknown> | undefined;
 }
 
+export interface TestQuestion {
+  id: string;
+  issueId: string;
+  question: string;
+  proposedFallback: string;
+  status: "open" | "answered" | "paused" | "fallback_used";
+}
+
 export interface TestStreamChunk {
   seq: number;
   kind: string;
@@ -118,6 +126,12 @@ export class TestOrrery {
   private readonly commands: TestCommand[] = [];
   private readonly sessions = new Map<string, TestSession>();
   private readonly activities: TestActivity[] = [];
+  private readonly questions: TestQuestion[] = [];
+  private readonly pendingResolutions = new Map<
+    string,
+    { resolution: "answered" | "fallback_used"; answer: string }
+  >();
+  private readonly stopCalls: string[] = [];
   private readonly dispatchIssues = new Map<string, string>();
   private readonly dispatchAttempts = new Map<string, string>();
   private readonly streamed: TestStreamChunk[] = [];
@@ -215,6 +229,15 @@ export class TestOrrery {
 
   enqueueCancel(dispatchAttemptId: string, reason = "human stop"): TestCommand {
     const command = this.commands.find((item) => item.dispatchAttemptId === dispatchAttemptId);
+    const deadlinePause = reason === "question_paused" || reason === "input_deadline_paused";
+    if (deadlinePause) {
+      const issueId = str(command?.payload.issueId);
+      for (const question of this.questionsFor(issueId)) {
+        if (question.status === "open") question.status = "paused";
+      }
+      const session = this.sessionFor(issueId);
+      if (session !== undefined) session.status = "released";
+    }
     return this.enqueue(
       "cancel",
       command?.dispatchId ?? `dispatch-for-${dispatchAttemptId}`,
@@ -226,6 +249,42 @@ export class TestOrrery {
         reason,
       },
     );
+  }
+
+  /** Same payload the server's inbox sends when a question is resolved. */
+  enqueueInputResolved(
+    dispatchAttemptId: string,
+    input: { questionId: string; resolution: "answered" | "fallback_used"; answer: string },
+  ): TestCommand {
+    const command = this.commands.find((item) => item.dispatchAttemptId === dispatchAttemptId);
+    const payload = {
+      dispatchId: command?.dispatchId ?? `dispatch-for-${dispatchAttemptId}`,
+      dispatchAttemptId,
+      issueId: str(command?.payload.issueId) || "TEST-1",
+      ...input,
+    };
+    // A resolution queued before the question was recorded (or redelivered
+    // with a synthetic id) still settles that issue's open question, so the
+    // supervisor does not park again on a question it already consumed.
+    const question =
+      this.questions.find((item) => item.id === input.questionId) ??
+      this.questionsFor(payload.issueId).find((item) => item.status === "open");
+    if (question !== undefined) {
+      question.status = input.resolution === "fallback_used" ? "fallback_used" : "answered";
+    } else {
+      // The answer arrived before the agent asked; apply it to that issue's
+      // next question so the supervisor does not park a second time.
+      this.pendingResolutions.set(payload.issueId, input);
+    }
+    return this.enqueue("input_resolved", payload.dispatchId, dispatchAttemptId, payload);
+  }
+
+  questionsFor(issueId: string): readonly TestQuestion[] {
+    return this.questions.filter((question) => question.issueId === issueId);
+  }
+
+  recordedStopCalls(): readonly string[] {
+    return this.stopCalls;
   }
 
   private attemptIdFor(dispatchId: string): string {
@@ -363,6 +422,35 @@ export class TestOrrery {
       );
       return;
     }
+    if (name === "list_issue_questions") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        this.toolResult(id, {
+          questions: this.questionsFor(issueId).map((question) => Object.assign({}, question)),
+        }),
+      );
+      return;
+    }
+    if (name === "ask_for_input") {
+      const pending = this.pendingResolutions.get(issueId);
+      this.pendingResolutions.delete(issueId);
+      const question: TestQuestion = {
+        id: `question-${randomUUID()}`,
+        issueId,
+        question: str(args.question) || "Which approach should I take?",
+        proposedFallback: str(args.proposedFallback) || "Use the safe default",
+        status:
+          pending === undefined
+            ? "open"
+            : pending.resolution === "fallback_used"
+              ? "fallback_used"
+              : "answered",
+      };
+      this.questions.push(question);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(this.toolResult(id, { question: { ...question } }));
+      return;
+    }
     if (name === "log_session_activity") {
       const detail = recordOf(args.detail);
       this.activities.push({
@@ -393,6 +481,7 @@ export class TestOrrery {
     }
     if (name === "stop_session") {
       const stopOutcome = str(args.outcome) || "review";
+      this.stopCalls.push(stopOutcome);
       session.status = stopOutcome === "released" ? "released" : "completed";
       session.stopOutcome = stopOutcome;
       res.writeHead(200, { "content-type": "application/json" });

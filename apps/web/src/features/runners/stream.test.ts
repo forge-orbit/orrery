@@ -4,6 +4,7 @@ import {
   accumulateStream,
   categorizeChunk,
   chunkStatus,
+  coalesceAcpChunks,
   commandSummary,
   defaultOpenFor,
   diagnosticCountdown,
@@ -221,5 +222,93 @@ describe("header facts", () => {
         "missing",
       ),
     ).toBe(false);
+  });
+});
+
+describe("ACP v1 chunk coalescing", () => {
+  it("drops available_commands_update and coalesces thoughts, messages, and tool calls", () => {
+    const raw = [
+      chunk({
+        seq: 1,
+        eventType: "available_commands_update",
+        data: { params: { update: { sessionUpdate: "available_commands_update" } } },
+      }),
+      chunk({
+        seq: 2,
+        eventType: "agent_thought_chunk",
+        data: {
+          params: {
+            update: {
+              sessionUpdate: "agent_thought_chunk",
+              messageId: "m1:reasoning",
+              content: { type: "text", text: "Checking " },
+            },
+          },
+        },
+      }),
+      chunk({
+        seq: 3,
+        eventType: "agent_thought_chunk",
+        data: {
+          params: {
+            update: {
+              sessionUpdate: "agent_thought_chunk",
+              messageId: "m1:reasoning",
+              content: { type: "text", text: "DEMO-1." },
+            },
+          },
+        },
+      }),
+      chunk({
+        seq: 4,
+        eventType: "agent_message_chunk",
+        data: {
+          params: {
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              messageId: "m1",
+              content: { type: "text", text: "Added hello.txt." },
+            },
+          },
+        },
+      }),
+      chunk({
+        seq: 5,
+        eventType: "tool_call",
+        data: {
+          params: {
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "tc1",
+              title: "bash",
+              status: "in_progress",
+              rawInput: { command: "git status" },
+            },
+          },
+        },
+      }),
+      chunk({
+        seq: 6,
+        eventType: "tool_call_update",
+        data: {
+          params: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc1",
+              status: "completed",
+              content: [{ type: "content", content: { text: "clean" } }],
+            },
+          },
+        },
+      }),
+    ];
+    const coalesced = coalesceAcpChunks(raw);
+    expect(coalesced).toHaveLength(3);
+    expect(coalesced[0]?.eventType).toBe("thought");
+    expect(coalesced[0]?.data).toEqual({ text: "Checking DEMO-1." });
+    expect(coalesced[1]?.eventType).toBe("agent_message");
+    expect(defaultOpenFor(coalesced[1]!)).toBe(true);
+    expect(coalesced[2]?.eventType).toBe("tool_call");
+    expect(chunkStatus(coalesced[2]!)).toBe("passed");
   });
 });
