@@ -251,12 +251,16 @@ export async function start(options: StartOptions): Promise<void> {
       }
 
       // Advance only across a contiguous run of applied commands, stopping at
-      // the first dispatch that is still waiting for a slot.
+      // the first dispatch that is still waiting for a slot. Walk the returned
+      // batch (ordered ascending by seq) rather than `afterSeq + 1..maxSeq`,
+      // because prior acked or expired commands leave legitimate gaps after a
+      // restart and would otherwise pin `afterSeq` at 0 forever.
       let ackTarget = afterSeq;
-      const maxSeq = batch.commands.reduce((max, command) => Math.max(max, command.seq), afterSeq);
-      for (let seq = afterSeq + 1; seq <= maxSeq; seq += 1) {
-        if (seq === blockedSeq || !replayed.has(seq)) break;
-        ackTarget = seq;
+      for (const command of batch.commands) {
+        if (command.seq <= afterSeq) continue;
+        if (blockedSeq !== undefined && command.seq >= blockedSeq) break;
+        if (!replayed.has(command.seq)) break;
+        ackTarget = command.seq;
       }
       if (ackTarget > afterSeq) {
         try {

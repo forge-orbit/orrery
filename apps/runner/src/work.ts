@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { OrreryClient } from "./client.ts";
+import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
+import { delay } from "./delay.ts";
 import { repoFingerprint } from "./start.ts";
-import { SlotPool, type SupervisionOutcome } from "./slots.ts";
+import { SlotPool, type SlotController, type SupervisionOutcome } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
 export interface WorkOptions {
@@ -16,6 +17,7 @@ export interface WorkOptions {
   write?: ((line: string) => void) | undefined;
   supervision?: SupervisionConfig | undefined;
   heartbeatMs?: number | undefined;
+  commandWaitMs?: number | undefined;
 }
 
 /**
@@ -59,12 +61,26 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
   write(`Registered ephemeral Runner ${runner.id} for ${resolved.identifier}.`);
 
   // A long one-shot (or an agent that parks on a question) must keep proving
-  // liveness; otherwise the server's disconnect sweep marks it uncertain.
+  // liveness and polling the outbox for `cancel` and `input_resolved` commands.
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  const sessionAbort = new AbortController();
+  const onExternalAbort = () => sessionAbort.abort();
+  if (options.signal?.aborted === true) sessionAbort.abort();
+  else options.signal?.addEventListener("abort", onExternalAbort, { once: true });
+
+  let activeController: SlotController | undefined;
+  let commandLoopPromise: Promise<void> | undefined;
+
   try {
     await client.reconnect(runner.id, { activeAttempts: [] });
     heartbeatTimer = setInterval(() => {
       void client.heartbeat(runner.id, { activeSlotCount: 1 }).catch((error: unknown) => {
+        if (error instanceof RunnerRequestError && error.status === 401) {
+          write("One-shot heartbeat rejected (401). Stopping local operation immediately.");
+          activeController?.requestCancel("revoked");
+          sessionAbort.abort();
+          return;
+        }
         write(`One-shot heartbeat failed: ${String(error)}`);
       });
     }, options.heartbeatMs ?? 5000);
@@ -80,6 +96,66 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     const pool = new SlotPool(1);
     const slot = pool.acquire();
     if (slot === undefined) throw new Error("one-shot Runner has no free slot");
+
+    const pollClient = new OrreryClient({
+      server: options.server,
+      credential: stored.credential,
+      signal: sessionAbort.signal,
+    });
+    const runCommandLoop = async (): Promise<void> => {
+      let afterSeq = 0;
+      const attemptId = acceptance.dispatch.dispatchAttemptId;
+      while (!sessionAbort.signal.aborted) {
+        let batch: Awaited<ReturnType<OrreryClient["pollCommands"]>>;
+        try {
+          batch = await pollClient.pollCommands(runner.id, {
+            afterSeq,
+            waitMs: options.commandWaitMs ?? 5000,
+          });
+        } catch (error) {
+          if (sessionAbort.signal.aborted) return;
+          if (error instanceof RunnerRequestError && error.status === 401) {
+            write("Control plane rejected one-shot Runner (401). Stopping local operation.");
+            activeController?.requestCancel("revoked");
+            sessionAbort.abort();
+            return;
+          }
+          write(`One-shot command poll failed; retrying: ${String(error)}`);
+          await delay(1000, sessionAbort.signal, "One-shot stopped.").catch(() => {});
+          continue;
+        }
+        let ackTarget = afterSeq;
+        for (const command of batch.commands) {
+          if (command.seq <= afterSeq) continue;
+          if (command.dispatchAttemptId === attemptId) {
+            if (command.kind === "cancel") {
+              activeController?.requestCancel(command.payload.reason);
+            } else if (command.kind === "input_resolved") {
+              write(
+                `Input resolved for ${command.dispatchId} (${command.payload.resolution}); waking parked slot.`,
+              );
+              activeController?.requestResumeInput(command.payload);
+            }
+          }
+          ackTarget = command.seq;
+        }
+        if (ackTarget > afterSeq) {
+          try {
+            await pollClient.ackCommands(runner.id, { upToSeq: ackTarget });
+            afterSeq = ackTarget;
+          } catch (error) {
+            if (sessionAbort.signal.aborted) return;
+            if (error instanceof RunnerRequestError && error.status === 401) {
+              activeController?.requestCancel("revoked");
+              sessionAbort.abort();
+              return;
+            }
+            write(`One-shot command ack failed; retrying: ${String(error)}`);
+          }
+        }
+      }
+    };
+
     const controller = await superviseDispatch({
       server: options.server,
       repoPath,
@@ -96,13 +172,20 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
       },
       slot,
       pool,
-      signal: options.signal ?? new AbortController().signal,
+      signal: sessionAbort.signal,
       write,
+      onController: (ctrl) => {
+        activeController = ctrl;
+        commandLoopPromise = runCommandLoop();
+      },
     });
     await controller.finished;
     return controller.outcome;
   } finally {
+    sessionAbort.abort();
+    options.signal?.removeEventListener("abort", onExternalAbort);
     if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
+    await commandLoopPromise;
     // Teardown must run even on SIGINT/SIGTERM, when `options.signal` (and any
     // client bound to it) is already aborted. Use a fresh, bounded client.
     const teardown = new OrreryClient({

@@ -410,13 +410,14 @@ describe("manual dispatch creation (#196)", () => {
       .where(eq(issues.id, issue.id));
     expect(after).toMatchObject({ assigneeType: "agent", assigneeId: otherAgent!.id });
 
-    const reset = await request(`/api/issues/${issue.id}`, {
+    const unassignedIssue = await createIssue("unassigned compatibility");
+    const reset = await request(`/api/issues/${unassignedIssue.id}`, {
       method: "PATCH",
       body: { assignee: null },
       cookie: adminCookie,
     });
     expect(reset.status).toBe(200);
-    expect((await createDispatch(issue.id, runner.id, adminCookie)).status).toBe(201);
+    expect((await createDispatch(unassignedIssue.id, runner.id, adminCookie)).status).toBe(201);
   });
 });
 
@@ -876,7 +877,8 @@ describe("#196 review regressions", () => {
     expect(afterExpiry?.status).toBe("todo");
 
     // Make the issue unclaimable after creation: accept must be a clean 409,
-    // never an unhandled 500 from the claim service.
+    // never an unhandled 500 from the claim service, and must settle the
+    // pending dispatch to `ended` (never leaving it stranded in `pending`).
     await database.db.update(issues).set({ status: "backlog" }).where(eq(issues.id, issue.id));
     const dispatch = Dispatch.parse(await created.json());
     const accepted = await request(`/api/runners/${runner.id}/dispatches/${dispatch.id}/accept`, {
@@ -884,6 +886,29 @@ describe("#196 review regressions", () => {
       token: host.credential,
     });
     await expectProblem(accepted, 409, "issue_not_dispatchable");
+
+    const [settled] = await database.db
+      .select({ state: runnerDispatches.state })
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.id, dispatch.id));
+    expect(settled?.state).toBe("ended");
+
+    // Once the issue returns to `todo`, a fresh dispatch succeeds.
+    await database.db.update(issues).set({ status: "todo" }).where(eq(issues.id, issue.id));
+    const retried = await createDispatch(issue.id, runner.id, adminCookie);
+    expect(retried.status).toBe(201);
+  });
+
+  it("rejects a second manual dispatch while a pending dispatch is already in flight", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("no duplicate pending dispatch");
+
+    const first = await createDispatch(issue.id, runner.id, adminCookie);
+    expect(first.status).toBe(201);
+
+    const second = await createDispatch(issue.id, runner.id, adminCookie);
+    await expectProblem(second, 409, "issue_not_claimable");
   });
 
   it("reports a dispatch as ended once its work session stops", async () => {

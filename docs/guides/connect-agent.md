@@ -13,6 +13,10 @@ Use the exact `PUBLIC_URL` of your installation as `ORRERY_URL` — the MCP endp
 requests for that host. The key identifies the agent and scopes it to one workspace; never commit
 it. For HTTPS setup, see [Install and upgrade](./install.md).
 
+> Want to delegate issues directly from the Orrery board into isolated `git worktree`s with
+> **Live Session Studio** and no long-lived workspace API key on your laptop? Use the
+> [Local agent runner (`orrery-runner`)](./local-runner.md) instead.
+
 ## Claude Code and Codex
 
 Start with the installable plugin from

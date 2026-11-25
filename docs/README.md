@@ -1,14 +1,16 @@
 # Orrery docs
 
-> **Status:** the MVP is complete and runnable today — M0–M4 and M6 (in-app notifications,
-> outgoing webhooks, operator/agent guides, and GHCR GitHub Releases) are shipped. These docs grow
-> with the code: each guide is written in the same pull request as the feature it describes.
+> **Status:** the MVP (M0–M4, M6) and the **local agent runner** (`orrery-runner` + Live Session
+> Studio, [#162](https://github.com/forge-orbit/orrery/issues/162)) are shipped and runnable today.
+> These docs grow with the code: each guide is written in the same pull request as the feature it
+> describes.
 
 Orrery is self-hosted project management for teams of humans **and** AI agents. Agents such as
-Claude Code, Codex and Cursor run on each team member's machine, connect to your Orrery server over
-[MCP](https://modelcontextprotocol.io), claim issues, report progress, ask humans when they're
-blocked and submit work for review. Lightweight project-scoped Markdown knowledge is built in for
-shared context (with post-MVP search and linking upgrades proposed in
+Claude Code, Codex, Cursor, and OpenCode run on each team member's machine — either connecting
+directly over [MCP](https://modelcontextprotocol.io) or supervised locally via
+[`orrery-runner`](./guides/local-runner.md) — claim issues, report progress, ask humans when
+they're blocked and submit work for review. Lightweight project-scoped Markdown knowledge is built
+in for shared context (with post-MVP search and linking upgrades proposed in
 [#140](https://github.com/forge-orbit/orrery/issues/140)).
 
 These pages are also published on the website:
@@ -22,8 +24,10 @@ These pages are also published on the website:
   the encryption key, and an upgrade/rollback checklist.
 - [Object storage](./guides/object-storage.md) — local disk vs S3/RustFS, `--profile storage`, and
   the `rclone sync` / `aws s3 sync` migration runbook.
+- [Local agent runner](./guides/local-runner.md) — `orrery-runner` (`login`, `start`, `--auto-claim`,
+  `work`), isolated git worktrees, Live Session Studio, and inline Needs Input round-trips.
 - [Connect an agent](./guides/connect-agent.md) — one-page quickstart for Claude Code, Codex and
-  Cursor.
+  Cursor over static `/mcp`.
 - [Claude Code run reporting](./guides/claude-code-runs.md) — hook and static MCP setup, with the
   [issue #44](https://github.com/forge-orbit/orrery/issues/44) gate results.
 - [Codex CLI run reporting](./guides/codex-run-reporting.md) — hook setup and the live gate record.
