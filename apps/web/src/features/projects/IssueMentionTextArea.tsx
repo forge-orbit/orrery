@@ -3,6 +3,7 @@ import { Divider } from "@astryxdesign/core/Divider";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { Popover } from "@astryxdesign/core/Popover";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Text } from "@astryxdesign/core/Text";
@@ -53,6 +54,7 @@ import {
   filterMentionCandidates,
   findAtMention,
   mentionToken,
+  nextMentionSelection,
 } from "../../lib/mentions.ts";
 import { issueStatusLabels } from "./issue-status.ts";
 import { mentionCandidatesQuery } from "./queries.ts";
@@ -221,6 +223,7 @@ export function IssueMentionTextArea({
           }));
   const activeIndex =
     suggestions.length === 0 ? 0 : Math.min(selectedIndex, suggestions.length - 1);
+  const isMenuOpen = mode === "write" && showMenu && suggestions.length > 0;
 
   function commitEdit(edit: TextSelectionEdit) {
     setDraft(edit.value);
@@ -243,9 +246,16 @@ export function IssueMentionTextArea({
 
   function insertSuggestion(suggestion: Suggestion) {
     if (mention === null) return;
-    setDraft(`${value.slice(0, mention.start)}${suggestion.token} `);
+    const next = `${value.slice(0, mention.start)}${suggestion.token} `;
+    setDraft(next);
     setDismissedAt(null);
     setSelectedIndex(0);
+    requestAnimationFrame(() => {
+      const target = activeRef.current;
+      if (target === null) return;
+      target.focus();
+      target.setSelectionRange(next.length, next.length);
+    });
   }
 
   function setDraft(next: string) {
@@ -337,12 +347,12 @@ export function IssueMentionTextArea({
         if (suggestions.length > 0) {
           if (event.key === "ArrowDown") {
             event.preventDefault();
-            setSelectedIndex((prev) => (prev + 1) % suggestions.length);
+            setSelectedIndex((prev) => nextMentionSelection(prev, 1, suggestions.length));
             return;
           }
           if (event.key === "ArrowUp") {
             event.preventDefault();
-            setSelectedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+            setSelectedIndex((prev) => nextMentionSelection(prev, -1, suggestions.length));
             return;
           }
           if (event.key === "Enter" || event.key === "Tab") {
@@ -567,50 +577,107 @@ export function IssueMentionTextArea({
 
         <Stack padding={2}>
           {mode === "write" ? (
-            <Stack id={`${id}-write-panel`} role="tabpanel" width="100%">
-              <TextAreaField
-                ref={activeRef}
-                label={label}
-                isLabelHidden
-                id={id}
-                htmlName={htmlName}
-                value={value}
-                onChange={(next) => {
-                  setDraft(next);
-                  setDismissedAt(null);
-                  setSelectedIndex(0);
-                }}
-                onPaste={(event) => {
-                  if (projectId !== undefined && event.clipboardData.files.length > 0) {
-                    event.preventDefault();
-                    void uploadFiles(event.clipboardData.files);
-                    return;
-                  }
-                  const el = activeRef.current;
-                  if (el === null) return;
-                  const pasted = event.clipboardData.getData("text");
-                  const edit = pasteUrlOverSelection(
-                    value,
-                    el.selectionStart,
-                    el.selectionEnd,
-                    pasted,
-                  );
-                  if (edit !== null) {
-                    event.preventDefault();
-                    commitEdit(edit);
-                  }
-                }}
-                rows={rows}
-                width="100%"
-                {...(onFocus === undefined ? {} : { onFocus })}
-                {...(required === true ? { required: true } : {})}
-                {...(placeholder !== undefined
-                  ? { placeholder }
-                  : issues.length > 0
-                    ? { placeholder: "Write in Markdown… Use # or @ to reference" }
-                    : { placeholder: "Write in Markdown…" })}
-              />
-            </Stack>
+            <Popover
+              isOpen={isMenuOpen}
+              content={
+                <Stack
+                  as="ul"
+                  role="listbox"
+                  aria-label={atMention !== null ? "Mention a teammate" : "Reference an issue"}
+                  gap={0.5}
+                >
+                  {suggestions.map((suggestion, index) => (
+                    <Stack
+                      as="li"
+                      key={suggestion.key}
+                      role="option"
+                      aria-selected={index === activeIndex}
+                      onMouseEnter={() => setSelectedIndex(index)}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        insertSuggestion(suggestion);
+                      }}
+                    >
+                      <Card variant={index === activeIndex ? "muted" : "transparent"} padding={2}>
+                        <Stack direction="horizontal" justify="between" vAlign="center" gap={2}>
+                          <SuggestionRow suggestion={suggestion} />
+                          {suggestion.kind === "issue" && (
+                            <Token
+                              label={issueStatusLabels[suggestion.issue.status]}
+                              color="gray"
+                              size="sm"
+                            />
+                          )}
+                        </Stack>
+                      </Card>
+                    </Stack>
+                  ))}
+                </Stack>
+              }
+              placement="below"
+              alignment="start"
+              role="none"
+              isModal={false}
+              hasAutoFocus={false}
+              hasCloseButton={false}
+              hasLightDismiss={false}
+              hasEscapeDismiss={false}
+              padding={1}
+            >
+              {(triggerProps) => (
+                <Stack id={`${id}-write-panel`} role="tabpanel" width="100%">
+                  <TextAreaField
+                    ref={activeRef}
+                    label={label}
+                    isLabelHidden
+                    id={id}
+                    htmlName={htmlName}
+                    value={value}
+                    onChange={(next) => {
+                      setDraft(next);
+                      setDismissedAt(null);
+                      setSelectedIndex(0);
+                    }}
+                    onPaste={(event) => {
+                      if (projectId !== undefined && event.clipboardData.files.length > 0) {
+                        event.preventDefault();
+                        void uploadFiles(event.clipboardData.files);
+                        return;
+                      }
+                      const el = activeRef.current;
+                      if (el === null) return;
+                      const pasted = event.clipboardData.getData("text");
+                      const edit = pasteUrlOverSelection(
+                        value,
+                        el.selectionStart,
+                        el.selectionEnd,
+                        pasted,
+                      );
+                      if (edit !== null) {
+                        event.preventDefault();
+                        commitEdit(edit);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (mention !== null) setDismissedAt(mention.start);
+                    }}
+                    rows={rows}
+                    width="100%"
+                    {...(onFocus === undefined ? {} : { onFocus })}
+                    {...(required === true ? { required: true } : {})}
+                    {...(placeholder !== undefined
+                      ? { placeholder }
+                      : issues.length > 0
+                        ? { placeholder: "Write in Markdown… Use # or @ to reference" }
+                        : { placeholder: "Write in Markdown…" })}
+                  />
+                  {/* Zero-height anchor at the textarea's bottom edge: the menu
+                      drops below it, and a viewport flip lands over the editor
+                      instead of the toolbar above. */}
+                  <Stack ref={triggerProps.ref} width="100%" height={0} aria-hidden="true" />
+                </Stack>
+              )}
+            </Popover>
           ) : (
             <Stack id={`${id}-preview-panel`} role="tabpanel" padding={2} width="100%">
               {value.trim() === "" ? (
@@ -650,44 +717,6 @@ export function IssueMentionTextArea({
           </Stack>
         )}
       </Card>
-
-      {suggestions.length > 0 && (
-        <Card elevation="med" padding={1}>
-          <Stack
-            as="ul"
-            role="listbox"
-            aria-label={atMention !== null ? "Mention a teammate" : "Reference an issue"}
-            gap={0.5}
-          >
-            {suggestions.map((suggestion, index) => (
-              <Stack
-                as="li"
-                key={suggestion.key}
-                role="option"
-                aria-selected={index === activeIndex}
-                onMouseEnter={() => setSelectedIndex(index)}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  insertSuggestion(suggestion);
-                }}
-              >
-                <Card variant={index === activeIndex ? "muted" : "transparent"} padding={2}>
-                  <Stack direction="horizontal" justify="between" vAlign="center" gap={2}>
-                    <SuggestionRow suggestion={suggestion} />
-                    {suggestion.kind === "issue" && (
-                      <Token
-                        label={issueStatusLabels[suggestion.issue.status]}
-                        color="gray"
-                        size="sm"
-                      />
-                    )}
-                  </Stack>
-                </Card>
-              </Stack>
-            ))}
-          </Stack>
-        </Card>
-      )}
     </Stack>
   );
 }
