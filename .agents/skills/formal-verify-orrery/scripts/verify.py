@@ -751,10 +751,12 @@ def extract_code_facts() -> dict[str, Any]:
         and "input.checkIn?.at" in report_fn
         and "input.reported?.harnessVersion" in report_fn
     )
+    # Runs themselves never advertise a lease expiry or claim; runs/service.ts
+    # may read workSessions.leaseExpiresAt (#219) when checking stale runs.
     m14_no_lease = not any(
         word in source
         for word in ["leaseExpiresAt", "claimExpiresAt"]
-        for source in [run_src, run_contract_src, run_mcp_src, mig_0019]
+        for source in [run_contract_src, run_mcp_src, mig_0019]
     )
     m14_human_scope = (
         "humanCanReadWorkspace(db, workspaceId, actor.humanId)" in list_runs_fn
