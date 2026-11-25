@@ -2,6 +2,16 @@ import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+/**
+ * Local ACP permission policy (application-layer gate, NOT an OS/process sandbox).
+ *
+ * This module gates ACP `session/request_permission` and `fs/*` requests against
+ * worktree confinement and a command allowlist/denylist. Once a command is
+ * allowed (for example `pnpm`, `make`, or `git`), it executes with the host OS
+ * user's privileges unless the operator runs `orrery-runner` inside a separate
+ * OS confinement layer (container, VM, `bwrap`, or `sandbox-exec`).
+ */
+
 export interface PermissionDecision {
   allow: boolean;
   reason: string;

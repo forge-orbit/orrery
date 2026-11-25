@@ -5,6 +5,12 @@ import { OrreryClient, RunnerRequestError } from "./client.ts";
 import type { SupervisionConfig } from "./config.ts";
 import { ephemeralMcpConfig } from "./config.ts";
 import { McpAuthError, RunnerMcpClient } from "./mcp-client.ts";
+import {
+  createStreamSpool,
+  mainRepositoryRoot,
+  spoolDirectory,
+  type StreamSpool,
+} from "./spool.ts";
 import type { Slot, SlotController, SlotPool } from "./slots.ts";
 import {
   cleanupWorktree,
@@ -16,6 +22,8 @@ import {
 export interface SupervisionOptions {
   server: string;
   repoPath: string;
+  /** The enrolled host credential (`orr_rh_...`) the stream endpoint requires. */
+  credential: string;
   config: SupervisionConfig;
   acceptance: DispatchAcceptance;
   command: DispatchCommandPayload;
@@ -77,21 +85,83 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     requestCancel,
     cancelled,
     finished,
+    outcome: "unknown",
+    lastSeq: 0,
   };
   pool.attach(slot, controller);
   options.onController?.(controller);
 
   let watchdog: ReturnType<typeof setInterval> | undefined;
+  let flushTimer: ReturnType<typeof setInterval> | undefined;
+  let spool: StreamSpool | undefined;
+  let activeFlush: Promise<number> | undefined;
   let renewing = false;
   let acpRunning = false;
   let worktree: WorktreeHandle | undefined;
   let acp: AcpStdioClient | undefined;
+
+  // Coalesce every flush (periodic tick, pre-stop, final safety net) into one
+  // chain; StreamSpool also serializes internally, so no duplicate POSTs race.
+  const flushSpool = (): Promise<number> => {
+    if (spool === undefined) return Promise.resolve(0);
+    const current = spool;
+    activeFlush = (activeFlush ?? Promise.resolve(0))
+      .catch(() => {})
+      .then(() => current.flush())
+      .catch((error: unknown) => {
+        write(`Stream flush failed; will retry: ${String(error)}`);
+        return 0;
+      });
+    return activeFlush;
+  };
+  const spoolEvent = (method: string, params: unknown): void => {
+    if (spool === undefined) return;
+    const fields = recordOf(params);
+    const update = recordOf(fields?.update);
+    const name = recordOf(update)?.sessionUpdate;
+    const raw = typeof name === "string" && name !== "" ? name : method.replace(/^session\//, "");
+    const eventType = (raw || "update").slice(0, 64);
+    void spool
+      .append({ kind: "event", eventType, summary: `ACP ${eventType}`, data: { params } })
+      .then((chunk) => {
+        controller.lastSeq = Math.max(controller.lastSeq, chunk.seq);
+      })
+      .catch((error: unknown) => write(`Could not spool ACP update: ${String(error)}`));
+  };
+  const spoolStderr = (line: string): void => {
+    if (spool === undefined) return;
+    void spool
+      .append({ kind: "raw_output", data: { line: line.slice(0, 2000) } })
+      .then((chunk) => {
+        controller.lastSeq = Math.max(controller.lastSeq, chunk.seq);
+      })
+      .catch((error: unknown) => write(`Could not spool ACP stderr: ${String(error)}`));
+  };
 
   const abortListener = () => requestCancel("shutdown");
   options.signal.addEventListener("abort", abortListener, { once: true });
   if (options.signal.aborted) requestCancel("shutdown");
 
   try {
+    // The spool lives in the main checkout, never in the isolated worktree, so
+    // a preserved dirty worktree cannot hide live Studio chunks (#199).
+    try {
+      spool = await createStreamSpool({
+        spoolDir: spoolDirectory(mainRepositoryRoot(options.repoPath)),
+        dispatchAttemptId: command.dispatchAttemptId,
+        apiBaseUrl: options.server,
+        runnerId: dispatch.runnerId,
+        dispatchId: dispatch.id,
+        credential: options.credential,
+      });
+      flushTimer = setInterval(() => {
+        void flushSpool();
+      }, 1000);
+      flushTimer.unref();
+    } catch (error) {
+      write(`Stream spool unavailable for this dispatch: ${String(error)}`);
+    }
+
     // The claim is already active; start renewing before any local work begins.
     watchdog = setInterval(() => {
       if (renewing || !acpRunning || revoked) return;
@@ -155,7 +225,11 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       env: Object.fromEntries(mcpConfig.env.map((item) => [item.name, item.value])),
       worktreeReal: worktree.realPath,
       mcpServers,
-      onStderr: (line) => write(`acp stderr: ${line}`),
+      onUpdate: (method, params) => spoolEvent(method, params),
+      onStderr: (line) => {
+        write(`acp stderr: ${line}`);
+        spoolStderr(line);
+      },
     });
     acpRunning = true;
     write(`ACP ${config.acp.command} started (pid ${acp.pid}) in ${worktree.branch}.`);
@@ -213,6 +287,12 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
 
     pruned = await cleanupWorktree(worktree, state, write);
 
+    // stop_session rolls the stream up immediately in Postgres. Every ACP
+    // update and stderr line must be flushed BEFORE that call, or the final
+    // chunks would land in the archived blob too late (or be pruned entirely).
+    if (acp !== undefined) await acp.exited;
+    await flushSpool();
+
     if (!revoked) {
       let status = "active";
       try {
@@ -226,8 +306,8 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
         );
         status = "unknown";
       }
+      let stopOutcome: "review" | "released" = normal ? "review" : "released";
       if (status === "active") {
-        const stopOutcome = normal ? "review" : "released";
         try {
           await mcp.callTool("stop_session", { issueId, outcome: stopOutcome, sessionId });
           write(`Stopped work session as ${stopOutcome}.`);
@@ -236,9 +316,21 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
         }
       } else {
         write(`Session already ${status}; the ACP agent stopped it itself.`);
+        // A self-released/expired session is not a successful review: the
+        // one-shot CLI must exit non-zero, and no second stop is needed.
+        stopOutcome = status === "completed" ? "review" : "released";
       }
+      controller.outcome =
+        outcome.kind === "cancel"
+          ? "cancelled"
+          : outcome.kind === "error" || outcome.kind === "exit"
+            ? "failed"
+            : stopOutcome === "review"
+              ? "completed"
+              : "released";
     } else {
       write("Revoked: left session state to the server; worktree preserved if dirty.");
+      controller.outcome = "revoked";
     }
 
     if (state.dirty || state.unpushed) {
@@ -248,6 +340,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     }
   } catch (error) {
     write(`Dispatch supervision failed: ${String(error)}`);
+    controller.outcome = revoked ? "revoked" : cancelledAlready ? "cancelled" : "failed";
     if (acp !== undefined) await acp.forceExit(config.cancelGraceMs);
     // A failure before the ACP turn started must still release the claim and
     // never destroy a dirty or unpushed worktree.
@@ -258,6 +351,8 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
         write(`Could not inspect worktree after setup failure: ${String(cleanupError)}`);
       }
     }
+    // Same ordering as the success path: flush before the rollup trigger.
+    await flushSpool();
     if (!revoked) {
       try {
         await mcp.callTool("stop_session", { issueId, outcome: "released", sessionId });
@@ -267,6 +362,10 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     }
   } finally {
     if (watchdog !== undefined) clearInterval(watchdog);
+    if (flushTimer !== undefined) clearInterval(flushTimer);
+    // Final flush safety net for error/abort paths; coalesced with any flush
+    // already in flight, so a repeated call cannot duplicate HTTP batches.
+    await flushSpool();
     options.signal.removeEventListener("abort", abortListener);
     acpRunning = false;
     if (acp !== undefined) await acp.exited;

@@ -21,6 +21,15 @@ export interface TestActivity {
   detail: Record<string, unknown> | undefined;
 }
 
+export interface TestStreamChunk {
+  seq: number;
+  kind: string;
+  visibility?: string;
+  eventType?: string;
+  summary?: string;
+  data?: Record<string, unknown>;
+}
+
 export interface TestCommand {
   commandId: string;
   runnerId: string;
@@ -111,6 +120,11 @@ export class TestOrrery {
   private readonly activities: TestActivity[] = [];
   private readonly dispatchIssues = new Map<string, string>();
   private readonly dispatchAttempts = new Map<string, string>();
+  private readonly streamed: TestStreamChunk[] = [];
+  reconnectCalls = 0;
+  /** Number of heartbeats to answer with a transient 503 before recovering. */
+  transientHeartbeatFailures = 0;
+  reconnectAttempts: Array<{ dispatchAttemptId: string; lastSeq: number }> = [];
   private readonly scopes = new Map<
     string,
     { issueId: string; runId: string; sessionId: string }
@@ -220,6 +234,11 @@ export class TestOrrery {
 
   revoke(): void {
     this.revoked = true;
+  }
+
+  /** Chunks flushed by the runner's StreamSpool (test seam for #202). */
+  chunks(): readonly TestStreamChunk[] {
+    return this.streamed;
   }
 
   state() {
@@ -425,7 +444,52 @@ export class TestOrrery {
       sendJson(res, 201, this.runner());
       return;
     }
+    if (req.method === "POST" && path.endsWith("/reconnect")) {
+      this.reconnectCalls += 1;
+      const body = recordOf(await bodyOf(req)) ?? {};
+      const attempts = Array.isArray(body.activeAttempts) ? body.activeAttempts : [];
+      this.reconnectAttempts = attempts.flatMap((item) => {
+        const record = recordOf(item);
+        if (record === undefined) return [];
+        return [
+          {
+            dispatchAttemptId:
+              typeof record.dispatchAttemptId === "string" ? record.dispatchAttemptId : "",
+            lastSeq: Number(record.lastSeq ?? 0),
+          },
+        ];
+      });
+      sendJson(res, 200, { resolutions: [] });
+      return;
+    }
+    const ingest = path.match(/^\/api\/runners\/[^/]+\/dispatches\/([^/]+)\/stream$/);
+    if (req.method === "POST" && ingest !== null) {
+      const body = recordOf(await bodyOf(req)) ?? {};
+      const chunks = Array.isArray(body.chunks) ? body.chunks : [];
+      for (const chunk of chunks) {
+        const record = recordOf(chunk);
+        if (record === undefined) continue;
+        this.streamed.push({
+          seq: Number(record.seq ?? 0),
+          kind: typeof record.kind === "string" ? record.kind : "event",
+          ...(typeof record.visibility === "string" ? { visibility: record.visibility } : {}),
+          ...(typeof record.eventType === "string" ? { eventType: record.eventType } : {}),
+          ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
+          ...(typeof record.data === "object" && record.data !== null
+            ? { data: Object.fromEntries(Object.entries(record.data)) }
+            : {}),
+        });
+      }
+      const toSeq = Number(body.toSeq ?? 0);
+      sendJson(res, 200, { ackedSeq: toSeq });
+      return;
+    }
     if (req.method === "POST" && path.endsWith("/heartbeat")) {
+      if (this.transientHeartbeatFailures > 0) {
+        this.transientHeartbeatFailures -= 1;
+        sendJson(res, 503, { status: 503, code: "temporarily_unavailable", title: "Try again" });
+        return;
+      }
       if (this.revoked) {
         sendJson(res, 401, {
           status: 401,

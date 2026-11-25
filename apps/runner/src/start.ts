@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import type { ReadyWorkFilter } from "@orrery/contract";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
@@ -22,6 +23,10 @@ export interface StartOptions {
   signal?: AbortSignal | undefined;
   write?: ((line: string) => void) | undefined;
   supervision?: SupervisionConfig | undefined;
+  /** Opt-in autonomous pickup from the bound project's ready queue. */
+  autoClaim?: boolean | undefined;
+  autoClaimFilter?: ReadyWorkFilter | undefined;
+  autoClaimPollMs?: number | undefined;
 }
 
 /** Opaque digest of a checkout; the raw local path never leaves the machine. */
@@ -70,16 +75,57 @@ export async function start(options: StartOptions): Promise<void> {
     repoFingerprint: repoFingerprint(options.repoPath ?? process.cwd()),
     capabilities: options.capabilities ?? [],
     maxConcurrency: options.maxConcurrency ?? 1,
+    ephemeral: false,
   });
   write(`Runner ${runner.id} registered (${runner.presence}).`);
 
+  // Startup/recovery reconciliation marks uncertain attempts and lets an
+  // agent reconnecting after sleep stream into Live Session Studio seamlessly.
+  const reconnected = await client.reconnect(runner.id, { activeAttempts: [] }).catch((error) => {
+    if (error instanceof RunnerRequestError && error.status === 401) {
+      revoke("Reconnect rejected (401). Stopping local operation immediately.");
+      return undefined;
+    }
+    write(`Reconnect report failed; continuing: ${String(error)}`);
+    return undefined;
+  });
+  if (reconnected !== undefined && reconnected.resolutions.length > 0) {
+    write(`Reconnect reconciled ${reconnected.resolutions.length} dispatch attempt(s).`);
+  }
+  if (controller.signal.aborted) {
+    options.signal?.removeEventListener("abort", onExternalAbort);
+    return;
+  }
+
   const pending = new Set<Promise<unknown>>();
+  // A transient network/server failure means the server may have marked our
+  // attempts uncertain. Reconcile with the live slot cursors once it recovers.
+  let needsReconnect = false;
+  const reportActiveReconnect = async (reason: string): Promise<void> => {
+    if (!needsReconnect || controller.signal.aborted) return;
+    needsReconnect = false;
+    try {
+      const result = await client.reconnect(runner.id, { activeAttempts: pool.activeAttempts() });
+      if (result.resolutions.length > 0) {
+        write(`Reconnect (${reason}) reconciled ${result.resolutions.length} dispatch attempt(s).`);
+      }
+    } catch (error) {
+      needsReconnect = true;
+      if (error instanceof RunnerRequestError && error.status === 401) {
+        revoke("Reconnect rejected (401). Stopping local operation immediately.");
+        return;
+      }
+      write(`Reconnect (${reason}) failed; will retry: ${String(error)}`);
+    }
+  };
+
   let lastPresence = runner.presence;
   const heartbeatLoop = async (): Promise<void> => {
     while (!controller.signal.aborted) {
       try {
         await delay(options.heartbeatMs ?? 5000, controller.signal, "Runner stopped.");
         const state = await client.heartbeat(runner.id, { activeSlotCount: pool.used });
+        await reportActiveReconnect("heartbeat recovered");
         if (state.presence !== lastPresence) {
           lastPresence = state.presence;
           write(`Runner presence: ${state.presence}.`);
@@ -94,6 +140,7 @@ export async function start(options: StartOptions): Promise<void> {
           return;
         }
         if (error instanceof Error && error.message === "Runner stopped.") return;
+        needsReconnect = true;
         write(
           `Heartbeat failed; retrying: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -120,10 +167,12 @@ export async function start(options: StartOptions): Promise<void> {
           revoke("Control plane rejected the Runner (401). Stopping local operation immediately.");
           return;
         }
+        needsReconnect = true;
         write(`Command poll failed; retrying: ${String(error)}`);
         await delay(1000, controller.signal, "Runner stopped.").catch(() => {});
         continue;
       }
+      await reportActiveReconnect("command poll recovered");
 
       let blockedSeq: number | undefined;
       for (const command of batch.commands) {
@@ -146,6 +195,7 @@ export async function start(options: StartOptions): Promise<void> {
             const running = superviseDispatch({
               server: options.server,
               repoPath: options.repoPath ?? process.cwd(),
+              credential: stored.credential,
               config: supervision,
               acceptance,
               command: command.payload,
@@ -205,6 +255,7 @@ export async function start(options: StartOptions): Promise<void> {
             revoke("Command ack rejected (401). Stopping local operation immediately.");
             return;
           }
+          needsReconnect = true;
           write(`Command ack failed; retrying: ${String(error)}`);
         }
       }
@@ -213,7 +264,51 @@ export async function start(options: StartOptions): Promise<void> {
     }
   };
 
-  await Promise.all([heartbeatLoop(), commandLoop()]);
+  const autoClaimLoop = async (): Promise<void> => {
+    if (options.autoClaim !== true) return;
+    const interval = options.autoClaimPollMs ?? 1000;
+    while (!controller.signal.aborted) {
+      try {
+        await delay(interval, controller.signal, "Runner stopped.");
+      } catch {
+        return;
+      }
+      if (controller.signal.aborted) return;
+      // A slot is required before asking the server to create a Dispatch; the
+      // server also fences by activeSlotCount + queued attempts, but this keeps
+      // the local concurrency contract exact even with a stale heartbeat.
+      if (pool.used >= (options.maxConcurrency ?? 1)) continue;
+      try {
+        const result = await client.autoClaim(runner.id, {
+          filter: options.autoClaimFilter ?? "assignedToMe",
+        });
+        if (result.dispatch !== null) {
+          write(
+            `Auto-claimed ${result.dispatch.issueId} as Dispatch ${result.dispatch.id} (${result.dispatch.state}).`,
+          );
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof RunnerRequestError && error.status === 401) {
+          revoke("Auto-claim rejected (401). Stopping local operation immediately.");
+          return;
+        }
+        if (error instanceof RunnerRequestError && error.status === 429) {
+          // Server backpressure is retryable, not a permanent refusal.
+          write(`Auto-claim backpressured; retrying: ${String(error)}`);
+          await delay(interval, controller.signal, "Runner stopped.").catch(() => {});
+          continue;
+        }
+        if (error instanceof RunnerRequestError && error.status >= 400 && error.status < 500) {
+          write(`Auto-claim refused: ${String(error)}`);
+          return;
+        }
+        write(`Auto-claim failed; retrying: ${String(error)}`);
+      }
+    }
+  };
+
+  await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop()]);
   options.signal?.removeEventListener("abort", onExternalAbort);
   pool.cancelAll("shutdown");
   await Promise.all(pending);

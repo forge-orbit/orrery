@@ -81,6 +81,11 @@ async function onPrompt(id: unknown): Promise<void> {
     pendingPermission(9003, "destructive", { command: "rm -rf /" });
     return;
   }
+  if (mode === "stderr") {
+    // A real harness writes diagnostics here; the runner must spool them as
+    // owner_only raw_output before stop_session rolls the stream up.
+    process.stderr.write("stub diagnostic: secret owner-only line\n");
+  }
   if (mode === "dirty") {
     writeFileSync(join(process.cwd(), "notes.txt"), "agent wrote this\n");
   }
@@ -122,6 +127,18 @@ async function onPrompt(id: unknown): Promise<void> {
       });
     }
     record({ event: "self-stop" });
+  }
+  if (mode === "chunk-hang") {
+    send({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId,
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "live" } },
+      },
+    });
+    record({ event: "hanging", pid: process.pid });
+    return;
   }
   if (mode === "hang" || mode === "ignore-term") {
     record({ event: "hanging", pid: process.pid });

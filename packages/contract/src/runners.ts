@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Timestamp } from "./common.ts";
 import { Run } from "./runs.ts";
-import { WorkSession } from "./sessions.ts";
+import { ReadyWorkFilter, WorkSession } from "./sessions.ts";
 
 /** A stable, opaque identity for a runner-related resource. */
 export const RunnerId = z.string().min(1).max(200).meta({ id: "RunnerId" });
@@ -179,6 +179,8 @@ export const RegisterRunnerRequest = z
     repoFingerprint: Sha256Hex,
     capabilities: z.array(z.string().min(1).max(64)).max(64).default([]),
     maxConcurrency: z.int().min(1).max(64).default(1),
+    /** One-shot `orrery-runner work` runners never reuse a persistent row. */
+    ephemeral: z.boolean().default(false),
   })
   .meta({ id: "RegisterRunnerRequest" });
 export type RegisterRunnerRequest = z.infer<typeof RegisterRunnerRequest>;
@@ -248,6 +250,59 @@ export const IssueDispatchesResponse = z
   .object({ dispatches: z.array(Dispatch) })
   .meta({ id: "IssueDispatchesResponse" });
 export type IssueDispatchesResponse = z.infer<typeof IssueDispatchesResponse>;
+
+/**
+ * `--auto-claim` asks the server to select the next ready issue atomically.
+ * `assignedToMe` never picks up an unassigned (potentially human) issue.
+ */
+export const AutoClaimRequest = z
+  .object({ filter: ReadyWorkFilter.default("assignedToMe") })
+  .meta({ id: "AutoClaimRequest" });
+export type AutoClaimRequest = z.infer<typeof AutoClaimRequest>;
+
+export const AutoClaimResponse = z
+  .object({ dispatch: Dispatch.nullable() })
+  .meta({ id: "AutoClaimResponse" });
+export type AutoClaimResponse = z.infer<typeof AutoClaimResponse>;
+
+/** A one-shot `orrery-runner work` dispatch targets one explicitly resolved issue. */
+export const RunnerDispatchRequest = z
+  .object({ issueId: z.string().min(1).max(200) })
+  .meta({ id: "RunnerDispatchRequest" });
+export type RunnerDispatchRequest = z.infer<typeof RunnerDispatchRequest>;
+
+/** An issue target may be a UUID, a full URL, or a `KEY-42` issue key. */
+export const IssueResolveRequest = z
+  .object({
+    target: z.string().trim().min(1).max(2000),
+    workspace: z.string().trim().min(1).max(200).optional(),
+  })
+  .meta({ id: "IssueResolveRequest" });
+export type IssueResolveRequest = z.infer<typeof IssueResolveRequest>;
+
+/** The unambiguous scope an ephemeral one-shot Runner is registered against. */
+export const IssueResolveResponse = z
+  .object({
+    issueId: z.string(),
+    workspaceId: z.string(),
+    workspaceName: z.string(),
+    projectId: z.string(),
+    projectKey: z.string(),
+    identifier: z.string(),
+    number: z.int(),
+    title: z.string(),
+  })
+  .meta({ id: "IssueResolveResponse" });
+export type IssueResolveResponse = z.infer<typeof IssueResolveResponse>;
+
+/** A one-shot Runner reports itself offline (revoked) during teardown. */
+export const RunnerOfflineResponse = z
+  .object({
+    runnerId: RunnerId,
+    revokedRunners: z.int().min(0),
+  })
+  .meta({ id: "RunnerOfflineResponse" });
+export type RunnerOfflineResponse = z.infer<typeof RunnerOfflineResponse>;
 
 /**
  * The `orr_dt_...` secret is returned exactly once. Only its SHA-256 digest is

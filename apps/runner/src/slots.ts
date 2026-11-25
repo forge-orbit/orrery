@@ -1,6 +1,15 @@
 export type SlotState = "idle" | "running" | "draining";
 
 /** The handle a running dispatch exposes so a `cancel` command can reach it. */
+/** Terminal outcome of a supervised dispatch, used by one-shot `work` exits. */
+export type SupervisionOutcome =
+  | "completed"
+  | "released"
+  | "failed"
+  | "cancelled"
+  | "revoked"
+  | "unknown";
+
 export interface SlotController {
   readonly dispatchId: string;
   readonly dispatchAttemptId: string;
@@ -8,6 +17,16 @@ export interface SlotController {
   requestCancel(reason: string): void;
   readonly cancelled: Promise<string>;
   readonly finished: Promise<void>;
+  /** Set once supervision has settled; `finished` resolves after this is set. */
+  outcome: SupervisionOutcome;
+  /** Highest stream sequence spooled so far, reported on reconnect. */
+  lastSeq: number;
+}
+
+/** One still-running local attempt reported to the server on reconnect. */
+export interface ActiveAttempt {
+  dispatchAttemptId: string;
+  lastSeq: number;
 }
 
 export interface Slot {
@@ -65,6 +84,16 @@ export class SlotPool {
   controllerFor(dispatchAttemptId: string): SlotController | undefined {
     return this.slots.find((slot) => slot.controller?.dispatchAttemptId === dispatchAttemptId)
       ?.controller;
+  }
+
+  /** Live attempts with their spool cursors, for post-disconnect `reconnect`. */
+  activeAttempts(): ActiveAttempt[] {
+    return this.slots
+      .filter((slot) => slot.controller !== undefined)
+      .map((slot) => ({
+        dispatchAttemptId: slot.controller!.dispatchAttemptId,
+        lastSeq: slot.controller!.lastSeq,
+      }));
   }
 
   cancelAll(reason: string): void {

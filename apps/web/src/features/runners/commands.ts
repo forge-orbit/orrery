@@ -19,3 +19,12 @@ export function createDispatch(issueId: string, input: CreateDispatchRequest) {
     Dispatch.parse(value),
   );
 }
+
+/** Explicitly settle a dispatch that is waiting for human resolution. */
+export function resolveUncertainDispatch(dispatchId: string, outcome: "released" | "completed") {
+  return postJson(
+    `/api/runners/dispatches/${encodeURIComponent(dispatchId)}/resolve`,
+    { outcome },
+    (value) => Dispatch.parse(value),
+  );
+}

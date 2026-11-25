@@ -170,11 +170,16 @@ export function SessionInspector({
   canContribute,
   initialOpen = false,
   initialSessionId,
+  compact = false,
+  liveStudioLink,
 }: {
   issueId: string;
   canContribute: boolean;
   initialOpen?: boolean | undefined;
   initialSessionId?: string | undefined;
+  /** Summary-only rendering for narrow surfaces such as the Board drawer. */
+  compact?: boolean | undefined;
+  liveStudioLink?: ReactNode | undefined;
 }) {
   const panelId = useId();
   const [open, setOpen] = useState(initialOpen);
@@ -201,6 +206,8 @@ export function SessionInspector({
             canContribute={canContribute}
             open={open}
             initialSessionId={initialSessionId}
+            compact={compact}
+            liveStudioLink={liveStudioLink}
           />
         </section>
       </Stack>
@@ -213,11 +220,15 @@ export function SessionInspectorDetails({
   canContribute,
   open,
   initialSessionId,
+  compact = false,
+  liveStudioLink,
 }: {
   issueId: string;
   canContribute: boolean;
   open: boolean;
   initialSessionId?: string | undefined;
+  compact?: boolean | undefined;
+  liveStudioLink?: ReactNode | undefined;
 }) {
   const [pickedId, setPickedId] = useState<string | null>(initialSessionId ?? null);
 
@@ -229,8 +240,12 @@ export function SessionInspectorDetails({
     list[0];
 
   const activities = useQuery({
-    ...sessionActivitiesQuery(issueId, selected?.id ?? "", open && selected?.status === "active"),
-    enabled: open && selected !== undefined,
+    ...sessionActivitiesQuery(
+      issueId,
+      selected?.id ?? "",
+      open && !compact && selected?.status === "active",
+    ),
+    enabled: open && !compact && selected !== undefined,
   });
   const questions = useQuery({ ...issueQuestionsQuery(issueId), enabled: open });
   const runs = useQuery({
@@ -256,9 +271,12 @@ export function SessionInspectorDetails({
         <Banner status="error" role="alert" title="Could not load work sessions." />
       )}
       {sessions.isSuccess && selected === undefined && (
-        <Text as="p" display="block" type="supporting" color="secondary">
-          No work sessions recorded for this issue.
-        </Text>
+        <Stack gap={2}>
+          <Text as="p" display="block" type="supporting" color="secondary">
+            No work sessions recorded for this issue.
+          </Text>
+          {liveStudioLink}
+        </Stack>
       )}
       {selected !== undefined && (
         <>
@@ -295,6 +313,7 @@ export function SessionInspectorDetails({
               />
             )}
           </Stack>
+          {liveStudioLink}
           {selected.progress !== "" && (
             <Text as="p" display="block" type="supporting" color="secondary">
               {selected.progress}
@@ -330,59 +349,63 @@ export function SessionInspectorDetails({
               costUsdMicros={selected.costUsdMicros}
             />
           </MetadataList>
-          <Divider />
-          <Heading level={3} color="inherit">
-            Session activity
-          </Heading>
-          {activities.isPending && (
-            <Text as="p" display="block" type="supporting" role="status">
-              Loading session activity…
-            </Text>
-          )}
-          {activities.isError && (
-            <Banner status="error" role="alert" title="Could not load session activity." />
-          )}
-          {activities.isSuccess && activityList.length === 0 ? (
-            <Text as="p" display="block" type="supporting" color="secondary">
-              No activities recorded yet.
-            </Text>
-          ) : (
-            <Stack as="ol" gap={2} data-activity-timeline="">
-              {activityList.map((activity) => (
-                <Stack
-                  as="li"
-                  key={activity.id}
-                  data-activity-id={activity.id}
-                  data-activity-kind={activity.kind}
-                >
-                  <Card padding={2}>
-                    <Stack gap={1.5}>
-                      <Stack
-                        direction="horizontal"
-                        gap={1.5}
-                        justify="between"
-                        vAlign="center"
-                        wrap="wrap"
-                      >
-                        <Token label={activity.kind} color="gray" size="sm" />
-                        <Text type="supporting" color="secondary">
-                          <time
-                            dateTime={activity.createdAt}
-                            title={formatFullDateTime(activity.createdAt)}
+          {!compact && (
+            <>
+              <Divider />
+              <Heading level={3} color="inherit">
+                Session activity
+              </Heading>
+              {activities.isPending && (
+                <Text as="p" display="block" type="supporting" role="status">
+                  Loading session activity…
+                </Text>
+              )}
+              {activities.isError && (
+                <Banner status="error" role="alert" title="Could not load session activity." />
+              )}
+              {activities.isSuccess && activityList.length === 0 ? (
+                <Text as="p" display="block" type="supporting" color="secondary">
+                  No activities recorded yet.
+                </Text>
+              ) : (
+                <Stack as="ol" gap={2} data-activity-timeline="">
+                  {activityList.map((activity) => (
+                    <Stack
+                      as="li"
+                      key={activity.id}
+                      data-activity-id={activity.id}
+                      data-activity-kind={activity.kind}
+                    >
+                      <Card padding={2}>
+                        <Stack gap={1.5}>
+                          <Stack
+                            direction="horizontal"
+                            gap={1.5}
+                            justify="between"
+                            vAlign="center"
+                            wrap="wrap"
                           >
-                            {formatDateTime(activity.createdAt)}
-                          </time>
-                        </Text>
-                      </Stack>
-                      <Text as="p" display="block" type="body" data-activity-summary="">
-                        {activity.summary}
-                      </Text>
-                      {activity.detail !== null && renderDetail(activity.detail)}
+                            <Token label={activity.kind} color="gray" size="sm" />
+                            <Text type="supporting" color="secondary">
+                              <time
+                                dateTime={activity.createdAt}
+                                title={formatFullDateTime(activity.createdAt)}
+                              >
+                                {formatDateTime(activity.createdAt)}
+                              </time>
+                            </Text>
+                          </Stack>
+                          <Text as="p" display="block" type="body" data-activity-summary="">
+                            {activity.summary}
+                          </Text>
+                          {activity.detail !== null && renderDetail(activity.detail)}
+                        </Stack>
+                      </Card>
                     </Stack>
-                  </Card>
+                  ))}
                 </Stack>
-              ))}
-            </Stack>
+              )}
+            </>
           )}
         </>
       )}

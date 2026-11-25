@@ -16,12 +16,25 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
-import type { FleetRunnerHost, RunnerPresence } from "@orrery/contract";
+import type {
+  ActiveWorkSession,
+  FleetRunner,
+  FleetRunnerHost,
+  RunnerPresence,
+} from "@orrery/contract";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
+import { Link } from "../../lib/Link.tsx";
+import { activeSessionsQuery } from "../work-sessions/index.ts";
 import { revokeRunnerHost } from "./commands.ts";
-import { workspaceRunnersQuery, workspaceRunnersQueryKey } from "./queries.ts";
+import {
+  issueDispatchesQuery,
+  streamQuery,
+  workspaceRunnersQuery,
+  workspaceRunnersQueryKey,
+} from "./queries.ts";
+import { fleetStatus } from "./stream.ts";
 
 const presenceColors = {
   online: "green",
@@ -39,8 +52,63 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : "The Runner host could not be revoked.";
 }
 
+/** Correlates an active Runner slot with its dispatch and diagnostic state. */
+function FleetLiveCell({
+  workspaceId,
+  runner,
+  session,
+}: {
+  workspaceId: string;
+  runner: FleetRunner;
+  session: ActiveWorkSession | undefined;
+}) {
+  const queryClient = useQueryClient();
+  const dispatches = useQuery({
+    ...issueDispatchesQuery(session?.issueId ?? ""),
+    enabled: session !== undefined,
+  });
+  const dispatch = dispatches.data?.dispatches.find(
+    (entry) => entry.runnerId === runner.id && entry.state !== "ended",
+  );
+  const stream = useQuery({
+    ...streamQuery(queryClient, runner.id, dispatch?.id ?? "", {
+      active: dispatch !== undefined,
+    }),
+    enabled: dispatch !== undefined,
+  });
+  const status = fleetStatus(stream.data?.chunks ?? []);
+
+  if (dispatch === undefined || session === undefined) {
+    return <Text type="supporting">Project-bound Runner</Text>;
+  }
+  return (
+    <Stack gap={1}>
+      <Link
+        to="/live/$runnerId/$dispatchId"
+        params={{ runnerId: runner.id, dispatchId: dispatch.id }}
+        search={{ issueId: session.issueId, workspaceId }}
+        color="accent"
+        hasUnderline
+        data-fleet-live-link={dispatch.id}
+      >
+        Open Live Studio
+      </Link>
+      <Token
+        label={status.label}
+        color={status.color}
+        size="sm"
+        data-fleet-diagnostic={status.color}
+      />
+      {dispatch.state === "uncertain" && (
+        <Token label="Needs resolution" size="sm" color="orange" />
+      )}
+    </Stack>
+  );
+}
+
 export function RunnersSection({ workspaceId }: { workspaceId: string }) {
   const { data: fleet } = useQuery(workspaceRunnersQuery(workspaceId, true));
+  const { data: activeSessions } = useQuery(activeSessionsQuery(workspaceId));
   const queryClient = useQueryClient();
   const toast = useToast();
   const [confirmHost, setConfirmHost] = useState<FleetRunnerHost | null>(null);
@@ -173,7 +241,13 @@ export function RunnersSection({ workspaceId }: { workspaceId: string }) {
                         </Text>
                       </TableCell>
                       <TableCell>
-                        <Text type="supporting">Project-bound Runner</Text>
+                        <FleetLiveCell
+                          workspaceId={workspaceId}
+                          runner={runner}
+                          session={activeSessions?.find(
+                            (entry) => entry.projectId === runner.projectId,
+                          )}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

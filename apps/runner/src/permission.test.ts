@@ -145,4 +145,59 @@ describe("local worktree permission policy", () => {
       join(root, "new", "deep", "file.txt"),
     );
   });
+
+  it("blocks disposable outside-marker access and strips host ORRERY_* env at the ACP policy boundary", async () => {
+    const { spawnSync } = await import("node:child_process");
+    const { readFile } = await import("node:fs/promises");
+    const { sanitizeAcpEnv } = await import("./acp.ts");
+    const root = await worktree();
+    const outsideDir = await mkdtemp(join(tmpdir(), "orrery-outside-marker-"));
+    try {
+      const outsideMarker = join(outsideDir, "secret-marker.txt");
+      const outsideWrite = join(outsideDir, "escaped-write.txt");
+      await writeFile(outsideMarker, "do-not-read-outside-worktree", "utf8");
+
+      const evidence = {
+        hostOs: process.platform,
+        nodeVersion: process.version,
+        confinementMode: "acp-permission-policy" as const,
+      };
+      expect(evidence.confinementMode).toBe("acp-permission-policy");
+
+      // ACP permission policy blocks direct paths, file:// URIs, redirects, and
+      // commands targeting the disposable outside marker.
+      expect(decision({ path: outsideMarker }, root).allow).toBe(false);
+      expect(decision({ uri: `file://${outsideMarker}` }, root).allow).toBe(false);
+      expect(decision({ command: `cat ${outsideMarker}` }, root).allow).toBe(false);
+      expect(decision({ command: `echo pwn > ${outsideWrite}` }, root).allow).toBe(false);
+      expect(await readFile(outsideMarker, "utf8")).toBe("do-not-read-outside-worktree");
+
+      // Deterministic child spawned with sanitizeAcpEnv cannot see host ORRERY_*
+      // secrets while still receiving the scoped Dispatch token.
+      const childEnv = sanitizeAcpEnv(
+        {
+          ...process.env,
+          ORRERY_RUNNER_CONFIG_DIR: outsideDir,
+          ORRERY_ENCRYPTION_KEY: "host-secret",
+        },
+        { ORRERY_DISPATCH_TOKEN: "orr_dt_scoped" },
+      );
+      const probe = spawnSync(
+        process.execPath,
+        [
+          "-e",
+          "process.stdout.write(JSON.stringify({ cfg: process.env.ORRERY_RUNNER_CONFIG_DIR ?? null, key: process.env.ORRERY_ENCRYPTION_KEY ?? null, tok: process.env.ORRERY_DISPATCH_TOKEN ?? null }))",
+        ],
+        { cwd: root, env: childEnv, encoding: "utf8" },
+      );
+      expect(probe.status).toBe(0);
+      expect(JSON.parse(probe.stdout)).toEqual({
+        cfg: null,
+        key: null,
+        tok: "orr_dt_scoped",
+      });
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
 });

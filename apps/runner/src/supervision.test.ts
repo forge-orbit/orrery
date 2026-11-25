@@ -344,6 +344,28 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
     expect(new Set(branches).size).toBe(2);
   });
 
+  it("re-reports live attempts with spool cursors after a transient disconnect", async () => {
+    const fixture = await makeFixture({ mode: "chunk-hang" });
+    fixture.control.enqueueDispatch("TEST-RECONNECT", "attempt-reconnect");
+    await until(() => (sessions(fixture)[0]?.status ?? "active") === "active");
+    await until(() => fixture.control.chunks().length > 0);
+
+    const before = fixture.control.reconnectCalls;
+    fixture.control.transientHeartbeatFailures = 1;
+    await until(
+      () =>
+        fixture.control.reconnectCalls > before &&
+        fixture.control.reconnectAttempts.some(
+          (attempt) => attempt.dispatchAttemptId === "attempt-reconnect",
+        ),
+    );
+    const attempt = fixture.control.reconnectAttempts.find(
+      (item) => item.dispatchAttemptId === "attempt-reconnect",
+    );
+    expect(attempt).toBeDefined();
+    expect(attempt?.lastSeq).toBeGreaterThan(0);
+  });
+
   it("drains a disconnected slot before shutdown completes", async () => {
     const fixture = await makeFixture({ mode: "ignore-term", cancelGraceMs: 80 });
     fixture.control.enqueueDispatch("TEST-13", "attempt-13");
