@@ -44,7 +44,19 @@ import {
   type UpdateProjectLabelRequest,
   type UpdateProjectRequest,
 } from "@orrery/contract";
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DbTransaction } from "../../platform/db.ts";
@@ -60,6 +72,7 @@ import {
   issueLinks,
   issues,
   knowledgeEntries,
+  notifications,
   projectAccessEvents,
   projectAccessGrants,
   projectActivity,
@@ -68,6 +81,10 @@ import {
   projects,
   questions,
   runnerDispatches,
+  runners,
+  storedObjects,
+  webhookProjects,
+  workspaceInvitationGrants,
   workspaceMemberships,
   workspaceEvents,
   workspaces,
@@ -3073,32 +3090,107 @@ export function createProjectsService({
 
     async purgeExpiredTrash() {
       return db.transaction(async (tx) => {
-        const expired = await tx
-          .select({ id: issues.id })
-          .from(issues)
+        const expiredProjects = await tx
+          .select({
+            id: projects.id,
+            deletedAt: projects.deletedAt,
+            deletedByHumanId: projects.deletedByHumanId,
+          })
+          .from(projects)
           .where(
             and(
-              isNotNull(issues.deletedAt),
-              isNull(issues.purgedAt),
-              sql`${issues.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+              isNotNull(projects.deletedAt),
+              isNull(projects.purgedAt),
+              sql`${projects.deletedAt} <= ${THIRTY_DAYS_AGO}`,
             ),
           )
+          .orderBy(projects.id)
+          .for("update", { skipLocked: true });
+        const expiredProjectIds = expiredProjects.map((row) => row.id);
+        const projectIssueRows =
+          expiredProjectIds.length === 0
+            ? []
+            : await tx
+                .select({ id: issues.id, purgedAt: issues.purgedAt })
+                .from(issues)
+                .where(inArray(issues.projectId, expiredProjectIds))
+                .orderBy(issues.id)
+                .for("update");
+        const projectIssueIds = projectIssueRows.map((row) => row.id);
+        const projectKnowledgeRows =
+          expiredProjectIds.length === 0
+            ? []
+            : await tx
+                .select({ id: knowledgeEntries.id, purgedAt: knowledgeEntries.purgedAt })
+                .from(knowledgeEntries)
+                .where(inArray(knowledgeEntries.projectId, expiredProjectIds))
+                .orderBy(knowledgeEntries.id)
+                .for("update");
+        const projectKnowledgeIds = projectKnowledgeRows.map((row) => row.id);
+
+        if (expiredProjectIds.length > 0) {
+          await tx
+            .update(issues)
+            .set({
+              deletedAt: sql`coalesce(${issues.deletedAt}, ${projects.deletedAt})`,
+              deletedByHumanId: sql`coalesce(${issues.deletedByHumanId}, ${projects.deletedByHumanId})`,
+            })
+            .from(projects)
+            .where(
+              and(
+                eq(issues.projectId, projects.id),
+                inArray(projects.id, expiredProjectIds),
+                isNull(issues.deletedAt),
+              ),
+            );
+          await tx
+            .update(knowledgeEntries)
+            .set({
+              deletedAt: sql`coalesce(${knowledgeEntries.deletedAt}, ${projects.deletedAt})`,
+              deletedByHumanId: sql`coalesce(${knowledgeEntries.deletedByHumanId}, ${projects.deletedByHumanId})`,
+            })
+            .from(projects)
+            .where(
+              and(
+                eq(knowledgeEntries.projectId, projects.id),
+                inArray(projects.id, expiredProjectIds),
+                isNull(knowledgeEntries.deletedAt),
+              ),
+            );
+        }
+
+        const issueExpiryPredicates = [
+          isNotNull(issues.deletedAt),
+          isNull(issues.purgedAt),
+          sql`${issues.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+        ];
+        if (expiredProjectIds.length > 0) {
+          issueExpiryPredicates.push(notInArray(issues.projectId, expiredProjectIds));
+        }
+        const expired = await tx
+          .select({ id: issues.id, purgedAt: issues.purgedAt })
+          .from(issues)
+          .where(and(...issueExpiryPredicates))
           .orderBy(issues.id)
           .for("update", { skipLocked: true });
         const expiredIds = expired.map((row) => row.id);
+        const knowledgeExpiryPredicates = [
+          isNotNull(knowledgeEntries.deletedAt),
+          isNull(knowledgeEntries.purgedAt),
+          sql`${knowledgeEntries.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+        ];
+        if (expiredProjectIds.length > 0) {
+          knowledgeExpiryPredicates.push(notInArray(knowledgeEntries.projectId, expiredProjectIds));
+        }
         const expiredKnowledge = await tx
-          .select({ id: knowledgeEntries.id })
+          .select({ id: knowledgeEntries.id, purgedAt: knowledgeEntries.purgedAt })
           .from(knowledgeEntries)
-          .where(
-            and(
-              isNotNull(knowledgeEntries.deletedAt),
-              isNull(knowledgeEntries.purgedAt),
-              sql`${knowledgeEntries.deletedAt} <= ${THIRTY_DAYS_AGO}`,
-            ),
-          )
+          .where(and(...knowledgeExpiryPredicates))
           .orderBy(knowledgeEntries.id)
           .for("update", { skipLocked: true });
         const expiredKnowledgeIds = expiredKnowledge.map((row) => row.id);
+        const issueIdsToScrub = [...new Set([...projectIssueIds, ...expiredIds])].toSorted();
+        const knowledgeIdsToScrub = [...new Set([...projectKnowledgeIds, ...expiredKnowledgeIds])];
         // Collect every holder across the whole batch before locking any
         // attachment row: a per-issue purge could lock B from issue 1 then A
         // from issue 2 (A < B) and AB-BA deadlock against a save. One batch call
@@ -3107,30 +3199,33 @@ export function createProjectsService({
           holderType: "issue" | "comment" | "knowledge";
           holderId: string;
         }[] = [];
-        if (expiredIds.length > 0) {
+        if (issueIdsToScrub.length > 0) {
           // Comments are hard-deleted, so collect their holder ids before the
           // rows vanish. References from both the issue and its comments have to
           // be dropped before the zero-reference check.
           const comments = await tx
             .select({ id: issueComments.id })
             .from(issueComments)
-            .where(inArray(issueComments.issueId, expiredIds));
-          await tx.delete(issueComments).where(inArray(issueComments.issueId, expiredIds));
+            .where(inArray(issueComments.issueId, issueIdsToScrub));
+          await tx.delete(issueComments).where(inArray(issueComments.issueId, issueIdsToScrub));
           attachmentHolders.push(
-            ...expiredIds.map((issueId) => ({ holderType: "issue" as const, holderId: issueId })),
+            ...issueIdsToScrub.map((issueId) => ({
+              holderType: "issue" as const,
+              holderId: issueId,
+            })),
             ...comments.map((comment) => ({
               holderType: "comment" as const,
               holderId: comment.id,
             })),
           );
-          await tx.delete(issueLinks).where(inArray(issueLinks.issueId, expiredIds));
-          await tx.delete(issueLabels).where(inArray(issueLabels.issueId, expiredIds));
+          await tx.delete(issueLinks).where(inArray(issueLinks.issueId, issueIdsToScrub));
+          await tx.delete(issueLabels).where(inArray(issueLabels.issueId, issueIdsToScrub));
           await tx
             .delete(issueDependencies)
             .where(
               or(
-                inArray(issueDependencies.issueId, expiredIds),
-                inArray(issueDependencies.blockedByIssueId, expiredIds),
+                inArray(issueDependencies.issueId, issueIdsToScrub),
+                inArray(issueDependencies.blockedByIssueId, issueIdsToScrub),
               ),
             );
           await tx
@@ -3141,15 +3236,15 @@ export function createProjectsService({
               parentIssueId: null,
               assigneeType: null,
               assigneeId: null,
-              purgedAt: sql`statement_timestamp()`,
+              purgedAt: sql`coalesce(${issues.purgedAt}, statement_timestamp())`,
             })
-            .where(inArray(issues.id, expiredIds));
+            .where(inArray(issues.id, issueIdsToScrub));
         }
-        if (expiredKnowledgeIds.length > 0) {
+        if (knowledgeIdsToScrub.length > 0) {
           // Knowledge entries keep their attachment references while in Trash so a
           // restore stays whole; the references drop here, at purge.
           attachmentHolders.push(
-            ...expiredKnowledgeIds.map((entryId) => ({
+            ...knowledgeIdsToScrub.map((entryId) => ({
               holderType: "knowledge" as const,
               holderId: entryId,
             })),
@@ -3159,21 +3254,113 @@ export function createProjectsService({
             .set({
               title: "[deleted]",
               body: "",
-              purgedAt: sql`statement_timestamp()`,
+              purgedAt: sql`coalesce(${knowledgeEntries.purgedAt}, statement_timestamp())`,
             })
-            .where(inArray(knowledgeEntries.id, expiredKnowledgeIds));
+            .where(inArray(knowledgeEntries.id, knowledgeIdsToScrub));
         }
-        if (attachmentSeams !== undefined && attachmentHolders.length > 0) {
-          await attachmentSeams.purgeHolders(tx, attachmentHolders);
+        let releasedStreamObjectIds: string[] = [];
+        if (expiredProjectIds.length > 0) {
+          const projectSessions = await tx
+            .select({ id: workSessions.id, streamObjectId: workSessions.streamObjectId })
+            .from(workSessions)
+            .innerJoin(issues, eq(issues.id, workSessions.issueId))
+            .where(
+              and(
+                inArray(issues.projectId, expiredProjectIds),
+                isNotNull(workSessions.streamObjectId),
+              ),
+            )
+            .orderBy(workSessions.id)
+            .for("update", { of: workSessions });
+          const sessionIds = projectSessions.map((session) => session.id);
+          const streamObjectIds = [
+            ...new Set(projectSessions.flatMap((session) => session.streamObjectId ?? [])),
+          ];
+          if (sessionIds.length > 0) {
+            await tx
+              .update(workSessions)
+              .set({ streamObjectId: null, updatedAt: sql`statement_timestamp()` })
+              .where(inArray(workSessions.id, sessionIds));
+          }
+          if (streamObjectIds.length > 0) {
+            const stillReferenced = await tx
+              .selectDistinct({ id: workSessions.streamObjectId })
+              .from(workSessions)
+              .where(inArray(workSessions.streamObjectId, streamObjectIds));
+            const retainedIds = new Set(
+              stillReferenced.flatMap((row) => (row.id === null ? [] : [row.id])),
+            );
+            releasedStreamObjectIds = streamObjectIds.filter((id) => !retainedIds.has(id));
+          }
         }
 
-        if (expiredIds.length > 0) {
+        // Sessions are locked and detached before the attachment seam takes its
+        // one ascending-id lock pass. Only after both families are complete do
+        // we lock and mark their released stored_objects together.
+        const releasedAttachmentObjectIds =
+          attachmentSeams === undefined
+            ? []
+            : await attachmentSeams.purgeForTrash(tx, attachmentHolders, expiredProjectIds);
+        const releasedObjectIds = [
+          ...new Set([...releasedStreamObjectIds, ...releasedAttachmentObjectIds]),
+        ].toSorted();
+        if (releasedObjectIds.length > 0) {
+          await tx
+            .select({ id: storedObjects.id })
+            .from(storedObjects)
+            .where(inArray(storedObjects.id, releasedObjectIds))
+            .orderBy(storedObjects.id)
+            .for("update");
+          await tx
+            .update(storedObjects)
+            .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
+            .where(
+              and(inArray(storedObjects.id, releasedObjectIds), eq(storedObjects.status, "active")),
+            );
+        }
+
+        if (expiredProjectIds.length > 0) {
+          await tx
+            .delete(projectAccessGrants)
+            .where(inArray(projectAccessGrants.projectId, expiredProjectIds));
+          await tx
+            .delete(workspaceInvitationGrants)
+            .where(inArray(workspaceInvitationGrants.projectId, expiredProjectIds));
+          await tx
+            .delete(agentApiKeyProjects)
+            .where(inArray(agentApiKeyProjects.projectId, expiredProjectIds));
+          await tx.delete(projectLabels).where(inArray(projectLabels.projectId, expiredProjectIds));
+          await tx
+            .delete(projectTransferAuthorizations)
+            .where(inArray(projectTransferAuthorizations.projectId, expiredProjectIds));
+          await tx
+            .delete(webhookProjects)
+            .where(inArray(webhookProjects.projectId, expiredProjectIds));
+          await tx.delete(runners).where(inArray(runners.projectId, expiredProjectIds));
+          await tx.delete(notifications).where(inArray(notifications.projectId, expiredProjectIds));
+          await tx
+            .update(projects)
+            .set({
+              name: "[deleted]",
+              description: "",
+              purgedAt: sql`statement_timestamp()`,
+            })
+            .where(inArray(projects.id, expiredProjectIds));
+        }
+
+        if (issueIdsToScrub.length > 0) {
           await tx
             .update(issues)
             .set({ parentIssueId: null })
-            .where(inArray(issues.parentIssueId, expiredIds));
+            .where(inArray(issues.parentIssueId, issueIdsToScrub));
         }
-        return expired.length + expiredKnowledge.length;
+        return (
+          expiredProjects.length +
+          projectIssueRows.filter((row) => row.purgedAt === null).length +
+          expired.length +
+          projectKnowledgeRows.filter((row) => row.purgedAt === null).length +
+          expiredKnowledge.length
+        );
       });
     },
 

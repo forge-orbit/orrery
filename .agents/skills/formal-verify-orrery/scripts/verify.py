@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Orrery Formal Verification Model Checker (M1-M47).
+Orrery Formal Verification Model Checker (M1-M48).
 
 Extracts critical concurrency, locking, and state-transition guards directly from
 Orrery's server source and SQL migrations, then runs an exhaustive BFS finite-state
@@ -2561,6 +2561,170 @@ def extract_code_facts() -> dict[str, Any]:
         for tool in ('"delete_project"', '"restore_project"', '"list_project_trash"')
     )
 
+    # M48 (#252): automatic project purge and storage release. These facts stay
+    # inside purgeExpiredTrash and the owning attachments/object-sweep services.
+    purge_project_fn = slice_between(
+        proj_src, "async purgeExpiredTrash()", "async listMentionCandidates("
+    )
+    attachment_src = read_text("apps/server/src/features/attachments/service.ts")
+    attachment_project_purge_fn = slice_between(
+        attachment_src, "async purgeForTrash(tx, holders, projectIds)", "async sweepUnreferenced()"
+    )
+    object_sweep_src = read_text("apps/server/src/platform/object-sweep.ts")
+    m48_project_due = ordered(
+        purge_project_fn,
+        "isNotNull(projects.deletedAt)",
+        "isNull(projects.purgedAt)",
+        "projects.deletedAt} <= ${THIRTY_DAYS_AGO",
+    )
+    m48_project_lock = ordered(
+        purge_project_fn,
+        ".orderBy(projects.id)",
+        '.for("update", { skipLocked: true })',
+    )
+    m48_project_transaction = "return db.transaction(async (tx)" in purge_project_fn
+    m48_issue_child_lock = ordered(
+        purge_project_fn,
+        "const projectIssueRows",
+        ".orderBy(issues.id)",
+        '.for("update")',
+    )
+    m48_knowledge_child_lock = ordered(
+        purge_project_fn,
+        "const projectKnowledgeRows",
+        ".orderBy(knowledgeEntries.id)",
+        '.for("update")',
+    )
+    m48_issue_backfill = (
+        "deletedAt: sql`coalesce(${issues.deletedAt}, ${projects.deletedAt})`" in purge_project_fn
+        and "deletedByHumanId: sql`coalesce(${issues.deletedByHumanId}, ${projects.deletedByHumanId})`"
+        in purge_project_fn
+        and "isNull(issues.deletedAt)" in purge_project_fn
+        and ".from(projects)" in purge_project_fn
+    )
+    m48_knowledge_backfill = (
+        "deletedAt: sql`coalesce(${knowledgeEntries.deletedAt}, ${projects.deletedAt})`"
+        in purge_project_fn
+        and "deletedByHumanId: sql`coalesce(${knowledgeEntries.deletedByHumanId}, ${projects.deletedByHumanId})`"
+        in purge_project_fn
+        and "isNull(knowledgeEntries.deletedAt)" in purge_project_fn
+        and ".from(projects)" in purge_project_fn
+    )
+    m48_backfill_before_scrub = ordered(
+        purge_project_fn,
+        "deletedAt: sql`coalesce(${issues.deletedAt}, ${projects.deletedAt})`",
+        "deletedAt: sql`coalesce(${knowledgeEntries.deletedAt}, ${projects.deletedAt})`",
+        'title: "[deleted]"',
+    )
+    m48_issue_scrub = (
+        "delete(issueComments)" in purge_project_fn
+        and "delete(issueLinks)" in purge_project_fn
+        and "delete(issueLabels)" in purge_project_fn
+        and "delete(issueDependencies)" in purge_project_fn
+        and 'title: "[deleted]"' in purge_project_fn
+        and 'body: ""' in purge_project_fn
+        and "parentIssueId: null" in purge_project_fn
+        and "assigneeType: null" in purge_project_fn
+        and "assigneeId: null" in purge_project_fn
+        and "coalesce(${issues.purgedAt}, statement_timestamp())" in purge_project_fn
+        and "delete(issues)" not in purge_project_fn
+    )
+    m48_knowledge_scrub = (
+        'title: "[deleted]"' in purge_project_fn
+        and 'body: ""' in purge_project_fn
+        and "coalesce(${knowledgeEntries.purgedAt}, statement_timestamp())" in purge_project_fn
+        and "delete(knowledgeEntries)" not in purge_project_fn
+    )
+    m48_project_scrub = (
+        'name: "[deleted]"' in purge_project_fn
+        and 'description: ""' in purge_project_fn
+        and "purgedAt: sql`statement_timestamp()`" in purge_project_fn
+        and "projects.deletedAt" not in purge_project_fn.split('name: "[deleted]"', 1)[-1]
+    )
+    m48_attachment_holders = (
+        "attachmentSeams.purgeForTrash(" in purge_project_fn
+        and "attachmentHolders" in purge_project_fn
+        and "expiredProjectIds" in purge_project_fn
+        and ordered(
+            purge_project_fn,
+            '.for("update", { of: workSessions })',
+            "streamObjectId: null",
+            "attachmentSeams.purgeForTrash(",
+        )
+    )
+    m48_attachment_rows = (
+        "targetConditions.push(inArray(attachments.projectId, projectIds))"
+        in attachment_project_purge_fn
+        and "targetConditions.push(or(...conditions))" in attachment_project_purge_fn
+        and ".where(or(...targetConditions))" in attachment_project_purge_fn
+        and ".orderBy(attachments.id)" in attachment_project_purge_fn
+        and '.for("update", { of: attachments })' in attachment_project_purge_fn
+        and attachment_project_purge_fn.count('.for("update"') == 1
+        and "tx.delete(attachments)" in attachment_project_purge_fn
+    )
+    m48_attachment_blob_status = (
+        ".update(storedObjects)" in purge_project_fn
+        and 'status: "deleted"' in purge_project_fn
+        and "update(storedObjects)" not in attachment_project_purge_fn
+        and ordered(
+            purge_project_fn,
+            "attachmentSeams.purgeForTrash(",
+            ".orderBy(storedObjects.id)",
+            '.for("update")',
+            ".update(storedObjects)",
+        )
+    )
+    m48_stream_reference_release = (
+        "inArray(issues.projectId, expiredProjectIds)" in purge_project_fn
+        and ".orderBy(workSessions.id)" in purge_project_fn
+        and '.for("update", { of: workSessions })' in purge_project_fn
+        and "streamObjectId: null" in purge_project_fn
+        and ordered(
+            purge_project_fn,
+            '.for("update", { of: workSessions })',
+            "streamObjectId: null",
+            "attachmentSeams.purgeForTrash(",
+        )
+    )
+    m48_stream_object_status = (
+        "inArray(storedObjects.id, releasedObjectIds)" in purge_project_fn
+        and "releasedStreamObjectIds" in purge_project_fn
+        and "releasedAttachmentObjectIds" in purge_project_fn
+        and 'status: "deleted"' in purge_project_fn
+        and "selectDistinct({ id: workSessions.streamObjectId })" in purge_project_fn
+        and ".orderBy(storedObjects.id)" in purge_project_fn
+    )
+    m48_object_sweeper = (
+        'eq(storedObjects.status, "deleted")' in object_sweep_src
+        and "await store.delete(row.key)" in object_sweep_src
+    )
+    m48_operational_cleanup = all(
+        f"delete({table})" in purge_project_fn
+        for table in (
+            "projectAccessGrants",
+            "workspaceInvitationGrants",
+            "agentApiKeyProjects",
+            "projectLabels",
+            "projectTransferAuthorizations",
+            "webhookProjects",
+            "runners",
+            "notifications",
+        )
+    )
+    m48_audit_retention = all(
+        f"delete({table})" not in purge_project_fn
+        for table in ("projectActivity", "projectAccessEvents", "workspaceEvents")
+    )
+    m48_independent_item_window = (
+        "sql`${issues.deletedAt} <= ${THIRTY_DAYS_AGO}`" in purge_project_fn
+        and "sql`${knowledgeEntries.deletedAt} <= ${THIRTY_DAYS_AGO}`" in purge_project_fn
+        and ".for(\"update\", { skipLocked: true })" in purge_project_fn
+    )
+    m48_project_children_excluded = (
+        "notInArray(issues.projectId, expiredProjectIds)" in purge_project_fn
+        and "notInArray(knowledgeEntries.projectId, expiredProjectIds)" in purge_project_fn
+    )
+
     # M33 (#99): cross-workspace My work access boundaries.
     my_work_src = read_text("apps/server/src/features/my-work/service.ts")
     my_work_rest = read_text("apps/server/src/features/my-work/rest.ts")
@@ -2880,7 +3044,7 @@ def extract_code_facts() -> dict[str, Any]:
         att_src, "async syncReferences(tx, input)", "async listMetadata(tx, holders)"
     )
     att_purge_fn = slice_between(
-        att_src, "async purgeHolders(tx, holders)", "async sweepUnreferenced()"
+        att_src, "async purgeForTrash(tx, holders, projectIds)", "async sweepUnreferenced()"
     )
     att_sweep_fn = att_src[att_src.index("async sweepUnreferenced()") :]
     att_reclaim_fn = slice_between(
@@ -2919,18 +3083,25 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m39_atomic_reclaim = (
         "reclaimMany(tx, rows)" in att_sweep_fn
-        and "await reclaimMany(tx," in att_purge_fn
-        and ".delete(attachments)" in att_reclaim_fn
-        and ".update(storedObjects)" in att_reclaim_fn
-        and 'status: "deleted"' in att_reclaim_fn
+        and "await tx.delete(attachments)" in att_purge_fn
+        and ".update(storedObjects)" in purge_fn
+        and '.orderBy(storedObjects.id)' in purge_fn
+        and 'status: "deleted"' in purge_fn
+        and ordered(
+            purge_fn,
+            "attachmentSeams.purgeForTrash(",
+            '.orderBy(storedObjects.id)',
+            '.for("update")',
+            ".update(storedObjects)",
+        )
     )
     m39_purge_issue_lock = '.for("update", { skipLocked: true })' in purge_fn
     m39_purge_holders = (
         '.for("update", { of: attachments })' in att_purge_fn
         and "await tx.delete(attachmentReferences)" in att_purge_fn
-        and "await reclaimMany(tx," in att_purge_fn
-        and "attachmentReferences.attachmentId" in att_reclaim_fn
-        and "attachmentSeams.purgeHolders(tx, attachmentHolders)" in purge_fn
+        and ".orderBy(attachments.id)" in att_purge_fn
+        and "attachmentReferences.attachmentId" in att_purge_fn
+        and "attachmentSeams.purgeForTrash(" in purge_fn
     )
     m39_sync_lock_union = (
         "[...new Set([...wanted, ...existingIds])].toSorted()" in att_sync_fn
@@ -2940,9 +3111,9 @@ def extract_code_facts() -> dict[str, Any]:
     m39_purge_single_batch = (
         "const attachmentHolders:" in purge_fn
         and "attachmentHolders.push(" in purge_fn
-        and purge_fn.count("attachmentSeams.purgeHolders(tx, attachmentHolders)") == 1
+        and purge_fn.count("attachmentSeams.purgeForTrash(") == 1
         and purge_fn.index("attachmentHolders.push(")
-        < purge_fn.index("attachmentSeams.purgeHolders(tx, attachmentHolders)")
+        < purge_fn.index("attachmentSeams.purgeForTrash(")
     )
     m39_knowledge_noop_metadata = (
         'unchanged.attachments = await metadataFor(tx, "knowledge", entryId);' in project_src
@@ -2954,9 +3125,9 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m39_holder_before_attachment = (
         project_src.count("await syncBody(tx, {") >= 5
-        and "attachmentSeams.purgeHolders(tx, attachmentHolders)" in purge_fn
+        and "attachmentSeams.purgeForTrash(" in purge_fn
         and purge_fn.index(".for(\"update\", { skipLocked: true })")
-        < purge_fn.index("attachmentSeams.purgeHolders(tx, attachmentHolders)")
+        < purge_fn.index("attachmentSeams.purgeForTrash(")
     )
     m39_metadata_rest_mcp = (
         "attachments: z.array(AttachmentMetadata)" in contract_project_src
@@ -4182,6 +4353,29 @@ def extract_code_facts() -> dict[str, Any]:
         "m47_activity_contract": m47_activity_contract,
         "m47_http_contract": m47_http_contract,
         "m47_no_project_lifecycle_mcp": m47_no_project_lifecycle_mcp,
+
+        # M48 (#252): automatic project purge, child timer preservation, and blob release.
+        "m48_project_due": m48_project_due,
+        "m48_project_lock": m48_project_lock,
+        "m48_project_transaction": m48_project_transaction,
+        "m48_issue_child_lock": m48_issue_child_lock,
+        "m48_knowledge_child_lock": m48_knowledge_child_lock,
+        "m48_issue_backfill": m48_issue_backfill,
+        "m48_knowledge_backfill": m48_knowledge_backfill,
+        "m48_backfill_before_scrub": m48_backfill_before_scrub,
+        "m48_issue_scrub": m48_issue_scrub,
+        "m48_knowledge_scrub": m48_knowledge_scrub,
+        "m48_project_scrub": m48_project_scrub,
+        "m48_attachment_holders": m48_attachment_holders,
+        "m48_attachment_rows": m48_attachment_rows,
+        "m48_attachment_blob_status": m48_attachment_blob_status,
+        "m48_stream_reference_release": m48_stream_reference_release,
+        "m48_stream_object_status": m48_stream_object_status,
+        "m48_object_sweeper": m48_object_sweeper,
+        "m48_operational_cleanup": m48_operational_cleanup,
+        "m48_audit_retention": m48_audit_retention,
+        "m48_independent_item_window": m48_independent_item_window,
+        "m48_project_children_excluded": m48_project_children_excluded,
     }
 
 
@@ -10598,6 +10792,384 @@ def check_m47(facts: dict[str, Any]) -> CheckResult:
     )
 
 
+def check_m48(facts: dict[str, Any]) -> CheckResult:
+    """#252: project purge, independent child timers, and storage release.
+
+    Each purge transaction is atomic in this bounded model. Source guards pin
+    the documented projects -> holders -> work_sessions -> attachments ->
+    stored_objects order, with one sorted attachment pass and one final sorted
+    object pass. Real-Postgres tests exercise CHECK constraints, FK cleanup, and
+    SKIP LOCKED; the model explores retention, competing workers, and guard loss.
+    """
+    files = [
+        "apps/server/src/features/projects/service.ts",
+        "apps/server/src/features/attachments/service.ts",
+        "apps/server/src/features/attachments/index.ts",
+        "apps/server/src/features/index.ts",
+        "apps/server/src/platform/object-sweep.ts",
+        "apps/server/src/db/schema.ts",
+    ]
+    g = {k: v for k, v in facts.items() if k.startswith("m48_")}
+    guard_violations = {
+        "project_eligibility": {
+            "m48_project_due": "project was purged before its 30-day window",
+        },
+        "project_locking": {
+            "m48_project_lock": "concurrent purge workers both acquired the same project",
+        },
+        "transaction": {
+            "m48_project_transaction": "project content and cleanup were not committed atomically",
+        },
+        "child_locks": {
+            "m48_issue_child_lock": "project issue children were not locked in ID order",
+            "m48_knowledge_child_lock": "project knowledge children were not locked in ID order",
+        },
+        "child_backfill": {
+            "m48_issue_backfill": "active issue reached purged_at without deleted_at and deleted_by_human_id",
+            "m48_knowledge_backfill": "active knowledge reached purged_at without deleted_at and deleted_by_human_id",
+            "m48_backfill_before_scrub": "child CHECK backfill did not happen before tombstone scrubbing",
+        },
+        "child_scrub": {
+            "m48_issue_scrub": "issue content or its comments, links, labels, or dependencies survived purge",
+            "m48_knowledge_scrub": "knowledge content survived purge",
+            "m48_project_scrub": "project mutable content was not scrubbed in place",
+        },
+        "attachments": {
+            "m48_attachment_holders": "project attachment holders or unreferenced attachments survived purge",
+            "m48_attachment_rows": "project attachment rows and references survived purge",
+            "m48_attachment_blob_status": "project attachment blobs were not queued for the object sweep",
+        },
+        "session_stream": {
+            "m48_stream_reference_release": "work-session stream reference survived project purge",
+            "m48_stream_object_status": "session stream blob was not queued after its last reference dropped",
+            "m48_object_sweeper": "object-storage sweep did not reclaim a deleted stream or attachment blob",
+        },
+        "operational_rows": {
+            "m48_operational_cleanup": "non-audit project operational rows survived purge",
+        },
+        "audit_rows": {
+            "m48_audit_retention": "project purge removed retained audit history",
+        },
+        "independent_timers": {
+            "m48_independent_item_window": "expired issue or knowledge did not purge on its own timer",
+            "m48_project_children_excluded": "project children were counted in both independent and project purge paths",
+        },
+    }
+    if set().union(*(set(guards) for guards in guard_violations.values())) != set(g):
+        raise ValueError("M48 guard mapping must cover each extracted source fact exactly once")
+    guard_action = {guard: action for action, guards in guard_violations.items() for guard in guards}
+
+    # Item tuple: (deleted day or None, deleting actor or None, purged, content scrubbed).
+    fields = (
+        "day",
+        "project_purged",
+        "project_scrubbed",
+        "key_reserved",
+        "issues",
+        "knowledge",
+        "operational_rows",
+        "attachment_refs",
+        "attachment_rows",
+        "attachment_blob",
+        "stream_ref",
+        "stream_blob",
+        "audits",
+        "owners",
+        "skips",
+        "violations",
+    )
+    old_trashed = (-31, "human:original", False, False)
+    recent_trashed = (5, "human:original", False, False)
+    active_child = (None, None, False, False)
+    initial = (
+        10,
+        False,
+        False,
+        True,
+        (old_trashed, recent_trashed, active_child),
+        (old_trashed, recent_trashed, active_child),
+        True,
+        True,
+        True,
+        "active",
+        True,
+        "active",
+        True,
+        frozenset(),
+        frozenset(),
+        frozenset(),
+    )
+
+    def unpack(state):
+        return dict(zip(fields, state, strict=True))
+
+    def pack(state, **changes):
+        current = unpack(state)
+        current.update(changes)
+        return tuple(current[name] for name in fields)
+
+    def scrub_items(items, actor, backfill, scrub, violations):
+        result = []
+        for deleted_day, deleted_actor, purged, scrubbed in items:
+            if deleted_day is None and backfill:
+                deleted_day, deleted_actor = 0, actor
+            if deleted_day is None:
+                violations.add("active child purged without a CHECK-safe deleted actor pair")
+            result.append(
+                (deleted_day, deleted_actor, True if scrub else purged, True if scrub else scrubbed)
+            )
+        return tuple(result)
+
+    def run(check_id: str) -> CheckResult:
+        def transitions(state):
+            current = unpack(state)
+            out = []
+
+            if current["day"] == 10:
+                out.append(("database time advances to project day 30", pack(state, day=30)))
+            elif current["day"] == 30:
+                out.append(("database time advances to project day 31", pack(state, day=31)))
+
+            if not current["project_purged"] and not current["owners"]:
+                old_issues = list(current["issues"])
+                old_knowledge = list(current["knowledge"])
+                due = []
+                for kind, items in (("issue", old_issues), ("knowledge", old_knowledge)):
+                    for index, item in enumerate(items):
+                        deleted_day, _actor, purged, scrubbed = item
+                        if deleted_day is not None and current["day"] - deleted_day >= 30 and not purged:
+                            due.append((kind, index))
+                            if g["m48_independent_item_window"] and g[
+                                "m48_issue_scrub" if kind == "issue" else "m48_knowledge_scrub"
+                            ]:
+                                items[index] = (deleted_day, item[1], True, True)
+                if due:
+                    violations = set(current["violations"])
+                    if not g["m48_independent_item_window"]:
+                        violations.add(
+                            guard_violations["independent_timers"]["m48_independent_item_window"]
+                        )
+                    if not g["m48_issue_scrub"] and any(kind == "issue" for kind, _ in due):
+                        violations.add(guard_violations["child_scrub"]["m48_issue_scrub"])
+                    if not g["m48_knowledge_scrub"] and any(kind == "knowledge" for kind, _ in due):
+                        violations.add(guard_violations["child_scrub"]["m48_knowledge_scrub"])
+                    out.append(
+                        (
+                            "shared sweep purges independently expired issue and knowledge rows",
+                            pack(
+                                state,
+                                issues=tuple(old_issues),
+                                knowledge=tuple(old_knowledge),
+                                violations=frozenset(violations),
+                            ),
+                        )
+                    )
+
+            # Workers claim eligible projects in the source's deterministic row order.
+            # An occupied row is skipped, while a missing lock permits both workers in.
+            if not current["project_purged"] and (
+                current["day"] >= 30 or not g["m48_project_due"]
+            ):
+                for worker in ("worker-1", "worker-2"):
+                    if worker in current["owners"]:
+                        continue
+                    if current["owners"] and g["m48_project_lock"]:
+                        skip = (worker, tuple(sorted(current["owners"])))
+                        if skip not in current["skips"]:
+                            out.append(
+                                (
+                                    f"{worker} uses SKIP LOCKED for the claimed project",
+                                    pack(state, skips=current["skips"] | {skip}),
+                                )
+                            )
+                    else:
+                        owners = current["owners"] | {worker}
+                        out.append(
+                            (
+                                f"{worker} locks the expired project row",
+                                pack(state, owners=owners),
+                            )
+                        )
+
+            if current["owners"]:
+                for worker in sorted(current["owners"]):
+                    if current["day"] < 30 and g["m48_project_due"]:
+                        continue
+                    violations = set(current["violations"])
+                    for guard, action in guard_action.items():
+                        if not g[guard] and guard not in {
+                            "m48_project_lock",
+                            "m48_project_due",
+                            "m48_independent_item_window",
+                            "m48_object_sweeper",
+                        }:
+                            violations.add(guard_violations[action][guard])
+                    if not g["m48_project_due"]:
+                        violations.add(guard_violations["project_eligibility"]["m48_project_due"])
+                    if not g["m48_project_children_excluded"]:
+                        violations.add(
+                            guard_violations["independent_timers"]["m48_project_children_excluded"]
+                        )
+
+                    issues = scrub_items(
+                        current["issues"],
+                        "human:project-deleter",
+                        g["m48_issue_backfill"] and g["m48_backfill_before_scrub"],
+                        g["m48_issue_scrub"],
+                        violations,
+                    )
+                    knowledge = scrub_items(
+                        current["knowledge"],
+                        "human:project-deleter",
+                        g["m48_knowledge_backfill"] and g["m48_backfill_before_scrub"],
+                        g["m48_knowledge_scrub"],
+                        violations,
+                    )
+                    out.append(
+                        (
+                            f"{worker} commits the project purge transaction",
+                            pack(
+                                state,
+                                project_purged=g["m48_project_scrub"],
+                                project_scrubbed=g["m48_project_scrub"],
+                                key_reserved=not g["m48_project_scrub"],
+                                issues=issues,
+                                knowledge=knowledge,
+                                operational_rows=not g["m48_operational_cleanup"],
+                                attachment_refs=not g["m48_attachment_holders"],
+                                attachment_rows=not g["m48_attachment_rows"],
+                                attachment_blob=(
+                                    "deleted"
+                                    if g["m48_attachment_rows"]
+                                    and g["m48_attachment_blob_status"]
+                                    else "active"
+                                ),
+                                stream_ref=not g["m48_stream_reference_release"],
+                                stream_blob=(
+                                    "deleted"
+                                    if g["m48_stream_reference_release"]
+                                    and g["m48_stream_object_status"]
+                                    else "active"
+                                ),
+                                audits=g["m48_audit_retention"],
+                                owners=frozenset(),
+                                violations=frozenset(violations),
+                            ),
+                        )
+                    )
+
+            if current["project_purged"]:
+                for object_field in ("attachment_blob", "stream_blob"):
+                    if current[object_field] == "deleted" and g["m48_object_sweeper"]:
+                        out.append(
+                            (
+                                f"object-storage sweep reclaims {object_field.replace('_blob', '')}",
+                                pack(state, **{object_field: "reclaimed"}),
+                            )
+                        )
+                    elif current[object_field] == "deleted" and not g["m48_object_sweeper"]:
+                        violations = set(current["violations"])
+                        violations.add(guard_violations["session_stream"]["m48_object_sweeper"])
+                        out.append(
+                            (
+                                "object-storage sweep fails to reclaim a released blob",
+                                pack(state, violations=frozenset(violations)),
+                            )
+                        )
+            return out
+
+        def invariant(state):
+            current = unpack(state)
+            if current["violations"]:
+                return False, "project purge invariant broken: " + sorted(current["violations"])[0]
+            if len(current["owners"]) > 1:
+                return False, "concurrent purge workers both acquired the same project row"
+            if current["project_purged"] and current["day"] < 30:
+                return False, "project was purged before its 30-day recovery window ended"
+            if not current["project_purged"] and not current["key_reserved"]:
+                return False, "project key became reusable before project purge committed"
+            if current["project_purged"]:
+                if not current["project_scrubbed"] or current["key_reserved"]:
+                    return False, "purged project content or project key state is inconsistent"
+                if current["operational_rows"]:
+                    return False, "non-audit project operational rows survived purge"
+                if current["attachment_refs"] or current["attachment_rows"]:
+                    return False, "project attachment holders survived purge"
+                if current["attachment_blob"] == "active":
+                    return False, "project attachment blob was not marked for object sweeping"
+                if current["stream_ref"] or current["stream_blob"] == "active":
+                    return False, "work-session stream reference or blob survived project purge"
+                if not current["audits"]:
+                    return False, "project activity, access, or workspace audit was removed"
+                for kind in ("issues", "knowledge"):
+                    for item in current[kind]:
+                        deleted_day, actor, purged, scrubbed = item
+                        if deleted_day is None or actor is None or not purged or not scrubbed:
+                            return False, f"project {kind} child was not a CHECK-safe scrubbed tombstone"
+            for kind in ("issues", "knowledge"):
+                for deleted_day, actor, purged, scrubbed in current[kind]:
+                    if purged and (deleted_day is None or actor is None or not scrubbed):
+                        return False, f"{kind} purged tombstone lost its deletion pair or content scrub"
+            if current["attachment_blob"] == "reclaimed" and (
+                current["attachment_refs"] or current["attachment_rows"]
+            ):
+                return False, "object sweep reclaimed an attachment that still had a holder"
+            if current["stream_blob"] == "reclaimed" and current["stream_ref"]:
+                return False, "object sweep reclaimed a stream still referenced by a session"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Automatic Project Trash Purge and Blob Release (#252)",
+            "Expired projects are purged once after 30 days; active children are CHECK-safe tombstones, previously trashed children keep their own timers, project keys and operational rows are released, session and attachment locks precede one final sorted stored_objects pass, and audit rows remain",
+            "safety",
+            initial,
+            transitions,
+            invariant,
+            files,
+            max_states=50000,
+        )
+
+    result = run("M48")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M48-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M48",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M48",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -10649,6 +11221,7 @@ def main() -> None:
         check_m45(facts),
         check_m46(facts),
         check_m47(facts),
+        check_m48(facts),
     ]
 
     if "--json" in sys.argv:
