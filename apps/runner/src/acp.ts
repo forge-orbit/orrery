@@ -300,7 +300,20 @@ export class AcpStdioClient {
       if (record.error !== undefined) {
         const error = asRecord(record.error);
         const detail = typeof error?.message === "string" ? error.message : "error";
-        pending.reject(new Error(`ACP ${detail}`));
+        const data = asRecord(error?.data);
+        const extra =
+          typeof data?.details === "string" && data.details.trim() !== ""
+            ? data.details.trim()
+            : typeof data?.message === "string" && data.message.trim() !== ""
+              ? data.message.trim()
+              : typeof error?.data === "string" && error.data.trim() !== ""
+                ? error.data.trim()
+                : undefined;
+        pending.reject(
+          new Error(
+            extra !== undefined && extra !== detail ? `ACP ${detail} (${extra})` : `ACP ${detail}`,
+          ),
+        );
       } else {
         pending.resolve(record.result);
       }

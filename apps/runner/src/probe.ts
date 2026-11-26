@@ -128,6 +128,31 @@ const isEffortOption = (id: string, name: string): boolean =>
 
 const isModelOption = (id: string, name: string): boolean => id === "model" || /model/i.test(name);
 
+/** Active model id advertised by a `session/new` (or switch) result, in any ACP dialect. */
+export function activeSessionModel(sessionResult: unknown): string | undefined {
+  const session = recordOf(sessionResult);
+  if (session === undefined) return undefined;
+  const models = recordOf(session.models);
+  const direct =
+    stringOf(models?.currentModelId) ?? stringOf(models?.currentModel) ?? stringOf(models?.current);
+  if (direct !== undefined) return direct;
+  for (const raw of list(session.configOptions)) {
+    const option = recordOf(raw);
+    if (option === undefined) continue;
+    const id = stringOf(option.id) ?? stringOf(option.configId);
+    const name = stringOf(option.name) ?? stringOf(option.description) ?? "";
+    if (id === undefined || !isModelOption(id, name)) continue;
+    const state = recordOf(option.state);
+    const value =
+      stringOf(state?.currentValue) ??
+      stringOf(state?.current) ??
+      stringOf(option.currentValue) ??
+      stringOf(option.current);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
 type EffortChoice = { values: string[]; default: string | undefined };
 
 /**

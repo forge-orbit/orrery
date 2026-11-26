@@ -17,7 +17,7 @@ import {
   type HarnessDefinition,
 } from "./harnesses.ts";
 import { McpAuthError, RunnerMcpClient } from "./mcp-client.ts";
-import { effortConfigIds } from "./probe.ts";
+import { activeSessionModel, effortConfigIds } from "./probe.ts";
 import {
   createStreamSpool,
   mainRepositoryRoot,
@@ -395,7 +395,10 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       try {
         if (cancelledAlready) throw new Error("dispatch cancelled during ACP start");
         let modelSwitchResult: unknown;
-        if (requestedModel !== undefined) {
+        if (
+          requestedModel !== undefined &&
+          activeSessionModel(client.sessionResult) !== requestedModel
+        ) {
           try {
             modelSwitchResult = await client.setModel(requestedModel);
           } catch (error) {

@@ -481,6 +481,9 @@ function handle(message: Record<string, unknown>): void {
             rejected || rejectModel.size > 0
               ? `unknown model ${typeof modelId === "string" ? modelId : ""}`
               : "unsupported session/set_model",
+          ...(rejected || rejectModel.size > 0
+            ? { data: { details: "model_switch_cancelled" } }
+            : {}),
         },
       });
       return;

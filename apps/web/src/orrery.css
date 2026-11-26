@@ -272,6 +272,10 @@ a[data-color="primary"]:hover {
   color: var(--orrery-accent);
 }
 
+[data-delegate-dialog] [role="listbox"][aria-label="Model"] {
+  max-height: min(14.5rem, calc(100dvh - 1rem));
+}
+
 @media (max-width: 40rem) {
   [data-access-layout] {
     display: block;

@@ -743,8 +743,34 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
       .chunks()
       .find((chunk) => chunk.kind === "diagnostic")?.diagnostic;
     expect(diagnostic).toMatchObject({ kind: "model_rejected", model: "stub-deep" });
+    expect(diagnostic?.message).toContain("model_switch_cancelled");
     // The Harness did spawn before rejecting the model.
     expect((await events(fixture)).some((item) => item.event === "session/new")).toBe(true);
+  });
+
+  it("skips redundant setModel when session/new is already on the requested model", async () => {
+    const fixture = await makeFixture({ mode: "normal", rejectModel: "stub-model-1" });
+    fixture.control.enqueueDispatch("TEST-241-ALREADY-ACTIVE", undefined, {
+      harness: "custom",
+      model: "stub-model-1",
+      effort: "high",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const recorded = await events(fixture);
+    const modelSets = recorded.filter(
+      (item) =>
+        item.event === "set_model" ||
+        (item.event === "set_config_option" && item.configId === "model"),
+    );
+    expect(modelSets).toHaveLength(0);
+    // Effort still applies from session/new's advertised configOptions.
+    expect(
+      recorded.find(
+        (item) => item.event === "set_config_option" && item.configId === "thought_level",
+      )?.value,
+    ).toBe("high");
   });
 
   it("omits unsupported effort with a warning chunk and keeps the turn alive", async () => {

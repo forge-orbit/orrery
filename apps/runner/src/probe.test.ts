@@ -6,6 +6,7 @@ import { EMPTY_HARNESS_CATALOG, type HarnessCatalog } from "@orrery/contract";
 import { afterEach, describe, expect, it } from "vitest";
 import { catalogWithProbedModel, probeModel } from "./catalog.ts";
 import { harnessLockKey, HarnessLocks, type HarnessDefinition } from "./harnesses.ts";
+import { activeSessionModel } from "./probe.ts";
 
 const stubPath = fileURLToPath(new URL("./stub-acp.ts", import.meta.url));
 const definition: HarnessDefinition = {
@@ -237,5 +238,22 @@ describe("per-Harness lock identity (#241/#242)", () => {
     ]);
     expect(order.indexOf("alias:start")).toBeGreaterThan(order.indexOf("first:end"));
     expect(order.indexOf("unrelated:start")).toBeLessThan(order.indexOf("first:end"));
+  });
+});
+
+describe("activeSessionModel", () => {
+  it("reads models.currentModelId and falls back to model configOptions", () => {
+    expect(activeSessionModel({ models: { currentModelId: "hermes/default" } })).toBe(
+      "hermes/default",
+    );
+    expect(
+      activeSessionModel({
+        configOptions: [{ id: "model", name: "Model", currentValue: "opencode-go:kimi" }],
+      }),
+    ).toBe("opencode-go:kimi");
+    expect(
+      activeSessionModel({ configOptions: [{ id: "reasoning_effort", currentValue: "high" }] }),
+    ).toBeUndefined();
+    expect(activeSessionModel(undefined)).toBeUndefined();
   });
 });

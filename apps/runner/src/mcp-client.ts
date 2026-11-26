@@ -133,9 +133,12 @@ export class RunnerMcpClient {
       });
     }
     if (response.status === 401 || response.status === 403) {
+      const body = (await response.text().catch(() => "")).trim().slice(0, 200);
       throw new McpAuthError(
         response.status,
-        `Orrery rejected the Dispatch token (${response.status}).`,
+        body === ""
+          ? `Orrery rejected the Dispatch token (${response.status}).`
+          : `Orrery rejected the Dispatch token (${response.status}): ${body}`,
       );
     }
     if (!response.ok) {
