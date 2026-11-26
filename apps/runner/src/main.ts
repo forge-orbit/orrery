@@ -50,6 +50,10 @@ Options:
   --workspace SLUG-OR-ID    Disambiguate an issue key (work)
   --prompt TEXT             Optional instructions appended after the runner's
                             preamble (work; max 16,000 characters)
+  --harness ID              Local Harness id for dispatches without a choice
+                            (start/work; e.g. opencode, codex)
+  --model ID                Default model for dispatches without one (start/work)
+  --effort LEVEL            Default reasoning effort (start/work; e.g. high)
   --acp-command NAME        ACP harness command (default: opencode; env: ORRERY_ACP_COMMAND)
   --acp-arg ARG             ACP harness argument, repeatable (default: acp)
   --lease-renew-ms N        Work-session lease renewal interval (default: 60000)
@@ -68,6 +72,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       "poll-ms": { type: "string" },
       workspace: { type: "string" },
       prompt: { type: "string" },
+      harness: { type: "string" },
+      model: { type: "string" },
+      effort: { type: "string" },
       project: { type: "string" },
       agent: { type: "string" },
       name: { type: "string" },
@@ -108,6 +115,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     const cancelGraceMs = positive(values["cancel-grace-ms"], "--cancel-grace-ms");
     return loadSupervisionConfig({
       ...(Object.keys(acp).length === 0 ? {} : { acp }),
+      ...(values.harness === undefined ? {} : { harness: values.harness }),
+      ...(values.model === undefined ? {} : { model: values.model }),
+      ...(values.effort === undefined ? {} : { effort: values.effort }),
       ...(leaseRenewMs === undefined ? {} : { leaseRenewMs }),
       ...(cancelGraceMs === undefined ? {} : { cancelGraceMs }),
       ...(values["worktree-root"] === undefined ? {} : { worktreeRoot: values["worktree-root"] }),
@@ -176,6 +186,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           ...(values.repo === undefined ? {} : { repoPath: values.repo }),
           ...(values.agent === undefined ? {} : { agentId: values.agent }),
           ...(values.prompt === undefined ? {} : { prompt: values.prompt }),
+          ...(values.harness === undefined ? {} : { harness: values.harness }),
+          ...(values.model === undefined ? {} : { model: values.model }),
+          ...(values.effort === undefined ? {} : { effort: values.effort }),
           signal: controller.signal,
           supervision: supervision(),
         });

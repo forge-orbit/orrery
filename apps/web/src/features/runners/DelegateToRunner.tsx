@@ -9,14 +9,20 @@ import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useToast } from "@astryxdesign/core/Toast";
-import { MAX_DISPATCH_PROMPT_LENGTH, type Dispatch } from "@orrery/contract";
+import {
+  MAX_DISPATCH_PROMPT_LENGTH,
+  type Dispatch,
+  type HarnessCatalogEntry,
+} from "@orrery/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
 import { useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
+import { HarnessBadge, HarnessLogo, resolveHarnessKind } from "../../lib/harness.tsx";
 import { Link } from "../../lib/Link.tsx";
 import { formatCompactDateTime } from "../../lib/time.ts";
 import { createDispatch } from "./commands.ts";
+import { harnessDisplayName } from "./dispatchOptions.ts";
 import {
   issueDispatchesQuery,
   workspaceRunnersQuery,
@@ -35,14 +41,22 @@ const stateLabels: Record<Dispatch["state"], string> = {
   ended: "Ended",
 };
 
+/**
+ * Last-used execution choices per project (issue #241): the remembered Runner,
+ * Harness, model, effort and Agent. Every field is optional so an older saved
+ * value cannot break the modal.
+ */
 interface DelegateMemory {
   runnerId: string;
+  harness: string;
+  model: string;
+  effort: string;
   agentId: string;
 }
 
 const memoryKey = (projectId: string) => `orrery.delegate.${projectId}`;
 
-/** Last-used (runnerId, agentId) per project, best-effort; localStorage may be unavailable. */
+/** Last-used (runnerId, harness, model, effort, agentId); localStorage may be unavailable. */
 function readDelegateMemory(projectId: string): DelegateMemory | undefined {
   try {
     const raw = window.localStorage.getItem(memoryKey(projectId));
@@ -50,9 +64,18 @@ function readDelegateMemory(projectId: string): DelegateMemory | undefined {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return undefined;
     const runnerId = Reflect.get(parsed, "runnerId");
-    const agentId = Reflect.get(parsed, "agentId");
     if (typeof runnerId !== "string" || runnerId === "") return undefined;
-    return { runnerId, agentId: typeof agentId === "string" ? agentId : "" };
+    const field = (key: string): string => {
+      const value = Reflect.get(parsed, key);
+      return typeof value === "string" ? value : "";
+    };
+    return {
+      runnerId,
+      harness: field("harness"),
+      model: field("model"),
+      effort: field("effort"),
+      agentId: field("agentId"),
+    };
   } catch {
     return undefined;
   }
@@ -65,6 +88,27 @@ function writeDelegateMemory(projectId: string, memory: DelegateMemory): void {
     // A private window or full quota must never block delegating.
   }
 }
+
+/** The model a fresh Harness selection starts on: its default, else the first. */
+function defaultModelId(harness: HarnessCatalogEntry | undefined): string {
+  if (harness === undefined) return "";
+  if (
+    harness.defaultModel !== null &&
+    harness.models.some((model) => model.id === harness.defaultModel)
+  ) {
+    return harness.defaultModel;
+  }
+  return harness.models[0]?.id ?? "";
+}
+
+/** Harness logos in Selector options; an unknown id falls back to its label. */
+function harnessIcon(harnessId: string) {
+  const kind = resolveHarnessKind(harnessId);
+  return kind === null ? undefined : <HarnessLogo kind={kind} size={14} />;
+}
+
+const effortLabel = (level: string): string =>
+  level === "" ? level : `${level.charAt(0).toUpperCase()}${level.slice(1)}`;
 
 /** Manual, owner-only issue dispatch from the issue detail page. */
 export function DelegateToRunner({
@@ -93,10 +137,14 @@ export function DelegateToRunner({
   // Explicit user overrides. Undefined means "no choice yet", so a cold open
   // never clears a remembered choice while the fleet query is still loading.
   const [runnerOverride, setRunnerOverride] = useState<string | undefined>(undefined);
+  const [harnessOverride, setHarnessOverride] = useState<string | undefined>(undefined);
+  const [modelOverride, setModelOverride] = useState<string | undefined>(undefined);
+  const [effortOverride, setEffortOverride] = useState<string | undefined>(undefined);
   const [agentOverride, setAgentOverride] = useState<string | undefined>(undefined);
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string>();
 
+  const allRunners = (fleet?.hosts ?? []).flatMap((host) => host.runners);
   const owned = (fleet?.hosts ?? [])
     .filter((host) => host.canRevoke)
     .flatMap((host) => host.runners)
@@ -107,15 +155,56 @@ export function DelegateToRunner({
         runner.revokedAt === null,
     );
 
-  // Validate the remembered choice against live data on every render. Until
-  // the fleet resolves there is nothing to validate against, so the remembered
-  // id survives a cold open and is applied as soon as data is present.
+  // Validate remembered choices against live data on every render. Until the
+  // fleet resolves there is nothing to validate against, so remembered values
+  // survive a cold open and are applied as soon as data is present.
   const memory = readDelegateMemory(projectId);
   const rememberedRunner =
     fleet === undefined || memory === undefined
       ? undefined
       : owned.find((runner) => runner.id === memory.runnerId);
   const runnerId = runnerOverride ?? rememberedRunner?.id ?? "";
+  const selectedRunner = owned.find((runner) => runner.id === runnerId);
+  const harnessCatalog = selectedRunner?.harnessCatalog?.harnesses ?? [];
+  const memoryApplies =
+    runnerOverride === undefined && rememberedRunner !== undefined && memory !== undefined;
+  const matchedMemoryHarness = memoryApplies
+    ? harnessCatalog.find((entry) => entry.id === memory.harness)
+    : undefined;
+  const rawHarnessId =
+    harnessOverride ??
+    (memoryApplies ? (matchedMemoryHarness?.id ?? harnessCatalog[0]?.id ?? "") : "");
+  const selectedHarness = harnessCatalog.find((entry) => entry.id === rawHarnessId);
+  // Validate manual harnessOverride against the live catalog so a background
+  // refetch that drops the chosen Harness never submits a vanished id.
+  const harnessId = selectedHarness?.id ?? "";
+  // Only a remembered Harness that still exists may restore the remembered
+  // model; a fallback Harness always starts on its own default model.
+  const matchedMemoryModel =
+    harnessOverride === undefined && matchedMemoryHarness !== undefined && memory !== undefined
+      ? matchedMemoryHarness.models.find((entry) => entry.id === memory.model)
+      : undefined;
+  const rawModelId =
+    modelOverride ??
+    (harnessOverride === undefined && memoryApplies
+      ? (matchedMemoryModel?.id ?? defaultModelId(selectedHarness))
+      : "");
+  const selectedModel = selectedHarness?.models.find((entry) => entry.id === rawModelId);
+  const modelId = selectedModel?.id ?? "";
+  const supportedEfforts = selectedModel?.supportedEfforts ?? [];
+  // Effort is only restored when both the Harness and the Model matched;
+  // a stale effort from a previous model is never sent with another.
+  const rememberedEffort =
+    harnessOverride === undefined &&
+    modelOverride === undefined &&
+    matchedMemoryHarness !== undefined &&
+    matchedMemoryModel !== undefined &&
+    memory !== undefined &&
+    supportedEfforts.includes(memory.effort)
+      ? memory.effort
+      : "";
+  const rawEffort = effortOverride ?? rememberedEffort;
+  const effectiveEffort = supportedEfforts.includes(rawEffort) ? rawEffort : "";
   const agentId =
     agentOverride ??
     (rememberedRunner !== undefined &&
@@ -124,10 +213,35 @@ export function DelegateToRunner({
       ? memory.agentId
       : "");
 
+  function chooseRunner(value: string | null) {
+    const id = value ?? "";
+    setRunnerOverride(id);
+    const next = owned.find((runner) => runner.id === id)?.harnessCatalog?.harnesses[0];
+    setHarnessOverride(next?.id ?? "");
+    setModelOverride(defaultModelId(next));
+    setEffortOverride("");
+  }
+
+  function chooseHarness(value: string | null) {
+    const id = value ?? "";
+    setHarnessOverride(id);
+    setModelOverride(defaultModelId(harnessCatalog.find((entry) => entry.id === id)));
+    setEffortOverride("");
+  }
+
+  function chooseModel(value: string | null) {
+    setModelOverride(value ?? "");
+    // Never carry the previous model's effort onto this one.
+    setEffortOverride("");
+  }
+
   function openDialog() {
-    // Prompt always starts blank; the Runner and Agent come from the derived
-    // choice above, so a click before the fleet settles cannot reset them.
+    // Prompt always starts blank; selections come from the derived memory
+    // above, so a click before the fleet settles cannot reset them.
     setRunnerOverride(undefined);
+    setHarnessOverride(undefined);
+    setModelOverride(undefined);
+    setEffortOverride(undefined);
     setAgentOverride(undefined);
     setPrompt("");
     setError(undefined);
@@ -139,11 +253,20 @@ export function DelegateToRunner({
       createDispatch(issueId, {
         runnerId,
         ...(agentId === "" ? {} : { agentId }),
+        ...(harnessId === "" ? {} : { harness: harnessId }),
+        ...(modelId === "" ? {} : { model: modelId }),
+        ...(effectiveEffort === "" ? {} : { effort: effectiveEffort }),
         ...(prompt.trim() === "" ? {} : { prompt: prompt.trim() }),
       }),
     onSuccess: async (dispatch) => {
       setError(undefined);
-      writeDelegateMemory(projectId, { runnerId, agentId });
+      writeDelegateMemory(projectId, {
+        runnerId,
+        harness: harnessId,
+        model: modelId,
+        effort: effectiveEffort,
+        agentId,
+      });
       toast({
         body: `Delegated to ${owned.find((runner) => runner.id === dispatch.runnerId)?.displayName ?? "Runner"}.`,
       });
@@ -157,11 +280,13 @@ export function DelegateToRunner({
       setError(
         cause instanceof ApiProblemError && cause.code === "issue_not_claimable"
           ? "This issue is not claimable by that Agent (check its assignee and status)."
-          : cause instanceof ApiProblemError && cause.code === "validation_failed"
-            ? "The prompt is too long (16,000 characters max)."
-            : cause instanceof Error
-              ? cause.message
-              : "The issue could not be delegated.",
+          : cause instanceof ApiProblemError && cause.code === "harness_unavailable"
+            ? "That Harness is no longer available on this Runner. Reopen the dialog to refresh its catalog."
+            : cause instanceof ApiProblemError && cause.code === "validation_failed"
+              ? "The prompt is too long (16,000 characters max)."
+              : cause instanceof Error
+                ? cause.message
+                : "The issue could not be delegated.",
       );
     },
   });
@@ -229,7 +354,7 @@ export function DelegateToRunner({
                       label: `${runner.displayName} · ${runner.presence}`,
                     }))}
                     value={runnerId}
-                    onChange={setRunnerOverride}
+                    onChange={chooseRunner}
                     isDisabled={owned.length === 0 || mutation.isPending}
                   />
                   <Selector
@@ -242,6 +367,63 @@ export function DelegateToRunner({
                     hasClear
                     isDisabled={mutation.isPending}
                   />
+                  <Selector
+                    label="Harness"
+                    isOptional
+                    placeholder={
+                      selectedRunner === undefined
+                        ? "Choose a Runner first"
+                        : harnessCatalog.length === 0
+                          ? "Use the Runner's default Harness"
+                          : "Choose a Harness"
+                    }
+                    options={harnessCatalog.map((entry) => ({
+                      value: entry.id,
+                      label: entry.displayName,
+                      icon: harnessIcon(entry.id),
+                    }))}
+                    value={harnessId}
+                    onChange={chooseHarness}
+                    hasClear
+                    isDisabled={selectedRunner === undefined || mutation.isPending}
+                    data-delegate-harness=""
+                  />
+                  <Selector
+                    label="Model"
+                    isOptional
+                    placeholder={
+                      selectedHarness === undefined
+                        ? "Choose a Harness first"
+                        : selectedHarness.models.length === 0
+                          ? "Use the Harness default model"
+                          : "Choose a model"
+                    }
+                    options={(selectedHarness?.models ?? []).map((model) => ({
+                      value: model.id,
+                      label: model.label ?? model.id,
+                    }))}
+                    value={modelId}
+                    onChange={chooseModel}
+                    hasClear
+                    isDisabled={selectedHarness === undefined || mutation.isPending}
+                    data-delegate-model=""
+                  />
+                  {supportedEfforts.length > 0 && (
+                    <Selector
+                      label="Effort"
+                      isOptional
+                      placeholder="Use the model default effort"
+                      options={supportedEfforts.map((level) => ({
+                        value: level,
+                        label: effortLabel(level),
+                      }))}
+                      value={effectiveEffort}
+                      onChange={(value) => setEffortOverride(value ?? "")}
+                      hasClear
+                      isDisabled={mutation.isPending}
+                      data-delegate-effort=""
+                    />
+                  )}
                   <TextArea
                     label="Prompt / Instructions"
                     isOptional
@@ -297,6 +479,35 @@ export function DelegateToRunner({
                   ? ` · ${formatCompactDateTime(dispatch.acceptedAt)}`
                   : ""}
               </Text>
+              {(dispatch.harness !== null ||
+                dispatch.model !== null ||
+                dispatch.effort !== null) && (
+                <Stack
+                  direction="horizontal"
+                  gap={2}
+                  vAlign="center"
+                  wrap="wrap"
+                  data-dispatch-options=""
+                >
+                  <HarnessBadge
+                    harness={harnessDisplayName(
+                      allRunners.find((runner) => runner.id === dispatch.runnerId),
+                      dispatch.harness,
+                    )}
+                    empty="Runner default"
+                  />
+                  {dispatch.model !== null && (
+                    <Text type="supporting" color="secondary">
+                      {dispatch.model}
+                    </Text>
+                  )}
+                  {dispatch.effort !== null && (
+                    <Text type="supporting" color="secondary">
+                      {dispatch.effort} effort
+                    </Text>
+                  )}
+                </Stack>
+              )}
               <Link
                 to="/live/$runnerId/$dispatchId"
                 params={{ runnerId: dispatch.runnerId, dispatchId: dispatch.id }}

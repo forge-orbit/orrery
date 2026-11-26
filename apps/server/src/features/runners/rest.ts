@@ -567,6 +567,7 @@ const statusFor = {
   runner_forbidden: 403,
   runner_unavailable: 409,
   runner_not_for_issue: 409,
+  harness_unavailable: 409,
   catalog_too_large: 400,
   insufficient_dispatch_access: 403,
   dispatch_not_found: 404,

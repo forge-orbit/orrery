@@ -1690,6 +1690,12 @@ export const runnerDispatches = pgTable(
     dispatchAttemptId: text("dispatch_attempt_id").notNull(),
     /** Optional requester steering text, appended by the Runner after its preamble. */
     prompt: text("prompt"),
+    /** Chosen Harness id (issue #241); null means the Runner's local default. */
+    harness: text("harness"),
+    /** Chosen model id; null means the Harness's cached default is passed. */
+    model: text("model"),
+    /** Chosen reasoning effort; null means no effort override. */
+    effort: text("effort"),
     state: text("state").$type<DispatchState>().notNull().default("pending"),
     runId: text("run_id").references(() => runs.id),
     workSessionId: text("work_session_id").references(() => workSessions.id),
@@ -1720,6 +1726,12 @@ export const runnerDispatches = pgTable(
     check(
       "runner_dispatches_prompt_bounded",
       sql`${t.prompt} is null or char_length(${t.prompt}) <= 16000`,
+    ),
+    check(
+      "runner_dispatches_options_bounded",
+      sql`(${t.harness} is null or char_length(${t.harness}) between 1 and 64)
+          and (${t.model} is null or char_length(${t.model}) between 1 and 200)
+          and (${t.effort} is null or char_length(${t.effort}) between 1 and 64)`,
     ),
     check(
       "runner_dispatches_accepted_fields",

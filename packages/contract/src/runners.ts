@@ -362,6 +362,60 @@ export const DispatchState = z
   .meta({ id: "DispatchState" });
 export type DispatchState = z.infer<typeof DispatchState>;
 
+/**
+ * Per-dispatch execution options (issue #241). The Runner is the authority for
+ * what `harness`, `model` and `effort` mean locally: the server only carries
+ * opaque ids it validated against that Runner's published Harness catalog.
+ */
+export const DispatchHarness = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .meta({ id: "DispatchHarness" });
+export type DispatchHarness = z.infer<typeof DispatchHarness>;
+
+export const NullableDispatchHarness = DispatchHarness.nullable().meta({
+  id: "NullableDispatchHarness",
+});
+
+export const DispatchModel = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .meta({ id: "DispatchModel" });
+export type DispatchModel = z.infer<typeof DispatchModel>;
+
+export const NullableDispatchModel = DispatchModel.nullable().meta({
+  id: "NullableDispatchModel",
+});
+
+export const DispatchEffort = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .meta({ id: "DispatchEffort" });
+export type DispatchEffort = z.infer<typeof DispatchEffort>;
+
+export const NullableDispatchEffort = DispatchEffort.nullable().meta({
+  id: "NullableDispatchEffort",
+});
+
+/**
+ * Optional per-dispatch execution options. One shape shared by every request,
+ * command payload and local Runner default so the data clump cannot drift.
+ */
+export const DispatchOptions = z
+  .object({
+    harness: DispatchHarness.optional(),
+    model: DispatchModel.optional(),
+    effort: DispatchEffort.optional(),
+  })
+  .meta({ id: "DispatchOptions" });
+export type DispatchOptions = z.infer<typeof DispatchOptions>;
+
 /** Thin delivery bridge; it never changes the issue's assignee. */
 export const Dispatch = z
   .object({
@@ -376,6 +430,12 @@ export const Dispatch = z
     dispatchAttemptId: DispatchAttemptId,
     state: DispatchState,
     prompt: NullableDispatchPrompt,
+    /** The chosen Harness id, or null when the Runner's local default applies. */
+    harness: NullableDispatchHarness,
+    /** The chosen model id, or null when the Harness default is passed explicitly. */
+    model: NullableDispatchModel,
+    /** The chosen reasoning effort, or null when effort was not requested. */
+    effort: NullableDispatchEffort,
     runId: z.string().nullable(),
     workSessionId: z.string().nullable(),
     lastUpSeq: z.int().min(0),
@@ -395,6 +455,7 @@ export const CreateDispatchRequest = z
     agentId: z.string().min(1).max(200).optional(),
     prompt: DispatchPrompt.optional(),
   })
+  .extend(DispatchOptions.shape)
   .meta({ id: "CreateDispatchRequest" });
 export type CreateDispatchRequest = z.infer<typeof CreateDispatchRequest>;
 
@@ -423,6 +484,7 @@ export const RunnerDispatchRequest = z
     issueId: z.string().min(1).max(200),
     prompt: DispatchPrompt.optional(),
   })
+  .extend(DispatchOptions.shape)
   .meta({ id: "RunnerDispatchRequest" });
 export type RunnerDispatchRequest = z.infer<typeof RunnerDispatchRequest>;
 
@@ -506,6 +568,7 @@ export const DispatchCommandPayload = z
     agentId: z.string(),
     prompt: DispatchPrompt.optional(),
   })
+  .extend(DispatchOptions.shape)
   .meta({ id: "DispatchCommandPayload" });
 export type DispatchCommandPayload = z.infer<typeof DispatchCommandPayload>;
 
@@ -608,6 +671,27 @@ export const AcpNotInstalledDiagnostic = z
   })
   .meta({ id: "AcpNotInstalledDiagnostic" });
 
+/** The Dispatch named a Harness this Runner does not have locally. */
+export const HarnessUnavailableDiagnostic = z
+  .object({
+    kind: z.literal("harness_unavailable"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    harness: z.string().min(1).max(64).optional(),
+  })
+  .meta({ id: "HarnessUnavailableDiagnostic" });
+
+/** The Harness rejected the requested model over ACP; the session was released. */
+export const ModelRejectedDiagnostic = z
+  .object({
+    kind: z.literal("model_rejected"),
+    version: diagnosticVersion,
+    message: z.string().min(1).max(2000),
+    harness: z.string().min(1).max(64).optional(),
+    model: z.string().min(1).max(200).optional(),
+  })
+  .meta({ id: "ModelRejectedDiagnostic" });
+
 export const AcpSpawnFailedDiagnostic = z
   .object({
     kind: z.literal("acp_spawn_failed"),
@@ -679,6 +763,8 @@ export const RunnerDisconnectedDiagnostic = z
 export const SessionDiagnostic = z
   .discriminatedUnion("kind", [
     AcpNotInstalledDiagnostic,
+    HarnessUnavailableDiagnostic,
+    ModelRejectedDiagnostic,
     AcpSpawnFailedDiagnostic,
     AcpCrashedDiagnostic,
     AuthExpiredDiagnostic,

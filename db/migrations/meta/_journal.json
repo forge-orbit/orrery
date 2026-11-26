@@ -435,6 +435,13 @@
       "when": 1795687266940,
       "tag": "0061_consolidate_harness_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795698559212,
+      "tag": "0062_sleepy_vampiro",
+      "breakpoints": true
     }
   ]
 }

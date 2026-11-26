@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import type { HarnessCatalog } from "@orrery/contract";
 import {
   Attachment,
   DeviceCodeResponse,
@@ -180,6 +181,22 @@ async function registerRunner(credential: string, agent = defaultAgentId) {
   return Runner.parse(await res.json());
 }
 
+async function registerRunnerWithCatalog(credential: string, catalog: HarnessCatalog) {
+  const res = await request("/api/runners/register", {
+    method: "POST",
+    body: {
+      workspaceId,
+      projectId,
+      agentId: defaultAgentId,
+      repoFingerprint: fingerprint,
+      harnessCatalog: catalog,
+    },
+    token: credential,
+  });
+  expect(res.status).toBe(201);
+  return Runner.parse(await res.json());
+}
+
 async function createIssue(title: string) {
   const res = await request(`/api/projects/${projectId}/issues`, {
     method: "POST",
@@ -237,16 +254,17 @@ type ToolResult = { structuredContent?: unknown; isError?: boolean };
 async function mcpTools(token: string) {
   const handlers = new Map<string, (args: unknown) => Promise<ToolResult>>();
   // The MCP SDK's registerTool signature is the only seam we need to observe.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- MCP SDK seam
   const server = {
     registerTool(name: string, _config: unknown, handler: (args: unknown) => Promise<ToolResult>) {
       handlers.set(name, handler);
     },
-  } as unknown as McpServer;
+  };
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- MCP SDK seam
+  const toolServer = server as unknown as McpServer;
   const bearerRequest = new Request(`${PUBLIC_URL}/mcp`, {
     headers: { authorization: `Bearer ${token}` },
   });
-  for (const feature of features) feature.registerTools?.(server, bearerRequest);
+  for (const feature of features) feature.registerTools?.(toolServer, bearerRequest);
   return handlers;
 }
 
@@ -598,6 +616,132 @@ describe("custom dispatch prompt (#239)", () => {
       404,
       "dispatch_not_found",
     );
+  });
+});
+
+const catalogWith = (catalogDefault: string): HarnessCatalog => {
+  const at = new Date().toISOString();
+  return {
+    harnesses: [
+      {
+        id: "opencode",
+        displayName: "OpenCode",
+        source: "preset",
+        defaultModel: catalogDefault,
+        models: [
+          {
+            id: catalogDefault,
+            label: "Catalog Model",
+            reasoningDiscovery: "known",
+            supportedEfforts: ["low", "medium", "high"],
+            defaultEffort: "medium",
+            probedAt: at,
+          },
+        ],
+        probedAt: at,
+      },
+    ],
+    probedAt: at,
+  };
+};
+
+describe("per-dispatch harness, model and effort (#241)", () => {
+  it("persists harness, model and effort on the dispatch and its outbox command", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunnerWithCatalog(host.credential, catalogWith("gpt-5"));
+    const issue = await createIssue("options dispatch");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, harness: "opencode", model: "gpt-5", effort: "high" },
+      cookie: adminCookie,
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch).toMatchObject({
+      harness: "opencode",
+      model: "gpt-5",
+      effort: "high",
+    });
+
+    const command = await dispatchCommand(dispatch.id);
+    expect(command.payload).toMatchObject({
+      harness: "opencode",
+      model: "gpt-5",
+      effort: "high",
+    });
+    const [row] = await database.db
+      .select()
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.id, dispatch.id));
+    expect(row).toMatchObject({ harness: "opencode", model: "gpt-5", effort: "high" });
+
+    // Project readers see the same choices through the single-dispatch endpoint.
+    const read = await request(`/api/runners/dispatches/${dispatch.id}`, { cookie: adminCookie });
+    expect(read.status).toBe(200);
+    expect(Dispatch.parse(await read.json())).toMatchObject({
+      harness: "opencode",
+      model: "gpt-5",
+      effort: "high",
+    });
+  });
+
+  it("rejects an unpublished harness as Problem Details when the catalog is non-empty", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunnerWithCatalog(host.credential, catalogWith("gpt-5"));
+    const issue = await createIssue("unknown harness dispatch");
+    await expectProblem(
+      await request(`/api/issues/${issue.id}/dispatches`, {
+        method: "POST",
+        body: { runnerId: runner.id, harness: "server-says-run-this" },
+        cookie: adminCookie,
+      }),
+      409,
+      "harness_unavailable",
+    );
+    const rows = await database.db
+      .select({ id: runnerDispatches.id })
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.issueId, issue.id));
+    expect(rows).toEqual([]);
+  });
+
+  it("accepts any harness id before the Runner publishes a catalog", async () => {
+    const host = await enrollHost(adminCookie, "no-catalog-laptop");
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("catalogless dispatch");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, harness: "a-local-user-harness" },
+      cookie: adminCookie,
+    });
+    expect(created.status).toBe(201);
+    expect(Dispatch.parse(await created.json()).harness).toBe("a-local-user-harness");
+  });
+
+  it("records the chosen harness and model on the accepted Run", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunnerWithCatalog(host.credential, catalogWith("gpt-5"));
+    const issue = await createIssue("run options dispatch");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, harness: "opencode", model: "gpt-5", effort: "low" },
+      cookie: adminCookie,
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    const accepted = await request(`/api/runners/${runner.id}/dispatches/${dispatch.id}/accept`, {
+      method: "POST",
+      token: host.credential,
+    });
+    expect(accepted.status).toBe(200);
+    const acceptance = DispatchAcceptance.parse(await accepted.json());
+    expect(acceptance.run).toMatchObject({ harness: "opencode", model: "gpt-5" });
+
+    const [runRow] = await database.db
+      .select({ harness: runs.harness, model: runs.model })
+      .from(runs)
+      .where(eq(runs.id, acceptance.run.id));
+    expect(runRow).toEqual({ harness: "opencode", model: "gpt-5" });
   });
 });
 

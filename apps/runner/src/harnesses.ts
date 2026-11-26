@@ -144,3 +144,44 @@ export function detectHarnesses(options: HarnessDetectionOptions = {}): HarnessD
   }
   return detected;
 }
+
+/**
+ * Resolve a Dispatch's Harness id strictly against this Runner's local
+ * registry: the explicit `--acp-command` override, `~/.config/orrery/
+ * harnesses.json`, and installed presets. The server never sends a command, so
+ * an id outside this allowlist is reported as unavailable, never executed.
+ */
+export async function resolveHarness(
+  id: string,
+  override: { command: string; args: string[] } | undefined,
+  configDir = configDirectory(),
+): Promise<HarnessDefinition | undefined> {
+  return detectHarnesses({
+    ...(override === undefined ? {} : { acpOverride: override }),
+    configDir,
+  }).find((entry) => entry.id === id);
+}
+
+/**
+ * A lightweight per-Harness mutex. Catalog probes temporarily switch a
+ * Harness's default model, so a Dispatch for the same Harness must never spawn
+ * ACP until the probe has restored it (issue #241). Work in the callback runs
+ * in call order; a rejected callback never blocks later work.
+ */
+export class HarnessLocks {
+  private readonly tails = new Map<string, Promise<void>>();
+
+  run<T>(harnessId: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.tails.get(harnessId) ?? Promise.resolve();
+    const current = previous.then(work, work);
+    const tail = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.tails.set(harnessId, tail);
+    void tail.then(() => {
+      if (this.tails.get(harnessId) === tail) this.tails.delete(harnessId);
+    });
+    return current;
+  }
+}

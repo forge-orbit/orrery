@@ -257,6 +257,20 @@ export function diagnosticView(diagnostic: SessionDiagnostic, now = Date.now()):
         detail: diagnostic.message,
         hint: `Install ${diagnostic.harness ?? "the ACP harness"} on the Runner host, then restart the Runner.`,
       };
+    case "harness_unavailable":
+      return {
+        title: "Harness unavailable",
+        status: "error",
+        detail: diagnostic.message,
+        hint: `Install or enable ${diagnostic.harness ?? "that Harness"} on the Runner host, then dispatch again.`,
+      };
+    case "model_rejected":
+      return {
+        title: "Model rejected",
+        status: "error",
+        detail: diagnostic.message,
+        hint: "Pick a model the Harness advertises in the Delegate to Runner modal.",
+      };
     case "acp_spawn_failed":
       return {
         title: "Agent failed to start",

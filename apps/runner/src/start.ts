@@ -9,11 +9,12 @@ import {
   probeHarness,
   readCachedCatalog,
   runStartupCatalogProbe,
+  verifiedDefaultModel,
 } from "./catalog.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
-import { detectHarnesses, type HarnessDefinition } from "./harnesses.ts";
+import { detectHarnesses, HarnessLocks, type HarnessDefinition } from "./harnesses.ts";
 import { SlotPool, type SlotController } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
@@ -82,6 +83,9 @@ export async function start(options: StartOptions): Promise<void> {
     signal: controller.signal,
   });
   const supervision = options.supervision ?? loadSupervisionConfig();
+  // One lock instance for this process: probes and dispatches coordinate per
+  // Harness so a probe's temporary default-model switch never leaks (issue #241).
+  const locks = new HarnessLocks();
   const fingerprint = repoFingerprint(options.repoPath ?? process.cwd());
   const configKey = harnessConfigKey(
     supervision.acpOverridden ? { acpOverride: supervision.acp } : {},
@@ -132,6 +136,7 @@ export async function start(options: StartOptions): Promise<void> {
         previous: publisher.current,
         isAborted: () => controller.signal.aborted,
         write,
+        locks,
       });
     } catch (error) {
       if (!controller.signal.aborted) write(`Catalog publish failed: ${String(error)}`);
@@ -262,6 +267,10 @@ export async function start(options: StartOptions): Promise<void> {
               pool,
               signal: controller.signal,
               write,
+              locks,
+              // Read live from the publisher: a probe that finishes after
+              // registration updates the cached default model used here.
+              defaultModelFor: (harnessId) => verifiedDefaultModel(publisher.current, harnessId),
               onController: options.onController,
             });
             pending.add(running);

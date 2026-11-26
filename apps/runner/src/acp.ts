@@ -68,6 +68,8 @@ export class AcpStdioClient {
   private exitValue: AcpExit | undefined;
   /** Raw `initialize` result, captured for the catalog discovery parser. */
   initResult: unknown;
+  /** Raw `session/new` result, captured so effort options can be inspected. */
+  sessionResult: unknown;
   cancelSent = false;
   termSent = false;
   killSent = false;
@@ -224,6 +226,7 @@ export class AcpStdioClient {
     );
     const sessionId = asRecord(session)?.sessionId;
     this.sessionId = typeof sessionId === "string" ? sessionId : "";
+    this.sessionResult = session;
     return session;
   }
 
@@ -380,6 +383,41 @@ export class AcpStdioClient {
       sessionId: this.sessionId,
       prompt: [{ type: "text", text }],
     });
+  }
+
+  /**
+   * Apply the session model (issue #241). ACP v1 exposes model selection as the
+   * `model` config option; older adapters only implement the `session/set_model`
+   * extension, so that is the fallback. Returns the RPC result so callers can
+   * read updated post-switch `configOptions` for model-aware effort ids.
+   */
+  async setModel(modelId: string): Promise<unknown> {
+    try {
+      return await this.request("session/set_config_option", {
+        sessionId: this.sessionId,
+        configId: "model",
+        value: modelId,
+      });
+    } catch {
+      return await this.request("session/set_model", { sessionId: this.sessionId, modelId });
+    }
+  }
+
+  /**
+   * Apply a reasoning-effort config option. Returns false instead of throwing:
+   * an unsupported effort is non-fatal and the dispatch continues without it.
+   */
+  async setEffort(configId: string, effort: string): Promise<boolean> {
+    try {
+      await this.request("session/set_config_option", {
+        sessionId: this.sessionId,
+        configId,
+        value: effort,
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   sendCancel(): void {

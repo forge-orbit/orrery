@@ -6388,6 +6388,15 @@
           "prompt": {
             "$ref": "#/components/schemas/NullableDispatchPrompt"
           },
+          "harness": {
+            "$ref": "#/components/schemas/NullableDispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/NullableDispatchModel"
+          },
+          "effort": {
+            "$ref": "#/components/schemas/NullableDispatchEffort"
+          },
           "runId": {
             "type": [
               "string",
@@ -6459,6 +6468,9 @@
           "dispatchAttemptId",
           "state",
           "prompt",
+          "harness",
+          "model",
+          "effort",
           "runId",
           "workSessionId",
           "lastUpSeq",
@@ -6485,6 +6497,30 @@
           "null"
         ]
       },
+      "NullableDispatchHarness": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "NullableDispatchModel": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "NullableDispatchEffort": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "minLength": 1,
+        "maxLength": 64
+      },
       "CreateDispatchRequest": {
         "type": "object",
         "properties": {
@@ -6498,6 +6534,15 @@
           },
           "prompt": {
             "$ref": "#/components/schemas/DispatchPrompt"
+          },
+          "harness": {
+            "$ref": "#/components/schemas/DispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/DispatchModel"
+          },
+          "effort": {
+            "$ref": "#/components/schemas/DispatchEffort"
           }
         },
         "required": [
@@ -6506,6 +6551,21 @@
       },
       "DispatchPrompt": {
         "type": "string"
+      },
+      "DispatchHarness": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "DispatchModel": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "DispatchEffort": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
       },
       "IssueDispatchesResponse": {
         "type": "object",
@@ -6742,6 +6802,15 @@
           },
           "prompt": {
             "$ref": "#/components/schemas/DispatchPrompt"
+          },
+          "harness": {
+            "$ref": "#/components/schemas/DispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/DispatchModel"
+          },
+          "effort": {
+            "$ref": "#/components/schemas/DispatchEffort"
           }
         },
         "required": [
@@ -7029,6 +7098,12 @@
             "$ref": "#/components/schemas/AcpNotInstalledDiagnostic"
           },
           {
+            "$ref": "#/components/schemas/HarnessUnavailableDiagnostic"
+          },
+          {
+            "$ref": "#/components/schemas/ModelRejectedDiagnostic"
+          },
+          {
             "$ref": "#/components/schemas/AcpSpawnFailedDiagnostic"
           },
           {
@@ -7054,6 +7129,8 @@
           "propertyName": "kind",
           "mapping": {
             "acp_not_installed": "#/components/schemas/AcpNotInstalledDiagnostic",
+            "harness_unavailable": "#/components/schemas/HarnessUnavailableDiagnostic",
+            "model_rejected": "#/components/schemas/ModelRejectedDiagnostic",
             "acp_spawn_failed": "#/components/schemas/AcpSpawnFailedDiagnostic",
             "acp_crashed": "#/components/schemas/AcpCrashedDiagnostic",
             "auth_expired": "#/components/schemas/AuthExpiredDiagnostic",
@@ -7088,6 +7165,75 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message"
+        ]
+      },
+      "HarnessUnavailableDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "harness_unavailable"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "harness": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "message"
+        ]
+      },
+      "ModelRejectedDiagnostic": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "model_rejected"
+            ]
+          },
+          "version": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "harness": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
           }
         },
         "required": [
@@ -7390,6 +7536,15 @@
           },
           "prompt": {
             "$ref": "#/components/schemas/DispatchPrompt"
+          },
+          "harness": {
+            "$ref": "#/components/schemas/DispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/DispatchModel"
+          },
+          "effort": {
+            "$ref": "#/components/schemas/DispatchEffort"
           }
         },
         "required": [

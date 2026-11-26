@@ -131,6 +131,38 @@ const isModelOption = (id: string, name: string): boolean => id === "model" || /
 type EffortChoice = { values: string[]; default: string | undefined };
 
 /**
+ * Candidate config ids for applying a reasoning effort to one model, in
+ * preference order: the session's advertised effort option(s) scoped to that
+ * model, then any global effort option, then the two well-known ACP ids.
+ * Prefers the post-switch `setModel` response when it carries `configOptions`,
+ * falling back to the initial `session/new` response.
+ */
+export function effortConfigIds(
+  sessionResult: unknown,
+  modelId: string | undefined,
+  fallbackSessionResult?: unknown,
+): string[] {
+  const primary = list(recordOf(sessionResult)?.configOptions);
+  const options =
+    primary.length > 0 ? primary : list(recordOf(fallbackSessionResult)?.configOptions);
+  const ids: string[] = [];
+  for (const raw of options) {
+    const option = recordOf(raw);
+    if (option === undefined) continue;
+    const id = stringOf(option.id) ?? stringOf(option.configId);
+    const name = stringOf(option.name) ?? stringOf(option.description) ?? "";
+    if (id === undefined || !isEffortOption(id, name)) continue;
+    const scoped = stringOf(option.modelId) ?? stringOf(recordOf(option.scope)?.modelId);
+    if (scoped !== undefined && scoped !== modelId) continue;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  for (const fallback of ["thought_level", "reasoning_effort"]) {
+    if (!ids.includes(fallback)) ids.push(fallback);
+  }
+  return ids;
+}
+
+/**
  * `configOptions` on a `session/new` (or model-switch) result: one option may
  * carry the model list, and one (per model or global) the effort levels. An
  * effort option carrying a `modelId` scopes to that model only. An unscoped

@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import type { DispatchOptions } from "@orrery/contract";
 
 /** The local ACP harness the Runner supervises over stdio. */
 export interface AcpHarnessConfig {
@@ -11,6 +12,8 @@ export interface SupervisionConfig {
   acp: AcpHarnessConfig;
   /** True only when a CLI flag or env var explicitly replaced the ACP command/args. */
   acpOverridden: boolean;
+  /** `--harness`, `--model` and `--effort`: defaults for dispatches without overrides. */
+  defaults: DispatchOptions;
   /** Renew the five-minute work-session lease this often. */
   leaseRenewMs: number;
   /** Grace period before escalating SIGTERM to SIGKILL on cancel. */
@@ -19,7 +22,7 @@ export interface SupervisionConfig {
   worktreeRoot: string | undefined;
 }
 
-export interface SupervisionOverrides {
+export interface SupervisionOverrides extends DispatchOptions {
   acp?: Partial<AcpHarnessConfig> | undefined;
   leaseRenewMs?: number | undefined;
   cancelGraceMs?: number | undefined;
@@ -66,6 +69,11 @@ export function loadSupervisionConfig(
   return {
     acp: { command, args: [...args] },
     acpOverridden,
+    defaults: {
+      harness: overrides.harness,
+      model: overrides.model,
+      effort: overrides.effort,
+    },
     leaseRenewMs: positiveInt(
       overrides.leaseRenewMs ?? env.ORRERY_LEASE_RENEW_MS,
       "leaseRenewMs",

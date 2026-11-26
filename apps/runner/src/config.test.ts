@@ -7,6 +7,13 @@ describe("supervision config", () => {
     expect(config.acp).toEqual({ command: "opencode", args: ["acp"] });
     expect(config.leaseRenewMs).toBe(60_000);
     expect(config.cancelGraceMs).toBe(2_000);
+    expect(config.defaults).toEqual({ harness: undefined, model: undefined, effort: undefined });
+  });
+
+  it("keeps per-dispatch CLI defaults from --harness, --model and --effort", () => {
+    expect(
+      loadSupervisionConfig({ harness: "codex", model: "gpt-5", effort: "high" }, {}).defaults,
+    ).toEqual({ harness: "codex", model: "gpt-5", effort: "high" });
   });
 
   it("rejects zero, negative and non-integer timing overrides", () => {

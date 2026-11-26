@@ -8,6 +8,7 @@ import type {
   DeviceCodeResponse,
   Dispatch,
   DispatchAcceptance,
+  DispatchOptions,
   ExchangeDeviceCodeRequest,
   IssueResolveRequest,
   IssueResolveResponse,
@@ -139,6 +140,7 @@ export type RunnersErrorKind =
   | "runner_forbidden"
   | "runner_unavailable"
   | "runner_not_for_issue"
+  | "harness_unavailable"
   | "catalog_too_large"
   | "insufficient_dispatch_access"
   | "dispatch_not_found"
@@ -177,6 +179,7 @@ const messages: Record<RunnersErrorKind, string> = {
   runner_forbidden: "Only the human who owns this Runner host may dispatch to it.",
   runner_unavailable: "This Runner is offline or has no free slot.",
   runner_not_for_issue: "This Runner is not registered for the issue's project.",
+  harness_unavailable: "This Runner does not have the requested Harness.",
   catalog_too_large: "The published Harness catalog exceeds the 256 KiB limit.",
   insufficient_dispatch_access: "The Runner host owner needs Contribute access to dispatch here.",
   dispatch_not_found: "No such pending Dispatch exists for this Runner.",
@@ -470,6 +473,9 @@ const dispatchBaseFields = {
   dispatchAttemptId: runnerDispatches.dispatchAttemptId,
   state: runnerDispatches.state,
   prompt: runnerDispatches.prompt,
+  harness: runnerDispatches.harness,
+  model: runnerDispatches.model,
+  effort: runnerDispatches.effort,
   runId: runnerDispatches.runId,
   workSessionId: runnerDispatches.workSessionId,
   lastUpSeq: runnerDispatches.lastUpSeq,
@@ -495,6 +501,9 @@ type DispatchRow = {
   dispatchAttemptId: string;
   state: Dispatch["state"];
   prompt: string | null;
+  harness: string | null;
+  model: string | null;
+  effort: string | null;
   runId: string | null;
   workSessionId: string | null;
   lastUpSeq: number;
@@ -518,6 +527,9 @@ const toDispatch = (row: DispatchRow): Dispatch => ({
   dispatchAttemptId: row.dispatchAttemptId,
   state: row.state,
   prompt: row.prompt,
+  harness: row.harness,
+  model: row.model,
+  effort: row.effort,
   runId: row.runId,
   workSessionId: row.workSessionId,
   lastUpSeq: row.lastUpSeq,
@@ -1598,7 +1610,7 @@ function createStreamHelpers(deps: RunnersDeps) {
   };
 }
 
-interface DispatchCreationInput {
+interface DispatchCreationInput extends DispatchOptions {
   runnerId: string;
   issueId: string;
   workspaceId: string;
@@ -1677,6 +1689,69 @@ async function assertIssueStillDispatchable(
   if (dispatch !== undefined) throw new RunnersError("issue_not_claimable");
 }
 
+/**
+ * The Runner is the authority on what its Harnesses can do, but an id it never
+ * published can never resolve locally: refuse it before creating a Dispatch
+ * when the Runner has a non-empty Harness catalog (issue #241).
+ */
+function assertHarnessAvailable(
+  catalog: HarnessCatalog | null | undefined,
+  harness: string | undefined,
+): void {
+  const publishedHarnesses = catalog?.harnesses ?? [];
+  if (
+    harness !== undefined &&
+    publishedHarnesses.length > 0 &&
+    !publishedHarnesses.some((entry) => entry.id === harness)
+  ) {
+    throw new RunnersError(
+      "harness_unavailable",
+      undefined,
+      `This Runner reports: ${publishedHarnesses.map((entry) => entry.id).join(", ")}.`,
+    );
+  }
+}
+
+/**
+ * Insert one pending Dispatch row and build its outbox payload so callers
+ * enqueue the command in the same transaction without drifting fields.
+ */
+async function insertDispatchRow(tx: DbTransaction, input: DispatchCreationInput) {
+  const [created] = await tx
+    .insert(runnerDispatches)
+    .values({
+      id: randomUUID(),
+      runnerId: input.runnerId,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      issueId: input.issueId,
+      requestedByHumanId: input.requestedByHumanId,
+      agentId: input.agentId,
+      dispatchAttemptId: randomUUID(),
+      state: "pending",
+      prompt: input.prompt ?? null,
+      harness: input.harness ?? null,
+      model: input.model ?? null,
+      effort: input.effort ?? null,
+      createdAt: sql`statement_timestamp()`,
+    })
+    .returning({ id: runnerDispatches.id });
+  const row = await readDispatch(tx, created!.id);
+  const payload = {
+    dispatchId: row.id,
+    dispatchAttemptId: row.dispatchAttemptId,
+    issueId: input.issueId,
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+    agentId: input.agentId,
+    ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
+    ...(input.harness === undefined ? {} : { harness: input.harness }),
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.effort === undefined ? {} : { effort: input.effort }),
+  };
+  return { row, payload };
+}
+
 /** Create a Dispatch when the caller already holds the project and issue FOR UPDATE locks. */
 async function insertDispatchLocked(
   tx: DbTransaction,
@@ -1691,37 +1766,12 @@ async function insertDispatchLocked(
     .limit(1);
   if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
   await assertIssueDispatchable(tx, input.issueId, input.agentId);
-
-  const [created] = await tx
-    .insert(runnerDispatches)
-    .values({
-      id: randomUUID(),
-      runnerId: input.runnerId,
-      workspaceId: input.workspaceId,
-      projectId: input.projectId,
-      issueId: input.issueId,
-      requestedByHumanId: input.requestedByHumanId,
-      agentId: input.agentId,
-      dispatchAttemptId: randomUUID(),
-      state: "pending",
-      prompt: input.prompt ?? null,
-      createdAt: sql`statement_timestamp()`,
-    })
-    .returning({ id: runnerDispatches.id });
-  const row = await readDispatch(tx, created!.id);
+  const { row, payload } = await insertDispatchRow(tx, input);
   await enqueueRunnerCommand(tx, {
     runnerId: input.runnerId,
     dispatch: { id: row.id, dispatchAttemptId: row.dispatchAttemptId },
     kind: "dispatch",
-    payload: {
-      dispatchId: row.id,
-      dispatchAttemptId: row.dispatchAttemptId,
-      issueId: input.issueId,
-      projectId: input.projectId,
-      workspaceId: input.workspaceId,
-      agentId: input.agentId,
-      ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
-    },
+    payload,
   });
   return toDispatch(row);
 }
@@ -2428,6 +2478,7 @@ export function createRunnersService(deps: RunnersDeps) {
         ) {
           throw new RunnersError("runner_unavailable");
         }
+        assertHarnessAvailable(joined.runner.harnessCatalog, input.harness);
 
         const agentId = input.agentId ?? joined.runner.agentId;
         // A prompt that is only whitespace is the same as no prompt; a kept
@@ -2494,36 +2545,23 @@ export function createRunnersService(deps: RunnersDeps) {
         // Validate with Orrery's claim rules, without mutating issues.assignee.
         await assertIssueDispatchable(tx, issueId, agentId);
 
-        const [created] = await tx
-          .insert(runnerDispatches)
-          .values({
-            id: randomUUID(),
-            runnerId,
-            workspaceId: issue.workspaceId,
-            projectId: issue.projectId,
-            issueId,
-            requestedByHumanId: human.humanId,
-            agentId,
-            dispatchAttemptId: randomUUID(),
-            state: "pending",
-            prompt: prompt ?? null,
-            createdAt: sql`statement_timestamp()`,
-          })
-          .returning({ id: runnerDispatches.id });
-        const row = await readDispatch(tx, created!.id);
+        const { row, payload } = await insertDispatchRow(tx, {
+          runnerId,
+          issueId,
+          workspaceId: issue.workspaceId,
+          projectId: issue.projectId,
+          agentId,
+          requestedByHumanId: human.humanId,
+          prompt,
+          harness: input.harness,
+          model: input.model,
+          effort: input.effort,
+        });
         await enqueueRunnerCommand(tx, {
           runnerId,
           dispatch: { id: row.id, dispatchAttemptId: row.dispatchAttemptId },
           kind: "dispatch",
-          payload: {
-            dispatchId: row.id,
-            dispatchAttemptId: row.dispatchAttemptId,
-            issueId,
-            projectId: issue.projectId,
-            workspaceId: issue.workspaceId,
-            agentId,
-            ...(prompt === undefined ? {} : { prompt }),
-          },
+          payload,
         });
         return toDispatch(row);
       });
@@ -2696,6 +2734,9 @@ export function createRunnersService(deps: RunnersDeps) {
               agentId: runner.agentId,
               requestedByHumanId: host.humanId,
               prompt: undefined,
+              harness: undefined,
+              model: undefined,
+              effort: undefined,
             });
             return { dispatch };
           } catch (error) {
@@ -2777,6 +2818,7 @@ export function createRunnersService(deps: RunnersDeps) {
         ) {
           throw new RunnersError("issue_not_found");
         }
+        assertHarnessAvailable(runner.harnessCatalog, input.harness);
         await assertIssueStillDispatchable(tx, issueId, runner.agentId, "all");
         return await insertDispatchLocked(tx, {
           runnerId,
@@ -2786,6 +2828,9 @@ export function createRunnersService(deps: RunnersDeps) {
           agentId: runner.agentId,
           requestedByHumanId: host.humanId,
           prompt,
+          harness: input.harness,
+          model: input.model,
+          effort: input.effort,
         });
       });
     },
@@ -3106,7 +3151,9 @@ export function createRunnersService(deps: RunnersDeps) {
             .limit(1);
           if (agent === undefined) throw new RunnersError("agent_not_found");
 
-          const harness = joined.runner.capabilities[0] ?? "opencode";
+          // The chosen Harness and model are recorded on the Run (issue #241);
+          // a Dispatch that left them to the Runner keeps the previous fallback.
+          const harness = dispatch.harness ?? joined.runner.capabilities[0] ?? "opencode";
           const runId = randomUUID();
           const [insertedRun] = await tx
             .insert(runs)
@@ -3115,6 +3162,7 @@ export function createRunnersService(deps: RunnersDeps) {
               agentId: agent.id,
               workspaceId: joined.runner.workspaceId,
               harness,
+              model: dispatch.model,
               nativeSessionId: dispatch.dispatchAttemptId,
               createdAt: sql`statement_timestamp()`,
               updatedAt: sql`statement_timestamp()`,

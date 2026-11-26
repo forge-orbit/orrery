@@ -20,8 +20,9 @@ import {
   probeHarness,
   readCachedCatalog,
   runStartupCatalogProbe,
+  verifiedDefaultModel,
 } from "./catalog.ts";
-import { detectHarnesses } from "./harnesses.ts";
+import { detectHarnesses, HarnessLocks, resolveHarness } from "./harnesses.ts";
 
 const stubPath = new URL("./stub-acp.ts", import.meta.url).pathname;
 const fingerprintA = "a".repeat(64);
@@ -437,6 +438,97 @@ describe("serialized catalog publication", () => {
     });
     expect(published).toEqual([]);
     expect(warnings.join("\n")).toContain("probe failed");
+  });
+});
+
+describe("local-only Harness resolution (#241)", () => {
+  it("resolves a requested id only from the local registry allowlist", async () => {
+    const root = makeDir();
+    const override = { command: process.execPath, args: [stubPath] };
+    const resolved = await resolveHarness("custom", override, root);
+    expect(resolved?.command).toBe(process.execPath);
+    expect(resolved?.args).toEqual([stubPath]);
+    // An id nobody configured is unavailable even when the server names it.
+    expect(await resolveHarness("server-says-run-this", override, root)).toBeUndefined();
+    // A user harness works without any preset install.
+    writeFileSync(
+      join(root, "harnesses.json"),
+      JSON.stringify({
+        harnesses: [
+          { id: "team", displayName: "Team", command: process.execPath, args: [stubPath] },
+        ],
+      }),
+    );
+    expect((await resolveHarness("team", undefined, root))?.source).toBe("user");
+  });
+
+  it("ignores synthetic defaultModel placeholders when a harness advertises 0 models", () => {
+    const catalog: HarnessCatalog = {
+      harnesses: [
+        {
+          id: "empty",
+          displayName: "Empty",
+          defaultModel: "default",
+          models: [],
+          probedAt: "2026-11-26T00:00:00.000Z",
+        },
+        {
+          id: "real",
+          displayName: "Real",
+          defaultModel: "stub-fast",
+          models: [
+            {
+              id: "stub-fast",
+              label: "Stub Fast",
+              reasoningDiscovery: "unknown",
+              probedAt: "2026-11-26T00:00:00.000Z",
+            },
+          ],
+          probedAt: "2026-11-26T00:00:00.000Z",
+        },
+      ],
+      probedAt: "2026-11-26T00:00:00.000Z",
+    };
+    expect(verifiedDefaultModel(catalog, "empty")).toBeNull();
+    expect(verifiedDefaultModel(catalog, "real")).toBe("stub-fast");
+    expect(verifiedDefaultModel(catalog, "missing")).toBeNull();
+  });
+});
+
+describe("per-Harness spawn lock (#241)", () => {
+  it("serializes work for one Harness while other Harnesses still run", async () => {
+    const locks = new HarnessLocks();
+    const order: string[] = [];
+    let active = 0;
+    let maxActive = 0;
+    const task = (label: string) => async (): Promise<void> => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      order.push(`start:${label}`);
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      order.push(`end:${label}`);
+      active -= 1;
+    };
+    await Promise.all([
+      locks.run("harness-a", task("a1")),
+      locks.run("harness-a", task("a2")),
+      locks.run("harness-b", task("b1")),
+    ]);
+    // One Harness never runs two sessions at once...
+    expect(order.indexOf("end:a1")).toBeLessThan(order.indexOf("start:a2"));
+    // ...while a different Harness is not blocked behind it.
+    expect(order.indexOf("start:b1")).toBeLessThan(order.indexOf("end:a1"));
+    expect(maxActive).toBeGreaterThanOrEqual(2);
+  });
+
+  it("releases the lock after a rejected run", async () => {
+    const locks = new HarnessLocks();
+    await expect(
+      locks.run("harness-a", async () => {
+        throw new Error("probe failed");
+      }),
+    ).rejects.toThrow("probe failed");
+    await expect(locks.run("harness-a", async () => "next")).resolves.toBe("next");
   });
 });
 

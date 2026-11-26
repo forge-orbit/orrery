@@ -222,6 +222,12 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           "project-1",
           "--heartbeat-ms",
           "50",
+          "--harness",
+          "node",
+          "--model",
+          "stub-deep",
+          "--effort",
+          "high",
         ],
         { ORRERY_RUNNER_CONFIG_DIR: dir },
       );
@@ -464,5 +470,145 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
     );
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("login");
+  });
+  it("forwards --harness, --model and --effort on a one-shot work dispatch", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: "http://orrery.test",
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
+    let dispatchBody:
+      | { issueId: string; harness?: string; model?: string; effort?: string }
+      | undefined;
+    const stub = await listen(async (req, res) => {
+      if (req.method === "POST" && req.url === "/api/runners/issue-resolve") {
+        json(res, 200, {
+          issueId: "issue-work",
+          workspaceId: "workspace-1",
+          workspaceName: "Work",
+          projectId: "project-1",
+          projectKey: "WORK",
+          identifier: "WORK-1",
+          number: 1,
+          title: "One-shot dispatch options",
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/register") {
+        json(res, 201, {
+          id: "runner-work",
+          hostId: "host-1",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          agentId: "agent-1",
+          displayName: "TestLaptop",
+          repoFingerprint: sha256("checkout"),
+          capabilities: [],
+          harnessCatalog: { harnesses: [], probedAt: new Date().toISOString() },
+          maxConcurrency: 1,
+          activeSlotCount: 0,
+          lastSeenAt: new Date().toISOString(),
+          disconnectedAt: null,
+          revokedAt: null,
+          createdAt: new Date().toISOString(),
+          presence: "online",
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/runner-work/reconnect") {
+        json(res, 200, { resolutions: [] });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/runner-work/dispatches") {
+        const body = z
+          .object({
+            issueId: z.string(),
+            harness: z.string().optional(),
+            model: z.string().optional(),
+            effort: z.string().optional(),
+          })
+          .parse(await bodyOf(req));
+        dispatchBody = {
+          issueId: body.issueId,
+          ...(body.harness === undefined ? {} : { harness: body.harness }),
+          ...(body.model === undefined ? {} : { model: body.model }),
+          ...(body.effort === undefined ? {} : { effort: body.effort }),
+        };
+        json(res, 201, {
+          id: "dispatch-work",
+          runnerId: "runner-work",
+          hostId: "host-1",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          issueId: "issue-work",
+          requestedByHumanId: "human-1",
+          agentId: "agent-1",
+          dispatchAttemptId: "attempt-work",
+          state: "pending",
+          prompt: null,
+          harness: dispatchBody.harness ?? null,
+          model: dispatchBody.model ?? null,
+          effort: dispatchBody.effort ?? null,
+          runId: null,
+          workSessionId: null,
+          lastUpSeq: 0,
+          lastDownSeq: 0,
+          branchName: null,
+          dirtyWorktree: false,
+          createdAt: new Date().toISOString(),
+          acceptedAt: null,
+          endedAt: null,
+        });
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        req.url === "/api/runners/runner-work/dispatches/dispatch-work/accept"
+      ) {
+        // Refuse acceptance so this test never needs a real ACP harness.
+        json(res, 409, { status: 409, code: "dispatch_not_pending", title: "Already accepted" });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/runner-work/offline") {
+        json(res, 200, { runnerId: "runner-work", revokedRunners: 1 });
+        return;
+      }
+      json(res, 404, { status: 404, code: "not_found", title: "Not found" });
+    });
+
+    try {
+      const result = await run(
+        [
+          "work",
+          "WORK-1",
+          "--server",
+          stub.url,
+          "--harness",
+          "node",
+          "--model",
+          "stub-deep",
+          "--effort",
+          "high",
+        ],
+        { ORRERY_RUNNER_CONFIG_DIR: dir },
+      );
+      expect(result.code).toBe(1);
+      if (dispatchBody === undefined) throw new Error("no dispatch was created");
+      expect(dispatchBody).toMatchObject({
+        issueId: "issue-work",
+        harness: "node",
+        model: "stub-deep",
+        effort: "high",
+      });
+    } finally {
+      await stub.close();
+    }
   });
 });

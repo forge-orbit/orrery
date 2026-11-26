@@ -28,12 +28,21 @@ const probeSession = process.env.STUB_ACP_PROBE === "1";
 // advertises models without any config option, and `none` suppresses both
 // payloads; `per-model` scopes the effort option to one model only.
 const catalogAd = process.env.STUB_ACP_CATALOG ?? "all";
+// Dispatch option seams (issue #241): reject a model like a strict harness
+// would, or reject every effort config option to exercise the non-fatal path.
+const rejectModel = new Set(
+  (process.env.STUB_ACP_REJECT_MODEL ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value !== ""),
+);
+const rejectEffort = process.env.STUB_ACP_REJECT_EFFORT === "1";
 const stubInitializeModels = {
   availableModels: [
     { modelId: "stub-fast", name: "Stub Fast" },
     { modelId: "stub-deep", name: "Stub Deep" },
   ],
-  currentModel: "stub-fast",
+  currentModel: process.env.STUB_ACP_DEFAULT_MODEL ?? "stub-fast",
 };
 const effortChoices = [
   { value: "low", name: "Low" },
@@ -457,13 +466,21 @@ function handle(message: Record<string, unknown>): void {
       reply(id, { configOptions: [] });
       return;
     }
-    if (rejected || mode === "model-unsupported") {
+    if (
+      rejected ||
+      mode === "model-unsupported" ||
+      rejectModel.has("*") ||
+      (typeof modelId === "string" && rejectModel.has(modelId))
+    ) {
       send({
         jsonrpc: "2.0",
         id,
         error: {
-          code: rejected ? -32000 : -32601,
-          message: rejected ? "model rejected" : "unsupported session/set_model",
+          code: rejected || rejectModel.size > 0 ? -32000 : -32601,
+          message:
+            rejected || rejectModel.size > 0
+              ? `unknown model ${typeof modelId === "string" ? modelId : ""}`
+              : "unsupported session/set_model",
         },
       });
       return;
@@ -473,23 +490,57 @@ function handle(message: Record<string, unknown>): void {
   }
   if (method === "session/set_config_option") {
     const params = recordOf(message.params) ?? {};
-    const optionId = params.optionId;
-    const value = params.value;
-    const rejected = mode === "effort-reject";
+    const configId =
+      typeof params.configId === "string"
+        ? params.configId
+        : typeof params.optionId === "string"
+          ? params.optionId
+          : undefined;
+    const value = typeof params.value === "string" ? params.value : undefined;
+    const modelRejected =
+      configId === "model" &&
+      (rejectModel.has("*") || (value !== undefined && rejectModel.has(value)));
+    const effortRejected = configId !== "model" && (mode === "effort-reject" || rejectEffort);
+    const rejected = modelRejected || effortRejected;
     record({
       event: "set_config_option",
-      ...(typeof optionId === "string" ? { optionId } : {}),
-      ...(typeof value === "string" ? { value } : {}),
+      ...(configId === undefined ? {} : { configId, optionId: configId }),
+      ...(value === undefined ? {} : { value }),
       rejected,
     });
-    if (rejected || mode === "effort-unsupported") {
+    if (modelRejected) {
+      send({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32602, message: `unknown model ${value ?? ""}` },
+      });
+      return;
+    }
+    if (effortRejected || (configId !== "model" && mode === "effort-unsupported")) {
       send({
         jsonrpc: "2.0",
         id,
         error: {
-          code: rejected ? -32000 : -32601,
-          message: rejected ? "config option rejected" : "unsupported session/set_config_option",
+          code: effortRejected ? -32000 : -32601,
+          message: effortRejected
+            ? "config option rejected"
+            : "unsupported session/set_config_option",
         },
+      });
+      return;
+    }
+    if (configId === "model" && mode === "model-switch-effort" && value === "stub-model-2") {
+      reply(id, {
+        configOptions: [
+          {
+            id: "reasoning_effort",
+            options: [
+              { value: "balanced", name: "Balanced" },
+              { value: "fast", name: "Fast" },
+            ],
+            currentValue: "balanced",
+          },
+        ],
       });
       return;
     }

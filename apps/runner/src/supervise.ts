@@ -1,14 +1,18 @@
 import { createHash } from "node:crypto";
+import { basename } from "node:path";
 import type {
   DispatchAcceptance,
   DispatchCommandPayload,
   InputResolvedCommandPayload,
+  SessionDiagnostic,
 } from "@orrery/contract";
 import { AcpStdioClient } from "./acp.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import type { SupervisionConfig } from "./config.ts";
 import { ephemeralMcpConfig } from "./config.ts";
+import { HarnessLocks, resolveHarness, type HarnessDefinition } from "./harnesses.ts";
 import { McpAuthError, RunnerMcpClient } from "./mcp-client.ts";
+import { effortConfigIds } from "./probe.ts";
 import {
   createStreamSpool,
   mainRepositoryRoot,
@@ -35,8 +39,23 @@ export interface SupervisionOptions {
   pool: SlotPool;
   signal: AbortSignal;
   write: (line: string) => void;
+  /** Shared across probes and dispatches so one Harness never spawns twice. */
+  locks?: HarnessLocks | undefined;
+  /** The Harness's cached default model, read from the local catalog. */
+  defaultModelFor?: ((harnessId: string) => string | null) | undefined;
   /** Called as soon as the controller exists, before any local work starts. */
   onController?: ((controller: SlotController) => void) | undefined;
+}
+
+/** A dispatch option failure that must surface as a typed Studio diagnostic. */
+class DispatchOptionError extends Error {
+  readonly diagnostic: SessionDiagnostic;
+
+  constructor(diagnostic: SessionDiagnostic) {
+    super(diagnostic.message);
+    this.name = "DispatchOptionError";
+    this.diagnostic = diagnostic;
+  }
 }
 
 type RaceResult =
@@ -72,6 +91,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
   let cancelledReason = "";
   let revoked = false;
   let stopRenewal = false;
+  const dispatchAbort = new AbortController();
   // A deadline pause can arrive after a racing renewal 401 already cancelled
   // the slot. Remember it independently so a clean worktree is still preserved.
   let pausedByDeadline = false;
@@ -87,6 +107,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     // A cancel (deadline pause, teammate Stop or revocation) ends the claim:
     // no more lease renewals, even while a parked ACP process is winding down.
     stopRenewal = true;
+    dispatchAbort.abort(reason);
     pool.markDraining(slot);
     resolveCancelled?.(reason);
   };
@@ -199,6 +220,21 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       })
       .catch((error: unknown) => write(`Could not spool ACP stderr: ${String(error)}`));
   };
+  /** One typed diagnostic chunk, awaited so it lands before the session release. */
+  const appendDiagnostic = async (diagnostic: SessionDiagnostic): Promise<void> => {
+    write(`Dispatch option diagnostic (${diagnostic.kind}): ${diagnostic.message}`);
+    if (spool === undefined) return;
+    try {
+      const chunk = await spool.append({
+        kind: "diagnostic",
+        diagnostic,
+        summary: diagnostic.message,
+      });
+      controller.lastSeq = Math.max(controller.lastSeq, chunk.seq);
+    } catch (error) {
+      write(`Could not spool diagnostic: ${String(error)}`);
+    }
+  };
 
   const abortListener = () => requestCancel("shutdown");
   options.signal.addEventListener("abort", abortListener, { once: true });
@@ -223,6 +259,48 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     } catch (error) {
       write(`Stream spool unavailable for this dispatch: ${String(error)}`);
     }
+
+    // Resolve the requested Harness strictly against the local registry before
+    // any worktree or ACP spawn: the server never supplies an executable.
+    const requestedHarness = command.harness ?? config.defaults.harness;
+    let harness: HarnessDefinition;
+    if (requestedHarness === undefined) {
+      // No override: keep the configured ACP command as the Runner default.
+      // Explicit --acp-command overrides are published under id "custom" (PR #260).
+      const id = config.acpOverridden ? "custom" : basename(config.acp.command);
+      harness = {
+        id,
+        displayName: basename(config.acp.command) || id,
+        source: "override",
+        command: config.acp.command,
+        args: [...config.acp.args],
+      };
+    } else {
+      const resolved = await resolveHarness(
+        requestedHarness,
+        config.acpOverridden ? { command: config.acp.command, args: config.acp.args } : undefined,
+      );
+      if (resolved === undefined) {
+        throw new DispatchOptionError({
+          kind: "harness_unavailable",
+          version: 1,
+          message: `Harness '${requestedHarness}' is not installed on this Runner.`,
+          harness: requestedHarness,
+        });
+      }
+      harness = resolved;
+    }
+    // Only inherit CLI default model/effort when the dispatch stays on the
+    // default Harness (and, for effort, on the same model) so one Harness's
+    // CLI defaults never bleed into a dispatch targeting another Harness.
+    const harnessMatchesDefault =
+      command.harness === undefined || command.harness === config.defaults.harness;
+    const cliDefaultModel = harnessMatchesDefault ? config.defaults.model : undefined;
+    const modelMatchesDefault =
+      command.model === undefined || command.model === config.defaults.model;
+    const requestedEffort =
+      command.effort ??
+      (harnessMatchesDefault && modelMatchesDefault ? config.defaults.effort : undefined);
 
     // The claim is already active; start renewing before any local work begins.
     watchdog = setInterval(() => {
@@ -286,21 +364,86 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     const mcpServers = [mcpConfig];
 
     if (cancelledAlready) throw new Error("dispatch cancelled before ACP start");
-    acp = await AcpStdioClient.start({
-      command: config.acp.command,
-      args: config.acp.args,
-      cwd: worktree.path,
-      env: Object.fromEntries(mcpConfig.env.map((item) => [item.name, item.value])),
-      worktreeReal: worktree.realPath,
-      mcpServers,
-      onUpdate: (method, params) => spoolEvent(method, params),
-      onStderr: (line) => {
-        write(`acp stderr: ${line}`);
-        spoolStderr(line);
-      },
+    const locks = options.locks ?? new HarnessLocks();
+    const worktreePath = worktree.path;
+    const worktreeReal = worktree.realPath;
+    acp = await locks.run(harness.id, async () => {
+      if (cancelledAlready) throw new Error("dispatch cancelled before ACP start");
+      // Read the cached Harness default inside the per-Harness lock so a
+      // dispatch queued behind a startup probe sees the freshly probed default.
+      const requestedModel =
+        command.model ?? cliDefaultModel ?? options.defaultModelFor?.(harness.id) ?? undefined;
+      const client = await AcpStdioClient.start({
+        command: harness.command,
+        args: harness.args,
+        cwd: worktreePath,
+        env: Object.fromEntries(mcpConfig.env.map((item) => [item.name, item.value])),
+        worktreeReal,
+        mcpServers,
+        signal: dispatchAbort.signal,
+        onUpdate: (method, params) => spoolEvent(method, params),
+        onStderr: (line) => {
+          write(`acp stderr: ${line}`);
+          spoolStderr(line);
+        },
+      });
+      try {
+        if (cancelledAlready) throw new Error("dispatch cancelled during ACP start");
+        let modelSwitchResult: unknown;
+        if (requestedModel !== undefined) {
+          try {
+            modelSwitchResult = await client.setModel(requestedModel);
+          } catch (error) {
+            throw new DispatchOptionError({
+              kind: "model_rejected",
+              version: 1,
+              message: `Harness '${harness.id}' rejected model '${requestedModel}': ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+              harness: harness.id,
+              model: requestedModel,
+            });
+          }
+        }
+        if (requestedEffort !== undefined) {
+          let applied = false;
+          for (const configId of effortConfigIds(
+            modelSwitchResult,
+            requestedModel,
+            client.sessionResult,
+          )) {
+            if (await client.setEffort(configId, requestedEffort)) {
+              applied = true;
+              break;
+            }
+          }
+          if (!applied) {
+            // Non-fatal (issue #241): omit effort, warn in the stream, continue.
+            const warning = `Harness '${harness.id}' does not support effort '${requestedEffort}'; continuing without it.`;
+            write(warning);
+            if (spool !== undefined) {
+              try {
+                const chunk = await spool.append({
+                  kind: "event",
+                  eventType: "effort_unsupported",
+                  summary: warning,
+                });
+                controller.lastSeq = Math.max(controller.lastSeq, chunk.seq);
+              } catch (error) {
+                write(`Could not spool effort warning: ${String(error)}`);
+              }
+            }
+          }
+        }
+        return client;
+      } catch (error) {
+        // Never leak the detached process group when a dispatch option fails.
+        await client.forceExit(config.cancelGraceMs);
+        throw error;
+      }
     });
     acpRunning = true;
-    write(`ACP ${config.acp.command} started (pid ${acp.pid}) in ${worktree.branch}.`);
+    write(`ACP ${harness.id} started (pid ${acp.pid}) in ${worktree.branch}.`);
 
     type ParkWake =
       | { kind: "resume"; payload: InputResolvedCommandPayload }
@@ -510,6 +653,9 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     }
   } catch (error) {
     write(`Dispatch supervision failed: ${String(error)}`);
+    // Harness/model failures are diagnostics a project reader can act on; the
+    // session is released below, so the Dispatch never looks merely crashed.
+    if (error instanceof DispatchOptionError) await appendDiagnostic(error.diagnostic);
     controller.outcome = revoked ? "revoked" : cancelledAlready ? "cancelled" : "failed";
     if (acp !== undefined) await acp.forceExit(config.cancelGraceMs);
     // A failure before the ACP turn started must still release the claim and

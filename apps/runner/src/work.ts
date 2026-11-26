@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { DispatchOptions } from "@orrery/contract";
+import { harnessConfigKey, readCachedCatalog, verifiedDefaultModel } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
@@ -7,7 +9,7 @@ import { repoFingerprint } from "./start.ts";
 import { SlotPool, type SlotController, type SupervisionOutcome } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
-export interface WorkOptions {
+export interface WorkOptions extends DispatchOptions {
   server: string;
   /** Workspace id, name or slug used to disambiguate an issue key. */
   workspace?: string | undefined;
@@ -92,6 +94,9 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
       ...(options.prompt === undefined || options.prompt.trim() === ""
         ? {}
         : { prompt: options.prompt }),
+      ...(options.harness === undefined ? {} : { harness: options.harness }),
+      ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
     });
     write(`Created Dispatch ${dispatch.id} for ${resolved.identifier}.`);
     const acceptance = await client.acceptDispatch(runner.id, dispatch.id);
@@ -161,6 +166,10 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
       }
     };
 
+    const configKey = harnessConfigKey(
+      supervision.acpOverridden ? { acpOverride: supervision.acp } : {},
+    );
+    const cachedCatalog = readCachedCatalog(repoFingerprint(repoPath), undefined, configKey);
     const controller = await superviseDispatch({
       server: options.server,
       repoPath,
@@ -174,11 +183,17 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
         projectId: resolved.projectId,
         workspaceId: resolved.workspaceId,
         agentId: acceptance.dispatch.agentId,
+        // Programmatic callers may set these without populating supervision
+        // defaults; the accepted Dispatch row is the fallback record.
+        harness: options.harness ?? acceptance.dispatch.harness ?? undefined,
+        model: options.model ?? acceptance.dispatch.model ?? undefined,
+        effort: options.effort ?? acceptance.dispatch.effort ?? undefined,
       },
       slot,
       pool,
       signal: sessionAbort.signal,
       write,
+      defaultModelFor: (harnessId) => verifiedDefaultModel(cachedCatalog, harnessId),
       onController: (ctrl) => {
         activeController = ctrl;
         commandLoopPromise = runCommandLoop();

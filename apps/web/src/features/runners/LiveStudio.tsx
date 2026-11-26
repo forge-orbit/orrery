@@ -19,6 +19,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Square, Terminal } from "lucide-react";
 import { useState } from "react";
 import { TextField } from "../../lib/fields.tsx";
+import { HarnessBadge } from "../../lib/harness.tsx";
 import {
   chunkPath,
   coalesceAcpChunks,
@@ -38,6 +39,7 @@ import { sessionsQuery } from "../work-sessions/index.ts";
 import { projectQuery } from "../projects/index.ts";
 import { workspaceRunsQuery } from "../runs/index.ts";
 import { resolveUncertainDispatch } from "./commands.ts";
+import { harnessDisplayName } from "./dispatchOptions.ts";
 import { NeedsInputComposer, PausedNeedsInput } from "./NeedsInput.tsx";
 import { ContextRail, DiagnosticBanners, LeaseCountdown, StreamCard } from "./StudioParts.tsx";
 import {
@@ -347,10 +349,25 @@ export function LiveStudio({
                 {active && session !== null && session !== undefined && (
                   <LeaseCountdown leaseExpiresAt={session.leaseExpiresAt} enabled={active} />
                 )}
-                <Text type="supporting" color="secondary">
-                  {run?.agentName ?? "Agent"} · {run?.model ?? "model unknown"} · {telemetry.tokens}{" "}
-                  tokens · {telemetry.cost}
-                </Text>
+                <Stack
+                  direction="horizontal"
+                  gap={2}
+                  vAlign="center"
+                  wrap="wrap"
+                  data-studio-options=""
+                >
+                  <HarnessBadge
+                    harness={harnessDisplayName(runner, dispatch?.harness ?? run?.harness)}
+                    empty="Harness unknown"
+                  />
+                  <Text type="supporting" color="secondary">
+                    {run?.agentName ?? "Agent"} · {dispatch?.model ?? run?.model ?? "model unknown"}
+                    {dispatch?.effort !== null && dispatch?.effort !== undefined
+                      ? ` · ${dispatch.effort} effort`
+                      : ""}{" "}
+                    · {telemetry.tokens} tokens · {telemetry.cost}
+                  </Text>
+                </Stack>
               </Stack>
 
               {active && session !== null && session !== undefined && (

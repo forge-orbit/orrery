@@ -12,8 +12,22 @@ import {
 import { AcpStdioClient } from "./acp.ts";
 import { RunnerRequestError } from "./client.ts";
 import { configDirectory } from "./credential.ts";
-import { harnessesJsonPath, type HarnessDefinition } from "./harnesses.ts";
+import { HarnessLocks, harnessesJsonPath, type HarnessDefinition } from "./harnesses.ts";
 import { parseDiscovery } from "./probe.ts";
+
+/**
+ * Return a Harness's cached default model only when it is a real advertised
+ * model id (PR #260 stores synthetic `defaultModel: "default"` when a harness
+ * advertises 0 models, which must never be sent to `session/set_model`).
+ */
+export function verifiedDefaultModel(
+  catalog: HarnessCatalog | null | undefined,
+  harnessId: string,
+): string | null {
+  const entry = catalog?.harnesses.find((item) => item.id === harnessId);
+  if (entry === undefined) return null;
+  return entry.models.some((model) => model.id === entry.defaultModel) ? entry.defaultModel : null;
+}
 
 /**
  * Turn one raw discovery payload pair into a published catalog entry. The
@@ -274,6 +288,8 @@ export interface StartupCatalogProbeOptions {
   previous?: HarnessCatalog | undefined;
   isAborted?: (() => boolean) | undefined;
   write?: ((line: string) => void) | undefined;
+  /** Shared with dispatch supervision: never probe and spawn one Harness at once. */
+  locks?: HarnessLocks | undefined;
   now?: (() => string) | undefined;
 }
 
@@ -289,6 +305,7 @@ export async function runStartupCatalogProbe(options: StartupCatalogProbeOptions
   const aborted = options.isAborted ?? (() => false);
   const write = options.write ?? (() => {});
   const now = options.now ?? (() => new Date().toISOString());
+  const locks = options.locks ?? new HarnessLocks();
   if (aborted()) return;
   if (options.definitions.length === 0) {
     await options.publish({ harnesses: [], probedAt: now() });
@@ -299,7 +316,7 @@ export async function runStartupCatalogProbe(options: StartupCatalogProbeOptions
   for (const definition of options.definitions) {
     if (aborted()) return;
     try {
-      harnesses.push(await options.probe(definition));
+      harnesses.push(await locks.run(definition.id, () => options.probe(definition)));
       succeeded += 1;
     } catch (error) {
       write(`Harness ${definition.id} probe failed: ${String(error)}`);

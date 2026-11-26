@@ -37,6 +37,7 @@ export interface TestStreamChunk {
   eventType?: string;
   summary?: string;
   data?: Record<string, unknown>;
+  diagnostic?: Record<string, unknown>;
 }
 
 export interface TestCommand {
@@ -135,6 +136,10 @@ export class TestOrrery {
   private readonly stopCalls: string[] = [];
   private readonly dispatchIssues = new Map<string, string>();
   private readonly dispatchAttempts = new Map<string, string>();
+  private readonly dispatchOptions = new Map<
+    string,
+    { harness?: string; model?: string; effort?: string }
+  >();
   private readonly streamed: TestStreamChunk[] = [];
   reconnectCalls = 0;
   /** Harness catalogs PUT by the runner's background sync (issue #240). */
@@ -217,10 +222,15 @@ export class TestOrrery {
     return command;
   }
 
-  enqueueDispatch(issueId: string, attemptId: string = randomUUID()): TestCommand {
+  enqueueDispatch(
+    issueId: string,
+    attemptId: string = randomUUID(),
+    options: { harness?: string; model?: string; effort?: string } = {},
+  ): TestCommand {
     const dispatchId = `dispatch-${issueId}`;
     this.dispatchIssues.set(dispatchId, issueId);
     this.dispatchAttempts.set(dispatchId, attemptId);
+    this.dispatchOptions.set(dispatchId, options);
     return this.enqueue("dispatch", dispatchId, attemptId, {
       dispatchId,
       dispatchAttemptId: attemptId,
@@ -228,6 +238,9 @@ export class TestOrrery {
       projectId: "project-test-1",
       workspaceId: "workspace-test-1",
       agentId: "agent-test-1",
+      ...(options.harness === undefined ? {} : { harness: options.harness }),
+      ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
     });
   }
 
@@ -578,6 +591,9 @@ export class TestOrrery {
           ...(typeof record.data === "object" && record.data !== null
             ? { data: Object.fromEntries(Object.entries(record.data)) }
             : {}),
+          ...(typeof record.diagnostic === "object" && record.diagnostic !== null
+            ? { diagnostic: Object.fromEntries(Object.entries(record.diagnostic)) }
+            : {}),
         });
       }
       const toSeq = Number(body.toSeq ?? 0);
@@ -645,6 +661,7 @@ export class TestOrrery {
       });
       this.scopes.set(sessionId, { issueId, runId, sessionId });
       const stamp = now();
+      const options = this.dispatchOptions.get(dispatchId) ?? {};
       sendJson(res, 200, {
         dispatch: {
           id: dispatchId,
@@ -658,6 +675,9 @@ export class TestOrrery {
           dispatchAttemptId: this.attemptIdFor(dispatchId),
           state: "active",
           prompt: null,
+          harness: options.harness ?? null,
+          model: options.model ?? null,
+          effort: options.effort ?? null,
           runId,
           workSessionId: sessionId,
           lastUpSeq: 0,
@@ -672,10 +692,10 @@ export class TestOrrery {
           id: runId,
           agentId: "agent-test-1",
           workspaceId: "workspace-test-1",
-          harness: null,
+          harness: options.harness ?? null,
           harnessVersion: null,
           nativeSessionId: this.attemptIdFor(dispatchId),
-          model: null,
+          model: options.model ?? null,
           status: "active",
           createdAt: stamp,
           updatedAt: stamp,

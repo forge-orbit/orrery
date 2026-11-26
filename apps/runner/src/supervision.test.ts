@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import type { HarnessCatalog } from "@orrery/contract";
+import { harnessConfigKey, writeCachedCatalog } from "./catalog.ts";
 import { loadSupervisionConfig } from "./config.ts";
 import type { SlotController } from "./slots.ts";
-import { start } from "./start.ts";
+import { repoFingerprint, start } from "./start.ts";
 import { TestOrrery, type TestActivity, type TestSession } from "./test-orrery.ts";
 
 interface Fixture {
@@ -34,6 +36,16 @@ interface FixtureOptions {
   cancelGraceMs?: number;
   sleepMs?: number;
   onController?: ((controller: SlotController) => void) | undefined;
+  /** Seed the local Harness catalog cache before registration (issue #241). */
+  cachedCatalog?: HarnessCatalog | undefined;
+  /** CLI defaults for dispatches without per-dispatch overrides. */
+  defaults?: { harness?: string; model?: string; effort?: string } | undefined;
+  /** Stub seam: reject this model id (or `*`) over ACP. */
+  rejectModel?: string | undefined;
+  /** Stub seam: reject every effort config option. */
+  rejectEffort?: boolean | undefined;
+  /** Stub seam: the Harness's advertised current/default model. */
+  defaultModel?: string | undefined;
 }
 
 const stubPath = fileURLToPath(new URL("./stub-acp.ts", import.meta.url));
@@ -42,6 +54,9 @@ const savedEnv = {
   STUB_ACP_MODE: process.env.STUB_ACP_MODE,
   STUB_ACP_MARKER: process.env.STUB_ACP_MARKER,
   STUB_ACP_SLEEP_MS: process.env.STUB_ACP_SLEEP_MS,
+  STUB_ACP_DEFAULT_MODEL: process.env.STUB_ACP_DEFAULT_MODEL,
+  STUB_ACP_REJECT_MODEL: process.env.STUB_ACP_REJECT_MODEL,
+  STUB_ACP_REJECT_EFFORT: process.env.STUB_ACP_REJECT_EFFORT,
   ORRERY_RUNNER_CONFIG_DIR: process.env.ORRERY_RUNNER_CONFIG_DIR,
 };
 const recordOf = (value: unknown): Record<string, unknown> | undefined =>
@@ -109,14 +124,32 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
   process.env.STUB_ACP_MODE = options.mode;
   process.env.STUB_ACP_MARKER = marker;
   process.env.STUB_ACP_SLEEP_MS = String(options.sleepMs ?? 0);
+  if (options.defaultModel === undefined) delete process.env.STUB_ACP_DEFAULT_MODEL;
+  else process.env.STUB_ACP_DEFAULT_MODEL = options.defaultModel;
+  if (options.rejectModel === undefined) delete process.env.STUB_ACP_REJECT_MODEL;
+  else process.env.STUB_ACP_REJECT_MODEL = options.rejectModel;
+  if (options.rejectEffort === true) process.env.STUB_ACP_REJECT_EFFORT = "1";
+  else delete process.env.STUB_ACP_REJECT_EFFORT;
   const stop = new AbortController();
   const lines: string[] = [];
   const config = loadSupervisionConfig({
     acp: { command: process.execPath, args: [stubPath] },
     ...(options.leaseRenewMs === undefined ? {} : { leaseRenewMs: options.leaseRenewMs }),
     ...(options.cancelGraceMs === undefined ? {} : { cancelGraceMs: options.cancelGraceMs }),
+    ...(options.defaults?.harness === undefined ? {} : { harness: options.defaults.harness }),
+    ...(options.defaults?.model === undefined ? {} : { model: options.defaults.model }),
+    ...(options.defaults?.effort === undefined ? {} : { effort: options.defaults.effort }),
     worktreeRoot: worktrees,
   });
+  // The cache is read before registration, exactly like a real cold start.
+  if (options.cachedCatalog !== undefined) {
+    await writeCachedCatalog(
+      repoFingerprint(repo),
+      options.cachedCatalog,
+      configDir,
+      harnessConfigKey({ acpOverride: config.acp }),
+    );
+  }
   const done = start({
     server: control.url,
     workspaceId: "workspace-1",
@@ -585,5 +618,169 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
     expect(resolved).toBe(false);
     await fixture.done;
     expect(resolved).toBe(true);
+  });
+});
+
+const catalogWithDefault = (defaultModel: string): HarnessCatalog => {
+  const at = new Date().toISOString();
+  return {
+    harnesses: [
+      {
+        id: "custom",
+        displayName: "Node stub",
+        source: "override",
+        defaultModel,
+        models: [
+          {
+            id: defaultModel,
+            label: "Stub Deep",
+            reasoningDiscovery: "known",
+            supportedEfforts: ["low", "medium", "high"],
+            defaultEffort: "medium",
+            probedAt: at,
+          },
+        ],
+        probedAt: at,
+      },
+    ],
+    probedAt: at,
+  };
+};
+
+describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, () => {
+  it("applies the chosen Harness, model and effort over ACP", async () => {
+    const fixture = await makeFixture({ mode: "normal" });
+    fixture.control.enqueueDispatch("TEST-241-MODEL", undefined, {
+      harness: "custom",
+      model: "stub-deep",
+      effort: "high",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const recorded = await events(fixture);
+    const sets = recorded.filter((item) => item.event === "set_config_option");
+    expect(sets.find((item) => item.configId === "model")?.value).toBe("stub-deep");
+    expect(sets.find((item) => item.configId === "thought_level")?.value).toBe("high");
+    // The model is applied before the turn starts, not after it.
+    const promptAt = recorded.find((item) => item.event === "prompt")?.at ?? 0;
+    const modelAt = sets.find((item) => item.configId === "model")?.at ?? Number.MAX_SAFE_INTEGER;
+    expect(modelAt).toBeLessThanOrEqual(promptAt);
+  });
+
+  it("passes the cached Harness default model when the dispatch omits one", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      cachedCatalog: catalogWithDefault("stub-deep"),
+      defaultModel: "stub-deep",
+    });
+    fixture.control.enqueueDispatch("TEST-241-DEFAULT", undefined, { harness: "custom" });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const sets = (await events(fixture)).filter((item) => item.event === "set_config_option");
+    expect(sets.find((item) => item.configId === "model")?.value).toBe("stub-deep");
+  });
+
+  it("fails fast with a typed diagnostic when the Harness is not local", async () => {
+    const fixture = await makeFixture({ mode: "normal" });
+    fixture.control.enqueueDispatch("TEST-241-MISSING", undefined, {
+      harness: "definitely-not-local",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("released");
+
+    await until(() => fixture.control.chunks().some((chunk) => chunk.kind === "diagnostic"));
+    const diagnostic = fixture.control
+      .chunks()
+      .find((chunk) => chunk.kind === "diagnostic")?.diagnostic;
+    expect(diagnostic).toMatchObject({
+      kind: "harness_unavailable",
+      harness: "definitely-not-local",
+    });
+    // Local-only resolution never spawns the server-supplied id.
+    expect((await events(fixture)).some((item) => item.event === "initialize")).toBe(false);
+  });
+
+  it("reports a rejected model as a typed diagnostic and releases the session", async () => {
+    const fixture = await makeFixture({ mode: "normal", rejectModel: "stub-deep" });
+    fixture.control.enqueueDispatch("TEST-241-REJECT", undefined, {
+      harness: "custom",
+      model: "stub-deep",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("released");
+
+    await until(() => fixture.control.chunks().some((chunk) => chunk.kind === "diagnostic"));
+    const diagnostic = fixture.control
+      .chunks()
+      .find((chunk) => chunk.kind === "diagnostic")?.diagnostic;
+    expect(diagnostic).toMatchObject({ kind: "model_rejected", model: "stub-deep" });
+    // The Harness did spawn before rejecting the model.
+    expect((await events(fixture)).some((item) => item.event === "session/new")).toBe(true);
+  });
+
+  it("omits unsupported effort with a warning chunk and keeps the turn alive", async () => {
+    const fixture = await makeFixture({ mode: "normal", rejectEffort: true });
+    fixture.control.enqueueDispatch("TEST-241-EFFORT", undefined, {
+      harness: "custom",
+      effort: "high",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    await until(() =>
+      fixture.control.chunks().some((chunk) => chunk.eventType === "effort_unsupported"),
+    );
+    const warning = fixture.control
+      .chunks()
+      .find((chunk) => chunk.eventType === "effort_unsupported");
+    expect(warning?.summary).toContain("does not support effort 'high'");
+    expect((await events(fixture)).some((item) => item.event === "prompt")).toBe(true);
+  });
+
+  it("uses local CLI defaults when the dispatch carries no options", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      defaults: { harness: "custom", model: "stub-deep", effort: "high" },
+    });
+    fixture.control.enqueueDispatch("TEST-241-CLI");
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const sets = (await events(fixture)).filter((item) => item.event === "set_config_option");
+    expect(sets.find((item) => item.configId === "model")?.value).toBe("stub-deep");
+    expect(sets.find((item) => item.configId === "thought_level")?.value).toBe("high");
+  });
+
+  it("never bleeds CLI default model/effort onto a different Harness or model", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      defaults: { harness: "other-harness", model: "other-model", effort: "high" },
+    });
+    fixture.control.enqueueDispatch("TEST-241-NO-BLEED", undefined, { harness: "custom" });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const sets = (await events(fixture)).filter((item) => item.event === "set_config_option");
+    expect(sets.some((item) => item.value === "other-model")).toBe(false);
+    expect(sets.some((item) => item.value === "high")).toBe(false);
+  });
+
+  it("never inherits CLI default effort when the dispatch overrides the model", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      defaults: { harness: "custom", model: "stub-deep", effort: "high" },
+    });
+    fixture.control.enqueueDispatch("TEST-241-MODEL-OVERRIDE", undefined, {
+      harness: "custom",
+      model: "stub-fast",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const sets = (await events(fixture)).filter((item) => item.event === "set_config_option");
+    expect(sets.find((item) => item.configId === "model")?.value).toBe("stub-fast");
+    expect(sets.some((item) => item.configId === "thought_level")).toBe(false);
   });
 });
