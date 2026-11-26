@@ -149,6 +149,7 @@ async function readPersonalProject(
     .where(
       and(
         eq(projects.id, projectId),
+        isNull(projects.deletedAt),
         eq(workspaces.kind, WorkspaceKind.enum.personal),
         eq(workspaces.personalOwnerHumanId, humanId),
       ),
@@ -176,7 +177,13 @@ async function readSharedSourceProject(
         isNull(workspaceMemberships.suspendedAt),
       ),
     )
-    .where(and(eq(projects.id, projectId), eq(workspaces.kind, WorkspaceKind.enum.shared)))
+    .where(
+      and(
+        eq(projects.id, projectId),
+        isNull(projects.deletedAt),
+        eq(workspaces.kind, WorkspaceKind.enum.shared),
+      ),
+    )
     .limit(1);
   if (row === undefined) throw new TransfersError("project_not_found");
   return row;
@@ -191,7 +198,7 @@ async function readSourceProject(
     .select({ kind: workspaces.kind })
     .from(projects)
     .innerJoin(workspaces, eq(projects.workspaceId, workspaces.id))
-    .where(eq(projects.id, projectId))
+    .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
     .limit(1);
   if (row?.kind === WorkspaceKind.enum.shared) {
     return readSharedSourceProject(tx, projectId, humanId);
@@ -545,12 +552,13 @@ async function createAuthorization(
 async function pendingAuthorizationByToken(
   tx: DbTransaction,
   token: string,
+  lock = false,
 ): Promise<typeof projectTransferAuthorizations.$inferSelect> {
-  const [row] = await tx
+  const query = tx
     .select()
     .from(projectTransferAuthorizations)
-    .where(eq(projectTransferAuthorizations.tokenHash, hashToken(token)))
-    .limit(1);
+    .where(eq(projectTransferAuthorizations.tokenHash, hashToken(token)));
+  const [row] = lock ? await query.for("update").limit(1) : await query.limit(1);
   if (row === undefined || row.status !== "pending") throw new TransfersError("transfer_invalid");
   const [live] = await tx
     .select({ id: projectTransferAuthorizations.id })
@@ -581,6 +589,14 @@ async function acceptInTransaction(
   if (row === undefined || row.status !== "pending") {
     throw new TransfersError("transfer_invalid");
   }
+  const [project] = await tx
+    .select()
+    .from(projects)
+    .where(and(eq(projects.id, auth.projectId), isNull(projects.deletedAt)))
+    .for("update")
+    .limit(1);
+  if (project === undefined) throw new TransfersError("transfer_invalid");
+
   const [live] = await tx
     .select({ id: projectTransferAuthorizations.id })
     .from(projectTransferAuthorizations)
@@ -637,13 +653,7 @@ async function acceptInTransaction(
 
   await bumpGuards(tx, [source.id, destination.id]);
 
-  const [project] = await tx
-    .select()
-    .from(projects)
-    .where(eq(projects.id, auth.projectId))
-    .for("update")
-    .limit(1);
-  if (project === undefined || project.workspaceId !== auth.sourceWorkspaceId) {
+  if (project.workspaceId !== auth.sourceWorkspaceId) {
     throw new TransfersError("transfer_stale");
   }
 
@@ -971,7 +981,7 @@ export function createTransfersService({ db }: TransfersDeps): TransfersService 
           const [project] = await tx
             .select()
             .from(projects)
-            .where(eq(projects.id, authorization.projectId))
+            .where(and(eq(projects.id, authorization.projectId), isNull(projects.deletedAt)))
             .limit(1);
           const [source] = await tx
             .select()
@@ -991,8 +1001,8 @@ export function createTransfersService({ db }: TransfersDeps): TransfersService 
     async accept(account, token, key) {
       if (account === null) throw new TransfersError("not_signed_in");
       return db.transaction(async (tx) => {
+        const row = await pendingAuthorizationByToken(tx, token, true);
         await lockOwnershipWrites(tx);
-        const row = await pendingAuthorizationByToken(tx, token);
         return acceptInTransaction(tx, row, account.humanId, key);
       });
     },

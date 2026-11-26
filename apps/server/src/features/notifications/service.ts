@@ -113,7 +113,7 @@ async function callerIsActive(tx: DbTransaction, humanId: string): Promise<boole
  * project's current workspace_id; there is no denormalized workspace id to go stale.
  */
 const readableAccess = (humanId: string | SQLWrapper) =>
-  sql`exists (
+  sql`${projects.deletedAt} is null and exists (
     select 1 from ${workspaces}
     where ${workspaces.id} = ${projects.workspaceId}
       and (

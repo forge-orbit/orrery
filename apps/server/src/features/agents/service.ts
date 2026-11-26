@@ -307,7 +307,7 @@ async function loadKeyProjects(
     })
     .from(agentApiKeyProjects)
     .innerJoin(projects, eq(projects.id, agentApiKeyProjects.projectId))
-    .where(inArray(agentApiKeyProjects.keyId, [...keyIds]));
+    .where(and(inArray(agentApiKeyProjects.keyId, [...keyIds]), isNull(projects.deletedAt)));
   for (const row of rows) {
     const list = byKey.get(row.keyId) ?? [];
     list.push({
@@ -409,6 +409,7 @@ const dispatchLive = sql<boolean>`${dispatchTokens.revokedAt} is null
   and ${workSessions.leaseExpiresAt} > statement_timestamp()
   and ${runnerHosts.revokedAt} is null
   and ${runners.revokedAt} is null
+  and ${projects.deletedAt} is null
   and ${humans.deactivatedAt} is null`;
 
 async function resolveDispatchTokenInTransaction(

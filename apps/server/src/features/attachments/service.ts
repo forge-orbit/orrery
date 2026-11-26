@@ -446,7 +446,7 @@ export function createAttachmentsService({
     const [project] = await tx
       .select({ workspaceId: projects.workspaceId })
       .from(projects)
-      .where(eq(projects.id, projectId))
+      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
       .limit(1);
     if (project === undefined) throw new AttachmentsError("project_not_found");
 
@@ -719,7 +719,10 @@ export function createAttachmentsService({
         .from(attachmentReferences)
         .innerJoin(attachments, eq(attachments.id, attachmentReferences.attachmentId))
         .innerJoin(storedObjects, eq(storedObjects.id, attachments.objectId))
-        .where(and(or(...conditions), eq(storedObjects.status, "active")))
+        .innerJoin(projects, eq(projects.id, attachments.projectId))
+        .where(
+          and(or(...conditions), eq(storedObjects.status, "active"), isNull(projects.deletedAt)),
+        )
         .orderBy(attachmentReferences.holderType, attachmentReferences.holderId, attachments.id);
       for (const row of rows) {
         const key = attachmentHolderKey(row.holderType, row.holderId);

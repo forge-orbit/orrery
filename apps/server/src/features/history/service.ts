@@ -224,9 +224,10 @@ async function loadProjectAccessEvents(
       subjectAvatarObjectId: subjectHuman.avatarObjectId,
     })
     .from(projectAccessEvents)
+    .innerJoin(projects, eq(projects.id, projectAccessEvents.projectId))
     .leftJoin(actorHuman, eq(actorHuman.id, projectAccessEvents.actorHumanId))
     .leftJoin(subjectHuman, eq(subjectHuman.id, projectAccessEvents.subjectHumanId))
-    .where(and(...conditions))
+    .where(and(...conditions, isNull(projects.deletedAt)))
     .orderBy(desc(projectAccessEvents.createdAt), desc(projectAccessEvents.id));
   if (rows.length === 0) return [];
   const projectIdList = [...new Set(rows.map((row) => row.projectId))];
@@ -508,7 +509,7 @@ export function createHistoryService({ db, projectAccessCeiling }: HistoryDeps):
                   eq(projectAccessGrants.level, ProjectAccessLevel.enum.manage),
                 ),
               )
-              .where(eq(projects.workspaceId, workspaceId));
+              .where(and(eq(projects.workspaceId, workspaceId), isNull(projects.deletedAt)));
             events.push(
               ...(await loadProjectAccessEvents(
                 tx,
@@ -530,7 +531,7 @@ export function createHistoryService({ db, projectAccessCeiling }: HistoryDeps):
           const [project] = await tx
             .select({ id: projects.id, workspaceId: projects.workspaceId, name: projects.name })
             .from(projects)
-            .where(eq(projects.id, projectId))
+            .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
             .limit(1);
           if (project === undefined) throw new HistoryError("project_not_found");
 
