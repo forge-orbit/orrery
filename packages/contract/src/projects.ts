@@ -162,10 +162,15 @@ export const ProjectKey = z
   .meta({ id: "ProjectKey" });
 export type ProjectKey = z.infer<typeof ProjectKey>;
 
+export const PROJECT_DESCRIPTION_MAX_LENGTH = 350;
+
 export const ProjectDescription = z
   .string()
   .trim()
-  .max(500, "Keep the description under 500 characters.")
+  .max(
+    PROJECT_DESCRIPTION_MAX_LENGTH,
+    `Keep the description under ${PROJECT_DESCRIPTION_MAX_LENGTH} characters.`,
+  )
   .meta({ id: "ProjectDescription" });
 export type ProjectDescription = z.infer<typeof ProjectDescription>;
 

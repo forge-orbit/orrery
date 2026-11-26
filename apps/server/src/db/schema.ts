@@ -438,7 +438,7 @@ export const projects = pgTable(
   },
   (t) => [
     check("projects_key_format", sql`${t.key} ~ '^[A-Z][A-Z0-9]{1,9}$'`),
-    check("projects_description_length", sql`char_length(${t.description}) <= 500`),
+    check("projects_description_length", sql`char_length(${t.description}) <= 350`),
     check("projects_next_issue_number_positive", sql`${t.nextIssueNumber} > 0`),
     check(
       "projects_fallback_policy",

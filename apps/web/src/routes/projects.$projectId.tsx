@@ -683,8 +683,8 @@ function ProjectSettings({ project }: { project: Project }) {
                 onChange={setDescription}
                 isOptional
                 rows={3}
-                maxLength={500}
-                htmlMaxLength={500}
+                maxLength={350}
+                htmlMaxLength={350}
                 placeholder="What is this project about?"
                 width="min(100%, 28rem)"
               />
