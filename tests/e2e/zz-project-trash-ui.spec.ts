@@ -71,6 +71,8 @@ test("workspace owner moves a project to Trash and restores its data", async ({ 
 
     await page.goto(`/projects/${projectId}`);
     await expect(page.getByRole("heading", { level: 1, name: projectName })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Danger Zone" })).toHaveCount(0);
+    await page.getByRole("tab", { name: "Settings" }).click();
     await expect(page.getByRole("heading", { level: 2, name: "Danger Zone" })).toBeVisible();
     await page.getByRole("button", { name: "Move to Trash", exact: true }).click();
 
