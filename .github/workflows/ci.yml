@@ -115,6 +115,21 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  runner-pack:
+    name: Runner tarball smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Builds @forge-orbit/orrery-runner, packs it, audits tarball hygiene,
+      # and runs --help/--version through the npm .bin symlink in isolation.
+      - run: node scripts/smoke-runner-pack.mjs
+
   publish:
     name: Publish image
     if: startsWith(github.ref, 'refs/tags/v')
@@ -151,11 +166,73 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # GHCR is the only published registry; the release body points at its image.
+  # One-time maintainer bootstrap prerequisite for the `npm` job below: the
+  # `@forge-orbit` npm org must be claimed/verified, an initial bootstrap
+  # publish of `@forge-orbit/orrery-runner` must exist, and GitHub Actions
+  # OIDC Trusted Publishing must be configured for `forge-orbit/orrery`
+  # (`ci.yml`). Until then, tagged `v*` builds will fail at the publish step
+  # while the Docker image publish and PR checks keep working. See
+  # docs/guides/local-runner.md for the end-user install story and the
+  # maintainer release prerequisite.
+  npm:
+    name: Publish runner to npm
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'forge-orbit/orrery'
+    needs: [publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: Publish @forge-orbit/orrery-runner with OIDC provenance
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          export STAMP_VERSION="$VERSION"
+          if ! node --input-type=module -e '
+            const version = process.env.STAMP_VERSION ?? "";
+            if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(version)) process.exit(1);
+          '; then
+            echo "::error::Tag $TAG is not valid semver."
+            exit 1
+          fi
+          # Idempotency: skip when this version is already on npm.
+          if npm view "@forge-orbit/orrery-runner@$VERSION" version 2>/dev/null | grep -Fqx "$VERSION"; then
+            echo "Version $VERSION is already published; skipping."
+            exit 0
+          fi
+          # Stamp the release version before building so the bundle bakes it in.
+          # (`prepack` also rebuilds on publish, but the explicit build keeps
+          # the stamp-then-build ordering obvious.)
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const path = "apps/runner/package.json";
+            const pkg = JSON.parse(readFileSync(path, "utf8"));
+            pkg.version = process.env.STAMP_VERSION;
+            writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          '
+          pnpm --filter @forge-orbit/orrery-runner build
+          PUBLISH_TAG_ARGS=""
+          case "$VERSION" in
+            *-*) PUBLISH_TAG_ARGS="--tag next" ;;
+          esac
+          pnpm --filter @forge-orbit/orrery-runner publish \
+            --provenance --access public --no-git-checks $PUBLISH_TAG_ARGS
+
+  # GHCR is the only published container registry; the release body points at
+  # its image alongside the npm runner package.
   release:
     name: Create GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [publish]
+    needs: [publish, npm]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -181,4 +258,17 @@ jobs:
           \`\`\`sh
           docker pull ghcr.io/forge-orbit/orrery:${VERSION}
           \`\`\`
+
+          **Install the local runner**
+
+          \`\`\`sh
+          npm install -g @forge-orbit/orrery-runner
+          # or run it without installing:
+          npx @forge-orbit/orrery-runner --help
+          \`\`\`
+
+          > Not an OS sandbox: the runner's local permission policy is an
+          > application-layer gate. Allowed commands run with your OS user's
+          > privileges; use a container, VM, or OS sandbox wrapper for hard
+          > confinement.
           EOF

@@ -160,31 +160,44 @@ Operator guides:
 
 ### Option 1: Delegate issues with the local runner
 
-Use `orrery-runner` when you want to dispatch issues from the Orrery board into isolated local git worktrees and watch Live Session Studio without storing a long-lived workspace API key on your laptop.
+Use `orrery-runner` when you want to dispatch issues from the Orrery board into isolated local git worktrees and watch Live Session Studio without storing a long-lived workspace API key on your laptop. Requires Node.js 26+.
 
-1. Enroll your machine once via browser device-code login:
+```sh
+npm install -g @forge-orbit/orrery-runner
+# or run it without installing:
+npx @forge-orbit/orrery-runner --help
+```
+
+1. Enroll your Runner host once via browser device-code login:
 
    ```sh
    orrery-runner login --server https://orrery.example.com
    ```
 
-2. Start a persistent project runner, optionally with `--auto-claim`:
+   One Runner host holds one active enrollment at a time; logging in elsewhere replaces the stored credential.
+
+2. From your repository, remember a workspace/project binding and start a persistent project runner with zero flags:
 
    ```sh
-   orrery-runner start \
-     --server https://orrery.example.com \
-     --workspace <WORKSPACE_ID> \
-     --project <PROJECT_ID> \
-     --repo /path/to/repo
+   cd /path/to/repo
+   orrery-runner init
+   orrery-runner start
    ```
+
+   Pass `--auto-claim` to pull ready `todo` issues automatically, or `--reconfigure` to change the saved binding.
 
 3. Or run a single issue from the terminal and exit when it finishes:
 
    ```sh
-   orrery-runner work PROJ-42 --server https://orrery.example.com --repo /path/to/repo
+   cd /path/to/repo
+   orrery-runner work PROJ-42
    ```
 
-`orrery-runner` supervises OpenCode (`opencode acp`) by default and supports any ACP stdio client via `--acp-command` and `--acp-arg`. Dirty, unpushed, or deadline-paused worktrees are preserved on disk. See the [Local agent runner guide](docs/guides/local-runner.md) for all flags, permission rules, and security details.
+`orrery-runner` supervises OpenCode (`opencode acp`) by default, supports the `codex`, `claude`, `omp`, `grok`, `hermes`, and `cursor` ACP presets via `--harness` (with `--model` / `--effort` defaults for model and reasoning effort), and any ACP stdio client via `--acp-command` and `--acp-arg` (see `orrery-runner --help`; `orrery-runner --version` needs no enrollment). Each checkout remembers its workspace/project binding in `~/.config/orrery/repos.json`, and dirty, unpushed, or deadline-paused worktrees are preserved on disk.
+
+> Not an OS sandbox: the runner's local permission policy is an application-layer gate, not an OS or process sandbox. Allowed commands run with your Runner host user's privileges. If you need hard confinement, run `orrery-runner` inside a container, VM, or OS sandbox wrapper.
+
+See the [Local agent runner guide](docs/guides/local-runner.md) for all flags, permission rules, and security details.
 
 ### Option 2: Connect Claude Code, Codex, or Cursor over MCP
 
@@ -360,12 +373,8 @@ Open <http://localhost:5173/setup> to create your local admin account.
 In a second terminal, run `orrery-runner` directly from `apps/runner`:
 
 ```sh
-pnpm --filter @orrery/runner start -- login --server http://localhost:8080
-pnpm --filter @orrery/runner start -- start \
-  --server http://localhost:8080 \
-  --workspace <WORKSPACE_ID> \
-  --project <PROJECT_ID> \
-  --repo /path/to/repo
+pnpm --filter @forge-orbit/orrery-runner start -- login --server http://localhost:8080
+pnpm --filter @forge-orbit/orrery-runner start -- start --repo /path/to/repo --workspace <NAME> --project <KEY>
 ```
 
 ### Repository layout

@@ -1,5 +1,6 @@
 {
   "name": "@orrery/contract",
+  "version": "0.0.0-dev",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",

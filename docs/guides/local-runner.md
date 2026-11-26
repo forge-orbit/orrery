@@ -22,10 +22,30 @@ the same local session.
 - At least one **Agent** owned by your Orrery account, and **Contribute** (or **Manage**) access to
   the target project.
 
-From this repository, run the CLI with:
+## Install
+
+Requires **Node.js 26+**.
 
 ```sh
-pnpm --filter @orrery/runner start -- <command> [options]
+npm install -g @forge-orbit/orrery-runner
+```
+
+Or run it without installing:
+
+```sh
+npx @forge-orbit/orrery-runner --help
+```
+
+Check the installed version at any time (no enrollment needed):
+
+```sh
+orrery-runner --version
+```
+
+Developing Orrery itself? Run the CLI from this repository instead:
+
+```sh
+pnpm --filter @forge-orbit/orrery-runner start -- <command> [options]
 ```
 
 (When installed as a package binary, invoke `orrery-runner <command> [options]` directly.)
@@ -53,18 +73,35 @@ orrery-runner status
 No long-lived workspace API key (`orr_ak_...`) is written to your machine. Every workspace and
 project check runs live against Postgres on each request.
 
+> **Single enrollment per Runner host.** `runner-credential.json` holds one active installation at
+> a time. `login --server <other>` replaces the stored credential (warning with the previous
+> host name and server); revoke the old Runner host in Orrery if it is no longer used. The
+> enrolled installation URL is authoritative afterwards: `start`, `work`, and `init` fail fast
+> if `--server` or `ORRERY_URL` points anywhere else, so the host credential can never leak to
+> the wrong origin.
+
 ## 2. Run modes
 
 ### Persistent project runner (`start`)
 
-Bind a Runner process to one workspace, one project, and one local git checkout:
+Bind a Runner process to one workspace, one project, and one local git checkout. From your
+repository, the zero-flag flow is:
 
 ```sh
-orrery-runner start \
-  --server https://orrery.example.com \
-  --workspace <WORKSPACE_ID> \
-  --project <PROJECT_ID> \
-  --repo /path/to/repo
+cd /path/to/repo
+orrery-runner init    # interactive picker, saves the binding, then exits
+orrery-runner start   # reuses the saved binding and heartbeats until stopped
+```
+
+On first run with no saved binding, `start` opens the same numbered picker
+(workspace → project → default agent) and saves it before registering. Later runs reuse the
+binding with no prompts and no extra network round-trip. Explicit `--workspace` / `--project`
+/ `--agent` flags override the saved binding for that run only without modifying it; names,
+slugs, and keys work anywhere an ID does (`--workspace Acme --project ONE --agent Ada`).
+
+```sh
+orrery-runner start --workspace Acme --project ONE
+orrery-runner start --reconfigure   # re-pick (or apply flags) and save after registration
 ```
 
 What `start` does:
@@ -84,12 +121,8 @@ By default, a persistent runner waits for manual delegation from the Orrery UI. 
 to also pull ready `todo` issues automatically:
 
 ```sh
-orrery-runner start \
-  --server https://orrery.example.com \
-  --workspace <WORKSPACE_ID> \
-  --project <PROJECT_ID> \
-  --auto-claim \
-  --auto-claim-filter assignedToMe
+cd /path/to/repo
+orrery-runner start --auto-claim --auto-claim-filter assignedToMe
 ```
 
 `--auto-claim-filter` controls which ready issues are eligible:
@@ -109,7 +142,8 @@ Run a single issue end-to-end from the command line without leaving a background
 open:
 
 ```sh
-orrery-runner work PROJ-42 --server https://orrery.example.com --repo /path/to/repo
+cd /path/to/repo
+orrery-runner work PROJ-42
 ```
 
 `work` accepts an issue UUID, a `KEY-N` identifier (such as `PROJ-42`), or a full Orrery issue URL.
@@ -120,6 +154,43 @@ to guess and lists the matching workspaces — pass `--workspace <ID|name|slug>`
 heartbeats, Live Session Studio streaming, Needs Input resume, and teammate Stop), marks the
 ephemeral Runner offline on exit or `Ctrl-C`, and exits `0` only when the session completes
 normally.
+
+### Harness selection (`--harness`, `--model`, `--effort`)
+
+Built-in `--harness` presets invoke each vendor's real ACP stdio command under a stable ID:
+
+| Preset | Command | Install hint |
+| --- | --- | --- |
+| `opencode` *(default)* | `opencode acp` | `npm install -g opencode-ai` |
+| `codex` | `codex-acp` | `npm install -g @agentclientprotocol/codex-acp` |
+| `claude` | `claude-agent-acp` | `npm install -g @agentclientprotocol/claude-agent-acp` |
+| `omp` | `omp acp` | `npm install -g omp` |
+| `grok` | `grok agent stdio` | `npm install -g @xai-official/grok` |
+| `hermes` | `hermes acp` | `cargo install hermes-acp` |
+| `cursor` | `cursor-agent acp` | See <https://cursor.com> |
+
+```sh
+orrery-runner start --harness codex --model <MODEL_ID> --effort high
+```
+
+Passing `--harness` together with `--acp-command` / `--acp-arg` (or `ORRERY_ACP_COMMAND` /
+`ORRERY_ACP_ARGS`) fails fast — the two ways of choosing a harness are mutually exclusive.
+Omitting both resolves the real `opencode` preset; if `opencode` is missing, UI-delegated
+`start` warns and continues when another harness is installed, while `work` and
+`--auto-claim` fail fast. A custom `harnesses.json` entry can never claim the reserved
+`custom` ID, and startup fails fast on an unknown `--harness` ID or a missing binary.
+
+### Remembered bindings (`repos.json`)
+
+`init`, `start`, and `start --reconfigure` remember the resolved workspace/project/agent in
+`~/.config/orrery/repos.json` (`0700` directory, `0600` file, written atomically; override
+with `ORRERY_RUNNER_CONFIG_DIR`). Bindings are keyed by checkout, live outside your
+repositories, and never store display names — `--name` stays per-run.
+
+- Bare `start` in a bound checkout reuses the binding with no prompts and no target lookup.
+- Explicit flags override for one run without touching the file.
+- A stale binding (trashed project, revoked access, deleted agent) is never auto-deleted:
+  the error names the cause and points at `--reconfigure`, `init`, or `login` (on `401`).
 
 ## 3. Delegating, watching live, and steering
 
@@ -225,26 +296,45 @@ marks the attempt `uncertain` instead of auto-rerunning it:
 
 | Flag | Env var | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
-| `--server URL` | `ORRERY_URL` | `http://localhost:8080` | all | Orrery base URL (`PUBLIC_URL`) |
-| `--host-name NAME` | — | OS hostname | `login` | Display name for this machine |
+| `--server URL` | `ORRERY_URL` | enrolled origin (`login`: `ORRERY_URL` else `http://localhost:8080`) | all (`start`/`work`/`init` must match enrollment) | Orrery base URL (`PUBLIC_URL`) |
+| `--host-name NAME` | — | OS hostname | `login` | Display name for this Runner host |
 | `--platform NAME` | — | `<platform>-<arch>` | `login` | Platform label shown in Runner Fleet |
-| `--workspace ID` | — | — | `start`, `work` | Workspace ID (`start`) or ID/name/slug to disambiguate a key (`work`) |
-| `--project ID` | — | — | `start` | Project ID to bind the Runner to |
-| `--agent ID` | — | owner's first Agent | `start`, `work` | Default Agent ID for dispatches |
-| `--name NAME` | — | host display name | `start` | Runner display name |
+| `--workspace ID` | — | saved binding or picker | `start`, `work`, `init` | Workspace ID, name, or slug (`work`: disambiguates an issue key) |
+| `--project ID` | — | saved binding or picker | `start`, `init` | Project ID, key, or name |
+| `--agent ID` | — | owner's first Agent | `start`, `work`, `init` | Agent ID or name |
+| `--reconfigure` | — | `false` | `start` | Re-resolve targets and update the saved binding (saved only after registration) |
+| `--name NAME` | — | `<enrolled-host-name> · <repo-dir>` (plus `(<worktree-dir>)` in linked worktrees) | `start` | Runner display name |
 | `--capability NAME` | — | `[]` | `start` | Repeatable declared capability (first entry sets default Run harness label) |
 | `--concurrency N` | — | `1` | `start` | Max concurrent local slots (`1`–`64`) |
-| `--repo PATH` | — | current directory | `start`, `work` | Local git checkout path |
+| `--repo PATH` | — | current directory | `start`, `work`, `init` | Local git checkout path |
 | `--heartbeat-ms N` | — | `5000` | `start` | Heartbeat interval in ms (min `10`) |
 | `--auto-claim` | — | `false` | `start` | Opt in to autonomous ready-work pickup |
 | `--auto-claim-filter` | — | `assignedToMe` | `start` | `assignedToMe`, `unassigned`, or `all` |
 | `--auto-claim-poll-ms N` | — | `1000` | `start` | Auto-claim polling interval in ms |
-| `--acp-command NAME` | `ORRERY_ACP_COMMAND` | `opencode` | `start`, `work` | Local ACP stdio harness executable |
+| `--prompt TEXT` | — | — | `work` | Optional instructions appended after the runner's preamble (max 16,000 chars) |
+| `--harness ID` | — | `opencode` | `start`, `work` | Local Harness preset (`opencode`, `codex`, `claude`, `omp`, `grok`, `hermes`, `cursor`) |
+| `--model ID` | — | — | `start`, `work` | Default model for dispatches without one |
+| `--effort LEVEL` | — | — | `start`, `work` | Default reasoning effort (e.g. `high`) |
+| `--acp-command NAME` | `ORRERY_ACP_COMMAND` | `opencode` | `start`, `work` | ACP harness command (mutually exclusive with `--harness`) |
 | `--acp-arg ARG` | `ORRERY_ACP_ARGS` (JSON array) | `["acp"]` | `start`, `work` | Repeatable ACP harness argument |
 | `--lease-renew-ms N` | `ORRERY_LEASE_RENEW_MS` | `60000` | `start`, `work` | Work-session lease renewal interval in ms |
 | `--cancel-grace-ms N` | `ORRERY_CANCEL_GRACE_MS` | `2000` | `start`, `work` | `SIGTERM` → `SIGKILL` grace period in ms |
 | `--worktree-root PATH` | `ORRERY_WORKTREE_ROOT` | `../.orrery-worktrees` | `start`, `work` | Parent directory for per-slot git worktrees |
-| — | `ORRERY_RUNNER_CONFIG_DIR` | `~/.config/orrery` | all | Directory storing `runner-credential.json` (`0600`) |
+| `-v, --version` | — | — | all | Print the runner version and exit (no enrollment needed) |
+| — | `ORRERY_RUNNER_CONFIG_DIR` | `~/.config/orrery` | all | Directory storing `runner-credential.json` (`0600`) and `repos.json` (`0600`) |
 
 For the full architectural specification, lock order, and rejected alternatives, see
 [ADR-0010](../adr/0010-local-agent-runner-and-live-streaming.md).
+
+## 6. Maintainer release process
+
+Every pull request packs the standalone tarball and smoke-tests it in isolation
+(`node scripts/smoke-runner-pack.mjs`, wired into CI). Every `v*` tag publishes
+`@forge-orbit/orrery-runner` to npm idempotently with OIDC provenance
+(`--provenance --access public`, `--tag next` for prereleases) and stamps the tag version
+into the bundle before building, so `orrery-runner --version` reports the release.
+
+One-time bootstrap prerequisite before the first tagged publish: claim/verify the
+`@forge-orbit` npm org, perform the initial bootstrap publish, and configure GitHub Actions
+OIDC Trusted Publishing for `forge-orbit/orrery` (`ci.yml`). Until then, tagged builds fail
+at the npm publish step while PR checks and the Docker image publish keep working.
