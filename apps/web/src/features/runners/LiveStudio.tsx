@@ -101,7 +101,10 @@ export function LiveStudio({
     ...dispatchMetaQuery(runnerId, dispatchId),
     enabled: hasIssue && listed === undefined && dispatches.isSuccess,
   });
-  const dispatch = listed ?? meta.data;
+  // The fetched metadata only applies when it belongs to the URL's issue;
+  // a mismatched ?issueId= must keep behaving as if no dispatch were known.
+  const dispatch =
+    listed ?? (meta.data !== undefined && meta.data.issueId === issueId ? meta.data : undefined);
   const workspaceId = searchWorkspaceId ?? dispatch?.workspaceId ?? "";
   const session =
     sessions.data?.find((entry) => entry.id === dispatch?.workSessionId) ??
