@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { init } from "./init.ts";
 import { bindingFingerprint } from "./checkout.ts";
-import { readReposFile } from "./repos.ts";
+import { readReposFile, saveBinding } from "./repos.ts";
 
 const dirs: string[] = [];
 afterAll(async () => {
@@ -299,6 +299,53 @@ describe("orrery-runner init (#267)", () => {
       const bindings = await readReposFile(dir);
       expect(bindings).toHaveLength(1);
       expect(bindings[0]?.projectId).toBe("proj-two");
+    } finally {
+      restoreEnv();
+      await stub.close();
+    }
+  });
+
+  it("bare init in a bound checkout runs the picker instead of reusing the binding", async () => {
+    const dir = await makeDir();
+    const repo = await makeRepo();
+    const stub = await listen();
+    const lines: string[] = [];
+    isolateEnv(dir);
+    try {
+      await writeCredential(dir, stub.url);
+      await saveBinding(
+        {
+          server: stub.url,
+          bindingFingerprint: bindingFingerprint(repo),
+          workspaceId: "ws-acme",
+          projectId: "proj-one",
+          agentId: "agent-ada",
+          hostId: "host-1",
+          workspaceName: "Acme",
+          projectKey: "ONE",
+          agentName: "Ada",
+          updatedAt: new Date(0).toISOString(),
+        },
+        dir,
+      );
+      await init({
+        server: stub.url,
+        repoPath: repo,
+        write: (line) => lines.push(line),
+        isTTY: true,
+        choose: async (title, options) => {
+          if (title === "Select a workspace:") return options[0]!.value;
+          return (options.find((option) => option.label.includes("Two")) ?? options[0]!).value;
+        },
+      });
+      const bindings = await readReposFile(dir);
+      expect(bindings).toHaveLength(1);
+      expect(bindings[0]).toMatchObject({
+        workspaceId: "ws-acme",
+        projectId: "proj-two",
+        agentId: "agent-ada",
+      });
+      expect(lines.join("\n")).toContain("Saved binding");
     } finally {
       restoreEnv();
       await stub.close();

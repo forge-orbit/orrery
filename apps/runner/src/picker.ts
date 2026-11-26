@@ -62,9 +62,18 @@ export interface PickedTargets {
   projectId: string;
   projectKey: string;
   projectName: string;
-  /** The response default (first-created Agent), or undefined when the host has none. */
   agentId: string | undefined;
   agentName: string | undefined;
+}
+
+/** An explicitly resolved `--agent`: the picker keeps it and skips its agent prompt. */
+export interface PreselectedAgent {
+  id: string;
+  name?: string | undefined;
+}
+
+export interface PickerAgentOptions {
+  agent?: PreselectedAgent | undefined;
 }
 
 export const pickerCancelledError = (): Error =>
@@ -80,6 +89,56 @@ export const nonTTYError = (): Error =>
       "or save a binding first with 'orrery-runner init --workspace <ID> --project <ID>'.",
   );
 
+function pickerDeps(deps: PickerDeps): {
+  write: (line: string) => void;
+  isTTY: boolean;
+  choose: ChooseFn;
+} {
+  return {
+    write: deps.write ?? ((line: string) => process.stdout.write(`${line}\n`)),
+    isTTY: deps.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY),
+    choose: deps.choose ?? readlineChoose,
+  };
+}
+
+/**
+ * Shared agent step: an explicit `--agent` is kept without prompting; zero
+ * agents fail with creation guidance; one agent auto-selects with a note;
+ * several agents prompt (marking the server default).
+ */
+export async function pickAgent(
+  targets: RunnerTargetsResponse,
+  deps: PickerDeps = {},
+  options: PickerAgentOptions = {},
+): Promise<PreselectedAgent> {
+  const { write, choose } = pickerDeps(deps);
+  if (options.agent !== undefined) {
+    write(`Using agent '${options.agent.name ?? options.agent.id}'.`);
+    return options.agent;
+  }
+  if (targets.agents.length === 0) {
+    throw new Error(
+      "This host has no agents. Create an Agent in Orrery, then run again " +
+        "with '--agent <ID>' once it exists.",
+    );
+  }
+  if (targets.agents.length === 1) {
+    const only = targets.agents[0]!;
+    write(`Using agent '${only.name}' (only option).`);
+    return { id: only.id, name: only.name };
+  }
+  const chosen = await choose(
+    "Select an agent:",
+    targets.agents.map((item) => ({
+      label: item.id === targets.defaultAgentId ? `${item.name} (default)` : item.name,
+      value: item,
+    })),
+  );
+  if (chosen === null || chosen === undefined) throw pickerCancelledError();
+  write(`Using agent '${chosen.name}'.`);
+  return { id: chosen.id, name: chosen.name };
+}
+
 /**
  * Project selection scoped to one already-resolved workspace (used when
  * `--workspace` was passed without `--project` and no binding applies).
@@ -89,10 +148,9 @@ export async function pickProjectInWorkspace(
   workspace: RunnerTargetsResponse["workspaces"][number],
   targets: RunnerTargetsResponse,
   deps: PickerDeps = {},
+  options: PickerAgentOptions = {},
 ): Promise<PickedTargets> {
-  const write = deps.write ?? ((line: string) => process.stdout.write(`${line}\n`));
-  const isTTY = deps.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY);
-  const choose = deps.choose ?? readlineChoose;
+  const { write, isTTY, choose } = pickerDeps(deps);
   if (!isTTY) throw nonTTYError();
   if (workspace.projects.length === 0) {
     throw new Error(
@@ -111,35 +169,29 @@ export async function pickProjectInWorkspace(
     if (chosen === null || chosen === undefined) throw pickerCancelledError();
     project = chosen;
   }
-  const agent = targets.agents.find((item) => item.id === targets.defaultAgentId) ?? undefined;
-  if (agent !== undefined) {
-    write(`Using default agent '${agent.name}'. Override with --agent for this run.`);
-  } else {
-    write("This host has no agents yet; continuing without a default agent.");
-  }
+  const agent = await pickAgent(targets, deps, options);
   return {
     workspaceId: workspace.id,
     workspaceName: workspace.name,
     projectId: project.id,
     projectKey: project.key,
     projectName: project.name,
-    agentId: agent?.id,
-    agentName: agent?.name,
+    agentId: agent.id,
+    agentName: agent.name,
   };
 }
 
 /**
- * Interactive Workspace → Project → default Agent selection. Workspaces with
- * zero bindable projects are hidden unless every workspace is empty; any
- * level with exactly one option is auto-selected with a printed note.
+ * Interactive Workspace → Project → Agent selection. Workspaces with zero
+ * bindable projects are hidden unless every workspace is empty; any level
+ * with exactly one option is auto-selected with a printed note.
  */
 export async function pickTargets(
   targets: RunnerTargetsResponse,
   deps: PickerDeps = {},
+  options: PickerAgentOptions = {},
 ): Promise<PickedTargets> {
-  const write = deps.write ?? ((line: string) => process.stdout.write(`${line}\n`));
-  const isTTY = deps.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY);
-  const choose = deps.choose ?? readlineChoose;
+  const { write, isTTY, choose } = pickerDeps(deps);
   if (!isTTY) throw nonTTYError();
 
   if (targets.workspaces.length === 0) {
@@ -162,38 +214,5 @@ export async function pickTargets(
     if (chosen === null || chosen === undefined) throw pickerCancelledError();
     workspace = chosen;
   }
-
-  if (workspace.projects.length === 0) {
-    throw new Error(
-      `Workspace '${workspace.name}' has no projects you can contribute to. ` +
-        `Ask a workspace owner for Contribute access, or choose another workspace with --workspace.`,
-    );
-  }
-  let project = workspace.projects[0]!;
-  if (workspace.projects.length === 1) {
-    write(`Using project '${project.name}' (${project.key}; only available project).`);
-  } else {
-    const chosen = await choose(
-      `Select a project in workspace '${workspace.name}':`,
-      workspace.projects.map((item) => ({ label: `${item.name} (${item.key})`, value: item })),
-    );
-    if (chosen === null || chosen === undefined) throw pickerCancelledError();
-    project = chosen;
-  }
-
-  const agent = targets.agents.find((item) => item.id === targets.defaultAgentId) ?? undefined;
-  if (agent !== undefined) {
-    write(`Using default agent '${agent.name}'. Override with --agent for this run.`);
-  } else {
-    write("This host has no agents yet; continuing without a default agent.");
-  }
-  return {
-    workspaceId: workspace.id,
-    workspaceName: workspace.name,
-    projectId: project.id,
-    projectKey: project.key,
-    projectName: project.name,
-    agentId: agent?.id,
-    agentName: agent?.name,
-  };
+  return pickProjectInWorkspace(workspace, targets, deps, options);
 }

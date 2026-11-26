@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { RunnerTargetsResponse } from "@orrery/contract";
 import { RunnerRequestError } from "./client.ts";
 import type { RepoBinding } from "./repos.ts";
-import { mapRegistrationError, resolveTargets, type TargetClient } from "./resolution.ts";
+import {
+  mapRegistrationError,
+  resolveTargets,
+  type ChooseFn,
+  type TargetClient,
+} from "./resolution.ts";
 
 const targets: RunnerTargetsResponse = {
   workspaces: [
@@ -73,6 +78,7 @@ interface Base {
   binding?: RepoBinding | undefined;
   alwaysSave?: boolean;
   isTTY?: boolean;
+  choose?: ChooseFn | undefined;
 }
 
 async function resolve(
@@ -81,6 +87,13 @@ async function resolve(
   base: Base = {},
 ) {
   const lines: string[] = [];
+  const seen: string[] = [];
+  const choose: ChooseFn =
+    base.choose ??
+    (async () => {
+      seen.push("prompt");
+      return null;
+    });
   const resolved = await resolveTargets({
     client: fakeClient(response, calls),
     flags: base.flags ?? {},
@@ -88,11 +101,11 @@ async function resolve(
     bindingFingerprint: "a".repeat(64),
     storedHostId: "host-1",
     write: (line) => lines.push(line),
-    choose: async () => null,
+    choose,
     isTTY: base.isTTY ?? false,
     alwaysSave: base.alwaysSave ?? false,
   });
-  return { resolved, lines };
+  return { resolved, lines, seen };
 }
 
 describe("target resolution precedence (#267)", () => {
@@ -107,7 +120,7 @@ describe("target resolution precedence (#267)", () => {
     expect(resolved.bindingToSave).toBeNull();
   });
 
-  it("skips targets for fully explicit UUIDs and schedules a fresh save", async () => {
+  it("skips targets for fully explicit UUIDs without writing on plain start", async () => {
     const calls = { count: 0 };
     const ws = "11111111-1111-1111-1111-111111111111";
     const pr = "22222222-2222-2222-2222-222222222222";
@@ -118,7 +131,77 @@ describe("target resolution precedence (#267)", () => {
     expect(resolved.workspaceId).toBe(ws);
     expect(resolved.projectId).toBe(pr);
     expect(resolved.agentId).toBeUndefined();
+    expect(resolved.bindingToSave).toBeNull();
+  });
+
+  it("never prints 'left unchanged' when alwaysSave is set", async () => {
+    const calls = { count: 0 };
+    const ws = "11111111-1111-1111-1111-111111111111";
+    const pr = "22222222-2222-2222-2222-222222222222";
+    const stale: RepoBinding = {
+      ...saved,
+      workspaceName: "Stale",
+      projectKey: "STALE",
+    };
+    const { resolved, lines } = await resolve(calls, targets, {
+      flags: { workspace: ws, project: pr },
+      binding: stale,
+      alwaysSave: true,
+    });
+    expect(calls.count).toBe(0);
+    expect(resolved.workspaceId).toBe(ws);
+    expect(resolved.workspaceName).toBeUndefined();
+    expect(resolved.projectKey).toBeUndefined();
     expect(resolved.bindingToSave).toMatchObject({ workspaceId: ws, projectId: pr });
+    expect(resolved.bindingToSave?.workspaceName).toBeUndefined();
+    expect(lines.join("\n")).not.toContain("left unchanged");
+  });
+
+  it("ignores the saved binding for bare --reconfigure and runs the picker", async () => {
+    const calls = { count: 0 };
+    await expect(
+      resolve(calls, targets, { binding: saved, alwaysSave: true, isTTY: true }),
+    ).rejects.toThrow(/cancelled/);
+    expect(calls.count).toBe(1);
+  });
+
+  it("does not write repos.json for explicit flags on unbound plain start", async () => {
+    const calls = { count: 0 };
+    const { resolved } = await resolve(calls, targets, {
+      flags: { workspace: "Acme", project: "TWO", agent: "Bo" },
+      isTTY: false,
+    });
+    expect(calls.count).toBe(1);
+    expect(resolved.bindingToSave).toBeNull();
+    expect(resolved.agentId).toBe("agent-bo");
+  });
+
+  it("preserves an explicit --agent through the picker without an agent prompt", async () => {
+    const calls = { count: 0 };
+    const seen: string[] = [];
+    const { resolved } = await resolve(calls, targets, {
+      flags: { agent: "Bo" },
+      isTTY: true,
+      choose: async <T>(title: string, options: Array<{ label: string; value: T }>) => {
+        seen.push(title);
+        if (title === "Select a workspace:") {
+          return options[0]!.value;
+        }
+        const project = options.find((option) => option.label.includes("Two"));
+        if (project !== undefined) return project.value;
+        throw new Error(`unexpected prompt '${title}'`);
+      },
+    });
+    expect(resolved.workspaceId).toBe("ws-acme");
+    expect(resolved.projectId).toBe("proj-two");
+    expect(resolved.agentId).toBe("agent-bo");
+    expect(resolved.agentName).toBe("Bo");
+    expect(resolved.bindingToSave).toMatchObject({
+      workspaceId: "ws-acme",
+      projectId: "proj-two",
+      agentId: "agent-bo",
+    });
+    expect(seen).not.toContain("Select an agent:");
   });
 
   it("resolves human-readable flags against targets", async () => {
@@ -182,9 +265,12 @@ describe("target resolution precedence (#267)", () => {
   it("fails fast in non-TTY when only --workspace is given without a binding", async () => {
     const calls = { count: 0 };
     await expect(
-      resolve(calls, targets, { flags: { workspace: "Acme" }, isTTY: false }),
+      resolve(calls, targets, {
+        flags: { workspace: "11111111-1111-1111-1111-111111111111" },
+        isTTY: false,
+      }),
     ).rejects.toThrow(/non-interactive.*--workspace.*--project.*init/s);
-    expect(calls.count).toBe(1);
+    expect(calls.count).toBe(0);
   });
 
   it("maps 401 and capped 409 discovery failures to remediation", async () => {

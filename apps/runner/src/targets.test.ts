@@ -75,6 +75,29 @@ describe("target resolvers (#267)", () => {
     );
   });
 
+  it("fails duplicate exact workspace names with an ambiguity listing IDs", () => {
+    const tricky: RunnerTargetsResponse = {
+      ...targets,
+      workspaces: [
+        { id: "a", name: "Acme", slug: "a-slug", kind: "shared", projects: [] },
+        { id: "b", name: "Acme", slug: "b-slug", kind: "shared", projects: [] },
+      ],
+    };
+    expect(() => resolveWorkspace(tricky, "Acme")).toThrow(/ambiguous.*'Acme' \(a\).*'Acme' \(b\)/);
+  });
+
+  it("fails duplicate exact workspace slugs with an ambiguity listing IDs", () => {
+    const tricky: RunnerTargetsResponse = {
+      ...targets,
+      workspaces: [
+        { id: "a", name: "Alpha", slug: "shared", kind: "shared", projects: [] },
+        { id: "b", name: "Beta", slug: "shared", kind: "shared", projects: [] },
+      ],
+    };
+    expect(() => resolveWorkspace(tricky, "shared")).toThrow(
+      /ambiguous.*'Alpha' \(a\).*'Beta' \(b\)/,
+    );
+  });
   it("fails ambiguously on case-insensitive workspace collisions", () => {
     const tricky: RunnerTargetsResponse = {
       ...targets,

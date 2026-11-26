@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RunnerTargetsResponse } from "@orrery/contract";
 import {
   nonTTYError,
+  pickAgent,
   pickProjectInWorkspace,
   pickTargets,
   pickerCancelledError,
@@ -86,7 +87,7 @@ describe("interactive picker (#267)", () => {
     expect(picked.agentId).toBe("agent-ada");
     expect(lines.join("\n")).toContain("Using workspace 'Only' (only available workspace).");
     expect(lines.join("\n")).toContain("Using project 'OnlyProject' (O; only available project).");
-    expect(lines.join("\n")).toContain("Using default agent 'Ada'.");
+    expect(lines.join("\n")).toContain("Using agent 'Ada' (only option).");
   });
 
   it("filters empty workspaces unless all are empty", async () => {
@@ -134,7 +135,11 @@ describe("interactive picker (#267)", () => {
   it("picks a project inside an already-resolved workspace", async () => {
     const acme = targets.workspaces[0]!;
     const { choose } = scripted(["Two"]);
-    const picked = await pickProjectInWorkspace(acme, targets, { choose, isTTY: true });
+    const picked = await pickProjectInWorkspace(acme, targets, {
+      choose,
+      isTTY: true,
+      write: () => {},
+    });
     expect(picked.workspaceId).toBe("ws-acme");
     expect(picked.projectId).toBe("proj-two");
     expect(picked.agentId).toBe("agent-ada");
@@ -148,7 +153,7 @@ describe("interactive picker (#267)", () => {
     );
   });
 
-  it("continues without a default agent when the host has none", async () => {
+  it("fails with creation guidance when the host has no agents", async () => {
     const none: RunnerTargetsResponse = {
       ...targets,
       agents: [],
@@ -156,13 +161,59 @@ describe("interactive picker (#267)", () => {
     };
     const lines: string[] = [];
     const { choose } = scripted(["Acme", "One"]);
-    const picked = await pickTargets(none, {
+    await expect(
+      pickTargets(none, { choose, isTTY: true, write: (line) => lines.push(line) }),
+    ).rejects.toThrow(/has no agents.*Create an Agent in Orrery/);
+  });
+
+  it("prompts for an agent when several exist, marking the default", async () => {
+    const multi: RunnerTargetsResponse = {
+      ...targets,
+      agents: [
+        { id: "agent-ada", name: "Ada" },
+        { id: "agent-bo", name: "Bo" },
+      ],
+      defaultAgentId: "agent-ada",
+    };
+    const lines: string[] = [];
+    const { choose, seen } = scripted(["Acme", "One", "Bo"]);
+    const picked = await pickTargets(multi, {
       choose,
       isTTY: true,
       write: (line) => lines.push(line),
     });
-    expect(picked.agentId).toBeUndefined();
-    expect(lines.join("\n")).toContain("no agents yet");
+    expect(picked.agentId).toBe("agent-bo");
+    expect(picked.agentName).toBe("Bo");
+    expect(seen.some((entry) => entry.startsWith("Select an agent:"))).toBe(true);
+    expect(seen.find((entry) => entry.startsWith("Select an agent:"))).toContain("Ada (default)");
+    expect(lines.join("\n")).toContain("Using agent 'Bo'.");
+  });
+
+  it("keeps a preselected agent without prompting", async () => {
+    const multi: RunnerTargetsResponse = {
+      ...targets,
+      agents: [
+        { id: "agent-ada", name: "Ada" },
+        { id: "agent-bo", name: "Bo" },
+      ],
+      defaultAgentId: "agent-ada",
+    };
+    const lines: string[] = [];
+    const { choose, seen } = scripted(["Acme", "One"]);
+    const picked = await pickTargets(
+      multi,
+      { choose, isTTY: true, write: (line) => lines.push(line) },
+      { agent: { id: "agent-bo", name: "Bo" } },
+    );
+    expect(picked.agentId).toBe("agent-bo");
+    expect(seen.some((entry) => entry.startsWith("Select an agent:"))).toBe(false);
+    expect(lines.join("\n")).toContain("Using agent 'Bo'.");
+  });
+
+  it("fails pickAgent directly when no agents exist", async () => {
+    await expect(
+      pickAgent({ workspaces: [], agents: [], defaultAgentId: null }, { isTTY: true }),
+    ).rejects.toThrow(/Create an Agent in Orrery/);
   });
 });
 

@@ -3,7 +3,7 @@ import type { OrreryClient } from "./client.ts";
 import { RunnerRequestError } from "./client.ts";
 import type { RepoBinding } from "./repos.ts";
 import { nonTTYError, pickProjectInWorkspace, pickTargets } from "./picker.ts";
-import type { ChooseFn } from "./picker.ts";
+import type { ChooseFn, PreselectedAgent } from "./picker.ts";
 export type { ChooseFn };
 import { isUuidLike, resolveAgent, resolveProject, resolveWorkspace } from "./targets.ts";
 
@@ -37,7 +37,11 @@ export interface ResolutionRequest {
   write: (line: string) => void;
   choose?: ChooseFn | undefined;
   isTTY: boolean;
-  /** `init` always persists; `start` persists only when previously unbound. */
+  /**
+   * `init` and `start --reconfigure` always persist (and never reuse the old
+   * binding as a default); a plain `start` persists only when the
+   * interactive picker actually ran.
+   */
   alwaysSave: boolean;
 }
 
@@ -152,18 +156,23 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
     project: normalize(request.flags.project),
     agent: normalize(request.flags.agent),
   };
+  // `init` and `start --reconfigure` never reuse the old binding as a
+  // default: a bare invocation always runs the picker (TTY) or requires
+  // explicit flags (non-TTY), and explicit UUIDs never inherit stale labels.
+  const binding = request.alwaysSave ? undefined : request.binding;
   const notices: string[] = [];
-  if (request.binding?.hostId !== undefined && request.binding.hostId !== request.storedHostId) {
+  if (binding?.hostId !== undefined && binding.hostId !== request.storedHostId) {
     notices.push(
       `Note: the saved binding was created under a different Runner host enrollment ` +
-        `(host '${request.binding.hostId}'); continuing with this host ('${request.storedHostId}'). ` +
+        `(host '${binding.hostId}'); continuing with this host ('${request.storedHostId}'). ` +
         `Live permissions apply at registration.`,
     );
   }
 
-  const workspaceId = flags.workspace ?? request.binding?.workspaceId;
-
-  const projectId = flags.project ?? request.binding?.projectId;
+  const workspaceId = flags.workspace ?? binding?.workspaceId;
+  const projectId = flags.project ?? binding?.projectId;
+  const hadExplicitFlags =
+    flags.workspace !== undefined || flags.project !== undefined || flags.agent !== undefined;
   const humanReadable = [flags.workspace, flags.project, flags.agent].some(
     (value) => value !== undefined && !isUuidLike(value),
   );
@@ -171,57 +180,26 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
   // Fast path: every required ID is already known and nothing needs a name
   // lookup. No `GET /api/runners/targets`, no prompting.
   if (!humanReadable && workspaceId !== undefined && projectId !== undefined) {
-    const agentId = flags.agent ?? request.binding?.agentId;
-    if (
-      request.binding !== undefined &&
-      (flags.workspace !== undefined || flags.project !== undefined || flags.agent !== undefined)
-    ) {
-      notices.push(
-        "Explicit flags override the saved binding for this run; the saved binding was left unchanged.",
-      );
-    }
-    const save = request.alwaysSave || request.binding === undefined;
-    for (const notice of notices) request.write(notice);
-    return {
-      workspaceId,
-      projectId,
-      agentId,
-      workspaceName: request.binding?.workspaceName,
-      projectKey: request.binding?.projectKey,
-      agentName: flags.agent === undefined ? request.binding?.agentName : undefined,
-      bindingToSave: save
-        ? {
-            server: request.client.server,
-            bindingFingerprint: request.bindingFingerprint,
-            workspaceId,
-            projectId,
-            ...(agentId === undefined ? {} : { agentId }),
-            hostId: request.storedHostId,
-            ...(request.binding?.workspaceName === undefined
-              ? {}
-              : { workspaceName: request.binding.workspaceName }),
-            ...(request.binding?.projectKey === undefined
-              ? {}
-              : { projectKey: request.binding.projectKey }),
-            ...(flags.agent === undefined && request.binding?.agentName !== undefined
-              ? { agentName: request.binding.agentName }
-              : {}),
-            updatedAt: new Date().toISOString(),
-          }
-        : null,
+    const agentId = flags.agent ?? binding?.agentId;
+    return finalize(
+      request,
+      binding,
       notices,
-      targetsFetched: false,
-    };
+      {
+        workspaceId,
+        projectId,
+        agentId,
+        workspaceName: binding?.workspaceName,
+        projectKey: binding?.projectKey,
+        agentName: flags.agent === undefined ? binding?.agentName : undefined,
+      },
+      { usedPicker: false, hadExplicitFlags, targetsFetched: false },
+    );
   }
 
-  // A full picker is certain (no flags, no binding): fail fast in non-TTY
-  // before any network call.
-  if (
-    workspaceId === undefined &&
-    projectId === undefined &&
-    request.binding === undefined &&
-    !request.isTTY
-  ) {
+  // A missing project with no binding to fill it means the picker is
+  // unavoidable: fail fast in non-TTY before any network call.
+  if (!request.isTTY && binding === undefined && projectId === undefined) {
     throw nonTTYError();
   }
 
@@ -232,11 +210,23 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
     throw mapTargetsError(error);
   }
 
+  // An explicit `--agent` is resolved up front so the picker keeps it and
+  // skips its agent prompt instead of overwriting it with a picked default.
+  let agentOverride: PreselectedAgent | undefined;
+  if (flags.agent !== undefined) {
+    const id = resolveAgent(targets, flags.agent);
+    if (id === undefined) {
+      throw new Error(`No agent matches '${flags.agent}'. Pass --agent with an exact ID or name.`);
+    }
+    agentOverride = { id, name: agentNameFor(targets, id, undefined) };
+  }
+
   let resolvedWorkspaceId: string;
   let resolvedWorkspaceName: string;
   let resolvedProjectId: string;
   let resolvedProjectKey: string;
   let resolvedProjectName: string;
+  let usedPicker = false;
 
   if (flags.workspace !== undefined) {
     const workspace = resolveWorkspace(targets, flags.workspace);
@@ -247,11 +237,11 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
       resolvedProjectId = hit.projectId;
       resolvedProjectKey = hit.projectKey;
       resolvedProjectName = hit.projectName;
-    } else if (request.binding !== undefined) {
-      const bound = workspace.projects.find((item) => item.id === request.binding!.projectId);
+    } else if (binding !== undefined) {
+      const bound = workspace.projects.find((item) => item.id === binding.projectId);
       if (bound === undefined) {
         throw new Error(
-          `The saved project '${request.binding.projectKey ?? request.binding.projectId}' ` +
+          `The saved project '${binding.projectKey ?? binding.projectId}' ` +
             `is not in workspace '${workspace.name}'. Pass --project explicitly or run ` +
             `'orrery-runner start --reconfigure' to choose new targets. ` +
             `The saved binding was left unchanged.`,
@@ -263,32 +253,35 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
       resolvedProjectKey = bound.key;
       resolvedProjectName = bound.name;
     } else {
-      const picked = await pickProjectInWorkspace(workspace, targets, {
-        choose: request.choose,
-        isTTY: request.isTTY,
-        write: request.write,
-      });
-      resolvedWorkspaceId = picked.workspaceId;
-      resolvedWorkspaceName = picked.workspaceName;
-      resolvedProjectId = picked.projectId;
-      resolvedProjectKey = picked.projectKey;
-      resolvedProjectName = picked.projectName;
-      return finish(request, notices, {
-        workspaceId: resolvedWorkspaceId,
-        workspaceName: resolvedWorkspaceName,
-        projectId: resolvedProjectId,
-        projectKey: resolvedProjectKey,
-        projectName: resolvedProjectName,
-        agentId: picked.agentId,
-        agentName: picked.agentName,
-      });
+      const picked = await pickProjectInWorkspace(
+        workspace,
+        targets,
+        { choose: request.choose, isTTY: request.isTTY, write: request.write },
+        { agent: agentOverride },
+      );
+      usedPicker = true;
+      return finalize(
+        request,
+        binding,
+        notices,
+        {
+          workspaceId: picked.workspaceId,
+          workspaceName: picked.workspaceName,
+          projectId: picked.projectId,
+          projectKey: picked.projectKey,
+          projectName: picked.projectName,
+          agentId: picked.agentId,
+          agentName: picked.agentName,
+        },
+        { usedPicker, hadExplicitFlags, targetsFetched: true },
+      );
     }
   } else if (flags.project !== undefined) {
-    if (request.binding !== undefined) {
+    if (binding !== undefined) {
       // A lone --project is verified inside the bound workspace first: it
       // must never silently switch workspaces.
-      const bound = targets.workspaces.find((item) => item.id === request.binding!.workspaceId);
-      if (bound === undefined) throw staleWorkspaceError(request.binding.workspaceId);
+      const bound = targets.workspaces.find((item) => item.id === binding.workspaceId);
+      if (bound === undefined) throw staleWorkspaceError(binding.workspaceId);
       let hit: { projectId: string; projectKey: string; projectName: string };
       try {
         hit = resolveProject(targets, flags.project, bound);
@@ -314,15 +307,15 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
       resolvedProjectKey = hit.projectKey;
       resolvedProjectName = hit.projectName;
     }
-  } else if (request.binding !== undefined) {
+  } else if (binding !== undefined) {
     // Only --agent (human-readable) was passed: the saved Workspace/Project
     // still scope the run, so confirm the binding workspace is visible.
-    const bound = targets.workspaces.find((item) => item.id === request.binding!.workspaceId);
-    if (bound === undefined) throw staleWorkspaceError(request.binding.workspaceId);
-    const project = bound.projects.find((item) => item.id === request.binding!.projectId);
+    const bound = targets.workspaces.find((item) => item.id === binding.workspaceId);
+    if (bound === undefined) throw staleWorkspaceError(binding.workspaceId);
+    const project = bound.projects.find((item) => item.id === binding.projectId);
     if (project === undefined) {
       throw new Error(
-        `The saved project '${request.binding.projectKey ?? request.binding.projectId}' ` +
+        `The saved project '${binding.projectKey ?? binding.projectId}' ` +
           `is no longer available in workspace '${bound.name}'. Run ` +
           `'orrery-runner start --reconfigure' to choose new targets. ` +
           `The saved binding was left unchanged.`,
@@ -334,57 +327,69 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
     resolvedProjectKey = project.key;
     resolvedProjectName = project.name;
   } else {
-    const picked = await pickTargets(targets, {
-      choose: request.choose,
-      isTTY: request.isTTY,
-      write: request.write,
-    });
-    return finish(request, notices, {
-      workspaceId: picked.workspaceId,
-      workspaceName: picked.workspaceName,
-      projectId: picked.projectId,
-      projectKey: picked.projectKey,
-      projectName: picked.projectName,
-      agentId: picked.agentId,
-      agentName: picked.agentName,
-    });
+    const picked = await pickTargets(
+      targets,
+      { choose: request.choose, isTTY: request.isTTY, write: request.write },
+      { agent: agentOverride },
+    );
+    usedPicker = true;
+    return finalize(
+      request,
+      binding,
+      notices,
+      {
+        workspaceId: picked.workspaceId,
+        workspaceName: picked.workspaceName,
+        projectId: picked.projectId,
+        projectKey: picked.projectKey,
+        projectName: picked.projectName,
+        agentId: picked.agentId,
+        agentName: picked.agentName,
+      },
+      { usedPicker, hadExplicitFlags, targetsFetched: true },
+    );
   }
 
-  const agentId =
-    flags.agent !== undefined
-      ? resolveAgent(targets, flags.agent)
-      : (request.binding?.agentId ?? targets.defaultAgentId ?? undefined);
-  return finish(request, notices, {
-    workspaceId: resolvedWorkspaceId,
-    workspaceName: resolvedWorkspaceName,
-    projectId: resolvedProjectId,
-    projectKey: resolvedProjectKey,
-    projectName: resolvedProjectName,
-    agentId,
-    agentName: agentNameFor(targets, agentId, request.binding?.agentName),
-  });
+  const agentId = agentOverride?.id ?? binding?.agentId ?? targets.defaultAgentId ?? undefined;
+  return finalize(
+    request,
+    binding,
+    notices,
+    {
+      workspaceId: resolvedWorkspaceId,
+      workspaceName: resolvedWorkspaceName,
+      projectId: resolvedProjectId,
+      projectKey: resolvedProjectKey,
+      projectName: resolvedProjectName,
+      agentId,
+      agentName: agentOverride?.name ?? agentNameFor(targets, agentId, binding?.agentName),
+    },
+    { usedPicker, hadExplicitFlags, targetsFetched: true },
+  );
 }
 
-function finish(
+function finalize(
   request: ResolutionRequest,
+  binding: RepoBinding | undefined,
   notices: string[],
   resolved: {
     workspaceId: string;
-    workspaceName: string;
+    workspaceName: string | undefined;
     projectId: string;
-    projectKey: string;
-    projectName: string;
+    projectKey: string | undefined;
+    /** Human-readable project label; absent on the no-fetch fast path. */
+    projectName?: string | undefined;
     agentId: string | undefined;
     agentName: string | undefined;
   },
+  options: { usedPicker: boolean; hadExplicitFlags: boolean; targetsFetched: boolean },
 ): ResolvedTargets {
-  const shouldSave = request.alwaysSave || request.binding === undefined;
-  if (
-    !shouldSave &&
-    (request.flags.workspace !== undefined ||
-      request.flags.project !== undefined ||
-      request.flags.agent !== undefined)
-  ) {
+  // Only `init`, `start --reconfigure`, or a run that actually prompted the
+  // operator persist `repos.json`. Explicit flags on an unbound plain `start`
+  // never write, and the override note only applies when a binding exists
+  // that is left untouched (never under `alwaysSave`).
+  const shouldSave = request.alwaysSave || options.usedPicker;
+  if (binding !== undefined && !shouldSave && options.hadExplicitFlags) {
     notices.push(
       "Explicit flags override the saved binding for this run; the saved binding was left unchanged.",
     );
@@ -405,14 +410,16 @@ function finish(
           projectId: resolved.projectId,
           ...(resolved.agentId === undefined ? {} : { agentId: resolved.agentId }),
           hostId: request.storedHostId,
-          workspaceName: resolved.workspaceName,
-          projectKey: resolved.projectKey,
+          ...(resolved.workspaceName === undefined
+            ? {}
+            : { workspaceName: resolved.workspaceName }),
+          ...(resolved.projectKey === undefined ? {} : { projectKey: resolved.projectKey }),
           ...(resolved.agentName === undefined ? {} : { agentName: resolved.agentName }),
           updatedAt: new Date().toISOString(),
         }
       : null,
     notices,
-    targetsFetched: true,
+    targetsFetched: options.targetsFetched,
   };
 }
 

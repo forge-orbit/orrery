@@ -37,8 +37,8 @@ const noWorkspaceMatch = (raw: string, targets: RunnerTargetsResponse): Error =>
 
 /**
  * Resolve `--workspace`: exact ID → exact name → exact slug (ignoring empty
- * slugs) → unique case-insensitive name/slug. A matched workspace with zero
- * `Contribute+` projects reports that explicitly instead of looking missing.
+ * slugs) → unique case-insensitive name/slug. Duplicate exact names or slugs
+ * fail with an ambiguity error instead of silently picking the first.
  */
 export function resolveWorkspace(
   targets: RunnerTargetsResponse,
@@ -46,11 +46,23 @@ export function resolveWorkspace(
 ): RunnerTargetWorkspace {
   const byId = targets.workspaces.find((item) => item.id === raw);
   if (byId !== undefined) return byId;
-  const byName = targets.workspaces.find((item) => item.name === raw);
-  if (byName !== undefined) return byName;
+  const byName = targets.workspaces.filter((item) => item.name === raw);
+  if (byName.length > 1) {
+    throw new Error(
+      `Workspace '${raw}' is ambiguous. Matching workspaces: ` +
+        `${describeWorkspaces(byName)}. Pass --workspace with an exact ID.`,
+    );
+  }
+  if (byName.length === 1 && byName[0] !== undefined) return byName[0];
   if (raw !== "") {
-    const bySlug = targets.workspaces.find((item) => item.slug !== "" && item.slug === raw);
-    if (bySlug !== undefined) return bySlug;
+    const bySlug = targets.workspaces.filter((item) => item.slug !== "" && item.slug === raw);
+    if (bySlug.length > 1) {
+      throw new Error(
+        `Workspace '${raw}' is ambiguous. Matching workspaces: ` +
+          `${describeWorkspaces(bySlug)}. Pass --workspace with an exact ID.`,
+      );
+    }
+    if (bySlug.length === 1 && bySlug[0] !== undefined) return bySlug[0];
   }
   const lowered = raw.toLowerCase();
   const fuzzy = targets.workspaces.filter(
@@ -123,13 +135,6 @@ const noProjectMatch = (
   );
 };
 
-function projectIn(
-  workspace: RunnerTargetWorkspace,
-  predicate: (project: { id: string; key: string; name: string }) => boolean,
-) {
-  return workspace.projects.filter(predicate);
-}
-
 /**
  * Resolve `--project`: exact ID → case-insensitive Project key → unique
  * exact name. Scoped to the resolved Workspace when one is given (or when a
@@ -142,27 +147,25 @@ export function resolveProject(
   scope: RunnerTargetWorkspace | undefined,
 ): ResolvedProject {
   const workspaces = scope === undefined ? targets.workspaces : [scope];
-  const at = (workspace: RunnerTargetWorkspace) => {
-    const byId = projectIn(workspace, (project) => project.id === raw)[0];
-    if (byId !== undefined) return { workspace, project: byId };
-    return undefined;
-  };
   for (const workspace of workspaces) {
-    const hit = at(workspace);
-    if (hit !== undefined)
+    const byId = workspace.projects.find((project) => project.id === raw);
+    if (byId !== undefined) {
       return {
-        ...hit,
-        projectId: hit.project.id,
-        projectKey: hit.project.key,
-        projectName: hit.project.name,
+        workspace,
+        projectId: byId.id,
+        projectKey: byId.key,
+        projectName: byId.name,
       };
+    }
   }
   const lowered = raw.toLowerCase();
   const byKey = workspaces.flatMap((workspace) =>
-    projectIn(workspace, (project) => project.key.toLowerCase() === lowered).map((project) => ({
-      workspace,
-      project,
-    })),
+    workspace.projects
+      .filter((project) => project.key.toLowerCase() === lowered)
+      .map((project) => ({
+        workspace,
+        project,
+      })),
   );
   if (byKey.length === 1 && byKey[0] !== undefined) {
     const hit = byKey[0];
@@ -181,10 +184,12 @@ export function resolveProject(
     );
   }
   const byName = workspaces.flatMap((workspace) =>
-    projectIn(workspace, (project) => project.name === raw).map((project) => ({
-      workspace,
-      project,
-    })),
+    workspace.projects
+      .filter((project) => project.name === raw)
+      .map((project) => ({
+        workspace,
+        project,
+      })),
   );
   if (byName.length === 1 && byName[0] !== undefined) {
     const hit = byName[0];

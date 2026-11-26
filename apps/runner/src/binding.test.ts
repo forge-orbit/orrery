@@ -513,6 +513,29 @@ describe("zero-flag start and remembered bindings (#267)", () => {
       expect(result.code).toBe(0);
       expect(stub.requests.some((item) => item.includes("/api/runners/targets"))).toBe(false);
       expect(stub.registerBodies[0]).toMatchObject({ workspaceId: ws, projectId: pr });
+      // An unbound plain start never writes repos.json, even for explicit UUIDs.
+      await expect(stat(join(dir, "repos.json"))).rejects.toThrow(/ENOENT/);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("bare --reconfigure in non-TTY fails fast instead of reusing the binding", async () => {
+    const dir = await makeDir();
+    const repo = await makeRepo();
+    const stub = await listen();
+    try {
+      await writeCredential(dir, stub.url);
+      await writeReposBinding(dir, stub.url, repo, {});
+      const before = await readRepos(dir);
+      const result = await run(["start", "--repo", repo, "--reconfigure"], {
+        ORRERY_RUNNER_CONFIG_DIR: dir,
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("--workspace");
+      expect(result.stderr).toContain("init");
+      expect(stub.registerBodies).toHaveLength(0);
+      expect(await readRepos(dir)).toBe(before);
     } finally {
       await stub.close();
     }
