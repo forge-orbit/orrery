@@ -406,31 +406,19 @@ export function AgentsSection({ workspaceId, isOwner }: { workspaceId: string; i
                 {hasInactiveKeys ? ` · ${allKeys.length - liveKeys.length} revoked/expired` : ""}
               </Text>
             </Stack>
-            <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-              {hasInactiveKeys && (
-                <SegmentedControl
-                  label="Filter workspace keys"
-                  size="sm"
-                  value={keyFilter}
-                  onChange={(value) => {
-                    if (value === "active" || value === "all") setKeyFilter(value);
-                  }}
-                >
-                  <SegmentedControlItem value="active" label="Active" />
-                  <SegmentedControlItem value="all" label="All" />
-                </SegmentedControl>
-              )}
-              {agents.length > 0 && allKeys.length > 0 && (
-                <Button
-                  type="button"
-                  label="Issue key"
-                  icon={<Icon icon={KeyRound} />}
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setIssueKeyAgentId(agents[0]?.id ?? "")}
-                />
-              )}
-            </Stack>
+            {hasInactiveKeys && (
+              <SegmentedControl
+                label="Filter workspace keys"
+                size="sm"
+                value={keyFilter}
+                onChange={(value) => {
+                  if (value === "active" || value === "all") setKeyFilter(value);
+                }}
+              >
+                <SegmentedControlItem value="active" label="Active" />
+                <SegmentedControlItem value="all" label="All" />
+              </SegmentedControl>
+            )}
           </Stack>
 
           {allKeys.length === 0 ? (
