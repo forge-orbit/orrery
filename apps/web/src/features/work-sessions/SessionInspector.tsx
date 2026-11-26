@@ -2,6 +2,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -133,7 +134,16 @@ function JsonFallback({ detail }: { detail: unknown }) {
           </Text>
         }
       >
-        <pre data-activity-detail="">{JSON.stringify(detail, null, 2)}</pre>
+        <Stack paddingBlockStart={1} data-activity-detail="">
+          <CodeBlock
+            code={JSON.stringify(detail, null, 2)}
+            language="json"
+            hasLanguageLabel={false}
+            size="sm"
+            width="100%"
+            maxHeight={260}
+          />
+        </Stack>
       </Collapsible>
     </Stack>
   );
