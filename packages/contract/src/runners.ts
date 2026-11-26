@@ -328,6 +328,14 @@ export const DispatchAttemptId = z.string().min(1).max(200).meta({ id: "Dispatch
 export type DispatchAttemptId = z.infer<typeof DispatchAttemptId>;
 
 /**
+ * Bounded target discovery (#229): collections past these limits answer
+ * `409 targets_too_large` so the CLI resolves explicit UUIDs instead.
+ */
+export const RUNNER_TARGETS_MAX_WORKSPACES = 200;
+export const RUNNER_TARGETS_MAX_PROJECTS = 2000;
+export const RUNNER_TARGETS_MAX_AGENTS = 200;
+
+/**
  * Optional steering text the requester attaches to a Dispatch. The Runner
  * appends it after its operational worktree/MCP preamble; every project reader
  * may see it, so it must never carry secrets.

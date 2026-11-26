@@ -19799,16 +19799,6 @@
               }
             }
           },
-          "400": {
-            "description": "The target discovery request is invalid",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
           "401": {
             "description": "The Runner host credential is invalid or was revoked",
             "content": {

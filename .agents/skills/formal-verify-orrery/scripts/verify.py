@@ -4084,6 +4084,9 @@ def extract_code_facts() -> dict[str, Any]:
     targets_handler_fn = slice_between(
         runners_rest_src, "app.openapi(listTargets", "app.openapi(markRunnerOffline"
     )
+    host_workspaces_fn = slice_between(
+        runners_src, "async function listHostWorkspaces(", "async function resolveIssueForHost("
+    )
     host_auth_fn = slice_between(
         runners_src, "async function readHostByCredential(", "async function canSeeWorkspace("
     )
@@ -4091,12 +4094,16 @@ def extract_code_facts() -> dict[str, Any]:
     m50_host_only = (
         "await readHostByCredential(tx, credential)" in targets_fn
         and "requireAccount(" not in targets_fn
-        and "sessionReader" not in targets_fn
+        and "sessionReader" not in targets_handler_fn
+        and "service.listTargets(bearer(c)" in targets_handler_fn
     )
     m50_host_prefix = "startsWith(HOST_CREDENTIAL_PREFIX)" in host_auth_fn
     m50_host_active = "isNull(runnerHosts.revokedAt)" in host_auth_fn
     m50_human_active = "deactivatedAt !== null" in host_auth_fn
-    m50_non_suspended = "isNull(workspaceMemberships.suspendedAt)" in targets_fn
+    m50_non_suspended = (
+        "isNull(workspaceMemberships.suspendedAt)" in host_workspaces_fn
+        and "listHostWorkspaces(tx, host.humanId)" in targets_fn
+    )
     m50_trash_filter = "isNull(projects.deletedAt)" in targets_fn
     m50_contribute_ceiling = (
         '"contribute"' in targets_fn and "deps.projectAccessCeiling(" in targets_fn
@@ -4117,7 +4124,7 @@ def extract_code_facts() -> dict[str, Any]:
     m50_problem_409 = (
         "targets_too_large: 409" in runners_rest_src and "...targetsErrors" in targets_route_fn
     )
-    m50_no_store = '"Cache-Control": "no-store"' in targets_handler_fn
+    m50_no_store = '"Cache-Control", "no-store"' in targets_handler_fn
     m50_route = (
         'path: "/api/runners/targets"' in targets_route_fn
         and "service.listTargets(" in targets_handler_fn

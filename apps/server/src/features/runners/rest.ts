@@ -521,7 +521,6 @@ const resolveIssue = createRoute({
 });
 
 const targetsErrors = {
-  400: problem("The target discovery request is invalid"),
   401: problem("The Runner host credential is invalid or was revoked"),
   409: problem("Too many workspaces, projects or agents; pass explicit UUIDs"),
 };
@@ -665,11 +664,12 @@ function readDispatchFailure(c: Context, error: unknown) {
   });
 }
 
-/** `listTargets` only emits validation, credential and bound-cap failures. */
+/** `listTargets` only emits credential and bound-cap failures. */
 function targetsFailure(c: Context, error: unknown) {
   if (!(error instanceof RunnersError)) throw error;
   const status = statusFor[error.kind];
-  if (status !== 400 && status !== 401 && status !== 409) throw error;
+  if (status !== 401 && status !== 409) throw error;
+  c.header("Cache-Control", "no-store");
   return problemResponse(c, {
     status,
     code: error.kind,
@@ -931,10 +931,9 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
   });
 
   app.openapi(listTargets, async (c) => {
+    c.header("Cache-Control", "no-store");
     try {
-      return c.json(await service.listTargets(bearer(c)), 200, {
-        "Cache-Control": "no-store",
-      });
+      return c.json(await service.listTargets(bearer(c)), 200);
     } catch (error) {
       return targetsFailure(c, error);
     }

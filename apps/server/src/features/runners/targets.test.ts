@@ -248,6 +248,8 @@ describe("GET /api/runners/targets authentication", () => {
     const credential = await enrollHost(cookie);
 
     await expectProblem(await getTargets(app), 401, "invalid_credential");
+    // Denials are never cached either.
+    expect((await getTargets(app)).headers.get("cache-control")).toBe("no-store");
     await expectProblem(await getTargets(app, { cookie }), 401, "invalid_credential");
     await expectProblem(
       await getTargets(app, { bearer: `orr_ak_${randomBytes(32).toString("base64url")}` }),
@@ -476,7 +478,7 @@ describe("GET /api/runners/targets discovery", () => {
     expect(Runner.parse(await registered.json()).agentId).toBe(expected);
   });
 
-  it("returns a 409 problem when collection bounds are exceeded", async () => {
+  it("returns a 409 problem when agents exceed the collection bound", async () => {
     const { cookie, human } = await insertHuman();
     const workspace = await insertPersonalWorkspace(human.id);
     await insertProject(workspace.id, human.id, "Repo", "REP");
@@ -491,6 +493,57 @@ describe("GET /api/runners/targets discovery", () => {
 
     const res = await getTargets(app, { bearer: credential.credential });
     expect(res.status).toBe(409);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    await expectProblem(res, 409, "targets_too_large");
+  });
+
+  it("returns a 409 problem when workspaces exceed the collection bound", async () => {
+    const { cookie, human } = await insertHuman();
+    const workspaceIds = Array.from({ length: 201 }, () => randomUUID());
+    // One transaction: the deferred shared-workspace owner guard fires at
+    // commit, when every membership already exists.
+    await database.db.transaction(async (tx) => {
+      await tx.insert(workspaces).values(
+        workspaceIds.map((id, index) => ({
+          id,
+          kind: "shared" as const,
+          name: `Fleet ${index}`,
+        })),
+      );
+      await tx.insert(workspaceMemberships).values(
+        workspaceIds.map((workspaceId) => ({
+          id: randomUUID(),
+          workspaceId,
+          humanId: human.id,
+          isOwner: true,
+        })),
+      );
+    });
+    const credential = await enrollHost(cookie);
+
+    const res = await getTargets(app, { bearer: credential.credential });
+    expect(res.status).toBe(409);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    await expectProblem(res, 409, "targets_too_large");
+  });
+
+  it("returns a 409 problem when projects exceed the collection bound", async () => {
+    const { cookie, human } = await insertHuman();
+    const workspace = await insertPersonalWorkspace(human.id);
+    await database.db.insert(projects).values(
+      Array.from({ length: 2001 }, (_, index) => ({
+        id: randomUUID(),
+        workspaceId: workspace.id,
+        name: `Bulk repo ${index}`,
+        key: `B${String(index).padStart(5, "0")}`,
+        createdByHumanId: human.id,
+      })),
+    );
+    const credential = await enrollHost(cookie);
+
+    const res = await getTargets(app, { bearer: credential.credential });
+    expect(res.status).toBe(409);
+    expect(res.headers.get("cache-control")).toBe("no-store");
     await expectProblem(res, 409, "targets_too_large");
   });
 

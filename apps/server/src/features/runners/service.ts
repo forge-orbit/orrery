@@ -19,7 +19,14 @@ import type {
   FleetRunnerHost,
   HeartbeatRequest,
 } from "@orrery/contract";
-import { EMPTY_HARNESS_CATALOG, HarnessCatalog, mergeHarnessCatalog } from "@orrery/contract";
+import {
+  EMPTY_HARNESS_CATALOG,
+  HarnessCatalog,
+  mergeHarnessCatalog,
+  RUNNER_TARGETS_MAX_AGENTS,
+  RUNNER_TARGETS_MAX_PROJECTS,
+  RUNNER_TARGETS_MAX_WORKSPACES,
+} from "@orrery/contract";
 import type {
   HostCredentialResponse,
   ProjectAccessLevel,
@@ -120,11 +127,6 @@ const MAX_FAILED_VERIFIER_ATTEMPTS = 5;
 
 /** A runner is offline once its last heartbeat is older than this in DB time. */
 export const RUNNER_ONLINE_WINDOW_SECONDS = 120;
-
-/** Bounded target discovery (#229): the CLI resolves UUIDs once past these. */
-export const RUNNER_TARGETS_MAX_WORKSPACES = 200;
-export const RUNNER_TARGETS_MAX_PROJECTS = 2000;
-export const RUNNER_TARGETS_MAX_AGENTS = 200;
 
 /** On-demand probes are short-lived and rate limited per runner/harness/model (#242). */
 export const PROBE_COOLDOWN_SECONDS = 30;
@@ -1850,6 +1852,32 @@ const workspaceSlug = (name: string): string =>
     .replaceAll(/^-|-$/g, "");
 
 /**
+ * Every workspace a human can see: their personal workspace plus non-suspended
+ * shared memberships, deduplicated and in stable id order. Shared by
+ * `resolveIssueForHost` and `listTargets` (#265).
+ */
+async function listHostWorkspaces(tx: DbTransaction, humanId: string) {
+  const personal = await tx
+    .select({ id: workspaces.id, name: workspaces.name, kind: workspaces.kind })
+    .from(workspaces)
+    .where(eq(workspaces.personalOwnerHumanId, humanId))
+    .orderBy(workspaces.id);
+  const shared = await tx
+    .select({ id: workspaces.id, name: workspaces.name, kind: workspaces.kind })
+    .from(workspaces)
+    .innerJoin(
+      workspaceMemberships,
+      and(
+        eq(workspaceMemberships.workspaceId, workspaces.id),
+        eq(workspaceMemberships.humanId, humanId),
+        isNull(workspaceMemberships.suspendedAt),
+      ),
+    )
+    .orderBy(workspaces.id);
+  return [...new Map([...personal, ...shared].map((row) => [row.id, row])).values()];
+}
+
+/**
  * Resolve a CLI target across every workspace the Runner host owner can see,
  * requiring Contribute access. A key matching two workspaces is never guessed:
  * the error lists them so the caller can pass --workspace.
@@ -1862,22 +1890,7 @@ async function resolveIssueForHost(
 ): Promise<IssueResolveResponse> {
   const host = await readHostByCredential(tx, credential);
   const parsed = parseIssueTarget(request.target);
-  const personal = await tx
-    .select({ id: workspaces.id, name: workspaces.name })
-    .from(workspaces)
-    .where(eq(workspaces.personalOwnerHumanId, host.humanId));
-  const shared = await tx
-    .select({ id: workspaces.id, name: workspaces.name })
-    .from(workspaces)
-    .innerJoin(
-      workspaceMemberships,
-      and(
-        eq(workspaceMemberships.workspaceId, workspaces.id),
-        eq(workspaceMemberships.humanId, host.humanId),
-        isNull(workspaceMemberships.suspendedAt),
-      ),
-    );
-  const scopes = [...new Map([...personal, ...shared].map((row) => [row.id, row])).values()];
+  const scopes = await listHostWorkspaces(tx, host.humanId);
   const candidates =
     request.workspace === undefined
       ? scopes
@@ -2992,24 +3005,7 @@ export function createRunnersService(deps: RunnersDeps) {
     async listTargets(credential: string | undefined): Promise<RunnerTargetsResponse> {
       return db.transaction(async (tx) => {
         const host = await readHostByCredential(tx, credential);
-        const personal = await tx
-          .select({ id: workspaces.id, name: workspaces.name, kind: workspaces.kind })
-          .from(workspaces)
-          .where(eq(workspaces.personalOwnerHumanId, host.humanId))
-          .orderBy(workspaces.id);
-        const shared = await tx
-          .select({ id: workspaces.id, name: workspaces.name, kind: workspaces.kind })
-          .from(workspaces)
-          .innerJoin(
-            workspaceMemberships,
-            and(
-              eq(workspaceMemberships.workspaceId, workspaces.id),
-              eq(workspaceMemberships.humanId, host.humanId),
-              isNull(workspaceMemberships.suspendedAt),
-            ),
-          )
-          .orderBy(workspaces.id);
-        const scopes = [...new Map([...personal, ...shared].map((row) => [row.id, row])).values()];
+        const scopes = await listHostWorkspaces(tx, host.humanId);
         if (scopes.length > RUNNER_TARGETS_MAX_WORKSPACES) {
           throw new RunnersError("targets_too_large");
         }
