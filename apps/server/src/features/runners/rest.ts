@@ -34,6 +34,7 @@ import {
   RunnerCommandsResponse,
   RunnerHostId,
   RunnerId,
+  RunnerTargetsResponse,
   StreamBatchRequest,
   StreamBatchResponse,
   StreamQuery,
@@ -519,6 +520,26 @@ const resolveIssue = createRoute({
   },
 });
 
+const targetsErrors = {
+  401: problem("The Runner host credential is invalid or was revoked"),
+  409: problem("Too many workspaces, projects or agents; pass explicit UUIDs"),
+};
+
+const listTargets = createRoute({
+  method: "get",
+  path: "/api/runners/targets",
+  summary: "List the enrolled Runner host's bindable targets",
+  description:
+    "Host credential only. Returns the host owner's personal and non-suspended shared workspaces with non-trashed Contribute+ projects, plus the owner's installation-wide agents and default agent. Responses are never cached.",
+  responses: {
+    200: {
+      description: "The host owner's bindable workspaces, projects and agents",
+      content: { "application/json": { schema: RunnerTargetsResponse } },
+    },
+    ...targetsErrors,
+  },
+});
+
 const markRunnerOffline = createRoute({
   method: "post",
   path: "/api/runners/{runnerId}/offline",
@@ -615,6 +636,7 @@ const statusFor = {
   stream_rate_limited: 429,
   stream_rollup_failed: 409,
   probe_rate_limited: 429,
+  targets_too_large: 409,
 } as const satisfies Record<RunnersErrorKind, Status>;
 
 function failure(c: Context, error: unknown) {
@@ -634,6 +656,20 @@ function readDispatchFailure(c: Context, error: unknown) {
   if (!(error instanceof RunnersError)) throw error;
   const status = statusFor[error.kind];
   if (status !== 400 && status !== 401 && status !== 404) throw error;
+  return problemResponse(c, {
+    status,
+    code: error.kind,
+    title: error.message,
+    ...(error.detail === undefined ? {} : { detail: error.detail }),
+  });
+}
+
+/** `listTargets` only emits credential and bound-cap failures. */
+function targetsFailure(c: Context, error: unknown) {
+  if (!(error instanceof RunnersError)) throw error;
+  const status = statusFor[error.kind];
+  if (status !== 401 && status !== 409) throw error;
+  c.header("Cache-Control", "no-store");
   return problemResponse(c, {
     status,
     code: error.kind,
@@ -678,6 +714,7 @@ export const routes = [
   autoClaim,
   createRunnerDispatch,
   resolveIssue,
+  listTargets,
   markRunnerOffline,
   reconnectRunner,
   resolveUncertain,
@@ -890,6 +927,15 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
       );
     } catch (error) {
       return failure(c, error);
+    }
+  });
+
+  app.openapi(listTargets, async (c) => {
+    c.header("Cache-Control", "no-store");
+    try {
+      return c.json(await service.listTargets(bearer(c)), 200);
+    } catch (error) {
+      return targetsFailure(c, error);
     }
   });
 

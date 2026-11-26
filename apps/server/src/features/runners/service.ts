@@ -19,7 +19,14 @@ import type {
   FleetRunnerHost,
   HeartbeatRequest,
 } from "@orrery/contract";
-import { EMPTY_HARNESS_CATALOG, HarnessCatalog, mergeHarnessCatalog } from "@orrery/contract";
+import {
+  EMPTY_HARNESS_CATALOG,
+  HarnessCatalog,
+  mergeHarnessCatalog,
+  RUNNER_TARGETS_MAX_AGENTS,
+  RUNNER_TARGETS_MAX_PROJECTS,
+  RUNNER_TARGETS_MAX_WORKSPACES,
+} from "@orrery/contract";
 import type {
   HostCredentialResponse,
   ProjectAccessLevel,
@@ -29,9 +36,10 @@ import type {
   ResolveUncertainRequest,
   Runner,
   RunnerCommandsResponse,
+  RunnerDispatchRequest,
   RunnerHost,
   RunnerPresence,
-  RunnerDispatchRequest,
+  RunnerTargetsResponse,
   StreamBatchRequest,
   StreamBatchResponse,
   StreamResponse,
@@ -160,6 +168,7 @@ export type RunnersErrorKind =
   | "dispatch_not_uncertain"
   | "issue_not_claimable"
   | "issue_not_dispatchable"
+  | "targets_too_large"
   | "stream_unavailable"
   | "stream_attempt_mismatch"
   | "stream_batch_out_of_range"
@@ -200,6 +209,8 @@ const messages: Record<RunnersErrorKind, string> = {
   dispatch_not_uncertain: "Only an uncertain Dispatch can be resolved this way.",
   issue_not_claimable: "This issue is not claimable by the selected Agent.",
   issue_not_dispatchable: "The claim could not be made for this Dispatch.",
+  targets_too_large:
+    "Too many workspaces, projects or agents to list. Pass explicit workspace, project and agent UUIDs instead.",
   stream_unavailable: "Object storage is not configured for stream rollup.",
   stream_attempt_mismatch: "The stream batch does not belong to the active dispatch attempt.",
   stream_batch_out_of_range: "A chunk seq lies outside the declared fromSeq..toSeq window.",
@@ -1841,6 +1852,32 @@ const workspaceSlug = (name: string): string =>
     .replaceAll(/^-|-$/g, "");
 
 /**
+ * Every workspace a human can see: their personal workspace plus non-suspended
+ * shared memberships, deduplicated and in stable id order. Shared by
+ * `resolveIssueForHost` and `listTargets` (#265).
+ */
+async function listHostWorkspaces(tx: DbTransaction, humanId: string) {
+  const personal = await tx
+    .select({ id: workspaces.id, name: workspaces.name, kind: workspaces.kind })
+    .from(workspaces)
+    .where(eq(workspaces.personalOwnerHumanId, humanId))
+    .orderBy(workspaces.id);
+  const shared = await tx
+    .select({ id: workspaces.id, name: workspaces.name, kind: workspaces.kind })
+    .from(workspaces)
+    .innerJoin(
+      workspaceMemberships,
+      and(
+        eq(workspaceMemberships.workspaceId, workspaces.id),
+        eq(workspaceMemberships.humanId, humanId),
+        isNull(workspaceMemberships.suspendedAt),
+      ),
+    )
+    .orderBy(workspaces.id);
+  return [...new Map([...personal, ...shared].map((row) => [row.id, row])).values()];
+}
+
+/**
  * Resolve a CLI target across every workspace the Runner host owner can see,
  * requiring Contribute access. A key matching two workspaces is never guessed:
  * the error lists them so the caller can pass --workspace.
@@ -1853,22 +1890,7 @@ async function resolveIssueForHost(
 ): Promise<IssueResolveResponse> {
   const host = await readHostByCredential(tx, credential);
   const parsed = parseIssueTarget(request.target);
-  const personal = await tx
-    .select({ id: workspaces.id, name: workspaces.name })
-    .from(workspaces)
-    .where(eq(workspaces.personalOwnerHumanId, host.humanId));
-  const shared = await tx
-    .select({ id: workspaces.id, name: workspaces.name })
-    .from(workspaces)
-    .innerJoin(
-      workspaceMemberships,
-      and(
-        eq(workspaceMemberships.workspaceId, workspaces.id),
-        eq(workspaceMemberships.humanId, host.humanId),
-        isNull(workspaceMemberships.suspendedAt),
-      ),
-    );
-  const scopes = [...new Map([...personal, ...shared].map((row) => [row.id, row])).values()];
+  const scopes = await listHostWorkspaces(tx, host.humanId);
   const candidates =
     request.workspace === undefined
       ? scopes
@@ -2216,7 +2238,7 @@ export function createRunnersService(deps: RunnersDeps) {
             .select({ id: agents.id })
             .from(agents)
             .where(eq(agents.humanId, host.humanId))
-            .orderBy(agents.createdAt)
+            .orderBy(agents.createdAt, agents.id)
             .limit(1);
           if (defaultAgent === undefined) throw new RunnersError("no_default_agent");
           agentId = defaultAgent.id;
@@ -2968,6 +2990,79 @@ export function createRunnersService(deps: RunnersDeps) {
       request: IssueResolveRequest,
     ): Promise<IssueResolveResponse> {
       return db.transaction((tx) => resolveIssueForHost(deps, tx, credential, request));
+    },
+
+    /**
+     * Host-authenticated target discovery (#229). Authenticates exclusively
+     * with the enrolled host credential: human session cookies, Agent API
+     * keys (`orr_ak_...`) and Dispatch tokens (`orr_dt_...`) all fail
+     * `readHostByCredential` with 401. Returns the host owner's personal
+     * workspace and non-suspended shared memberships (keeping workspaces with
+     * zero `Contribute+` projects), only non-trashed projects at the live
+     * `Contribute` ceiling, and the owner's own installation-wide agents with
+     * `registerRunner`'s deterministic `(createdAt, id)` default.
+     */
+    async listTargets(credential: string | undefined): Promise<RunnerTargetsResponse> {
+      return db.transaction(async (tx) => {
+        const host = await readHostByCredential(tx, credential);
+        const scopes = await listHostWorkspaces(tx, host.humanId);
+        if (scopes.length > RUNNER_TARGETS_MAX_WORKSPACES) {
+          throw new RunnersError("targets_too_large");
+        }
+        const ownedAgents = await tx
+          .select({ id: agents.id, name: agents.name })
+          .from(agents)
+          .where(eq(agents.humanId, host.humanId))
+          .orderBy(agents.createdAt, agents.id);
+        if (ownedAgents.length > RUNNER_TARGETS_MAX_AGENTS) {
+          throw new RunnersError("targets_too_large");
+        }
+        const listed: RunnerTargetsResponse["workspaces"] = [];
+        let projectTotal = 0;
+        for (const scope of scopes) {
+          const candidateProjects = await tx
+            .select({ id: projects.id, key: projects.key, name: projects.name })
+            .from(projects)
+            .where(and(eq(projects.workspaceId, scope.id), isNull(projects.deletedAt)))
+            .orderBy(projects.id);
+          const ceiling =
+            candidateProjects.length === 0
+              ? new Map<string, ProjectAccessLevel | null>()
+              : await deps.projectAccessCeiling(
+                  tx,
+                  scope.id,
+                  host.humanId,
+                  candidateProjects.map((project) => project.id),
+                );
+          const visible = [];
+          for (const project of candidateProjects) {
+            const level = ceiling.get(project.id);
+            if (!hasAccess(level, "contribute", deps.projectAccessAtLeast)) continue;
+            visible.push({
+              id: project.id,
+              key: project.key,
+              name: project.name,
+              accessLevel: level!,
+            });
+          }
+          projectTotal += visible.length;
+          if (projectTotal > RUNNER_TARGETS_MAX_PROJECTS) {
+            throw new RunnersError("targets_too_large");
+          }
+          listed.push({
+            id: scope.id,
+            name: scope.name,
+            slug: workspaceSlug(scope.name),
+            kind: scope.kind,
+            projects: visible,
+          });
+        }
+        return {
+          workspaces: listed,
+          agents: ownedAgents,
+          defaultAgentId: ownedAgents[0]?.id ?? null,
+        };
+      });
     },
 
     /** Ephemeral one-shot teardown: revoke the Runner and its Dispatch tokens. */
