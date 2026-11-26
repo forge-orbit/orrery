@@ -10,6 +10,12 @@ import {
   mergeHarnessCatalog,
 } from "@orrery/contract";
 import { AcpStdioClient } from "./acp.ts";
+import {
+  adapterForHarness,
+  type AcpSession,
+  type HarnessAdapter,
+  isUnsupportedSwitchMethod,
+} from "./adapter.ts";
 import { RunnerRequestError } from "./client.ts";
 import { configDirectory } from "./credential.ts";
 import {
@@ -18,75 +24,7 @@ import {
   harnessesJsonPath,
   type HarnessDefinition,
 } from "./harnesses.ts";
-import { parseDiscovery } from "./probe.ts";
-import { z } from "zod";
-
-/** ACP config option ids that carry reasoning-effort choices for the active model. */
-export const REASONING_OPTION_IDS = new Set([
-  "thought_level",
-  "reasoning_effort",
-  "effort",
-  "thinking_level",
-]);
-
-const AcpSessionNew = z.object({
-  models: z
-    .object({
-      availableModels: z
-        .array(z.object({ modelId: z.string(), name: z.string().optional() }))
-        .optional(),
-      currentModelId: z.string().optional(),
-    })
-    .optional(),
-  configOptions: z
-    .array(
-      z.object({
-        id: z.string(),
-        options: z.array(z.object({ value: z.string() })).optional(),
-        currentValue: z.string().optional(),
-      }),
-    )
-    .optional(),
-});
-
-interface SessionInfo {
-  available: Array<{ modelId: string; name?: string | undefined }>;
-  options: Array<{
-    id: string;
-    values: string[];
-    currentValue?: string | undefined;
-  }>;
-  efforts: string[];
-  defaultEffort?: string | undefined;
-  currentModelId?: string | undefined;
-}
-
-/** Parse the raw `session/new` (or model-switch) result without trusting it. */
-function sessionInfo(session: unknown): SessionInfo | undefined {
-  const parsed = AcpSessionNew.safeParse(session);
-  if (!parsed.success) return undefined;
-  const available = parsed.data.models?.availableModels ?? [];
-  const options = (parsed.data.configOptions ?? []).map((option) =>
-    Object.assign(
-      { id: option.id, values: (option.options ?? []).map((item) => item.value) },
-      option.currentValue === undefined ? {} : { currentValue: option.currentValue },
-    ),
-  );
-  const reasoning = options.find((option) => REASONING_OPTION_IDS.has(option.id));
-  const efforts = [...new Set(reasoning?.values ?? [])];
-  const currentValue = reasoning?.currentValue;
-  const defaultEffort =
-    currentValue !== undefined && efforts.includes(currentValue) ? currentValue : efforts[0];
-  return {
-    available,
-    options,
-    efforts,
-    ...(defaultEffort === undefined ? {} : { defaultEffort }),
-    ...(parsed.data.models?.currentModelId === undefined
-      ? {}
-      : { currentModelId: parsed.data.models.currentModelId }),
-  };
-}
+import { activeModelEfforts, activeSessionModel, currentConfigValues } from "./probe.ts";
 
 /**
  * Return a Harness's cached default model only when it is a real advertised
@@ -113,8 +51,9 @@ export function catalogEntryFromSession(
   initResult: unknown,
   session: unknown,
   probedAt: string = new Date().toISOString(),
+  adapter: HarnessAdapter = adapterForHarness(definition),
 ): HarnessCatalogEntry {
-  const discovery = parseDiscovery(initResult, session, probedAt);
+  const discovery = adapter.probeCatalog(initResult, session, probedAt);
   // A hostile or merely sloppy ACP payload must never produce an entry that
   // fails the shared contract on PUT and poisons the local cache (#255 review).
   const models: HarnessModel[] = [];
@@ -161,7 +100,8 @@ export function catalogEntryFromSession(
 
 export interface ProbeHarnessOptions {
   cwd: string;
-  timeoutMs: number;
+  /** Defaults to the resolved HarnessAdapter's `probeTimeoutMs`. */
+  timeoutMs?: number | undefined;
   env?: Record<string, string> | undefined;
   at?: string | undefined;
   /** Shutdown/401 revocation kills an in-flight probe's process group. */
@@ -172,6 +112,7 @@ export interface ProbeHarnessOptions {
 export async function probeHarness(
   definition: HarnessDefinition,
   options: ProbeHarnessOptions,
+  adapter: HarnessAdapter = adapterForHarness(definition),
 ): Promise<HarnessCatalogEntry> {
   const { session, initResult } = await AcpStdioClient.probe({
     command: definition.command,
@@ -182,7 +123,7 @@ export async function probeHarness(
     // Lets a test stub tell a discovery session from a real dispatch session.
     sessionMeta: { orreryProbe: true },
     worktreeReal: options.cwd,
-    timeoutMs: options.timeoutMs,
+    timeoutMs: options.timeoutMs ?? adapter.probeTimeoutMs,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   return catalogEntryFromSession(
@@ -190,12 +131,15 @@ export async function probeHarness(
     initResult,
     session,
     options.at ?? new Date().toISOString(),
+    adapter,
   );
 }
 
 /** Bounds the restore even when the probe itself ran out of its five seconds. */
 const RESTORE_BUDGET_MS = 1500;
 const RECOVERY_BUDGET_MS = 2000;
+/** ADR-0011: one-shot recovery stays short even if the probe budget is large. */
+const MAX_RECOVERY_BUDGET_MS = 5000;
 const MAX_RESTORED_OPTIONS = 8;
 
 type PreviousDefaults = {
@@ -203,11 +147,42 @@ type PreviousDefaults = {
   options: Array<{ id: string; value: string }>;
 };
 
+/** The adapter's ACP seam plus the bounded restore RPCs a probe needs. */
+export interface ProbeClient extends AcpSession {
+  requestInBudget(
+    method: string,
+    params: Record<string, unknown>,
+    deadline: number,
+  ): Promise<unknown>;
+  forceExit(graceMs: number): Promise<unknown>;
+}
+
+export interface StartedProbe {
+  client: ProbeClient;
+  session: unknown;
+  deadline: number;
+}
+
+/** Plain function seam; tests can supply a stubbed probe session without a child process. */
+export type ProbeStarter = (options: {
+  command: string;
+  args: string[];
+  cwd: string;
+  env?: Record<string, string> | undefined;
+  mcpServers: unknown[];
+  sessionMeta?: Record<string, unknown>;
+  worktreeReal: string;
+  timeoutMs: number;
+  signal?: AbortSignal | undefined;
+}) => Promise<StartedProbe>;
+
 export interface ProbeModelOptions extends ProbeHarnessOptions {
   /** Used when a killed probe never reported the active model. */
   fallbackModel?: string | undefined;
   /** Shared with dispatch supervision: never probe and spawn one Harness at once. */
   locks?: HarnessLocks | undefined;
+  /** Injectable probe-session factory; defaults to `AcpStdioClient.startProbe`. */
+  startProbe?: ProbeStarter | undefined;
 }
 
 export type ProbeModelStatus =
@@ -226,8 +201,29 @@ export interface ProbeModelResult {
   error?: string;
 }
 
+async function restoreOptionValues(
+  client: ProbeClient,
+  values: Array<{ id: string; value: string }>,
+  deadline: number,
+): Promise<boolean> {
+  let ok = true;
+  for (const option of values) {
+    if (option.id === "model") continue;
+    try {
+      await client.requestInBudget(
+        "session/set_config_option",
+        { sessionId: client.id, configId: option.id, value: option.value },
+        deadline,
+      );
+    } catch {
+      ok = false;
+    }
+  }
+  return ok;
+}
+
 async function restoreDefaults(
-  client: AcpStdioClient,
+  client: ProbeClient,
   previous: PreviousDefaults,
   deadline: number,
 ): Promise<boolean> {
@@ -239,22 +235,24 @@ async function restoreDefaults(
         { sessionId: client.id, modelId: previous.model },
         deadline,
       );
-    } catch {
-      ok = false;
+    } catch (error) {
+      if (isUnsupportedSwitchMethod(error)) {
+        // A config-option-only harness still needs its previous model restored.
+        try {
+          await client.requestInBudget(
+            "session/set_config_option",
+            { sessionId: client.id, configId: "model", value: previous.model },
+            deadline,
+          );
+        } catch {
+          ok = false;
+        }
+      } else {
+        ok = false;
+      }
     }
   }
-  for (const option of previous.options) {
-    try {
-      await client.requestInBudget(
-        "session/set_config_option",
-        { sessionId: client.id, optionId: option.id, value: option.value },
-        deadline,
-      );
-    } catch {
-      ok = false;
-    }
-  }
-  return ok;
+  return (await restoreOptionValues(client, previous.options, deadline)) && ok;
 }
 
 /**
@@ -265,12 +263,18 @@ async function restoreDefaults(
 async function recoveryRestore(
   definition: HarnessDefinition,
   previous: PreviousDefaults,
-  options: ProbeModelOptions,
+  options: ProbeModelOptions & { allowAlreadyRestored?: boolean },
 ): Promise<boolean> {
-  const deadline = Date.now() + RECOVERY_BUDGET_MS;
-  let client: AcpStdioClient | undefined;
+  const budget = Math.min(
+    MAX_RECOVERY_BUDGET_MS,
+    Math.max(RECOVERY_BUDGET_MS, options.timeoutMs ?? RECOVERY_BUDGET_MS),
+  );
+  const deadline = Date.now() + budget;
+  const startProbe: ProbeStarter =
+    options.startProbe ?? (async (startOptions) => await AcpStdioClient.startProbe(startOptions));
+  let client: ProbeClient | undefined;
   try {
-    const started = await AcpStdioClient.startProbe({
+    const started = await startProbe({
       command: definition.command,
       args: definition.args,
       cwd: options.cwd,
@@ -278,9 +282,25 @@ async function recoveryRestore(
       mcpServers: [],
       sessionMeta: { orreryProbe: true, orreryRecovery: true },
       worktreeReal: options.cwd,
-      timeoutMs: RECOVERY_BUDGET_MS,
+      timeoutMs: budget,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     client = started.client;
+    if (
+      options.allowAlreadyRestored === true &&
+      previous.model !== undefined &&
+      activeSessionModel(started.session) === previous.model
+    ) {
+      // A brand-new session already opens on the previous default, which may
+      // mean a session-scoped switch never touched the CLI default — but an
+      // option restored in that old session must still match before we trust it.
+      const current = currentConfigValues(started.session);
+      const mismatched = previous.options.filter(
+        (option) => !current.some((item) => item.id === option.id && item.value === option.value),
+      );
+      if (mismatched.length === 0) return true;
+      return await restoreOptionValues(client, mismatched, deadline);
+    }
     return await restoreDefaults(client, previous, deadline);
   } catch {
     return false;
@@ -291,16 +311,21 @@ async function recoveryRestore(
 
 /**
  * Switch one Harness's active model for a bounded ACP session, read that
- * model's own configOptions, and restore the previous model AND options before
- * the per-Harness lock is released. A timeout or kill triggers a bounded
- * restore attempt and, if needed, a one-shot recovery session (ADR-0011).
+ * model's own configOptions through the resolved adapter, and restore the
+ * previous model AND options before the per-Harness lock is released when the
+ * adapter says the switch mutates the CLI default. A timeout or kill then
+ * triggers a bounded restore attempt and, if needed, a one-shot recovery
+ * session (ADR-0011).
  */
 export async function probeModel(
   definition: HarnessDefinition,
   modelId: string,
   options: ProbeModelOptions,
+  adapter: HarnessAdapter = adapterForHarness(definition),
 ): Promise<ProbeModelResult> {
   const locks = options.locks ?? new HarnessLocks();
+  const timeoutMs = options.timeoutMs ?? adapter.probeTimeoutMs;
+  const resolved: ProbeModelOptions = { ...options, timeoutMs };
   return await locks.run(harnessLockKey(definition), async () => {
     if (options.signal?.aborted === true) {
       return {
@@ -310,13 +335,16 @@ export async function probeModel(
         error: "ACP probe aborted before the child was spawned.",
       };
     }
-    const deadline = Date.now() + options.timeoutMs;
-    let client: AcpStdioClient | undefined;
+    const deadline = Date.now() + timeoutMs;
+    const startProbe: ProbeStarter =
+      options.startProbe ?? (async (startOptions) => await AcpStdioClient.startProbe(startOptions));
+    let client: ProbeClient | undefined;
     let previous: PreviousDefaults | undefined;
     let discovered: HarnessModel | undefined;
+    let didSwitch = false;
     let failure: unknown;
     try {
-      const started = await AcpStdioClient.startProbe({
+      const started = await startProbe({
         command: definition.command,
         args: definition.args,
         cwd: options.cwd,
@@ -325,42 +353,40 @@ export async function probeModel(
         // The registry supplies the command; the control plane only names a model.
         sessionMeta: { orreryProbe: true, orreryProbeModel: modelId },
         worktreeReal: options.cwd,
-        timeoutMs: options.timeoutMs,
+        timeoutMs,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       });
       client = started.client;
-      const initial = sessionInfo(started.session);
+      // One tolerant parser serves every dialect: `models.currentModelId`,
+      // `configId` plus `state.currentValue`, and `choices` all read the same.
+      const activeModel = activeSessionModel(started.session);
       previous = {
-        ...(initial?.currentModelId === undefined
+        ...(activeModel === undefined
           ? options.fallbackModel === undefined
             ? {}
             : { model: options.fallbackModel }
-          : { model: initial.currentModelId }),
-        options: (initial?.options ?? [])
-          .filter((option) => option.currentValue !== undefined)
-          .slice(0, MAX_RESTORED_OPTIONS)
-          .map((option) => ({ id: option.id, value: option.currentValue! })),
+          : { model: activeModel }),
+        options: currentConfigValues(started.session)
+          .filter((option) => option.id !== "model")
+          .slice(0, MAX_RESTORED_OPTIONS),
       };
       // ACP reports configOptions for the active model, so read them *after*
-      // switching instead of reusing the previous model's effort levels.
-      const switched = await client.requestInBudget(
-        "session/set_model",
-        { sessionId: client.id, modelId },
-        deadline,
-      );
-      const after = sessionInfo(switched);
-      if (after !== undefined) {
-        // A successful switch that advertised no reasoning options is still a
-        // completed discovery: publish `known` with an empty effort list so the
-        // UI hides the selector and reselecting the model does not re-probe it
-        // forever. Only a failed/timed-out switch leaves it `unknown`.
-        discovered = {
-          id: modelId,
-          reasoningDiscovery: "known",
-          supportedEfforts: after.efforts,
-          ...(after.defaultEffort === undefined ? {} : { defaultEffort: after.defaultEffort }),
-        };
-      }
+      // switching instead of reusing the previous model's effort levels. The
+      // resolved adapter owns the dialect (set_model vs config-option, optional
+      // post-switch refresh) and returns the payload to publish.
+      const switched = await adapter.probeModel(client, modelId, deadline);
+      didSwitch = switched.switched;
+      // A successful switch that advertised no reasoning options is still a
+      // completed discovery: publish `known` with an empty effort list so the
+      // UI hides the selector and reselecting the model does not re-probe it
+      // forever. Only a failed/timed-out switch leaves it `unknown`.
+      const efforts = activeModelEfforts(switched.result);
+      discovered = {
+        id: modelId,
+        reasoningDiscovery: "known",
+        supportedEfforts: efforts.supportedEfforts,
+        ...(efforts.defaultEffort === undefined ? {} : { defaultEffort: efforts.defaultEffort }),
+      };
     } catch (error) {
       failure = error;
       // A hung/killed session never revealed its active model. Use the cached
@@ -370,19 +396,31 @@ export async function probeModel(
       }
     }
 
+    // A switch that timed out or killed the probe may already have mutated the
+    // CLI default, so a failed probe must be restored just like a successful one.
+    const mutatedDefault =
+      adapter.modelSwitchMutatesCliDefault && (didSwitch || failure !== undefined);
     let restored = false;
-    if (client !== undefined && previous !== undefined) {
-      try {
-        restored = await restoreDefaults(client, previous, Date.now() + RESTORE_BUDGET_MS);
-      } catch {
-        restored = false;
+    if (client !== undefined) {
+      // No RPC switch or a session-scoped switch never touched the persisted
+      // CLI default, so there is nothing to restore (no recovery client either).
+      restored = !mutatedDefault;
+      if (mutatedDefault && previous !== undefined) {
+        try {
+          restored = await restoreDefaults(client, previous, Date.now() + RESTORE_BUDGET_MS);
+        } catch {
+          restored = false;
+        }
       }
       await client.forceExit(250);
     }
     let recovery = false;
-    if (!restored && previous !== undefined) {
+    if (mutatedDefault && !restored && previous !== undefined) {
       recovery = true;
-      restored = await recoveryRestore(definition, previous, options);
+      restored = await recoveryRestore(definition, previous, {
+        ...resolved,
+        allowAlreadyRestored: failure === undefined && discovered !== undefined,
+      });
     }
 
     const detail =

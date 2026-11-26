@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HarnessCatalog } from "@orrery/contract";
+import { GenericAcpAdapter, type AdapterResolver, type HarnessAdapter } from "./adapter.ts";
 import { harnessConfigKey, writeCachedCatalog } from "./catalog.ts";
 import { loadSupervisionConfig } from "./config.ts";
 import type { HarnessDefinition } from "./harnesses.ts";
@@ -53,6 +54,8 @@ interface FixtureOptions {
   /** Simulated CLI default file used by targeted probe tests (#242). */
   defaultFile?: string | undefined;
   catalogProbeTimeoutMs?: number | undefined;
+  /** Inject a stub HarnessAdapter resolver for catalog and dispatch probes. */
+  adapterFor?: AdapterResolver | undefined;
 }
 
 const stubPath = fileURLToPath(new URL("./stub-acp.ts", import.meta.url));
@@ -178,6 +181,7 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
     ...(options.catalogProbeTimeoutMs === undefined
       ? {}
       : { catalogProbeTimeoutMs: options.catalogProbeTimeoutMs }),
+    ...(options.adapterFor === undefined ? {} : { adapterFor: options.adapterFor }),
     onController: options.onController,
   });
   const result: Fixture = {
@@ -743,8 +747,55 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
       .chunks()
       .find((chunk) => chunk.kind === "diagnostic")?.diagnostic;
     expect(diagnostic).toMatchObject({ kind: "model_rejected", model: "stub-deep" });
+    expect(diagnostic?.message).toContain("model_switch_cancelled");
     // The Harness did spawn before rejecting the model.
     expect((await events(fixture)).some((item) => item.event === "session/new")).toBe(true);
+  });
+
+  it("bounds a hostile model-rejection diagnostic through the ACP client", async () => {
+    const fixture = await makeFixture({ mode: "error-oversized", rejectModel: "stub-deep" });
+    fixture.control.enqueueDispatch("TEST-241-HUGE-ERROR", undefined, {
+      harness: "custom",
+      model: "stub-deep",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("released");
+
+    await until(() => fixture.control.chunks().some((chunk) => chunk.kind === "diagnostic"));
+    const diagnostic = fixture.control
+      .chunks()
+      .find((chunk) => chunk.kind === "diagnostic")?.diagnostic;
+    expect(diagnostic?.kind).toBe("model_rejected");
+    expect(diagnostic?.message).toContain("unknown model stub-deep");
+    expect(diagnostic?.message).toContain("x".repeat(500));
+    expect(
+      typeof diagnostic?.message === "string" ? diagnostic.message.length : Number.MAX_SAFE_INTEGER,
+    ).toBeLessThanOrEqual(2000);
+  });
+
+  it("skips redundant setModel when session/new is already on the requested model", async () => {
+    const fixture = await makeFixture({ mode: "normal", rejectModel: "stub-model-1" });
+    fixture.control.enqueueDispatch("TEST-241-ALREADY-ACTIVE", undefined, {
+      harness: "custom",
+      model: "stub-model-1",
+      effort: "high",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const recorded = await events(fixture);
+    const modelSets = recorded.filter(
+      (item) =>
+        item.event === "set_model" ||
+        (item.event === "set_config_option" && item.configId === "model"),
+    );
+    expect(modelSets).toHaveLength(0);
+    // Effort still applies from session/new's advertised configOptions.
+    expect(
+      recorded.find(
+        (item) => item.event === "set_config_option" && item.configId === "thought_level",
+      )?.value,
+    ).toBe("high");
   });
 
   it("omits unsupported effort with a warning chunk and keeps the turn alive", async () => {
@@ -917,3 +968,46 @@ describe("on-demand catalog probes (#242)", { timeout: 30_000 }, () => {
     expect(switchEvents).toHaveLength(1);
   });
 });
+
+describe(
+  "injected HarnessAdapter strategy in start() and superviseDispatch()",
+  { timeout: 30_000 },
+  () => {
+    it("resolves a stub adapter from the local Harness and applies its dispatch options", async () => {
+      const applied: Array<{ model?: string; effort?: string }> = [];
+      const resolvedIds: string[] = [];
+      const delegate = new GenericAcpAdapter();
+      const stub: HarnessAdapter = {
+        probeTimeoutMs: delegate.probeTimeoutMs,
+        modelSwitchMutatesCliDefault: delegate.modelSwitchMutatesCliDefault,
+        probeCatalog: (initResult, sessionResult, probedAt) =>
+          delegate.probeCatalog(initResult, sessionResult, probedAt),
+        probeModel: async (session, modelId, deadline) =>
+          await delegate.probeModel(session, modelId, deadline),
+        applyDispatchOptions: async (session, options) => {
+          applied.push({
+            ...(options.model === undefined ? {} : { model: options.model }),
+            ...(options.effort === undefined ? {} : { effort: options.effort }),
+          });
+          return await delegate.applyDispatchOptions(session, options);
+        },
+      };
+      const fixture = await makeFixture({
+        mode: "normal",
+        adapterFor: (definition) => {
+          resolvedIds.push(definition.id);
+          return stub;
+        },
+      });
+      fixture.control.enqueueDispatch("TEST-ADAPTER-DI", undefined, {
+        harness: "custom",
+        model: "stub-deep",
+        effort: "high",
+      });
+      const session = await settledSession(fixture);
+      expect(session.status).toBe("completed");
+      expect(resolvedIds).toContain("custom");
+      expect(applied).toContainEqual({ model: "stub-deep", effort: "high" });
+    });
+  },
+);

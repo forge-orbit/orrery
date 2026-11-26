@@ -7,6 +7,7 @@ import type {
   SessionDiagnostic,
 } from "@orrery/contract";
 import { AcpStdioClient } from "./acp.ts";
+import { adapterForHarness, type AdapterResolver } from "./adapter.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import type { SupervisionConfig } from "./config.ts";
 import { ephemeralMcpConfig } from "./config.ts";
@@ -17,7 +18,6 @@ import {
   type HarnessDefinition,
 } from "./harnesses.ts";
 import { McpAuthError, RunnerMcpClient } from "./mcp-client.ts";
-import { effortConfigIds } from "./probe.ts";
 import {
   createStreamSpool,
   mainRepositoryRoot,
@@ -46,6 +46,8 @@ export interface SupervisionOptions {
   write: (line: string) => void;
   /** Shared across probes and dispatches so one Harness never spawns twice. */
   locks?: HarnessLocks | undefined;
+  /** Test seam: inject a pure HarnessAdapter resolver; defaults to the registry. */
+  adapterFor?: AdapterResolver | undefined;
   /** The Harness's cached default model, read from the local catalog. */
   defaultModelFor?: ((harnessId: string) => string | null) | undefined;
   /** Called as soon as the controller exists, before any local work starts. */
@@ -295,6 +297,9 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       }
       harness = resolved;
     }
+    // Resolved from the local definition only: the server never selects an
+    // adapter or supplies an executable path.
+    const adapter = (options.adapterFor ?? adapterForHarness)(harness);
     // Only inherit CLI default model/effort when the dispatch stays on the
     // default Harness (and, for effort, on the same model) so one Harness's
     // CLI defaults never bleed into a dispatch targeting another Harness.
@@ -394,11 +399,14 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       });
       try {
         if (cancelledAlready) throw new Error("dispatch cancelled during ACP start");
-        let modelSwitchResult: unknown;
-        if (requestedModel !== undefined) {
-          try {
-            modelSwitchResult = await client.setModel(requestedModel);
-          } catch (error) {
+        let application;
+        try {
+          application = await adapter.applyDispatchOptions(client, {
+            ...(requestedModel === undefined ? {} : { model: requestedModel }),
+            ...(requestedEffort === undefined ? {} : { effort: requestedEffort }),
+          });
+        } catch (error) {
+          if (requestedModel !== undefined) {
             throw new DispatchOptionError({
               kind: "model_rejected",
               version: 1,
@@ -409,34 +417,22 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
               model: requestedModel,
             });
           }
+          throw error;
         }
-        if (requestedEffort !== undefined) {
-          let applied = false;
-          for (const configId of effortConfigIds(
-            modelSwitchResult,
-            requestedModel,
-            client.sessionResult,
-          )) {
-            if (await client.setEffort(configId, requestedEffort)) {
-              applied = true;
-              break;
-            }
-          }
-          if (!applied) {
-            // Non-fatal (issue #241): omit effort, warn in the stream, continue.
-            const warning = `Harness '${harness.id}' does not support effort '${requestedEffort}'; continuing without it.`;
-            write(warning);
-            if (spool !== undefined) {
-              try {
-                const chunk = await spool.append({
-                  kind: "event",
-                  eventType: "effort_unsupported",
-                  summary: warning,
-                });
-                controller.lastSeq = Math.max(controller.lastSeq, chunk.seq);
-              } catch (error) {
-                write(`Could not spool effort warning: ${String(error)}`);
-              }
+        if (requestedEffort !== undefined && !application.effortApplied) {
+          // Non-fatal (issue #241): omit effort, warn in the stream, continue.
+          const warning = `Harness '${harness.id}' does not support effort '${requestedEffort}'; continuing without it.`;
+          write(warning);
+          if (spool !== undefined) {
+            try {
+              const chunk = await spool.append({
+                kind: "event",
+                eventType: "effort_unsupported",
+                summary: warning,
+              });
+              controller.lastSeq = Math.max(controller.lastSeq, chunk.seq);
+            } catch (error) {
+              write(`Could not spool effort warning: ${String(error)}`);
             }
           }
         }

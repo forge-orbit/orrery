@@ -51,6 +51,26 @@ export function sanitizeAcpEnv(
   return scopedEnv === undefined ? clean : { ...clean, ...scopedEnv };
 }
 
+const MAX_ERROR_DETAIL_CHARS = 500;
+
+/**
+ * Bounded ACP error text. A hostile harness can put arbitrary data in an error
+ * payload; this keeps `SessionDiagnostic.message` well under the contract's
+ * `max(2000)` while preserving the useful `model_switch_cancelled` detail.
+ */
+const clipDetail = (raw: unknown): string | undefined => {
+  if (typeof raw !== "string" || raw.trim() === "") return undefined;
+  return raw.trim().slice(0, MAX_ERROR_DETAIL_CHARS);
+};
+
+export function acpErrorDetail(value: unknown): string {
+  const error = asRecord(value);
+  const detail = clipDetail(error?.message) ?? "error";
+  const data = asRecord(error?.data);
+  const extra = clipDetail(data?.details) ?? clipDetail(data?.message) ?? clipDetail(error?.data);
+  return extra !== undefined && extra !== detail ? `${detail} (${extra})` : detail;
+}
+
 export class AcpStdioClient {
   readonly pid: number;
   readonly exited: Promise<AcpExit>;
@@ -200,6 +220,15 @@ export class AcpStdioClient {
     return await this.request(method, params, Math.max(1, deadline - Date.now()));
   }
 
+  /** Low-level RPC seam for HarnessAdapter strategies; omits the timeout for dispatch calls. */
+  async requestAcp(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<unknown> {
+    return await this.request(method, params, timeoutMs);
+  }
+
   private async initializeSession(
     options: AcpStartOptions,
     budget?: { deadline: number; sessionMeta?: Record<string, unknown> },
@@ -298,9 +327,7 @@ export class AcpStdioClient {
       if (pending === undefined) return;
       this.pending.delete(id);
       if (record.error !== undefined) {
-        const error = asRecord(record.error);
-        const detail = typeof error?.message === "string" ? error.message : "error";
-        pending.reject(new Error(`ACP ${detail}`));
+        pending.reject(new Error(acpErrorDetail(record.error)));
       } else {
         pending.resolve(record.result);
       }
@@ -383,41 +410,6 @@ export class AcpStdioClient {
       sessionId: this.sessionId,
       prompt: [{ type: "text", text }],
     });
-  }
-
-  /**
-   * Apply the session model (issue #241). ACP v1 exposes model selection as the
-   * `model` config option; older adapters only implement the `session/set_model`
-   * extension, so that is the fallback. Returns the RPC result so callers can
-   * read updated post-switch `configOptions` for model-aware effort ids.
-   */
-  async setModel(modelId: string): Promise<unknown> {
-    try {
-      return await this.request("session/set_config_option", {
-        sessionId: this.sessionId,
-        configId: "model",
-        value: modelId,
-      });
-    } catch {
-      return await this.request("session/set_model", { sessionId: this.sessionId, modelId });
-    }
-  }
-
-  /**
-   * Apply a reasoning-effort config option. Returns false instead of throwing:
-   * an unsupported effort is non-fatal and the dispatch continues without it.
-   */
-  async setEffort(configId: string, effort: string): Promise<boolean> {
-    try {
-      await this.request("session/set_config_option", {
-        sessionId: this.sessionId,
-        configId,
-        value: effort,
-      });
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   sendCancel(): void {

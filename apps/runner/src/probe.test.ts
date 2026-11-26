@@ -6,6 +6,12 @@ import { EMPTY_HARNESS_CATALOG, type HarnessCatalog } from "@orrery/contract";
 import { afterEach, describe, expect, it } from "vitest";
 import { catalogWithProbedModel, probeModel } from "./catalog.ts";
 import { harnessLockKey, HarnessLocks, type HarnessDefinition } from "./harnesses.ts";
+import {
+  activeSessionModel,
+  currentConfigValues,
+  effortConfigIds,
+  parseDiscovery,
+} from "./probe.ts";
 
 const stubPath = fileURLToPath(new URL("./stub-acp.ts", import.meta.url));
 const definition: HarnessDefinition = {
@@ -237,5 +243,65 @@ describe("per-Harness lock identity (#241/#242)", () => {
     ]);
     expect(order.indexOf("alias:start")).toBeGreaterThan(order.indexOf("first:end"));
     expect(order.indexOf("unrelated:start")).toBeLessThan(order.indexOf("first:end"));
+  });
+});
+
+describe("activeSessionModel", () => {
+  it("reads models.currentModelId and falls back to model configOptions", () => {
+    expect(activeSessionModel({ models: { currentModelId: "hermes/default" } })).toBe(
+      "hermes/default",
+    );
+    expect(
+      activeSessionModel({
+        configOptions: [{ id: "model", name: "Model", currentValue: "opencode-go:kimi" }],
+      }),
+    ).toBe("opencode-go:kimi");
+    expect(
+      activeSessionModel({ configOptions: [{ id: "reasoning_effort", currentValue: "high" }] }),
+    ).toBeUndefined();
+    expect(activeSessionModel(undefined)).toBeUndefined();
+  });
+});
+
+describe("shared config-option parsing (#263 review)", () => {
+  it("gives discovery, effort ids and restore values the same tolerant read", () => {
+    const session = {
+      models: { currentModelId: "m1" },
+      configOptions: [
+        { configId: "model", state: { options: [{ value: "m1" }], currentValue: "m1" } },
+        {
+          id: "reasoning_effort",
+          state: {
+            choices: [{ value: "high" }, { value: "low" }],
+            currentValue: "high",
+          },
+        },
+      ],
+    };
+    const at = "2026-01-01T00:00:00.000Z";
+    expect(activeSessionModel(session)).toBe("m1");
+    expect(currentConfigValues(session)).toEqual([
+      { id: "model", value: "m1" },
+      { id: "reasoning_effort", value: "high" },
+    ]);
+    expect(effortConfigIds(undefined, undefined, session)).toEqual([
+      "reasoning_effort",
+      "thought_level",
+    ]);
+    const discovery = parseDiscovery({}, session, at);
+    expect(discovery.defaultModel).toBe("m1");
+    expect(discovery.models[0]).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["high", "low"],
+      defaultEffort: "high",
+    });
+  });
+
+  it("never treats an advertised default as a currently selected value", () => {
+    const session = {
+      configOptions: [{ id: "thought_level", default: "high", options: [{ value: "high" }] }],
+    };
+    expect(currentConfigValues(session)).toEqual([]);
+    expect(parseDiscovery({}, session, "2026-01-01T00:00:00.000Z").models).toEqual([]);
   });
 });

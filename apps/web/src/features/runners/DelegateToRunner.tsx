@@ -3,9 +3,10 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Stack } from "@astryxdesign/core/Stack";
+import { Stack, StackItem } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useToast } from "@astryxdesign/core/Toast";
@@ -222,22 +223,28 @@ export function DelegateToRunner({
     supportedEfforts.length === 0;
   const probingKeyForModel = `${runnerId}\u0000${harnessId}\u0000${modelId}`;
   const probingKeyForCatalog = `catalog\u0000${runnerId}`;
-  // The catalog the Runner publishes advances `probedAt`; derive the end of a
-  // probe from that live query data instead of clearing on the enqueue reply.
+  // Catalog refreshes finish when the runner publishes a newer `probedAt`.
+  // Model probes finish when the *selected* model itself becomes `known`, so an
+  // earlier model's probe completing first never stops the active spinner early.
   const catalogProbedAt = selectedRunner?.harnessCatalog?.probedAt;
-  const catalogUpdated =
+  const catalogRefreshed =
     probeState !== undefined &&
     catalogProbedAt !== undefined &&
     (probeState.baselineProbedAt === "" ||
       Date.parse(catalogProbedAt) > Date.parse(probeState.baselineProbedAt));
-  const probeActive = probeState !== undefined && !probeExpired && !probeFailed && !catalogUpdated;
+  const probeCompleted =
+    probeState !== undefined &&
+    (probeState.key === probingKeyForCatalog
+      ? catalogRefreshed
+      : probeState.key === probingKeyForModel && selectedModel?.reasoningDiscovery === "known");
+  const probeActive = probeState !== undefined && !probeExpired && !probeFailed && !probeCompleted;
   const probingEffort = probeActive && probeState.key === probingKeyForModel;
   const probingCatalog = probeActive && probeState.key === probingKeyForCatalog;
   const probeMatchesSelection =
     probeState !== undefined &&
     (probeState.key === probingKeyForCatalog || probeState.key === probingKeyForModel);
   const probeMessage =
-    probeMatchesSelection && !catalogUpdated && (probeFailed || probeExpired)
+    probeMatchesSelection && !probeCompleted && (probeFailed || probeExpired)
       ? probeState.key === probingKeyForCatalog
         ? "Catalog refresh did not finish; you can still delegate."
         : "Reasoning levels could not be discovered; you can still delegate."
@@ -304,33 +311,56 @@ export function DelegateToRunner({
     },
   });
 
-  function startProbe(request: CatalogProbeRequest, key: string) {
+  function startProbe(request: CatalogProbeRequest, key: string, targetRunner = selectedRunner) {
+    const targetId = targetRunner?.id ?? runnerId;
+    if (targetId === "") return;
     probeGeneration.current += 1;
     probeMutation.mutate({
-      runnerId,
+      runnerId: targetId,
       request,
       key,
-      baselineProbedAt: selectedRunner?.harnessCatalog?.probedAt ?? "",
+      baselineProbedAt: targetRunner?.harnessCatalog?.probedAt ?? "",
       generation: probeGeneration.current,
     });
+  }
+
+  function probeIfUnknown(
+    targetRunner: (typeof owned)[number] | undefined,
+    entry: HarnessCatalogEntry | undefined,
+    nextModel: string,
+  ) {
+    if (targetRunner === undefined || entry === undefined || nextModel === "") return;
+    const candidate = entry.models.find((model) => model.id === nextModel);
+    if (candidate?.reasoningDiscovery !== "unknown") return;
+    startProbe(
+      { kind: "model", harness: entry.id, model: nextModel },
+      `${targetRunner.id}\u0000${entry.id}\u0000${nextModel}`,
+      targetRunner,
+    );
   }
 
   function chooseRunner(value: string | null) {
     const id = value ?? "";
     clearProbe();
     setRunnerOverride(id);
-    const next = owned.find((runner) => runner.id === id)?.harnessCatalog?.harnesses[0];
+    const runner = owned.find((item) => item.id === id);
+    const next = runner?.harnessCatalog?.harnesses[0];
+    const nextModel = defaultModelId(next);
     setHarnessOverride(next?.id ?? "");
-    setModelOverride(defaultModelId(next));
+    setModelOverride(nextModel);
     setEffortOverride("");
+    probeIfUnknown(runner, next, nextModel);
   }
 
   function chooseHarness(value: string | null) {
     const id = value ?? "";
     clearProbe();
     setHarnessOverride(id);
-    setModelOverride(defaultModelId(harnessCatalog.find((entry) => entry.id === id)));
+    const entry = harnessCatalog.find((item) => item.id === id);
+    const nextModel = defaultModelId(entry);
+    setModelOverride(nextModel);
     setEffortOverride("");
+    probeIfUnknown(selectedRunner, entry, nextModel);
   }
 
   function chooseModel(value: string | null) {
@@ -339,13 +369,7 @@ export function DelegateToRunner({
     setModelOverride(next);
     // Never carry the previous model's effort onto this one.
     setEffortOverride("");
-    const candidate = selectedHarness?.models.find((entry) => entry.id === next);
-    if (candidate?.reasoningDiscovery === "unknown" && runnerId !== "" && harnessId !== "") {
-      startProbe(
-        { kind: "model", harness: harnessId, model: next },
-        `${runnerId}\u0000${harnessId}\u0000${next}`,
-      );
-    }
+    probeIfUnknown(selectedRunner, selectedHarness, next);
   }
 
   function closeDialog() {
@@ -452,7 +476,7 @@ export function DelegateToRunner({
             header={
               <DialogHeader
                 title="Delegate to Runner"
-                subtitle="Choose a Runner, an optional Agent and optional instructions for the Dispatch."
+                hasDivider
                 onOpenChange={(open) => {
                   if (!open) closeDialog();
                 }}
@@ -469,35 +493,38 @@ export function DelegateToRunner({
                       collapsible={false}
                     />
                   )}
-                  <Selector
-                    label="Runner"
-                    placeholder={owned.length === 0 ? "No online Runners" : "Choose a Runner"}
-                    options={owned.map((runner) => ({
-                      value: runner.id,
-                      label: `${runner.displayName} · ${runner.presence}`,
-                    }))}
-                    value={runnerId}
-                    onChange={chooseRunner}
-                    isDisabled={owned.length === 0 || mutation.isPending}
-                  />
-                  {/* A Runner with an empty, never-probed catalog is exactly the
-                      case that needs a manual refresh, so this action never sits
-                      behind the harness list. */}
-                  {runnerId !== "" && (
-                    <Stack direction="horizontal" gap={2} justify="end">
-                      <Button
+                  {/* Keep Refresh catalog beside the Runner field so a Runner
+                      with an empty, never-probed catalog is still refreshable
+                      without pushing Agent away. */}
+                  <Stack direction="horizontal" gap={2} vAlign="end">
+                    <StackItem size="fill">
+                      <Selector
+                        label="Runner"
+                        width="100%"
+                        placeholder={owned.length === 0 ? "No online Runners" : "Choose a Runner"}
+                        options={owned.map((runner) => ({
+                          value: runner.id,
+                          label: `${runner.displayName} · ${runner.presence}`,
+                        }))}
+                        value={runnerId}
+                        onChange={chooseRunner}
+                        isDisabled={owned.length === 0 || mutation.isPending}
+                      />
+                    </StackItem>
+                    {runnerId !== "" && (
+                      <IconButton
                         type="button"
-                        size="sm"
-                        variant="ghost"
+                        variant="secondary"
                         label="Refresh catalog"
+                        tooltip="Refresh catalog"
                         icon={<Icon icon={RefreshCw} />}
                         isLoading={probingCatalog}
                         isDisabled={probingCatalog}
                         data-delegate-refresh-catalog=""
                         onClick={() => startProbe({ kind: "catalog" }, probingKeyForCatalog)}
                       />
-                    </Stack>
-                  )}
+                    )}
+                  </Stack>
                   <Selector
                     label="Agent"
                     isOptional

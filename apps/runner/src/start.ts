@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import type { HarnessCatalog, ReadyWorkFilter } from "@orrery/contract";
+import { adapterForHarness, type AdapterResolver } from "./adapter.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import {
   CatalogPublisher,
@@ -40,8 +41,10 @@ export interface StartOptions {
   autoClaim?: boolean | undefined;
   autoClaimFilter?: ReadyWorkFilter | undefined;
   autoClaimPollMs?: number | undefined;
-  /** Bounded time budget for the one startup catalog probe pass (default 5s). */
+  /** Overrides the adapter's `probeTimeoutMs` for discovery sessions. */
   catalogProbeTimeoutMs?: number | undefined;
+  /** Test seam: inject a pure HarnessAdapter resolver (defaults to the registry). */
+  adapterFor?: AdapterResolver | undefined;
   /** Test seams: inject the harness list and observe each published catalog. */
   harnessDefinitions?: HarnessDefinition[] | undefined;
   onCatalog?: ((catalog: HarnessCatalog) => void) | undefined;
@@ -60,6 +63,7 @@ export function repoFingerprint(repoPath: string): string {
  * terminate every local process group and stop local operation immediately.
  */
 export async function start(options: StartOptions): Promise<void> {
+  const adapterFor = options.adapterFor ?? adapterForHarness;
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   const stored = await readCredential();
   const pool = new SlotPool(options.maxConcurrency ?? 1);
@@ -128,11 +132,17 @@ export async function start(options: StartOptions): Promise<void> {
       await runStartupCatalogProbe({
         definitions: localDefinitions(),
         probe: (definition) =>
-          probeHarness(definition, {
-            cwd: options.repoPath ?? process.cwd(),
-            timeoutMs: options.catalogProbeTimeoutMs ?? 5000,
-            signal: controller.signal,
-          }),
+          probeHarness(
+            definition,
+            {
+              cwd: options.repoPath ?? process.cwd(),
+              ...(options.catalogProbeTimeoutMs === undefined
+                ? {}
+                : { timeoutMs: options.catalogProbeTimeoutMs }),
+              signal: controller.signal,
+            },
+            adapterFor(definition),
+          ),
         publish: async (catalog) => {
           await publisher.publish(catalog);
           options.onCatalog?.(publisher.current);
@@ -278,13 +288,20 @@ export async function start(options: StartOptions): Promise<void> {
                 write(`Probe rejected: Harness ${harness} is not in the local registry.`);
                 return;
               }
-              const result = await probeModel(definition, model, {
-                cwd: options.repoPath ?? process.cwd(),
-                timeoutMs: options.catalogProbeTimeoutMs ?? 5000,
-                signal: controller.signal,
-                locks,
-                fallbackModel: verifiedDefaultModel(publisher.current, harness) ?? undefined,
-              });
+              const result = await probeModel(
+                definition,
+                model,
+                {
+                  cwd: options.repoPath ?? process.cwd(),
+                  ...(options.catalogProbeTimeoutMs === undefined
+                    ? {}
+                    : { timeoutMs: options.catalogProbeTimeoutMs }),
+                  signal: controller.signal,
+                  locks,
+                  fallbackModel: verifiedDefaultModel(publisher.current, harness) ?? undefined,
+                },
+                adapterFor(definition),
+              );
               write(
                 `Probe ${harness}/${model}: ${result.status}; restored=${String(result.restored)}${result.recovery ? " via recovery" : ""}.`,
               );
@@ -326,6 +343,7 @@ export async function start(options: StartOptions): Promise<void> {
               signal: controller.signal,
               write,
               locks,
+              adapterFor,
               // Read live from the publisher: a probe that finishes after
               // registration updates the cached default model used here.
               defaultModelFor: (harnessId) => verifiedDefaultModel(publisher.current, harnessId),
