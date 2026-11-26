@@ -13,6 +13,7 @@ export default defineConfig({
   timeout: 30_000,
   use: {
     baseURL,
+    trace: process.env.CI ? "retain-on-failure" : "off",
     ...(process.env.CHROMIUM_PATH
       ? { launchOptions: { executablePath: process.env.CHROMIUM_PATH } }
       : {}),

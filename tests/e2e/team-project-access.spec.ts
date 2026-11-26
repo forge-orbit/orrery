@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, request, test, type APIRequestContext } from "@playwright/test";
 import { ADMIN_EMAIL, ADMIN_PASSWORD, recordSecret } from "./admin.ts";
 
@@ -16,11 +17,13 @@ const SETTINGS = {
   from: "orrery@orrery.test",
 } as const;
 
-const MEMBER_EMAIL = "access.member@orrery.test";
+const RUN_ID = randomUUID().slice(0, 8);
+const WORKSPACE_NAME = `Access Lab ${RUN_ID}`;
+const MEMBER_EMAIL = `access.member.${RUN_ID}@orrery.test`;
 const MEMBER_PASSWORD = "access-member-password";
-const COLLEAGUE_EMAIL = "access.colleague@orrery.test";
+const COLLEAGUE_EMAIL = `access.colleague.${RUN_ID}@orrery.test`;
 const COLLEAGUE_PASSWORD = "access-colleague-password";
-const OUTSIDER_EMAIL = "access.outsider@orrery.test";
+const OUTSIDER_EMAIL = `access.outsider.${RUN_ID}@orrery.test`;
 const OUTSIDER_PASSWORD = "access-outsider-password";
 
 let adminApi: APIRequestContext;
@@ -49,12 +52,12 @@ test.beforeAll(async () => {
 
   await ensureAdminVerified();
 
-  const created = await adminApi.post("/api/workspaces", { data: { name: "Access Lab" } });
+  const created = await adminApi.post("/api/workspaces", { data: { name: WORKSPACE_NAME } });
   expect(created.status()).toBe(201);
   workspaceId = requiredText(field(await created.json(), "id"), "the workspace id");
 
-  memberApi = await registeredMember(MEMBER_EMAIL, MEMBER_PASSWORD, "Access Lab");
-  colleagueApi = await registeredMember(COLLEAGUE_EMAIL, COLLEAGUE_PASSWORD, "Access Lab");
+  memberApi = await registeredMember(MEMBER_EMAIL, MEMBER_PASSWORD, WORKSPACE_NAME);
+  colleagueApi = await registeredMember(COLLEAGUE_EMAIL, COLLEAGUE_PASSWORD, WORKSPACE_NAME);
   outsiderApi = await installedOutsider();
 
   const members = await adminApi.get(`/api/workspaces/${workspaceId}/members`);
@@ -86,6 +89,7 @@ test.beforeAll(async () => {
   expect(capability.status()).toBe(200);
   memberProjectId = await createProjectAs(memberApi, workspaceId, "Member Project");
 
+  await createIssueAs(adminApi, projectId, "Seed issue");
   await grant(adminApi, projectId, MEMBER_EMAIL, "read");
 });
 
@@ -183,6 +187,11 @@ test("enforces the direct-request matrix for every level", async () => {
     name: "Access Lab Project Renamed",
     accessLevel: "manage",
   });
+  expect(
+    (
+      await memberApi.patch(`/api/projects/${projectId}`, { data: { name: "Access Lab Project" } })
+    ).status(),
+  ).toBe(200);
   expect((await memberApi.get(`/api/projects/${projectId}/access`)).status()).toBe(200);
 
   const colleagueGrant = await grant(memberApi, projectId, COLLEAGUE_EMAIL, "read");
@@ -313,9 +322,7 @@ test("grants access in the browser and shows Read without mutation controls", as
 
     await grant(adminApi, projectId, COLLEAGUE_EMAIL, "read");
     await colleaguePage.goto(`/projects/${projectId}`);
-    await expect(
-      colleaguePage.getByRole("heading", { name: "Access Lab Project Renamed" }),
-    ).toBeVisible();
+    await expect(colleaguePage.getByRole("heading", { name: "Access Lab Project" })).toBeVisible();
     await expect(colleaguePage.locator('[data-project-access-level="read"]').first()).toBeVisible();
     await expect(colleaguePage.getByRole("button", { name: "Create issue" })).toHaveCount(0);
     await expect(colleaguePage.getByRole("button", { name: "Create knowledge" })).toHaveCount(0);
