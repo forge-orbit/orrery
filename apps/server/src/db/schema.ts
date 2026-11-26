@@ -243,6 +243,8 @@ export const workspaceEventTypes = [
   "project_transfer_authorized",
   "project_transfer_received",
   "project_transferred_out",
+  "project_deleted",
+  "project_restored",
 
   "workspace_ownership_recovered",
 ] as const;
@@ -435,6 +437,9 @@ export const projects = pgTable(
       .$type<FallbackPolicy>()
       .notNull()
       .default("require_human"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedByHumanId: text("deleted_by_human_id").references(() => humans.id),
+    purgedAt: timestamp("purged_at", { withTimezone: true }),
   },
   (t) => [
     check("projects_key_format", sql`${t.key} ~ '^[A-Z][A-Z0-9]{1,9}$'`),
@@ -444,8 +449,18 @@ export const projects = pgTable(
       "projects_fallback_policy",
       sql`${t.fallbackPolicy} in (${sql.raw(sqlLiteralList(FallbackPolicy))})`,
     ),
+    check(
+      "projects_deleted_actor_matches",
+      sql`(${t.deletedAt} is null) = (${t.deletedByHumanId} is null)`,
+    ),
+    check(
+      "projects_purged_requires_deleted",
+      sql`${t.purgedAt} is null or ${t.deletedAt} is not null`,
+    ),
 
-    uniqueIndex("one_project_key_per_workspace").on(t.workspaceId, t.key),
+    uniqueIndex("one_project_key_per_workspace")
+      .on(t.workspaceId, t.key)
+      .where(sql`${t.purgedAt} is null`),
     index("projects_workspace_created").on(t.workspaceId, t.createdAt),
   ],
 );

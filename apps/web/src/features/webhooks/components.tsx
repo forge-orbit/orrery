@@ -56,6 +56,8 @@ const eventLabels: Record<WebhookEvent, string> = {
   project_created: "Project created",
   project_renamed: "Project renamed",
   project_fallback_policy_changed: "Project fallback policy changed",
+  project_deleted: "Project moved to Trash",
+  project_restored: "Project restored from Trash",
   project_label_created: "Project label created",
   project_label_edited: "Project label edited",
   project_label_deleted: "Project label deleted",

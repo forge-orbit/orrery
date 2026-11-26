@@ -15,7 +15,11 @@ import {
   issueLinks,
   issues,
   projectAccessGrants,
+  projectTransferAuthorizations,
   projects,
+  runnerDispatches,
+  runnerHosts,
+  runners,
   runs,
   workspaceMemberships,
   workspaces,
@@ -59,8 +63,12 @@ afterEach(async () => {
     await tx.execute(sql`delete from project_activity`);
     await tx.execute(sql`delete from work_session_activities`);
     await tx.execute(sql`delete from questions`);
+    await tx.execute(sql`delete from runner_dispatches`);
+    await tx.execute(sql`delete from project_transfer_authorizations`);
     await tx.execute(sql`delete from work_sessions`);
     await tx.execute(sql`delete from runs`);
+    await tx.execute(sql`delete from runners`);
+    await tx.execute(sql`delete from runner_hosts`);
     await tx.execute(sql`delete from agent_api_keys`);
     await tx.execute(sql`delete from agents`);
     await tx.execute(sql`delete from issue_dependencies`);
@@ -69,6 +77,7 @@ afterEach(async () => {
     await tx.execute(sql`delete from issue_comments`);
     await tx.execute(sql`delete from issues`);
     await tx.execute(sql`delete from project_access_grants`);
+    await tx.execute(sql`delete from workspace_events`);
     await tx.execute(sql`delete from projects`);
     await tx.execute(sql`delete from workspace_memberships`);
     await tx.execute(sql`delete from workspaces`);
@@ -206,6 +215,7 @@ async function createIssue(
 async function insertLiveSession(f: Fixture, issueId: string, lease: "live" | "lapsed" = "live") {
   const agentId = randomUUID();
   const runId = randomUUID();
+  const workSessionId = randomUUID();
   await database.db.insert(agents).values({
     id: agentId,
     humanId: f.humanId,
@@ -217,7 +227,7 @@ async function insertLiveSession(f: Fixture, issueId: string, lease: "live" | "l
     workspaceId: f.workspaceId,
   });
   await database.db.insert(workSessions).values({
-    id: randomUUID(),
+    id: workSessionId,
     agentId,
     runId,
     workspaceId: f.workspaceId,
@@ -228,7 +238,7 @@ async function insertLiveSession(f: Fixture, issueId: string, lease: "live" | "l
         ? sql`statement_timestamp() + interval '5 minutes'`
         : sql`statement_timestamp() - interval '1 minute'`,
   });
-  return { agentId, runId };
+  return { agentId, runId, workSessionId };
 }
 
 function identityForAgent(f: Fixture, agentId: string): AgentIdentity {
@@ -731,5 +741,265 @@ describe("issue trash", () => {
     });
     expect(gone.status).toBe(409);
     expect(await gone.json()).toMatchObject({ code: "issue_purged" });
+  });
+
+  it("does not register Project Trash operations as MCP tools", () => {
+    const names = projectTools.map((tool) => tool.name);
+    expect(names).not.toContain("delete_project");
+    expect(names).not.toContain("restore_project");
+    expect(names).not.toContain("list_project_trash");
+  });
+
+  it("restricts project Trash to shared Workspace owners and rejects agents", async () => {
+    const f = await seed();
+    const roleHumans = [
+      { id: randomUUID(), name: "manager", level: ProjectAccessLevel.enum.manage },
+      { id: randomUUID(), name: "contributor", level: ProjectAccessLevel.enum.contribute },
+      { id: randomUUID(), name: "reader", level: ProjectAccessLevel.enum.read },
+      { id: randomUUID(), name: "non-member", level: null },
+    ] as const;
+    await database.db.insert(humans).values(
+      roleHumans.map(({ id }) => ({
+        id,
+        email: `${id}@example.com`,
+        passwordHash: "x",
+      })),
+    );
+    await database.db
+      .insert(workspaceMemberships)
+      .values(
+        roleHumans.flatMap((role) =>
+          role.name === "non-member"
+            ? []
+            : [{ id: randomUUID(), workspaceId: f.workspaceId, humanId: role.id, isOwner: false }],
+        ),
+      );
+    await database.db.insert(projectAccessGrants).values(
+      roleHumans.flatMap(({ id, level }) =>
+        level === null
+          ? []
+          : [
+              {
+                id: randomUUID(),
+                projectId: f.projectId,
+                humanId: id,
+                level,
+                grantedByHumanId: f.humanId,
+              },
+            ],
+      ),
+    );
+
+    const accounts = createAccountsFeature({
+      db: database.db,
+      setupSecret: "s",
+      publicUrl: "http://orrery.test",
+    });
+    const identity = agentIdentity(f);
+    const feature = createProjectsFeature({
+      db: database.db,
+      sessionReader: accounts.sessionReader,
+      agentAuthenticator: async (request) =>
+        request.headers.get("authorization") === "Bearer agent-key" ? identity : null,
+      sessionGate: async () => true,
+      issueSessionGate: liveSessionGate,
+    });
+    const app = createApp({
+      features: [accounts, feature],
+      publicUrl: "http://orrery.test",
+      log: silentLogger,
+    });
+
+    const roles = [
+      ...roleHumans.map((role) => ({
+        humanId: role.id,
+        status: role.name === "non-member" ? 404 : 403,
+        code: role.name === "non-member" ? "workspace_not_found" : "workspace_owner_required",
+      })),
+      {
+        humanId: f.otherHumanId,
+        status: 403,
+        code: "workspace_owner_required",
+      },
+    ];
+    for (const role of roles) {
+      const cookie = await humanCookie(role.humanId);
+      const removed = await app.request(`/api/projects/${f.projectId}`, {
+        method: "DELETE",
+        headers: { cookie },
+      });
+      expect(removed.status).toBe(role.status);
+      expect(await removed.json()).toMatchObject({ code: role.code });
+
+      const restored = await app.request(`/api/projects/${f.projectId}/restore`, {
+        method: "POST",
+        headers: { cookie },
+      });
+      expect(restored.status).toBe(role.status);
+      expect(await restored.json()).toMatchObject({ code: role.code });
+
+      const trash = await app.request(`/api/workspaces/${f.workspaceId}/trash/projects`, {
+        headers: { cookie },
+      });
+      expect(trash.status).toBe(role.status);
+      expect(await trash.json()).toMatchObject({ code: role.code });
+    }
+
+    for (const request of [
+      app.request(`/api/projects/${f.projectId}`, {
+        method: "DELETE",
+        headers: { authorization: "Bearer agent-key" },
+      }),
+      app.request(`/api/projects/${f.projectId}/restore`, {
+        method: "POST",
+        headers: { authorization: "Bearer agent-key" },
+      }),
+      app.request(`/api/workspaces/${f.workspaceId}/trash/projects`, {
+        headers: { authorization: "Bearer agent-key" },
+      }),
+    ]) {
+      const rejected = await request;
+      expect(rejected.status).toBe(403);
+      expect(await rejected.json()).toMatchObject({ code: "agents_cannot_delete_projects" });
+    }
+
+    const ownerCookie = await humanCookie(f.humanId);
+    const removed = await app.request(`/api/projects/${f.projectId}`, {
+      method: "DELETE",
+      headers: { cookie: ownerCookie },
+    });
+    expect(removed.status).toBe(204);
+    const listed = await app.request(`/api/workspaces/${f.workspaceId}/trash/projects`, {
+      headers: { cookie: ownerCookie },
+    });
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toMatchObject([{ id: f.projectId }]);
+    const restored = await app.request(`/api/projects/${f.projectId}/restore`, {
+      method: "POST",
+      headers: { cookie: ownerCookie },
+    });
+    expect(restored.status).toBe(200);
+  });
+
+  it("blocks project Trash for live sessions and non-ended dispatches, then revokes offers", async () => {
+    const f = await seed();
+    const accounts = createAccountsFeature({
+      db: database.db,
+      setupSecret: "s",
+      publicUrl: "http://orrery.test",
+    });
+    const feature = createProjectsFeature({
+      db: database.db,
+      sessionReader: accounts.sessionReader,
+      agentAuthenticator: async () => null,
+      sessionGate: async () => true,
+      issueSessionGate: liveSessionGate,
+    });
+    const app = createApp({
+      features: [accounts, feature],
+      publicUrl: "http://orrery.test",
+      log: silentLogger,
+    });
+    const service = makeService();
+    const actor = humanActor(f.humanId);
+    const cookie = await humanCookie(f.humanId);
+    const sessionIssue = await createIssue(service, actor, f.projectId);
+    await insertLiveSession(f, sessionIssue.id, "live");
+    const sessionConflict = await app.request(`/api/projects/${f.projectId}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(sessionConflict.status).toBe(409);
+    expect(await sessionConflict.json()).toMatchObject({ code: "project_active_work_exists" });
+    await database.db
+      .update(workSessions)
+      .set({
+        status: "expired",
+        endedAt: sql`statement_timestamp()`,
+        updatedAt: sql`statement_timestamp()`,
+      })
+      .where(eq(workSessions.issueId, sessionIssue.id));
+
+    const dispatchStates = ["pending", "active", "uncertain"] as const;
+    for (const state of dispatchStates) {
+      const issue = await createIssue(service, actor, f.projectId);
+      const session = await insertLiveSession(f, issue.id, "lapsed");
+      const hostId = randomUUID();
+      const runnerId = randomUUID();
+      const dispatchId = randomUUID();
+      await database.db.insert(runnerHosts).values({
+        id: hostId,
+        humanId: f.humanId,
+        displayName: `Host ${state}`,
+        platform: "linux-x64",
+        credentialHash: tokenHash(randomUUID()),
+      });
+      await database.db.insert(runners).values({
+        id: runnerId,
+        hostId,
+        workspaceId: f.workspaceId,
+        projectId: f.projectId,
+        agentId: session.agentId,
+        displayName: `Runner ${state}`,
+        repoFingerprint: "a".repeat(64),
+      });
+      await database.db.insert(runnerDispatches).values({
+        id: dispatchId,
+        runnerId,
+        workspaceId: f.workspaceId,
+        projectId: f.projectId,
+        issueId: issue.id,
+        requestedByHumanId: f.humanId,
+        agentId: session.agentId,
+        dispatchAttemptId: randomUUID(),
+        state,
+        ...(state === "pending"
+          ? {}
+          : {
+              runId: session.runId,
+              workSessionId: session.workSessionId,
+              acceptedAt: new Date(),
+            }),
+      });
+
+      const conflict = await app.request(`/api/projects/${f.projectId}`, {
+        method: "DELETE",
+        headers: { cookie },
+      });
+      expect(conflict.status).toBe(409);
+      expect(await conflict.json()).toMatchObject({ code: "project_active_work_exists" });
+      await database.db.delete(runnerDispatches).where(eq(runnerDispatches.id, dispatchId));
+    }
+
+    const destinationWorkspaceId = randomUUID();
+    await database.db.insert(workspaces).values({
+      id: destinationWorkspaceId,
+      kind: WorkspaceKind.enum.personal,
+      name: "Destination",
+      personalOwnerHumanId: f.otherHumanId,
+    });
+    const authorizationId = randomUUID();
+    await database.db.insert(projectTransferAuthorizations).values({
+      id: authorizationId,
+      projectId: f.projectId,
+      sourceWorkspaceId: f.workspaceId,
+      destinationWorkspaceId,
+      authorizedByHumanId: f.humanId,
+      tokenHash: tokenHash(randomUUID()),
+      status: "pending",
+      expiresAt: sql`statement_timestamp() + interval '1 day'`,
+    });
+
+    const removed = await app.request(`/api/projects/${f.projectId}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(removed.status).toBe(204);
+    const [authorization] = await database.db
+      .select()
+      .from(projectTransferAuthorizations)
+      .where(eq(projectTransferAuthorizations.id, authorizationId));
+    expect(authorization).toMatchObject({ status: "revoked" });
+    expect(authorization?.revokedAt).not.toBeNull();
   });
 });

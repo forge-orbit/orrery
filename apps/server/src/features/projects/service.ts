@@ -35,6 +35,7 @@ import {
   type ProjectActivity,
   type ProjectActivityType,
   type ProjectLabel,
+  type TrashedProject,
   type SetIssueFallbackPolicyRequest,
   type SetProjectAccessRequest,
   type SetProjectFallbackPolicyRequest,
@@ -63,10 +64,14 @@ import {
   projectAccessGrants,
   projectActivity,
   projectLabels,
+  projectTransferAuthorizations,
   projects,
   questions,
+  runnerDispatches,
   workspaceMemberships,
+  workspaceEvents,
   workspaces,
+  workSessions,
 } from "../../db/schema.ts";
 import type { SessionAccount } from "../accounts/index.ts";
 import { attachmentHolderKey, type AttachmentSeams } from "../attachments/index.ts";
@@ -104,7 +109,11 @@ export type ProjectsErrorKind =
   | "issue_active_session_exists"
   | "issue_needs_input"
   | "issue_purged"
-  | "knowledge_entry_purged";
+  | "knowledge_entry_purged"
+  | "agents_cannot_delete_projects"
+  | "workspace_owner_required"
+  | "project_active_work_exists"
+  | "project_purged";
 
 const messages = {
   not_signed_in: "Not signed in.",
@@ -141,6 +150,12 @@ const messages = {
   issue_purged: "This issue's trash window has ended and it can no longer be restored.",
   knowledge_entry_purged:
     "This knowledge entry's trash window has ended and it can no longer be restored.",
+  agents_cannot_delete_projects:
+    "Agents cannot delete or restore projects; only a workspace owner can.",
+  workspace_owner_required: "Only a workspace owner can manage project Trash.",
+  project_active_work_exists:
+    "This project has active work or a dispatch; stop it before deleting the project.",
+  project_purged: "This project's trash window has ended and it can no longer be restored.",
 } as const satisfies Record<ProjectsErrorKind, string>;
 
 const ACCESS_RANK: Record<ProjectAccessLevel, number> = {
@@ -307,6 +322,12 @@ export type WorkActor =
 
 function requireActor(actor: WorkActor | null): WorkActor {
   if (actor === null) throw new ProjectsError("not_signed_in");
+  return actor;
+}
+
+function requireProjectHuman(actorArg: WorkActor | null): Extract<WorkActor, { kind: "human" }> {
+  const actor = requireActor(actorArg);
+  if (actor.kind === "agent") throw new ProjectsError("agents_cannot_delete_projects");
   return actor;
 }
 
@@ -1101,7 +1122,7 @@ async function requireProject(
       and(eq(workspaceMemberships.workspaceId, projects.workspaceId), membershipMatch),
     )
     .leftJoin(projectAccessGrants, and(eq(projectAccessGrants.projectId, projects.id), grantMatch))
-    .where(eq(projects.id, projectId))
+    .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
     .limit(1);
 
   if (row === undefined) throw new ProjectsError("project_not_found");
@@ -1165,8 +1186,8 @@ async function requireIssue(
     .leftJoin(projectAccessGrants, and(eq(projectAccessGrants.projectId, projects.id), grantMatch))
     .where(
       includeDeleted
-        ? eq(issues.id, issueId)
-        : and(eq(issues.id, issueId), isNull(issues.deletedAt)),
+        ? and(eq(issues.id, issueId), isNull(projects.deletedAt))
+        : and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)),
     )
     .limit(1);
 
@@ -1463,8 +1484,12 @@ async function requireKnowledge(
     .leftJoin(projectAccessGrants, and(eq(projectAccessGrants.projectId, projects.id), grantMatch))
     .where(
       includeDeleted
-        ? eq(knowledgeEntries.id, entryId)
-        : and(eq(knowledgeEntries.id, entryId), isNull(knowledgeEntries.deletedAt)),
+        ? and(eq(knowledgeEntries.id, entryId), isNull(projects.deletedAt))
+        : and(
+            eq(knowledgeEntries.id, entryId),
+            isNull(knowledgeEntries.deletedAt),
+            isNull(projects.deletedAt),
+          ),
     )
     .limit(1);
 
@@ -1479,6 +1504,8 @@ type RecordActivityInput =
         | "project_created"
         | "project_renamed"
         | "project_fallback_policy_changed"
+        | "project_deleted"
+        | "project_restored"
         | "project_label_created"
         | "project_label_edited"
         | "project_label_deleted";
@@ -1811,6 +1838,12 @@ async function freezeDueQuestions(
 export interface ProjectsService {
   listProjects(actor: WorkActor | null, workspaceId: string): Promise<Project[]>;
   getProject(actor: WorkActor | null, projectId: string): Promise<Project>;
+  deleteProject(actor: WorkActor | null, projectId: string): Promise<void>;
+  restoreProject(actor: WorkActor | null, projectId: string): Promise<Project>;
+  listWorkspaceProjectTrash(
+    actor: WorkActor | null,
+    workspaceId: string,
+  ): Promise<TrashedProject[]>;
   createProject(
     account: SessionAccount | null,
     workspaceId: string,
@@ -2131,14 +2164,15 @@ export function createProjectsService({
               ),
             )
             .where(
-              workspace.kind === WorkspaceKind.enum.personal
-                ? eq(projects.workspaceId, workspaceId)
-                : workspace.isOwner
+              and(
+                workspace.kind === WorkspaceKind.enum.personal || workspace.isOwner
                   ? eq(projects.workspaceId, workspaceId)
                   : and(
                       eq(projects.workspaceId, workspaceId),
                       isNotNull(projectAccessGrants.level),
                     ),
+                isNull(projects.deletedAt),
+              ),
             )
             .orderBy(projects.createdAt, projects.id);
 
@@ -2161,6 +2195,193 @@ export function createProjectsService({
       );
     },
 
+    async deleteProject(actorArg, projectId) {
+      const actor = requireProjectHuman(actorArg);
+      await db.transaction(async (tx) => {
+        await tx
+          .select({ id: projectTransferAuthorizations.id })
+          .from(projectTransferAuthorizations)
+          .where(
+            and(
+              eq(projectTransferAuthorizations.projectId, projectId),
+              eq(projectTransferAuthorizations.status, "pending"),
+            ),
+          )
+          .orderBy(projectTransferAuthorizations.id)
+          .for("update");
+        await lockWorkspaceOwnershipWrites(tx);
+        await lockProjectForMutation(tx, projectId);
+        const [project] = await tx
+          .select({
+            id: projects.id,
+            workspaceId: projects.workspaceId,
+            name: projects.name,
+            deletedAt: projects.deletedAt,
+          })
+          .from(projects)
+          .where(eq(projects.id, projectId))
+          .limit(1);
+        if (project === undefined) throw new ProjectsError("project_not_found");
+
+        const workspace = await readWorkspaceFacts(tx, project.workspaceId, actor.account.humanId);
+        if (!workspace.isOwner) throw new ProjectsError("workspace_owner_required");
+        if (project.deletedAt !== null) throw new ProjectsError("project_not_found");
+
+        const [activeSession] = await tx
+          .select({ id: workSessions.id })
+          .from(workSessions)
+          .innerJoin(issues, eq(issues.id, workSessions.issueId))
+          .where(
+            and(
+              eq(issues.projectId, projectId),
+              eq(workSessions.status, "active"),
+              gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+            ),
+          )
+          .limit(1);
+        const [activeDispatch] = await tx
+          .select({ id: runnerDispatches.id })
+          .from(runnerDispatches)
+          .where(
+            and(
+              eq(runnerDispatches.projectId, projectId),
+              inArray(runnerDispatches.state, ["pending", "active", "uncertain"]),
+              isNull(runnerDispatches.endedAt),
+            ),
+          )
+          .limit(1);
+        if (activeSession !== undefined || activeDispatch !== undefined) {
+          throw new ProjectsError("project_active_work_exists");
+        }
+
+        await tx
+          .update(projectTransferAuthorizations)
+          .set({ status: "revoked", revokedAt: sql`statement_timestamp()` })
+          .where(
+            and(
+              eq(projectTransferAuthorizations.projectId, projectId),
+              eq(projectTransferAuthorizations.status, "pending"),
+            ),
+          );
+        await tx
+          .update(projects)
+          .set({
+            deletedAt: sql`statement_timestamp()`,
+            deletedByHumanId: actor.account.humanId,
+          })
+          .where(eq(projects.id, projectId));
+        await recordActivity(tx, {
+          projectId,
+          type: "project_deleted",
+          actor,
+          summary: project.name,
+        });
+        await tx.insert(workspaceEvents).values({
+          id: randomUUID(),
+          workspaceId: project.workspaceId,
+          type: "project_deleted",
+          actorHumanId: actor.account.humanId,
+          subjectHumanId: actor.account.humanId,
+          createdAt: sql`statement_timestamp()`,
+        });
+      });
+    },
+
+    async restoreProject(actorArg, projectId) {
+      const actor = requireProjectHuman(actorArg);
+      return db.transaction(async (tx) => {
+        await lockWorkspaceOwnershipWrites(tx);
+        await lockProjectForMutation(tx, projectId);
+        const [project] = await tx
+          .select({
+            id: projects.id,
+            workspaceId: projects.workspaceId,
+            name: projects.name,
+            deletedAt: projects.deletedAt,
+            deletedByHumanId: projects.deletedByHumanId,
+            purgedAt: projects.purgedAt,
+            trashExpired: sql<boolean>`${projects.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+          })
+          .from(projects)
+          .where(eq(projects.id, projectId))
+          .limit(1);
+        if (project === undefined) throw new ProjectsError("project_not_found");
+
+        const workspace = await readWorkspaceFacts(tx, project.workspaceId, actor.account.humanId);
+        if (!workspace.isOwner) throw new ProjectsError("workspace_owner_required");
+        if (project.deletedAt === null || project.deletedByHumanId === null) {
+          throw new ProjectsError("project_not_found");
+        }
+        if (project.purgedAt !== null || project.trashExpired) {
+          throw new ProjectsError("project_purged");
+        }
+
+        await tx
+          .update(projects)
+          .set({ deletedAt: null, deletedByHumanId: null })
+          .where(eq(projects.id, projectId));
+        await recordActivity(tx, {
+          projectId,
+          type: "project_restored",
+          actor,
+          summary: project.name,
+        });
+        await tx.insert(workspaceEvents).values({
+          id: randomUUID(),
+          workspaceId: project.workspaceId,
+          type: "project_restored",
+          actorHumanId: actor.account.humanId,
+          subjectHumanId: actor.account.humanId,
+          createdAt: sql`statement_timestamp()`,
+        });
+        return toProject(
+          await requireProject(tx, projectId, actor, ProjectAccessLevel.enum.manage),
+        );
+      });
+    },
+
+    async listWorkspaceProjectTrash(actorArg, workspaceId) {
+      const actor = requireProjectHuman(actorArg);
+      return db.transaction(
+        async (tx) => {
+          const workspace = await readWorkspaceFacts(tx, workspaceId, actor.account.humanId);
+          if (!workspace.isOwner) throw new ProjectsError("workspace_owner_required");
+          const rows = await tx
+            .select({
+              ...projectColumns,
+              workspaceKind: workspaces.kind,
+              deletedAt: projects.deletedAt,
+              deletedByHumanId: projects.deletedByHumanId,
+            })
+            .from(projects)
+            .innerJoin(workspaces, eq(workspaces.id, projects.workspaceId))
+            .innerJoin(projectCreator, eq(projectCreator.id, projects.createdByHumanId))
+            .where(
+              and(
+                eq(projects.workspaceId, workspaceId),
+                isNotNull(projects.deletedAt),
+                isNull(projects.purgedAt),
+                gt(projects.deletedAt, THIRTY_DAYS_AGO),
+              ),
+            )
+            .orderBy(projects.deletedAt, projects.id);
+          return rows.map((row) => {
+            if (row.deletedAt === null || row.deletedByHumanId === null) {
+              throw new Error("project trash row violated its deletion constraints");
+            }
+            return Object.assign(
+              toProject({ ...row, accessLevel: ProjectAccessLevel.enum.manage }),
+              {
+                deletedAt: row.deletedAt.toISOString(),
+                deletedByHumanId: row.deletedByHumanId,
+              },
+            );
+          });
+        },
+        { accessMode: "read only" },
+      );
+    },
+
     async createProject(account, workspaceId, input) {
       const actor = requireAccount(account);
       const workActor: WorkActor = { kind: "human", account: actor };
@@ -2175,7 +2396,7 @@ export function createProjectsService({
         const existing = await tx
           .select({ key: projects.key })
           .from(projects)
-          .where(eq(projects.workspaceId, workspaceId));
+          .where(and(eq(projects.workspaceId, workspaceId), isNull(projects.purgedAt)));
         const used = new Set(existing.map((row) => row.key));
         const key = input.key ?? availableProjectKey(baseProjectKey(input.name), used);
         if (used.has(key)) throw new ProjectsError("project_key_taken");

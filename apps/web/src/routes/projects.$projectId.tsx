@@ -105,6 +105,8 @@ const activityLabels: Record<ProjectActivityType, string> = {
   project_created: "created the project",
   project_renamed: "renamed the project",
   project_fallback_policy_changed: "changed the project fallback policy",
+  project_deleted: "moved the project to Trash",
+  project_restored: "restored the project from Trash",
   issue_created: "opened issue",
   issue_edited: "edited issue",
   issue_commented: "commented on issue",
