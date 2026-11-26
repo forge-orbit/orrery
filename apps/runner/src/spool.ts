@@ -6,6 +6,7 @@ import {
   StreamChunk,
   type StreamChunk as StreamChunkType,
 } from "@orrery/contract";
+import { mainCheckoutRoot } from "./checkout.ts";
 
 /**
  * Local spool for structured ACP events (#199). This module never imports the
@@ -15,12 +16,19 @@ import {
 
 /** The main checkout root, even when called from an isolated runner worktree. */
 export function mainRepositoryRoot(repoPath: string): string {
-  const commonGitDir = execFileSync(
-    "git",
-    ["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-    { encoding: "utf8" },
-  ).trim();
-  return dirname(commonGitDir);
+  // First `worktree ` entry: uniform for main checkouts, linked worktrees and
+  // submodules. The old `--git-common-dir` dirname escaped submodules into
+  // the superproject's `.git/modules` directory.
+  try {
+    return mainCheckoutRoot(repoPath);
+  } catch {
+    const commonGitDir = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { encoding: "utf8" },
+    ).trim();
+    return dirname(commonGitDir);
+  }
 }
 
 /** Spool files live under the main checkout, never inside a runner worktree. */
@@ -195,6 +203,7 @@ export class StreamSpool {
     for (;;) {
       const response = await this.fetchFn(url, {
         method: "POST",
+        redirect: "error",
         headers: {
           "content-type": "application/json",
           authorization: `Bearer ${credential}`,

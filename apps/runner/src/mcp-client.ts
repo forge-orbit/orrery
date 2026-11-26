@@ -5,6 +5,8 @@
  * `ephemeralMcpConfig`; the Runner speaks to the same stateless `/mcp`
  * endpoint over HTTP using JSON-RPC 2.0.
  */
+import { assertSecureOrigin, canonicalizeServerUrl } from "./origin.ts";
+
 export class McpAuthError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -105,7 +107,9 @@ export class RunnerMcpClient {
   private initialized = false;
 
   constructor(options: RunnerMcpClientOptions) {
-    this.server = options.server.replace(/\/$/, "");
+    const canonical = canonicalizeServerUrl(options.server);
+    assertSecureOrigin(canonical);
+    this.server = canonical;
     this.token = options.token;
     this.signal = options.signal;
     this.timeoutMs = options.timeoutMs ?? 15_000;
@@ -116,6 +120,7 @@ export class RunnerMcpClient {
     try {
       response = await fetch(`${this.server}/mcp`, {
         method: "POST",
+        redirect: "error",
         headers: {
           "content-type": "application/json",
           accept: "application/json, text/event-stream",

@@ -1,8 +1,10 @@
-import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
 import type { HarnessCatalog, ReadyWorkFilter } from "@orrery/contract";
 import { adapterForHarness, type AdapterResolver } from "./adapter.ts";
+import {
+  bindingFingerprint,
+  runnerFingerprint as checkoutRunnerFingerprint,
+  validateCheckout,
+} from "./checkout.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import {
   CatalogPublisher,
@@ -15,14 +17,17 @@ import {
   verifiedDefaultModel,
 } from "./catalog.ts";
 import { readCredential } from "./credential.ts";
+import { defaultStartDisplayName, validateDisplayName } from "./display-name.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
 import { detectHarnesses, HarnessLocks, type HarnessDefinition } from "./harnesses.ts";
+import { acquireCheckoutLock } from "./lock.ts";
+import { resolveCredentialedOrigin } from "./origin.ts";
 import { SlotPool, type SlotController } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
 export interface StartOptions {
-  server: string;
+  server?: string | undefined;
   workspaceId: string;
   projectId: string;
   agentId?: string | undefined;
@@ -52,9 +57,12 @@ export interface StartOptions {
 
 /** Opaque digest of a checkout; the raw local path never leaves the machine. */
 export function repoFingerprint(repoPath: string): string {
-  return createHash("sha256")
-    .update(realpathSync(resolve(repoPath)))
-    .digest("hex");
+  return checkoutRunnerFingerprint(repoPath);
+}
+
+/** Canonical main-checkout binding fingerprint shared by linked worktrees. */
+export function repoBindingFingerprint(repoPath: string): string {
+  return bindingFingerprint(repoPath);
 }
 
 /**
@@ -66,6 +74,26 @@ export async function start(options: StartOptions): Promise<void> {
   const adapterFor = options.adapterFor ?? adapterForHarness;
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   const stored = await readCredential();
+  // Origin pinning first: fail before any HTTP request on --server/ORRERY_URL
+  // disagreement. Never fall back to http://localhost:8080 here.
+  const server = resolveCredentialedOrigin({
+    storedServer: stored.server,
+    ...(options.server === undefined ? {} : { serverFlag: options.server }),
+    ...(process.env.ORRERY_URL === undefined ? {} : { envUrl: process.env.ORRERY_URL }),
+  });
+  // Shared git/HEAD validator before any network call (reusable by `init`).
+  const repoPath = options.repoPath ?? process.cwd();
+  const checkout = validateCheckout(repoPath);
+  const fingerprint = checkoutRunnerFingerprint(repoPath);
+  const displayName =
+    options.displayName === undefined
+      ? defaultStartDisplayName(stored.displayName, repoPath)
+      : validateDisplayName(options.displayName);
+  const releaseLock = await acquireCheckoutLock({
+    fingerprint,
+    server,
+    repoRoot: checkout.repoRoot,
+  });
   const pool = new SlotPool(options.maxConcurrency ?? 1);
   const controller = new AbortController();
   let revoked = false;
@@ -84,7 +112,7 @@ export async function start(options: StartOptions): Promise<void> {
   else options.signal?.addEventListener("abort", onExternalAbort, { once: true });
 
   const client = new OrreryClient({
-    server: options.server,
+    server,
     credential: stored.credential,
     signal: controller.signal,
   });
@@ -92,7 +120,6 @@ export async function start(options: StartOptions): Promise<void> {
   // One lock instance for this process: probes and dispatches coordinate per
   // Harness so a probe's temporary default-model switch never leaks (issue #241).
   const locks = new HarnessLocks();
-  const fingerprint = repoFingerprint(options.repoPath ?? process.cwd());
   const configKey = harnessConfigKey(
     supervision.acpOverridden ? { acpOverride: supervision.acp } : {},
   );
@@ -103,7 +130,7 @@ export async function start(options: StartOptions): Promise<void> {
     workspaceId: options.workspaceId,
     projectId: options.projectId,
     ...(options.agentId === undefined ? {} : { agentId: options.agentId }),
-    ...(options.displayName === undefined ? {} : { displayName: options.displayName }),
+    displayName,
     repoFingerprint: fingerprint,
     capabilities: options.capabilities ?? [],
     maxConcurrency: options.maxConcurrency ?? 1,
@@ -332,8 +359,8 @@ export async function start(options: StartOptions): Promise<void> {
           try {
             const acceptance = await client.acceptDispatch(runner.id, command.dispatchId);
             const running = superviseDispatch({
-              server: options.server,
-              repoPath: options.repoPath ?? process.cwd(),
+              server,
+              repoPath,
               credential: stored.credential,
               config: supervision,
               acceptance,
@@ -468,10 +495,14 @@ export async function start(options: StartOptions): Promise<void> {
     }
   };
 
-  await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop(), probeCatalogOnce()]);
-  options.signal?.removeEventListener("abort", onExternalAbort);
-  pool.cancelAll("shutdown");
-  await Promise.all(pending);
-  await pool.drain();
-  write("Runner stopped.");
+  try {
+    await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop(), probeCatalogOnce()]);
+  } finally {
+    options.signal?.removeEventListener("abort", onExternalAbort);
+    pool.cancelAll("shutdown");
+    await Promise.all(pending);
+    await pool.drain();
+    await releaseLock();
+    write("Runner stopped.");
+  }
 }

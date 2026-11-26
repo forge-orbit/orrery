@@ -19,11 +19,20 @@ export const RunnerPlatform = z
 export type RunnerPlatform = z.infer<typeof RunnerPlatform>;
 
 /** A human-readable name for an enrolled machine. */
+export const MAX_RUNNER_HOST_DISPLAY_NAME_LENGTH = 120;
+
+/**
+ * The display-name bound is measured in Unicode code points, the same unit as
+ * Postgres `char_length`. Zod's string `.max` would count UTF-16 code units,
+ * so the limit is expressed as a refinement over the trimmed value instead.
+ */
 export const RunnerHostDisplayName = z
   .string()
   .trim()
   .min(1, "Enter a display name.")
-  .max(120)
+  .refine((value) => Array.from(value).length <= MAX_RUNNER_HOST_DISPLAY_NAME_LENGTH, {
+    message: "Use at most 120 characters.",
+  })
   .meta({ id: "RunnerHostDisplayName" });
 export type RunnerHostDisplayName = z.infer<typeof RunnerHostDisplayName>;
 

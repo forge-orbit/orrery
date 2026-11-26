@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertSecureOrigin, canonicalizeServerUrl } from "./origin.ts";
 import {
   AckCommandsResponse,
   AutoClaimResponse,
@@ -48,7 +49,8 @@ export class OrreryClient {
   private readonly signal: AbortSignal | undefined;
 
   constructor(options: OrreryClientOptions) {
-    this.server = options.server.replace(/\/$/, "");
+    this.server = canonicalizeServerUrl(options.server);
+    assertSecureOrigin(this.server);
     this.credential = options.credential;
     this.signal = options.signal;
   }
@@ -61,6 +63,7 @@ export class OrreryClient {
     try {
       response = await fetch(`${this.server}${path}`, {
         ...init,
+        redirect: "error",
         headers,
         signal: this.signal ?? null,
       });
