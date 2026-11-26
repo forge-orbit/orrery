@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { MAX_DISPATCH_PROMPT_LENGTH } from "@orrery/contract";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
@@ -32,8 +33,10 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   const trimmedPrompt = options.prompt?.trim();
   const prompt = trimmedPrompt === undefined || trimmedPrompt === "" ? undefined : trimmedPrompt;
-  if (prompt !== undefined && prompt.length > 16_000) {
-    throw new Error("--prompt must be at most 16,000 characters.");
+  if (prompt !== undefined && prompt.length > MAX_DISPATCH_PROMPT_LENGTH) {
+    throw new Error(
+      `--prompt must be at most ${MAX_DISPATCH_PROMPT_LENGTH.toLocaleString()} characters.`,
+    );
   }
   const stored = await readCredential();
   const client = new OrreryClient({

@@ -9,7 +9,7 @@ import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useToast } from "@astryxdesign/core/Toast";
-import type { Dispatch } from "@orrery/contract";
+import { MAX_DISPATCH_PROMPT_LENGTH, type Dispatch } from "@orrery/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
 import { useState } from "react";
@@ -22,15 +22,17 @@ import {
   workspaceRunnersQuery,
   workspaceRunnersQueryKey,
 } from "./queries.ts";
-import { readDelegatePreference, writeDelegatePreference } from "./preferences.ts";
+import {
+  readDelegatePreference,
+  resolveDelegateChoice,
+  writeDelegatePreference,
+  type DelegatePreference,
+} from "./preferences.ts";
 
 export interface DelegatableAgent {
   id: string;
   name: string;
 }
-
-/** The shared contract and the database both cap a prompt at this length. */
-export const MAX_DISPATCH_PROMPT_LENGTH = 16_000;
 
 const stateLabels: Record<Dispatch["state"], string> = {
   pending: "Waiting for the Runner",
@@ -59,7 +61,7 @@ export function DelegateToRunner({
   const { data: fleet } = useQuery(workspaceRunnersQuery(workspaceId));
   const { data: dispatchList } = useQuery(issueDispatchesQuery(issueId));
   const [isOpen, setIsOpen] = useState(false);
-  const [choice, setChoice] = useState({ runnerId: "", agentId: "" });
+  const [preference, setPreference] = useState<DelegatePreference>({ runnerId: "", agentId: "" });
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string>();
 
@@ -75,19 +77,12 @@ export function DelegateToRunner({
 
   // Validate the remembered choices against live data on every render, so a
   // Runner going offline or stale browser storage never breaks delegation.
-  const runnerId = owned.some((runner) => runner.id === choice.runnerId)
-    ? choice.runnerId
-    : (owned[0]?.id ?? "");
-  const agentId = agents.some((agent) => agent.id === choice.agentId) ? choice.agentId : "";
+  const { runnerId, agentId } = resolveDelegateChoice(preference, owned, agents);
   const trimmedPrompt = prompt.trim();
   const promptTooLong = trimmedPrompt.length > MAX_DISPATCH_PROMPT_LENGTH;
 
   const openDialog = () => {
-    const preference = readDelegatePreference(projectId);
-    setChoice({
-      runnerId: preference?.runnerId ?? "",
-      agentId: preference?.agentId ?? "",
-    });
+    setPreference(readDelegatePreference(projectId) ?? { runnerId: "", agentId: "" });
     // A new delegation never carries the previous issue's instructions.
     setPrompt("");
     setError(undefined);
@@ -212,7 +207,9 @@ export function DelegateToRunner({
                     label: `${runner.displayName} · ${runner.presence}`,
                   }))}
                   value={runnerId}
-                  onChange={(value) => setChoice((current) => ({ ...current, runnerId: value }))}
+                  onChange={(value) =>
+                    setPreference((current) => ({ ...current, runnerId: value }))
+                  }
                   isDisabled={owned.length === 0 || mutation.isPending}
                 />
                 <Selector
@@ -222,7 +219,7 @@ export function DelegateToRunner({
                   options={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
                   value={agentId}
                   onChange={(value) =>
-                    setChoice((current) => ({ ...current, agentId: value ?? "" }))
+                    setPreference((current) => ({ ...current, agentId: value ?? "" }))
                   }
                   hasClear
                   isDisabled={mutation.isPending}

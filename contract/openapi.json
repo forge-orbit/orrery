@@ -17754,7 +17754,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The human's dispatches for this issue",
+            "description": "The issue's dispatches for a human with project Read access",
             "content": {
               "application/json": {
                 "schema": {

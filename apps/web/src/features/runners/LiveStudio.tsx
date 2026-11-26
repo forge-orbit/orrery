@@ -35,6 +35,7 @@ import {
   type StudioFilter,
 } from "./stream.ts";
 import { issueQuestionsQuery } from "../inbox/index.ts";
+import { projectQuery } from "../projects/index.ts";
 import { requestStop } from "../work-sessions/index.ts";
 import { sessionsQuery } from "../work-sessions/index.ts";
 import { workspaceRunsQuery } from "../runs/index.ts";
@@ -142,6 +143,18 @@ export function LiveStudio({
     enabled: workspaceId !== "",
   });
   const run = runs.data?.find((entry) => entry.id === (dispatch?.runId ?? session?.runId));
+  const project = useQuery({
+    ...projectQuery(dispatch?.projectId ?? ""),
+    enabled: dispatch?.projectId !== undefined,
+  });
+  // Matches resolveUncertain's server authorization: the requester/host owner
+  // or a project manager may settle an uncertain attempt. Ordinary project
+  // readers can see the banner but are not offered actions that would 403.
+  const canResolveUncertain =
+    dispatch?.state === "uncertain" &&
+    (isOwner ||
+      dispatch.requestedByHumanId === host?.humanId ||
+      project.data?.accessLevel === "manage");
 
   // A bare bookmark URL has no issue metadata, so read the stream directly by ids.
   const bareUrl = !hasIssue;
@@ -447,26 +460,28 @@ export function LiveStudio({
                 collapsible={false}
                 data-uncertain-dispatch=""
               >
-                <Stack direction="horizontal" gap={2} wrap="wrap">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    label="Resolve as completed"
-                    isDisabled={resolve.isPending}
-                    data-resolve-dispatch="completed"
-                    onClick={() => resolve.mutate("completed")}
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="destructive"
-                    label="Release for re-dispatch"
-                    isDisabled={resolve.isPending}
-                    data-resolve-dispatch="released"
-                    onClick={() => resolve.mutate("released")}
-                  />
-                </Stack>
+                {canResolveUncertain && (
+                  <Stack direction="horizontal" gap={2} wrap="wrap">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      label="Resolve as completed"
+                      isDisabled={resolve.isPending}
+                      data-resolve-dispatch="completed"
+                      onClick={() => resolve.mutate("completed")}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      label="Release for re-dispatch"
+                      isDisabled={resolve.isPending}
+                      data-resolve-dispatch="released"
+                      onClick={() => resolve.mutate("released")}
+                    />
+                  </Stack>
+                )}
               </Banner>
             )}
             {rolledUp && (

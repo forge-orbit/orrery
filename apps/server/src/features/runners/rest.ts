@@ -236,7 +236,7 @@ const listIssueDispatches = createRoute({
   request: { params: issueParams },
   responses: {
     200: {
-      description: "The human's dispatches for this issue",
+      description: "The issue's dispatches for a human with project Read access",
       content: { "application/json": { schema: IssueDispatchesResponse } },
     },
     ...dispatchErrors,

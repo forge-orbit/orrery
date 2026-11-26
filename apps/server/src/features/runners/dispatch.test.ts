@@ -24,6 +24,7 @@ import {
   issues,
   projectAccessGrants,
   projects,
+  runnerCommands,
   runnerDispatches,
   runners,
   runs,
@@ -306,6 +307,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await database.db.transaction(async (tx) => {
     for (const table of [
+      "runner_commands",
       "dispatch_tokens",
       "runner_dispatches",
       "notifications",
@@ -996,6 +998,36 @@ describe("custom dispatch prompt (#239)", () => {
       .from(runnerDispatches)
       .where(eq(runnerDispatches.id, dispatch.id));
     expect(row?.prompt).toBeNull();
+  });
+
+  it("persists and delivers a prompt on a one-shot Runner dispatch", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("one-shot prompt issue");
+    const prompt = "  Keep the change additive and add a rollback note.  ";
+
+    const created = await request(`/api/runners/${runner.id}/dispatches`, {
+      method: "POST",
+      token: host.credential,
+      body: { issueId: issue.id, prompt },
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch.prompt).toBe("Keep the change additive and add a rollback note.");
+
+    const [row] = await database.db
+      .select({ prompt: runnerDispatches.prompt })
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.id, dispatch.id));
+    expect(row?.prompt).toBe("Keep the change additive and add a rollback note.");
+    const [command] = await database.db
+      .select({ payload: runnerCommands.payload })
+      .from(runnerCommands)
+      .where(eq(runnerCommands.runnerId, runner.id));
+    expect(command?.payload).toMatchObject({
+      dispatchId: dispatch.id,
+      prompt: "Keep the change additive and add a rollback note.",
+    });
   });
 
   it("rejects a prompt longer than 16,000 characters with a Problem Details error", async () => {

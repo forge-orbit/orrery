@@ -212,11 +212,18 @@ export const DispatchState = z
   .meta({ id: "DispatchState" });
 export type DispatchState = z.infer<typeof DispatchState>;
 
+/** The shared bound for a requester's per-Dispatch instructions. */
+export const MAX_DISPATCH_PROMPT_LENGTH = 16_000;
+
 /**
  * Optional instructions from the requester for one Dispatch. Empty strings are
  * treated as omitted by the server; the limit is also a Postgres CHECK.
  */
-export const DispatchPrompt = z.string().trim().max(16_000).meta({ id: "DispatchPrompt" });
+export const DispatchPrompt = z
+  .string()
+  .trim()
+  .max(MAX_DISPATCH_PROMPT_LENGTH)
+  .meta({ id: "DispatchPrompt" });
 export type DispatchPrompt = z.infer<typeof DispatchPrompt>;
 
 /** Thin delivery bridge; it never changes the issue's assignee. */

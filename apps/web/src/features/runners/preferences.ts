@@ -37,3 +37,28 @@ export function writeDelegatePreference(projectId: string, preference: DelegateP
     // Storage is optional: delegation still works without remembered choices.
   }
 }
+
+/**
+ * Validate remembered choices against the live, delegatable options on every
+ * render. An offline/removed Runner or a stale Agent falls back cleanly to the
+ * first available Runner and no Agent, so an old browser preference can never
+ * block delegation.
+ */
+export function resolveDelegateChoice(
+  preference: DelegatePreference | undefined,
+  runners: readonly { id: string }[],
+  agents: readonly { id: string }[],
+): DelegatePreference {
+  const rememberedRunner = preference?.runnerId;
+  const rememberedAgent = preference?.agentId;
+  return {
+    runnerId:
+      rememberedRunner !== undefined && runners.some((runner) => runner.id === rememberedRunner)
+        ? rememberedRunner
+        : (runners[0]?.id ?? ""),
+    agentId:
+      rememberedAgent !== undefined && agents.some((agent) => agent.id === rememberedAgent)
+        ? rememberedAgent
+        : "",
+  };
+}
