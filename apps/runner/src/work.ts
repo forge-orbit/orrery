@@ -28,7 +28,7 @@ export interface WorkOptions {
   supervision?: SupervisionConfig | undefined;
   heartbeatMs?: number | undefined;
   commandWaitMs?: number | undefined;
-  /** CLI defaults, also sent to the server so the Run records the choice. */
+  /** CLI defaults, sent explicitly at one-shot Dispatch creation and in its command. */
   defaults?: ExecutionChoice | undefined;
   /** Test seam for the local Harness registry. */
   harnessDefinitions?: HarnessDefinition[] | undefined;
@@ -209,7 +209,6 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
       harnessDefinitions: options.harnessDefinitions,
       harnessCatalog:
         options.harnessCatalog ?? readCachedCatalog(repoFingerprint(repoPath)) ?? undefined,
-      defaults: options.defaults,
       onController: (ctrl) => {
         activeController = ctrl;
         commandLoopPromise = runCommandLoop();

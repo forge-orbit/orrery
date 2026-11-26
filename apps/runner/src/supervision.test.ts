@@ -708,7 +708,7 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
     expect((await events(fixture)).some((item) => item.event === "prompt")).toBe(true);
   });
 
-  it("applies start-time defaults when a Dispatch omits every execution option", async () => {
+  it("does not re-apply start-time defaults to a queued Dispatch snapshot", async () => {
     const fixture = await makeFixture({
       mode: "normal",
       harnessDefinitions: [
@@ -719,18 +719,21 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
           args: [stubPath],
         },
       ],
+      // Current process flags; the server snapshot below was created without
+      // them and must stay authoritative.
       defaults: { harness: "opencode", model: "stub-model-2", effort: "high" },
     });
     fixture.control.enqueueDispatch("TEST-241-5", "attempt-241-5");
     const session = await settledSession(fixture);
     expect(session.status).toBe("completed");
     const recorded = await events(fixture);
-    expect(recorded.find((item) => item.event === "set_model")).toMatchObject({
-      modelId: "stub-model-2",
-    });
-    expect(recorded.find((item) => item.event === "set_config_option")).toMatchObject({
-      value: "high",
-    });
+    expect(
+      recorded.filter((item) => item.event === "set_model").map((item) => item.modelId),
+    ).not.toContain("stub-model-2");
+    expect(
+      recorded.filter((item) => item.event === "set_config_option").map((item) => item.value),
+    ).not.toContain("high");
+    expect(recorded.some((item) => item.event === "prompt")).toBe(true);
   });
 
   it("applies the cached default model of the local default Harness when nothing is selected", async () => {

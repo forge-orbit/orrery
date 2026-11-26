@@ -1,7 +1,7 @@
 import type { HarnessCatalog } from "@orrery/contract";
 import { detectHarnesses, type HarnessDefinition } from "./harnesses.ts";
 
-/** Identifiers selected for one Dispatch or supplied as CLI defaults (#241). */
+/** Identifiers carried by one Dispatch snapshot or registered as CLI defaults (#241). */
 export interface ExecutionChoice {
   harness?: string | undefined;
   model?: string | undefined;
@@ -75,18 +75,6 @@ export function executionChoicePayload(choice: ExecutionChoice | undefined): Exe
     ...(harness === undefined ? {} : { harness }),
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
-  };
-}
-
-/** Dispatch choices win over `start`/`work` defaults; blanks are omitted. */
-export function mergeExecutionChoice(
-  dispatch: ExecutionChoice,
-  defaults: ExecutionChoice | undefined,
-): ExecutionChoice {
-  return {
-    harness: nonBlank(dispatch.harness) ?? nonBlank(defaults?.harness),
-    model: nonBlank(dispatch.model) ?? nonBlank(defaults?.model),
-    effort: nonBlank(dispatch.effort) ?? nonBlank(defaults?.effort),
   };
 }
 

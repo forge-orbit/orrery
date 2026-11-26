@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,7 @@ import {
   issues,
   projectAccessGrants,
   projects,
+  runnerCommands,
   runnerDispatches,
   runners,
   runs,
@@ -673,6 +675,129 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
         return current.length > 0 ? current : undefined;
       }, 30_000);
       expect(chunks.length).toBeGreaterThan(0);
+    } finally {
+      started.child.kill("SIGTERM");
+      await Promise.race([started.done, new Promise<void>((resolve) => setTimeout(resolve, 5000))]);
+    }
+  });
+
+  it("keeps a queued Dispatch snapshot across re-registration with new defaults", async () => {
+    // The Dispatch is queued with empty execution choices. The same persistent
+    // Runner then restarts with different CLI defaults: the server snapshot,
+    // not the current process flags, must still drive supervision.
+    const fingerprint = createHash("sha256").update(realpathSync(world.repo)).digest("hex");
+    const registered = await api("/api/runners/register", {
+      method: "POST",
+      token: world.credential,
+      body: {
+        workspaceId: world.workspaceA,
+        projectId: world.projectA,
+        agentId: world.agentId,
+        repoFingerprint: fingerprint,
+        capabilities: [],
+        maxConcurrency: 1,
+        ephemeral: false,
+      },
+    });
+    expect(registered.status).toBe(201);
+    const runnerId = str(field(registered.body, "id"));
+    const issue = await makeIssue("queued before new runner defaults", {
+      agentId: world.agentId,
+    });
+    const created = await api(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      cookie: world.cookie,
+      body: { runnerId },
+    });
+    expect(created.status).toBe(201);
+    const snapshot = recordOf(created.body);
+    const dispatchId = str(field(snapshot, "id"));
+    expect(snapshot?.harness).toBeUndefined();
+    expect(snapshot?.model).toBeUndefined();
+    expect(snapshot?.effort).toBeUndefined();
+
+    const marker = join(world.root, `stale-${randomBytes(4).toString("hex")}.jsonl`);
+    const started = spawnCli(
+      [
+        "start",
+        "--server",
+        world.baseUrl,
+        "--workspace",
+        world.workspaceA,
+        "--project",
+        world.projectA,
+        "--agent",
+        world.agentId,
+        "--repo",
+        world.repo,
+        "--concurrency",
+        "1",
+        "--heartbeat-ms",
+        "100",
+        "--harness",
+        "codex",
+        "--model",
+        "stale-model-M",
+        "--effort",
+        "high",
+        "--lease-renew-ms",
+        "60",
+        "--cancel-grace-ms",
+        "500",
+        ...acpArgs(),
+      ],
+      { STUB_ACP_MARKER: marker },
+    );
+    try {
+      const session = await until(
+        async () =>
+          (await sessionsOf(issue.id)).find((item) => field(item, "status") === "completed"),
+        30_000,
+      );
+      expect(field(session, "issueId")).toBe(issue.id);
+
+      // Re-registration updated the Runner row, but the pending Dispatch and
+      // its outbox command keep the values they were created with.
+      const [row] = await database.db
+        .select()
+        .from(runnerDispatches)
+        .where(eq(runnerDispatches.id, dispatchId));
+      expect(row?.harness).toBeNull();
+      expect(row?.model).toBeNull();
+      expect(row?.effort).toBeNull();
+      const [command] = await database.db
+        .select()
+        .from(runnerCommands)
+        .where(
+          and(eq(runnerCommands.runnerId, runnerId), eq(runnerCommands.dispatchId, dispatchId)),
+        );
+      expect(command?.payload).toMatchObject({ dispatchId });
+      expect(command?.payload).not.toMatchObject({
+        harness: "codex",
+        model: "stale-model-M",
+        effort: "high",
+      });
+      const [run] = await database.db
+        .select()
+        .from(runs)
+        .where(eq(runs.id, row?.runId ?? ""));
+      expect(run?.model).toBeNull();
+
+      // Actual supervision: the ACP session ran, but never applied the new
+      // process's model/effort to this older queued Dispatch.
+      const recorded = (await readFile(marker, "utf8").catch(() => ""))
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line): Record<string, unknown> => JSON.parse(line));
+      // A cached catalog default may legitimately be applied; the current
+      // process's newly registered flags must never reach this old snapshot.
+      expect(
+        recorded.filter((item) => item.event === "set_model").map((item) => item.modelId),
+      ).not.toContain("stale-model-M");
+      expect(
+        recorded.filter((item) => item.event === "set_config_option").map((item) => item.value),
+      ).not.toContain("high");
+      expect(recorded.some((item) => item.event === "prompt")).toBe(true);
     } finally {
       started.child.kill("SIGTERM");
       await Promise.race([started.done, new Promise<void>((resolve) => setTimeout(resolve, 5000))]);

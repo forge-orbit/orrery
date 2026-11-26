@@ -38,7 +38,7 @@ export interface StartOptions {
   harnessDefinitions?: HarnessDefinition[] | undefined;
   harnessCatalog?: HarnessCatalog | undefined;
   onCatalog?: ((catalog: HarnessCatalog) => void) | undefined;
-  /** CLI defaults for dispatches that do not select harness/model/effort. */
+  /** CLI defaults registered with the server for Dispatches it creates. */
   defaults?: ExecutionChoice | undefined;
 }
 
@@ -233,7 +233,6 @@ export async function start(options: StartOptions): Promise<void> {
               onController: options.onController,
               harnessDefinitions: options.harnessDefinitions,
               harnessCatalog: options.harnessCatalog ?? publisher.current,
-              defaults: options.defaults,
             });
             pending.add(running);
             void running.finally(() => pending.delete(running));

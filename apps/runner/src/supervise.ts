@@ -11,12 +11,7 @@ import { REASONING_OPTION_IDS } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import type { SupervisionConfig } from "./config.ts";
 import { ephemeralMcpConfig } from "./config.ts";
-import {
-  DispatchOptionFailure,
-  mergeExecutionChoice,
-  resolveExecutionChoice,
-  type ExecutionChoice,
-} from "./dispatch-options.ts";
+import { DispatchOptionFailure, resolveExecutionChoice } from "./dispatch-options.ts";
 import { withHarnessLock } from "./harness-lock.ts";
 import type { HarnessDefinition } from "./harnesses.ts";
 import { McpAuthError, RunnerMcpClient } from "./mcp-client.ts";
@@ -50,8 +45,6 @@ export interface SupervisionOptions {
   /** Local registry seam and cached catalog for per-Dispatch execution options. */
   harnessDefinitions?: readonly HarnessDefinition[] | undefined;
   harnessCatalog?: HarnessCatalog | undefined;
-  /** CLI defaults on `start` / `work` for dispatches without an override. */
-  defaults?: ExecutionChoice | undefined;
   /** Called as soon as the controller exists, before any local work starts. */
   onController?: ((controller: SlotController) => void) | undefined;
 }
@@ -251,8 +244,10 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       write(`Stream spool unavailable for this dispatch: ${String(error)}`);
     }
 
-    const choice = mergeExecutionChoice(command, options.defaults);
-    const resolved = resolveExecutionChoice(choice, {
+    // The outbox payload is the server's immutable execution snapshot. CLI
+    // defaults were already resolved when the server created the Dispatch, so
+    // never re-apply the *current* process's flags to an older queued Dispatch.
+    const resolved = resolveExecutionChoice(command, {
       ...(options.harnessDefinitions === undefined
         ? {}
         : { definitions: options.harnessDefinitions }),
