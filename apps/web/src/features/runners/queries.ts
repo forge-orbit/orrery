@@ -1,5 +1,6 @@
 import {
   DeviceCodePreview,
+  Dispatch,
   IssueDispatchesResponse,
   StreamResponse,
   WorkspaceRunnersFleet,
@@ -34,6 +35,22 @@ export function issueDispatchesQuery(issueId: string) {
       getJson(`/api/issues/${encodeURIComponent(issueId)}/dispatches`, (value) =>
         IssueDispatchesResponse.parse(value),
       ),
+  });
+}
+
+/**
+ * One dispatch's metadata, including its custom prompt. Teammates with
+ * project Read access need this: the per-issue list only covers a human's
+ * own dispatches. Non-members get a 404, which the caller ignores.
+ */
+export function dispatchMetaQuery(runnerId: string, dispatchId: string) {
+  return queryOptions({
+    queryKey: ["runners", runnerId, "dispatches", dispatchId, "meta"] as const,
+    queryFn: () =>
+      getJson(`/api/runners/dispatches/${encodeURIComponent(dispatchId)}`, (value) =>
+        Dispatch.parse(value),
+      ),
+    retry: false,
   });
 }
 

@@ -7,6 +7,7 @@ import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
+import type { PowerSearchFilter } from "@astryxdesign/core/PowerSearch";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
@@ -37,9 +38,14 @@ import { Plus, Trash2, UserPlus } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import {
+  countIssueScopes,
   deleteProject,
+  filterAndSortIssues,
+  IssueFilterBar,
   IssuePriorityControls,
   issuesQuery,
+  type IssueSortKey,
+  type IssueStatusScope,
   projectAccessCandidates,
   projectAccessCandidatesQuery,
   issueStatusLabels,
@@ -183,8 +189,25 @@ function ProjectPage() {
   const navigate = useNavigate();
   const search = Route.useSearch();
   const [tab, setTab] = useState<ProjectTab>(search.tab ?? "issues");
+  const [issueScope, setIssueScope] = useState<IssueStatusScope>("all");
+  const [issueFilters, setIssueFilters] = useState<PowerSearchFilter[]>([]);
+  const [issueSort, setIssueSort] = useState<IssueSortKey>("priority");
   const [knowledgeFilter, setKnowledgeFilter] = useState("");
   const activeTab: ProjectTab = tab === "settings" && !canManage ? "issues" : tab;
+  const activeSessionIssueIds = new Set(sessionsByIssue.keys());
+  const issueScopeCounts = countIssueScopes(issues);
+  const visibleIssues = filterAndSortIssues({
+    issues,
+    scope: issueScope,
+    filters: issueFilters,
+    sort: issueSort,
+    activeSessionIssueIds,
+  });
+  function resetIssueFilters() {
+    setIssueScope("all");
+    setIssueFilters([]);
+    setIssueSort("priority");
+  }
   const knowledgeNeedle = knowledgeFilter.trim().toLowerCase();
   const visibleKnowledge =
     knowledgeNeedle === ""
@@ -360,132 +383,166 @@ function ProjectPage() {
               />
             </Stack>
           ) : (
-            <Section variant="transparent" padding={0}>
-              <Table density="compact" hasHover dividers="rows" aria-label="Project issues">
-                <TableHeader>
-                  <TableRow>
-                    <TableHeaderCell>Key</TableHeaderCell>
-                    <TableHeaderCell>Issue</TableHeaderCell>
-                    <TableHeaderCell>Status</TableHeaderCell>
-                    <TableHeaderCell>Assignee</TableHeaderCell>
-                    <TableHeaderCell>Priority</TableHeaderCell>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {issues.map((issue) => {
-                    const session = sessionsByIssue.get(issue.id);
-                    const run = session === undefined ? undefined : runsById.get(session.runId);
-                    const assignee = issue.assignee;
-                    const showWorkingAgent =
-                      session !== undefined &&
-                      run !== undefined &&
-                      assignee?.agentId !== session.agentId;
-
-                    return (
-                      <TableRow key={issue.id} data-issue-id={issue.id}>
-                        <TableCell>
-                          <Text
-                            as="span"
-                            type="supporting"
-                            color="secondary"
-                            data-issue-identifier={issue.identifier}
-                          >
-                            {issue.identifier}
-                          </Text>
-                        </TableCell>
-                        <TableCell>
-                          <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-                            <Link
-                              to="/issues/$issueId"
-                              params={{ issueId: issue.id }}
-                              color="primary"
-                              weight="medium"
-                            >
-                              {issue.title}
-                            </Link>
-                            {issue.labels.map((label) => (
-                              <LabelPill key={label.id} label={label} />
-                            ))}
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          <Token
-                            label={issueStatusLabels[issue.status]}
-                            color={statusTokenColors[issue.status]}
-                            size="sm"
-                            data-issue-status={issue.status}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {assignee === null && !showWorkingAgent ? (
-                            <Text as="span" type="supporting" color="secondary">
-                              —
-                            </Text>
-                          ) : (
-                            <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-                              {assignee !== null && (
-                                <Stack
-                                  as="span"
-                                  direction="horizontal"
-                                  vAlign="center"
-                                  data-issue-assignee=""
-                                >
-                                  {assignee.agentId !== undefined ? (
-                                    <AgentAvatar
-                                      name={assignee.displayName}
-                                      harness={
-                                        session?.agentId === assignee.agentId
-                                          ? run?.harness
-                                          : undefined
-                                      }
-                                      size={18}
-                                    />
-                                  ) : (
-                                    <HumanAvatar
-                                      name={assignee.displayName}
-                                      avatarUrl={assignee.avatarUrl}
-                                      size="xsm"
-                                    />
-                                  )}
-                                  <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
-                                </Stack>
-                              )}
-                              {showWorkingAgent && (
-                                <Stack
-                                  as="span"
-                                  direction="horizontal"
-                                  vAlign="center"
-                                  data-working-agent=""
-                                >
-                                  <AgentAvatar
-                                    name={run.agentName}
-                                    harness={run.harness}
-                                    size={18}
-                                  />
-                                  <VisuallyHidden>{run.agentName}</VisuallyHidden>
-                                </Stack>
-                              )}
-                            </Stack>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {canContribute ? (
-                            <IssuePriorityControls
-                              issue={issue}
-                              issues={issues}
-                              projectId={project.id}
-                              compact
-                            />
-                          ) : (
-                            <PriorityBadge priority={issue.priority} />
-                          )}
-                        </TableCell>
+            <Stack gap={3}>
+              <IssueFilterBar
+                issues={issues}
+                labels={labels}
+                scope={issueScope}
+                onScopeChange={setIssueScope}
+                filters={issueFilters}
+                onFiltersChange={setIssueFilters}
+                sort={issueSort}
+                onSortChange={setIssueSort}
+                counts={issueScopeCounts}
+                filteredCount={visibleIssues.length}
+                onReset={resetIssueFilters}
+              />
+              {visibleIssues.length === 0 ? (
+                <Stack padding={4}>
+                  <EmptyState
+                    title="No matching issues"
+                    description="Try adjusting or clearing your filters to see more issues."
+                    headingLevel={2}
+                    actions={
+                      <Button
+                        type="button"
+                        label="Clear filters"
+                        variant="secondary"
+                        size="sm"
+                        onClick={resetIssueFilters}
+                      />
+                    }
+                  />
+                </Stack>
+              ) : (
+                <Section variant="transparent" padding={0}>
+                  <Table density="compact" hasHover dividers="rows" aria-label="Project issues">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHeaderCell>Key</TableHeaderCell>
+                        <TableHeaderCell>Issue</TableHeaderCell>
+                        <TableHeaderCell>Status</TableHeaderCell>
+                        <TableHeaderCell>Assignee</TableHeaderCell>
+                        <TableHeaderCell>Priority</TableHeaderCell>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </Section>
+                    </TableHeader>
+                    <TableBody>
+                      {visibleIssues.map((issue) => {
+                        const session = sessionsByIssue.get(issue.id);
+                        const run = session === undefined ? undefined : runsById.get(session.runId);
+                        const assignee = issue.assignee;
+                        const showWorkingAgent =
+                          session !== undefined &&
+                          run !== undefined &&
+                          assignee?.agentId !== session.agentId;
+
+                        return (
+                          <TableRow key={issue.id} data-issue-id={issue.id}>
+                            <TableCell>
+                              <Text
+                                as="span"
+                                type="supporting"
+                                color="secondary"
+                                data-issue-identifier={issue.identifier}
+                              >
+                                {issue.identifier}
+                              </Text>
+                            </TableCell>
+                            <TableCell>
+                              <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+                                <Link
+                                  to="/issues/$issueId"
+                                  params={{ issueId: issue.id }}
+                                  color="primary"
+                                  weight="medium"
+                                >
+                                  {issue.title}
+                                </Link>
+                                {issue.labels.map((label) => (
+                                  <LabelPill key={label.id} label={label} />
+                                ))}
+                              </Stack>
+                            </TableCell>
+                            <TableCell>
+                              <Token
+                                label={issueStatusLabels[issue.status]}
+                                color={statusTokenColors[issue.status]}
+                                size="sm"
+                                data-issue-status={issue.status}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {assignee === null && !showWorkingAgent ? (
+                                <Text as="span" type="supporting" color="secondary">
+                                  —
+                                </Text>
+                              ) : (
+                                <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
+                                  {assignee !== null && (
+                                    <Stack
+                                      as="span"
+                                      direction="horizontal"
+                                      vAlign="center"
+                                      data-issue-assignee=""
+                                    >
+                                      {assignee.agentId !== undefined ? (
+                                        <AgentAvatar
+                                          name={assignee.displayName}
+                                          harness={
+                                            session?.agentId === assignee.agentId
+                                              ? run?.harness
+                                              : undefined
+                                          }
+                                          size={18}
+                                        />
+                                      ) : (
+                                        <HumanAvatar
+                                          name={assignee.displayName}
+                                          avatarUrl={assignee.avatarUrl}
+                                          size="xsm"
+                                        />
+                                      )}
+                                      <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
+                                    </Stack>
+                                  )}
+                                  {showWorkingAgent && (
+                                    <Stack
+                                      as="span"
+                                      direction="horizontal"
+                                      vAlign="center"
+                                      data-working-agent=""
+                                    >
+                                      <AgentAvatar
+                                        name={run.agentName}
+                                        harness={run.harness}
+                                        size={18}
+                                      />
+                                      <VisuallyHidden>{run.agentName}</VisuallyHidden>
+                                    </Stack>
+                                  )}
+                                </Stack>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {canContribute ? (
+                                <IssuePriorityControls
+                                  issue={issue}
+                                  issues={issues}
+                                  projectId={project.id}
+                                  compact
+                                />
+                              ) : (
+                                <PriorityBadge priority={issue.priority} />
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </Section>
+              )}
+            </Stack>
           )}
         </section>
       )}
@@ -832,8 +889,8 @@ function ProjectSettings({ project }: { project: Project }) {
                 onChange={setDescription}
                 isOptional
                 rows={3}
-                maxLength={500}
-                htmlMaxLength={500}
+                maxLength={350}
+                htmlMaxLength={350}
                 placeholder="What is this project about?"
                 width="min(100%, 28rem)"
               />

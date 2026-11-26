@@ -148,21 +148,26 @@ async function until(
 
 async function events(fixture: Fixture): Promise<MarkerEvent[]> {
   try {
-    return (await readFile(fixture.marker, "utf8"))
-      .split("\n")
-      .filter((line) => line.trim() !== "")
-      .map((line): MarkerEvent => {
-        const parsed: unknown = JSON.parse(line);
-        const record = recordOf(parsed) ?? {};
-        const event: MarkerEvent = {
-          at: typeof record.at === "number" ? record.at : 0,
-          event: str(record.event),
-        };
-        for (const [key, value] of Object.entries(record)) {
-          if (key !== "at" && key !== "event") event[key] = value;
-        }
-        return event;
-      });
+    return (
+      (await readFile(fixture.marker, "utf8"))
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line): MarkerEvent => {
+          const parsed: unknown = JSON.parse(line);
+          const record = recordOf(parsed) ?? {};
+          const event: MarkerEvent = {
+            at: typeof record.at === "number" ? record.at : 0,
+            event: str(record.event),
+          };
+          for (const [key, value] of Object.entries(record)) {
+            if (key !== "at" && key !== "event") event[key] = value;
+          }
+          return event;
+        })
+        // Catalog probes (issue #240) run the same stub; their records carry
+        // `probe: true` and never count as dispatch-supervision activity.
+        .filter((item) => item.probe !== true)
+    );
   } catch {
     return [];
   }

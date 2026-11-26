@@ -38,6 +38,13 @@ export {
   type BoardOrderable,
 } from "./board-placement.ts";
 export { AssigneeControl, type AssigneeCandidate } from "./AssigneeControl.tsx";
+export {
+  countIssueScopes,
+  filterAndSortIssues,
+  type IssueSortKey,
+  type IssueStatusScope,
+} from "./issue-filter.ts";
+export { IssueFilterBar } from "./IssueFilterBar.tsx";
 export { IssueLabels } from "./IssueLabels.tsx";
 export { IssueMentionTextArea } from "./IssueMentionTextArea.tsx";
 export { IssuePriorityControls, PRIORITY_LABELS, PriorityBadge } from "./IssuePriority.tsx";

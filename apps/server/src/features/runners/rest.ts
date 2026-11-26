@@ -18,6 +18,7 @@ import {
   IssueDispatchesResponse,
   IssueResolveRequest,
   IssueResolveResponse,
+  HarnessCatalog,
   RunnerDispatchRequest,
   RunnerOfflineResponse,
   HeartbeatRequest,
@@ -161,6 +162,25 @@ const registerRunner = createRoute({
   },
 });
 
+const updateRunnerCatalog = createRoute({
+  method: "put",
+  path: "/api/runners/{runnerId}/catalog",
+  summary: "Publish a Runner's live Harness catalog",
+  description:
+    "Runner host credential only. The submitted catalog is merged with the stored one so a slower startup probe or later refresh never regresses a previously known model's effort levels; heartbeats keep carrying only `activeSlotCount`.",
+  request: {
+    params: runnerParams,
+    body: { content: { "application/json": { schema: HarnessCatalog } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "The Runner with the merged Harness catalog",
+      content: { "application/json": { schema: Runner } },
+    },
+    ...enrollErrors,
+  },
+});
+
 const heartbeat = createRoute({
   method: "post",
   path: "/api/runners/{runnerId}/heartbeat",
@@ -240,6 +260,31 @@ const listIssueDispatches = createRoute({
       content: { "application/json": { schema: IssueDispatchesResponse } },
     },
     ...dispatchErrors,
+  },
+});
+
+const readDispatchErrors = {
+  400: problem("The dispatch request is invalid"),
+  401: problem("Not signed in, or the Runner host credential is invalid"),
+  403: problem("The viewer cannot read this project"),
+  404: problem("No such Dispatch is accessible"),
+  409: problem("The Dispatch is unavailable"),
+  429: problem("Too many requests; try again later"),
+};
+
+const readDispatchRoute = createRoute({
+  method: "get",
+  path: "/api/runners/dispatches/{dispatchId}",
+  summary: "Read one Dispatch's metadata, including its custom prompt",
+  description:
+    "A human with project Read access or the Runner host may read it; workspace members without project Read access receive 404.",
+  request: { params: resolveParams },
+  responses: {
+    200: {
+      description: "The Dispatch",
+      content: { "application/json": { schema: Dispatch } },
+    },
+    ...readDispatchErrors,
   },
 });
 
@@ -565,11 +610,13 @@ export const routes = [
   approveDeviceCode,
   exchangeDeviceCode,
   registerRunner,
+  updateRunnerCatalog,
   heartbeat,
   listWorkspaceRunners,
   revokeRunnerHost,
   createDispatch,
   listIssueDispatches,
+  readDispatchRoute,
   acceptDispatch,
   pollCommands,
   ackCommands,
@@ -627,6 +674,18 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
     }
   });
 
+  app.openapi(updateRunnerCatalog, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      return c.json(
+        await service.updateRunnerCatalog(bearer(c), runnerId, c.req.valid("json")),
+        200,
+      );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
   app.openapi(heartbeat, async (c) => {
     try {
       const { runnerId } = c.req.valid("param");
@@ -674,6 +733,15 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
         { dispatches: await service.listIssueDispatches(await sessionReader(c), issueId) },
         200,
       );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(readDispatchRoute, async (c) => {
+    try {
+      const { dispatchId } = c.req.valid("param");
+      return c.json(await service.getDispatch(bearer(c), await sessionReader(c), dispatchId), 200);
     } catch (error) {
       return failure(c, error);
     }
@@ -737,7 +805,7 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
     try {
       const { runnerId } = c.req.valid("param");
       return c.json(
-        await service.createRunnerDispatch(bearer(c), runnerId, c.req.valid("json").issueId),
+        await service.createRunnerDispatch(bearer(c), runnerId, c.req.valid("json")),
         201,
       );
     } catch (error) {

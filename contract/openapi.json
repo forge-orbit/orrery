@@ -1797,7 +1797,7 @@
       },
       "ProjectDescription": {
         "type": "string",
-        "maxLength": 500
+        "maxLength": 350
       },
       "UpdateProjectRequest": {
         "type": "object",
@@ -5874,6 +5874,9 @@
             },
             "maxItems": 64
           },
+          "harnessCatalog": {
+            "$ref": "#/components/schemas/HarnessCatalog"
+          },
           "maxConcurrency": {
             "type": "integer",
             "minimum": 1,
@@ -5929,6 +5932,7 @@
           "displayName",
           "repoFingerprint",
           "capabilities",
+          "harnessCatalog",
           "maxConcurrency",
           "activeSlotCount",
           "lastSeenAt",
@@ -5937,6 +5941,150 @@
           "createdAt",
           "presence"
         ]
+      },
+      "HarnessCatalog": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "harnesses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HarnessCatalogEntry"
+            },
+            "maxItems": 64
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "harnesses",
+          "updatedAt"
+        ]
+      },
+      "HarnessCatalogEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "source": {
+            "$ref": "#/components/schemas/HarnessSource"
+          },
+          "defaultModel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 200,
+            "default": null
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HarnessModelCatalog"
+            },
+            "maxItems": 256,
+            "default": []
+          },
+          "probedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "displayName"
+        ]
+      },
+      "HarnessSource": {
+        "type": "string",
+        "enum": [
+          "preset",
+          "override",
+          "user"
+        ],
+        "default": "preset"
+      },
+      "HarnessModelCatalog": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "reasoningDiscovery": {
+            "$ref": "#/components/schemas/HarnessEffortDiscovery"
+          },
+          "effortLevels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 32,
+            "default": []
+          },
+          "defaultEffort": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 64,
+            "default": null
+          },
+          "probedAt": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "HarnessEffortDiscovery": {
+        "type": "string",
+        "enum": [
+          "known",
+          "unknown"
+        ],
+        "default": "unknown"
       },
       "RunnerPresence": {
         "type": "string",
@@ -5989,6 +6137,9 @@
           "ephemeral": {
             "type": "boolean",
             "default": false
+          },
+          "harnessCatalog": {
+            "$ref": "#/components/schemas/HarnessCatalog"
           }
         },
         "required": [
@@ -6136,6 +6287,9 @@
             },
             "maxItems": 64
           },
+          "harnessCatalog": {
+            "$ref": "#/components/schemas/HarnessCatalog"
+          },
           "maxConcurrency": {
             "type": "integer",
             "minimum": 1,
@@ -6200,6 +6354,7 @@
           "displayName",
           "repoFingerprint",
           "capabilities",
+          "harnessCatalog",
           "maxConcurrency",
           "activeSlotCount",
           "lastSeenAt",
@@ -6260,6 +6415,9 @@
           },
           "state": {
             "$ref": "#/components/schemas/DispatchState"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/DispatchPrompt"
           },
           "runId": {
             "type": [
@@ -6331,6 +6489,7 @@
           "agentId",
           "dispatchAttemptId",
           "state",
+          "prompt",
           "runId",
           "workSessionId",
           "lastUpSeq",
@@ -6351,6 +6510,13 @@
           "ended"
         ]
       },
+      "DispatchPrompt": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "maxLength": 16000
+      },
       "CreateDispatchRequest": {
         "type": "object",
         "properties": {
@@ -6361,6 +6527,9 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/DispatchPrompt"
           }
         },
         "required": [
@@ -6599,6 +6768,9 @@
           },
           "agentId": {
             "type": "string"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/DispatchPrompt"
           }
         },
         "required": [
@@ -7244,6 +7416,9 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/DispatchPrompt"
           }
         },
         "required": [
@@ -17631,6 +17806,104 @@
         }
       }
     },
+    "/api/runners/{runnerId}/catalog": {
+      "put": {
+        "summary": "Publish a Runner's live Harness catalog",
+        "description": "Runner host credential only. The submitted catalog is merged with the stored one so a slower startup probe or later refresh never regresses a previously known model's effort levels; heartbeats keep carrying only `activeSlotCount`.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/RunnerId"
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HarnessCatalog"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Runner with the merged Harness catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Runner"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/runners/{runnerId}/heartbeat": {
       "post": {
         "summary": "Heartbeat a Runner in database time",
@@ -18083,6 +18356,94 @@
           },
           "429": {
             "description": "Too many failed dispatch attempts; try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/dispatches/{dispatchId}": {
+      "get": {
+        "summary": "Read one Dispatch's metadata, including its custom prompt",
+        "description": "A human with project Read access or the Runner host may read it; workspace members without project Read access receive 404.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/DispatchId"
+            },
+            "required": true,
+            "name": "dispatchId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The Dispatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dispatch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The dispatch request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the Runner host credential is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The viewer cannot read this project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Dispatch is accessible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Dispatch is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests; try again later",
             "content": {
               "application/problem+json": {
                 "schema": {

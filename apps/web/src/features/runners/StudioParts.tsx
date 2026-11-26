@@ -206,6 +206,7 @@ export function ContextRail({
   childWorkers,
   host,
   runner,
+  prompt,
   selectedFile,
   onSelectFile,
 }: {
@@ -214,14 +215,46 @@ export function ContextRail({
   childWorkers: readonly RunChild[];
   host: RunnerHost | undefined;
   runner: Runner | undefined;
+  prompt: string | undefined;
   selectedFile: string | undefined;
   onSelectFile: (path: string) => void;
 }) {
   const done = plan.filter((item) => item.done).length;
   const firstPending = plan.findIndex((item) => !item.done);
   const presence = runner?.presence ?? (host === undefined ? "offline" : "online");
+  const dispatchPrompt = prompt?.trim() ?? "";
+  const promptIsLong = dispatchPrompt.length > 280;
   return (
     <Stack gap={3} data-context-rail="">
+      {dispatchPrompt !== "" && (
+        <Section padding={3} data-dispatch-prompt="">
+          <Stack gap={2}>
+            <Heading level={3} color="inherit">
+              Dispatch prompt
+            </Heading>
+            {promptIsLong ? (
+              <Collapsible
+                trigger={
+                  <Text type="body" weight="semibold">
+                    Show the full prompt
+                  </Text>
+                }
+                defaultIsOpen={false}
+              >
+                <Stack paddingBlockStart={1}>
+                  <Text type="body" color="secondary">
+                    {dispatchPrompt}
+                  </Text>
+                </Stack>
+              </Collapsible>
+            ) : (
+              <Text type="body" color="secondary">
+                {dispatchPrompt}
+              </Text>
+            )}
+          </Stack>
+        </Section>
+      )}
       <Section padding={3}>
         <Stack gap={2}>
           <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
@@ -340,15 +373,17 @@ export function ContextRail({
 
       <Section padding={3}>
         <Stack gap={2}>
-          <Heading level={3} color="inherit">
-            Host Health
-          </Heading>
-          <Token
-            label={presence}
-            size="sm"
-            color={presence === "busy" ? "orange" : presence === "offline" ? "gray" : "green"}
-            data-host-health-presence=""
-          />
+          <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
+            <Heading level={3} color="inherit">
+              Host Health
+            </Heading>
+            <Token
+              label={presence}
+              size="sm"
+              color={presence === "busy" ? "orange" : presence === "offline" ? "gray" : "green"}
+              data-host-health-presence=""
+            />
+          </Stack>
           <Text type="supporting" color="secondary">
             {host?.displayName ?? "Runner host"} · {host?.platform ?? "unknown platform"}
           </Text>

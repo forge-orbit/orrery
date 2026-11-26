@@ -2385,7 +2385,7 @@ def extract_code_facts() -> dict[str, Any]:
     project_rest = read_text("apps/server/src/features/projects/rest.ts")
     project_mcp = read_text("apps/server/src/features/projects/mcp.ts")
     project_contract = read_text("packages/contract/src/projects.ts")
-    mig_0056 = read_text("db/migrations/0056_robust_sasquatch.sql")
+    mig_0056 = read_text("db/migrations/0059_fearless_skin.sql")
     delete_project_fn = slice_between(
         proj_src, "async deleteProject(actorArg, projectId)", "async restoreProject("
     )
@@ -12035,7 +12035,7 @@ def check_m47(facts: dict[str, Any]) -> CheckResult:
         "apps/server/src/features/projects/service.ts",
         "apps/server/src/features/projects/rest.ts",
         "apps/server/src/db/schema.ts",
-        "db/migrations/0056_robust_sasquatch.sql",
+        "db/migrations/0059_fearless_skin.sql",
         "packages/contract/src/projects.ts",
         "contract/openapi.json",
     ]

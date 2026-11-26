@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -99,6 +99,8 @@ async function freePort(): Promise<number> {
 }
 
 async function markerEvents(): Promise<Array<Record<string, unknown>>> {
+  // Catalog probes (issue #240) run the same stub; their records carry
+  // `probe: true` and never count as dispatch-supervision activity.
   try {
     return (await readFile(world.marker, "utf8"))
       .split("\n")
@@ -106,12 +108,12 @@ async function markerEvents(): Promise<Array<Record<string, unknown>>> {
       .map((line): Record<string, unknown> => {
         const parsed: unknown = JSON.parse(line);
         return recordOf(parsed) ?? {};
-      });
+      })
+      .filter((item) => item.probe !== true);
   } catch {
     return [];
   }
 }
-
 async function setMode(mode: string): Promise<void> {
   await writeFile(world.modeFile, mode);
 }
@@ -189,6 +191,37 @@ async function waitForRunnerOnline(): Promise<void> {
   }, 15_000);
 }
 
+/**
+ * Issue #240: the started runner probes its `--acp-command` override (the
+ * stub) in the background and publishes the Harness catalog via
+ * `PUT /api/runners/{runnerId}/catalog`; the Fleet response must expose it.
+ * Other preset harnesses may also exist on the test machine's PATH, so the
+ * lookup targets the override entry by id, not the first harness.
+ */
+async function waitForRunnerCatalog(): Promise<Record<string, unknown>> {
+  const id = basename(process.execPath);
+  try {
+    return await until(async () => {
+      const fleet = await api(`/api/workspaces/${world.workspaceId}/runners`, {
+        cookie: world.cookie,
+      });
+      const runners = list(field(fleet.body, "hosts")).flatMap((host) =>
+        list(field(host, "runners")),
+      );
+      const found = runners.find((item) => field(item, "id") === world.runnerId);
+      const catalog = recordOf(field(found, "harnessCatalog"));
+      const harnesses = list(catalog?.harnesses);
+      const entry = harnesses.find((item) => field(item, "id") === id);
+      if (entry === undefined) return undefined;
+      return recordOf(entry) ?? {};
+    });
+  } catch (error) {
+    throw new Error(`catalog entry '${id}' never appeared; runner output:\n${world.output}`, {
+      cause: error,
+    });
+  }
+}
+
 async function createIssue(title: string): Promise<string> {
   const issue = await api(`/api/projects/${world.projectId}/issues`, {
     method: "POST",
@@ -199,12 +232,15 @@ async function createIssue(title: string): Promise<string> {
   return str(field(issue.body, "id"));
 }
 
-async function dispatch(title: string): Promise<string> {
+async function dispatch(title: string, prompt?: string): Promise<string> {
   const issueId = await createIssue(title);
   const created = await api(`/api/issues/${issueId}/dispatches`, {
     method: "POST",
     cookie: world.cookie,
-    body: { runnerId: world.runnerId },
+    body: {
+      runnerId: world.runnerId,
+      ...(prompt === undefined ? {} : { prompt }),
+    },
   });
   if (created.status !== 201) {
     throw new Error(
@@ -429,6 +465,17 @@ afterAll(async () => {
 describe("orrery-runner against a real Orrery server (#198)", { timeout: 120_000 }, () => {
   it("renews the real lease and completes a clean turn as review with a pruned worktree", async () => {
     await waitForRunnerOnline();
+    // The background probe publishes the stub's advertised models; the Fleet
+    // may also hold preset harnesses found on the test machine's PATH.
+    const harness = await waitForRunnerCatalog();
+    const models = list(harness.models).map((model) => recordOf(model) ?? {});
+    const ids = models.map((model) => str(field(model, "id"))).toSorted();
+    expect(ids).toEqual(["stub-deep", "stub-fast"]);
+    const fast = models.find((model) => str(field(model, "id")) === "stub-fast");
+    expect(field(fast, "reasoningDiscovery")).toBe("known");
+    expect(field(fast, "defaultEffort")).toBe("medium");
+    const deep = models.find((model) => str(field(model, "id")) === "stub-deep");
+    expect(field(deep, "reasoningDiscovery")).toBe("known");
     await setMode("normal");
     const issueId = await dispatch("real lease renewal");
     const session = await until(async () => {
@@ -573,5 +620,28 @@ describe("orrery-runner against a real Orrery server (#198)", { timeout: 120_000
       encoding: "utf8",
     }).stdout;
     expect(listed).toContain(branch);
+  });
+
+  it("carries the requester prompt into the ACP turn after the preamble", async () => {
+    await waitForRunnerOnline();
+    await setMode("normal");
+    const issueId = await dispatch("prompted dispatch", "Use the additive migration strategy.");
+    await until(async () => {
+      const current = (await sessionsOf(issueId))[0];
+      return str(field(current, "status")) === "completed" ? true : undefined;
+    });
+    const prompted = (await markerEvents()).filter(
+      (item) =>
+        typeof item.text === "string" && item.text.includes("Use the additive migration strategy."),
+    );
+    expect(prompted.length).toBeGreaterThan(0);
+    const first = prompted[0];
+    if (first === undefined) throw new Error("no prompted marker recorded");
+    const text = String(first.text);
+    // The operational preamble comes first, then the explicit section header.
+    expect(text.indexOf("Do not write outside this worktree.")).toBeGreaterThan(-1);
+    const headerIndex = text.indexOf("Additional instructions from the requester:");
+    expect(headerIndex).toBeGreaterThan(text.indexOf("Do not write outside this worktree."));
+    expect(text.indexOf("Use the additive migration strategy.")).toBeGreaterThan(headerIndex);
   });
 });

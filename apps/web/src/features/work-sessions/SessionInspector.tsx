@@ -2,9 +2,12 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -22,6 +25,7 @@ import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
 import { ActivityDetailBlockV1, type SessionActivityDetail } from "@orrery/contract";
 import { useQuery } from "@tanstack/react-query";
+import { Copy } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 import { AgentAvatar, HarnessBadge } from "../../lib/harness.tsx";
 import { Link } from "../../lib/Link.tsx";
@@ -130,7 +134,16 @@ function JsonFallback({ detail }: { detail: unknown }) {
           </Text>
         }
       >
-        <pre data-activity-detail="">{JSON.stringify(detail, null, 2)}</pre>
+        <Stack paddingBlockStart={1} data-activity-detail="">
+          <CodeBlock
+            code={JSON.stringify(detail, null, 2)}
+            language="json"
+            hasLanguageLabel={false}
+            size="sm"
+            width="100%"
+            maxHeight={260}
+          />
+        </Stack>
       </Collapsible>
     </Stack>
   );
@@ -160,7 +173,15 @@ function ShortId({ value, label }: { value: string; label: string }) {
   return (
     <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
       <code title={value}>{value.slice(0, 8)}</code>
-      <Button type="button" variant="ghost" size="sm" label="Copy" onClick={() => void onCopy()} />
+      <IconButton
+        type="button"
+        variant="ghost"
+        size="sm"
+        label={`Copy ${label}`}
+        tooltip={`Copy ${label}`}
+        icon={<Icon icon={Copy} />}
+        onClick={() => void onCopy()}
+      />
     </Stack>
   );
 }

@@ -343,11 +343,11 @@ describe("projects", () => {
     expect(clearedRes.status).toBe(200);
     expect(Project.parse(await clearedRes.json()).description).toBe("");
 
-    // Descriptions longer than 500 characters are rejected.
+    // Descriptions longer than 350 characters are rejected.
     const tooLongRes = await postJson(
       app,
       `/api/workspaces/${workspaceId}/projects`,
-      { name: "Too Long", description: "a".repeat(501) },
+      { name: "Too Long", description: "a".repeat(351) },
       adminCookie,
     );
     await expectProblem(tooLongRes, 400, "validation_failed");

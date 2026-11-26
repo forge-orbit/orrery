@@ -14,7 +14,11 @@ import type {
   ReadyWorkFilter,
   FleetRunner,
   FleetRunnerHost,
+  HarnessCatalog,
   HeartbeatRequest,
+} from "@orrery/contract";
+import { mergeHarnessCatalog } from "@orrery/contract";
+import type {
   HostCredentialResponse,
   ProjectAccessLevel,
   ReconnectRequest,
@@ -25,6 +29,7 @@ import type {
   RunnerCommandsResponse,
   RunnerHost,
   RunnerPresence,
+  RunnerDispatchRequest,
   StreamBatchRequest,
   StreamBatchResponse,
   StreamResponse,
@@ -280,6 +285,7 @@ const runnerFields = {
   displayName: runners.displayName,
   repoFingerprint: runners.repoFingerprint,
   capabilities: runners.capabilities,
+  harnessCatalog: runners.harnessCatalog,
   maxConcurrency: runners.maxConcurrency,
   activeSlotCount: runners.activeSlotCount,
   lastSeenAt: runners.lastSeenAt,
@@ -298,6 +304,7 @@ type RunnerRow = {
   displayName: string;
   repoFingerprint: string;
   capabilities: string[];
+  harnessCatalog: HarnessCatalog | null;
   maxConcurrency: number;
   activeSlotCount: number;
   lastSeenAt: Date;
@@ -316,6 +323,7 @@ const toRunnerResponse = (row: RunnerRow): Runner => ({
   displayName: row.displayName,
   repoFingerprint: row.repoFingerprint,
   capabilities: row.capabilities,
+  harnessCatalog: row.harnessCatalog,
   maxConcurrency: row.maxConcurrency,
   activeSlotCount: row.activeSlotCount,
   lastSeenAt: row.lastSeenAt.toISOString(),
@@ -342,6 +350,9 @@ const toHostResponse = (row: {
   revokedAt: row.revokedAt?.toISOString() ?? null,
   createdAt: row.createdAt.toISOString(),
 });
+
+/** An empty catalog is the merge identity for Runners without one yet. */
+const EMPTY_CATALOG: HarnessCatalog = { harnesses: [], updatedAt: "1970-01-01T00:00:00.000Z" };
 
 async function joinRunner(tx: DbTransaction, runnerId: string) {
   const [row] = await tx
@@ -447,6 +458,7 @@ const dispatchBaseFields = {
   agentId: runnerDispatches.agentId,
   dispatchAttemptId: runnerDispatches.dispatchAttemptId,
   state: runnerDispatches.state,
+  prompt: runnerDispatches.prompt,
   runId: runnerDispatches.runId,
   workSessionId: runnerDispatches.workSessionId,
   lastUpSeq: runnerDispatches.lastUpSeq,
@@ -471,6 +483,7 @@ type DispatchRow = {
   agentId: string;
   dispatchAttemptId: string;
   state: Dispatch["state"];
+  prompt: string | null;
   runId: string | null;
   workSessionId: string | null;
   lastUpSeq: number;
@@ -493,6 +506,7 @@ const toDispatch = (row: DispatchRow): Dispatch => ({
   agentId: row.agentId,
   dispatchAttemptId: row.dispatchAttemptId,
   state: row.state,
+  prompt: row.prompt,
   runId: row.runId,
   workSessionId: row.workSessionId,
   lastUpSeq: row.lastUpSeq,
@@ -1580,6 +1594,7 @@ interface DispatchCreationInput {
   projectId: string;
   agentId: string;
   requestedByHumanId: string;
+  prompt: string | undefined;
 }
 
 /**
@@ -1678,6 +1693,7 @@ async function insertDispatchLocked(
       agentId: input.agentId,
       dispatchAttemptId: randomUUID(),
       state: "pending",
+      prompt: input.prompt ?? null,
       createdAt: sql`statement_timestamp()`,
     })
     .returning({ id: runnerDispatches.id });
@@ -1693,6 +1709,7 @@ async function insertDispatchLocked(
       projectId: input.projectId,
       workspaceId: input.workspaceId,
       agentId: input.agentId,
+      ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
     },
   });
   return toDispatch(row);
@@ -2144,7 +2161,7 @@ export function createRunnersService(deps: RunnersDeps) {
         const [existing] = input.ephemeral
           ? []
           : await tx
-              .select({ id: runners.id })
+              .select({ id: runners.id, harnessCatalog: runners.harnessCatalog })
               .from(runners)
               .where(
                 and(
@@ -2166,6 +2183,15 @@ export function createRunnersService(deps: RunnersDeps) {
               activeSlotCount: 0,
               lastSeenAt: sql`statement_timestamp()`,
               disconnectedAt: null,
+              ...(input.harnessCatalog === undefined
+                ? {}
+                : {
+                    // Re-registration with a catalog merges, never regresses.
+                    harnessCatalog: mergeHarnessCatalog(
+                      existing.harnessCatalog ?? EMPTY_CATALOG,
+                      input.harnessCatalog,
+                    ),
+                  }),
             })
             .where(eq(runners.id, existing.id));
           const row = await joinRunner(tx, existing.id);
@@ -2186,9 +2212,30 @@ export function createRunnersService(deps: RunnersDeps) {
             capabilities: input.capabilities,
             maxConcurrency: input.maxConcurrency,
             activeSlotCount: 0,
+            ...(input.harnessCatalog === undefined ? {} : { harnessCatalog: input.harnessCatalog }),
           })
           .returning({ id: runners.id });
         const row = await joinRunner(tx, created!.id);
+        if (row === undefined) throw new RunnersError("runner_not_found");
+        return toRunnerResponse(row);
+      });
+    },
+
+    /**
+     * Publishes a Runner's live Harness catalog. The submitted catalog is
+     * merged with the stored one so a slower startup probe or later refresh
+     * never regresses a previously known model's effort levels (issue #240).
+     */
+    async updateRunnerCatalog(
+      credential: string | undefined,
+      runnerId: string,
+      input: HarnessCatalog,
+    ): Promise<Runner> {
+      return db.transaction(async (tx) => {
+        const { runner } = await authenticateHostRunnerForDeps(deps, tx, credential, runnerId);
+        const merged = mergeHarnessCatalog(runner.harnessCatalog ?? EMPTY_CATALOG, input);
+        await tx.update(runners).set({ harnessCatalog: merged }).where(eq(runners.id, runnerId));
+        const row = await joinRunner(tx, runnerId);
         if (row === undefined) throw new RunnersError("runner_not_found");
         return toRunnerResponse(row);
       });
@@ -2369,6 +2416,10 @@ export function createRunnersService(deps: RunnersDeps) {
         }
 
         const agentId = input.agentId ?? joined.runner.agentId;
+        // A prompt that is only whitespace is the same as no prompt; a kept
+        // prompt is stored trimmed so Live Studio never shows padding.
+        const requestedPrompt = input.prompt ?? "";
+        const prompt = requestedPrompt.trim() === "" ? undefined : requestedPrompt.trim();
         const [agent] = await tx
           .select({ id: agents.id, name: agents.name })
           .from(agents)
@@ -2441,6 +2492,7 @@ export function createRunnersService(deps: RunnersDeps) {
             agentId,
             dispatchAttemptId: randomUUID(),
             state: "pending",
+            prompt: prompt ?? null,
             createdAt: sql`statement_timestamp()`,
           })
           .returning({ id: runnerDispatches.id });
@@ -2456,6 +2508,7 @@ export function createRunnersService(deps: RunnersDeps) {
             projectId: issue.projectId,
             workspaceId: issue.workspaceId,
             agentId,
+            ...(prompt === undefined ? {} : { prompt }),
           },
         });
         return toDispatch(row);
@@ -2628,6 +2681,7 @@ export function createRunnersService(deps: RunnersDeps) {
               projectId: runner.projectId,
               agentId: runner.agentId,
               requestedByHumanId: host.humanId,
+              prompt: undefined,
             });
             return { dispatch };
           } catch (error) {
@@ -2653,8 +2707,12 @@ export function createRunnersService(deps: RunnersDeps) {
     async createRunnerDispatch(
       credential: string | undefined,
       runnerId: string,
-      issueId: string,
+      input: RunnerDispatchRequest,
     ): Promise<Dispatch> {
+      const issueId = input.issueId;
+      const requestedPrompt = input.prompt ?? "";
+      // Same normalization as the manual path: trimmed, empty means omitted.
+      const prompt = requestedPrompt.trim() === "" ? undefined : requestedPrompt.trim();
       return db.transaction(async (tx) => {
         // Read-only live check, then lock projects -> issues -> runners.
         const scanned = await authenticateHostRunnerForDeps(
@@ -2713,6 +2771,7 @@ export function createRunnersService(deps: RunnersDeps) {
           projectId: issue.projectId,
           agentId: runner.agentId,
           requestedByHumanId: host.humanId,
+          prompt,
         });
       });
     },
@@ -2813,6 +2872,42 @@ export function createRunnersService(deps: RunnersDeps) {
             ),
           );
         return rows.map(toDispatch);
+      });
+    },
+
+    /**
+     * One Dispatch's metadata, including its prompt, for the Live Session
+     * Studio. Project readers may view it (issue #239); workspace members
+     * without project Read access keep receiving 404, never a 403 oracle.
+     */
+    async getDispatch(
+      credential: string | undefined,
+      account: SessionAccount | null,
+      dispatchId: string,
+    ): Promise<Dispatch> {
+      if (account === null) {
+        // Authenticate first: an anonymous or invalid host credential gets 401,
+        // never a 404 that would leak whether the dispatch id exists.
+        await db.transaction((tx) => readHostByCredential(tx, credential));
+      }
+      return db.transaction(async (tx) => {
+        const dispatch = await readDispatch(tx, dispatchId);
+        if (account !== null) {
+          if (!(await canSeeWorkspace(tx, dispatch.workspaceId, account.humanId))) {
+            throw new RunnersError("dispatch_not_found");
+          }
+          const ceiling = await projectAccessCeiling(tx, dispatch.workspaceId, account.humanId, [
+            dispatch.projectId,
+          ]);
+          if (!hasAccess(ceiling.get(dispatch.projectId), "read", projectAccessAtLeast)) {
+            throw new RunnersError("dispatch_not_found");
+          }
+          return toDispatch(dispatch);
+        }
+        // Runner host credential: the host owns every Runner it enrolled.
+        const host = await readHostByCredential(tx, credential);
+        if (dispatch.hostId !== host.host.id) throw new RunnersError("dispatch_not_found");
+        return toDispatch(dispatch);
       });
     },
 

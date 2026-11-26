@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ReadyWorkFilter } from "@orrery/contract";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
+import { readCatalogCache, startCatalogSync } from "./catalog.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
@@ -69,6 +70,9 @@ export async function start(options: StartOptions): Promise<void> {
     signal: controller.signal,
   });
   const supervision = options.supervision ?? loadSupervisionConfig();
+  // Seed registration with the cached Harness catalog so the Fleet shows
+  // harnesses, models and effort levels before the background probe lands.
+  const cachedCatalog = await readCatalogCache();
   const runner = await client.registerRunner({
     workspaceId: options.workspaceId,
     projectId: options.projectId,
@@ -78,8 +82,26 @@ export async function start(options: StartOptions): Promise<void> {
     capabilities: options.capabilities ?? [],
     maxConcurrency: options.maxConcurrency ?? 1,
     ephemeral: false,
+    ...(cachedCatalog === null ? {} : { harnessCatalog: cachedCatalog }),
   });
   write(`Runner ${runner.id} registered (${runner.presence}).`);
+
+  // Background Harness discovery pushes updates via PUT /catalog so the
+  // five-second heartbeat keeps carrying only `activeSlotCount` (issue #240).
+  // Only an explicit --acp-command / --acp-arg override becomes a custom
+  // Harness catalog entry; the `opencode acp` default is a preset instead.
+  const catalog = startCatalogSync({
+    client,
+    runnerId: runner.id,
+    initial: cachedCatalog,
+    override: supervision.acpExplicit
+      ? { command: supervision.acp.command, args: supervision.acp.args }
+      : undefined,
+    cwd: options.repoPath ?? process.cwd(),
+    signal: controller.signal,
+    write,
+  });
+  void catalog.done.catch(() => {});
 
   // Startup/recovery reconciliation marks uncertain attempts and lets an
   // agent reconnecting after sleep stream into Live Session Studio seamlessly.

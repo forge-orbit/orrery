@@ -21,7 +21,7 @@ describe("project key migration", () => {
     database = createDb(pg.getConnectionUri());
     staged = await mkdtemp(join(tmpdir(), "orrery-key-migration-"));
     for (const file of await readdir(MIGRATIONS)) {
-      if (!file.endsWith(".sql") || isKeyMigration(file) || file === "0056_robust_sasquatch.sql") {
+      if (!file.endsWith(".sql") || isKeyMigration(file) || file === "0059_fearless_skin.sql") {
         continue;
       }
       const body = await readFile(join(MIGRATIONS, file), "utf8");

@@ -1,0 +1,2 @@
+ALTER TABLE "projects" DROP CONSTRAINT "projects_description_length";--> statement-breakpoint
+ALTER TABLE "projects" ADD CONSTRAINT "projects_description_length" CHECK (char_length("projects"."description") <= 350);

@@ -19,6 +19,7 @@ import {
   QuestionStatus,
   RunnerCommandKind,
   type RunnerCommandPayload,
+  type HarnessCatalog,
   RunEndReason,
   RunStatus,
   SessionActivityKind,
@@ -443,7 +444,7 @@ export const projects = pgTable(
   },
   (t) => [
     check("projects_key_format", sql`${t.key} ~ '^[A-Z][A-Z0-9]{1,9}$'`),
-    check("projects_description_length", sql`char_length(${t.description}) <= 500`),
+    check("projects_description_length", sql`char_length(${t.description}) <= 350`),
     check("projects_next_issue_number_positive", sql`${t.nextIssueNumber} > 0`),
     check(
       "projects_fallback_policy",
@@ -1620,6 +1621,12 @@ export const runners = pgTable(
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    /**
+     * The live Harness catalog the Runner published (issue #240): ACP
+     * harnesses, models and per-model reasoning-effort levels. Separate from
+     * `capabilities`, which stays a flat string list.
+     */
+    harnessCatalog: jsonb("harness_catalog").$type<HarnessCatalog | null>(),
     maxConcurrency: integer("max_concurrency").notNull().default(1),
     activeSlotCount: integer("active_slot_count").notNull().default(0),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1678,6 +1685,8 @@ export const runnerDispatches = pgTable(
       .notNull()
       .references(() => agents.id),
     dispatchAttemptId: text("dispatch_attempt_id").notNull(),
+    /** Optional requester steering text, appended by the Runner after its preamble. */
+    prompt: text("prompt"),
     state: text("state").$type<DispatchState>().notNull().default("pending"),
     runId: text("run_id").references(() => runs.id),
     workSessionId: text("work_session_id").references(() => workSessions.id),
@@ -1705,6 +1714,10 @@ export const runnerDispatches = pgTable(
       sql`${t.lastUpSeq} >= 0 and ${t.lastDownSeq} >= 0`,
     ),
     check("runner_dispatches_stream_batch_count_nonnegative", sql`${t.streamBatchCount} >= 0`),
+    check(
+      "runner_dispatches_prompt_bounded",
+      sql`${t.prompt} is null or char_length(${t.prompt}) <= 16000`,
+    ),
     check(
       "runner_dispatches_accepted_fields",
       sql`(${t.state} = 'pending' and ${t.acceptedAt} is null and ${t.runId} is null and ${t.workSessionId} is null)

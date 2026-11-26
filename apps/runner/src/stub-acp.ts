@@ -18,9 +18,62 @@ if (process.env.STUB_ACP_MODE_FILE !== undefined) {
 }
 const marker = process.env.STUB_ACP_MARKER ?? "";
 const sleepMs = Number(process.env.STUB_ACP_SLEEP_MS ?? "0");
+// Probe sessions set this so test markers can tell catalog probes apart.
+const probeSession = process.env.STUB_ACP_PROBE === "1";
+
+// Harness-catalog advertisement (issue #240): by default the stub advertises
+// two models and a thought_level config option, so the runner's catalog probe
+// can exercise models + effort discovery. `STUB_ACP_CATALOG=effortless`
+// advertises models without any config option, and `none` suppresses both
+// payloads; `per-model` scopes the effort option to one model only.
+const catalogAd = process.env.STUB_ACP_CATALOG ?? "all";
+const stubInitializeModels = {
+  availableModels: [
+    { modelId: "stub-fast", name: "Stub Fast" },
+    { modelId: "stub-deep", name: "Stub Deep" },
+  ],
+  currentModel: "stub-fast",
+};
+const effortChoices = [
+  { value: "low", name: "Low" },
+  { value: "medium", name: "Medium" },
+  { value: "high", name: "High" },
+];
+const globalEffortOption = {
+  id: "thought_level",
+  name: "Thought level",
+  state: { currentValue: "medium", options: effortChoices },
+};
+const perModelEffortOption = {
+  id: "thought_level",
+  name: "Thought level",
+  modelId: "stub-deep",
+  state: { currentValue: "high", options: effortChoices },
+};
+const stubConfigOptions =
+  catalogAd === "per-model"
+    ? [
+        {
+          id: "model",
+          name: "Model",
+          state: {
+            currentValue: "stub-fast",
+            options: [
+              { value: "stub-fast", name: "Stub Fast" },
+              { value: "stub-deep", name: "Stub Deep" },
+            ],
+          },
+        },
+        perModelEffortOption,
+      ]
+    : [globalEffortOption];
 
 const record = (event: Record<string, unknown>): void => {
-  if (marker !== "") appendFileSync(marker, `${JSON.stringify({ at: Date.now(), ...event })}\n`);
+  if (marker !== "")
+    appendFileSync(
+      marker,
+      `${JSON.stringify({ at: Date.now(), probe: probeSession, ...event })}\n`,
+    );
 };
 const send = (message: Record<string, unknown>): void => {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -76,6 +129,9 @@ if (mode === "ignore-term") {
   });
   record({ event: "grandchild", pid: grandchild.pid ?? -1 });
 }
+// Harness-catalog probe test seam: never answer `initialize`, so the runner's
+// bounded handshake deadline must reap this whole process group.
+const hangHandshake = process.env.STUB_ACP_HANG_HANDSHAKE === "1";
 
 function pendingPermission(id: unknown, label: string, fields: Record<string, unknown>): void {
   send({
@@ -95,7 +151,7 @@ function pendingPermission(id: unknown, label: string, fields: Record<string, un
 
 async function onPrompt(id: unknown): Promise<void> {
   promptId = id;
-  record({ event: "prompt", cwd: process.cwd() });
+  record({ event: "prompt", cwd: process.cwd(), text: lastPromptText });
   if (sleepMs > 0) await wait(sleepMs);
   if (mode === "crash") {
     record({ event: "crash" });
@@ -271,10 +327,12 @@ function handle(message: Record<string, unknown>): void {
   const method = typeof message.method === "string" ? message.method : "";
   if (method === "initialize") {
     record({ event: "initialize" });
+    if (hangHandshake) return;
     reply(id, {
       protocolVersion: 1,
       agentInfo: { name: "stub-acp", version: "1" },
       agentCapabilities: {},
+      ...(catalogAd === "none" ? {} : { models: stubInitializeModels }),
     });
     return;
   }
@@ -282,7 +340,12 @@ function handle(message: Record<string, unknown>): void {
     record({ event: "session/new", params: message.params });
     const value = recordOf(message.params)?.sessionId;
     if (typeof value === "string") sessionId = value;
-    reply(id, { sessionId });
+    reply(id, {
+      ...(catalogAd === "all" || catalogAd === "per-model"
+        ? { configOptions: stubConfigOptions }
+        : {}),
+      sessionId,
+    });
     return;
   }
   if (method === "session/prompt") {

@@ -48,6 +48,8 @@ Options:
   --auto-claim-filter FILTER  assignedToMe | unassigned | all (start; default: assignedToMe)
   --auto-claim-poll-ms N    Auto-claim poll interval (start; default: 1000)
   --workspace SLUG-OR-ID    Disambiguate an issue key (work)
+  --prompt TEXT             Optional instructions appended after the runner's
+                            preamble (work; max 16,000 characters)
   --acp-command NAME        ACP harness command (default: opencode; env: ORRERY_ACP_COMMAND)
   --acp-arg ARG             ACP harness argument, repeatable (default: acp)
   --lease-renew-ms N        Work-session lease renewal interval (default: 60000)
@@ -65,6 +67,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       platform: { type: "string" },
       "poll-ms": { type: "string" },
       workspace: { type: "string" },
+      prompt: { type: "string" },
       project: { type: "string" },
       agent: { type: "string" },
       name: { type: "string" },
@@ -172,6 +175,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           ...(values.workspace === undefined ? {} : { workspace: values.workspace }),
           ...(values.repo === undefined ? {} : { repoPath: values.repo }),
           ...(values.agent === undefined ? {} : { agentId: values.agent }),
+          ...(values.prompt === undefined ? {} : { prompt: values.prompt }),
           signal: controller.signal,
           supervision: supervision(),
         });
