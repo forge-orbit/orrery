@@ -73,11 +73,21 @@ async function listen(
 
 function run(
   args: string[],
-  env: Record<string, string>,
+  env: Record<string, string | undefined>,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    const merged: NodeJS.ProcessEnv = { ...process.env };
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete merged[key];
+      else merged[key] = value;
+    }
+    // Origin-pinning tests must not leak the developer's outer ORRERY_URL.
+    if (!("ORRERY_URL" in env)) delete merged.ORRERY_URL;
+    if (!("ORRERY_RUNNER_ALLOW_INSECURE_HTTP" in env)) {
+      delete merged.ORRERY_RUNNER_ALLOW_INSECURE_HTTP;
+    }
     const child = spawn(process.execPath, [mainPath, ...args], {
-      env: { ...process.env, ...env },
+      env: merged,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -165,17 +175,6 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
 
   it("registers with an opaque fingerprint and stops immediately on a 401 heartbeat", async () => {
     const dir = await makeDir();
-    await writeFile(
-      join(dir, "runner-credential.json"),
-      JSON.stringify({
-        server: "http://orrery.test",
-        hostId: "host-1",
-        credential: "orr_rh_local-credential-1234567890",
-        displayName: "TestLaptop",
-        platform: "linux-x64",
-      }),
-      { mode: 0o600 },
-    );
     let registration: z.infer<typeof registrationBody> | undefined;
     let heartbeats = 0;
     const stub = await listen(async (req, res) => {
@@ -208,6 +207,18 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
       }
       json(res, 404, { status: 404, code: "not_found", title: "Not found" });
     });
+
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: stub.url,
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
 
     try {
       const started = Date.now();
@@ -246,17 +257,6 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
 
   it("stops the heartbeat loop on a runner_revoked 401 after workspace member removal", async () => {
     const dir = await makeDir();
-    await writeFile(
-      join(dir, "runner-credential.json"),
-      JSON.stringify({
-        server: "http://orrery.test",
-        hostId: "host-1",
-        credential: "orr_rh_local-credential-1234567890",
-        displayName: "TestLaptop",
-        platform: "linux-x64",
-      }),
-      { mode: 0o600 },
-    );
     let heartbeats = 0;
     const stub = await listen(async (req, res) => {
       if (req.method === "POST" && req.url === "/api/runners/register") {
@@ -313,6 +313,18 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
       json(res, 404, { status: 404, code: "not_found", title: "Not found" });
     });
 
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: stub.url,
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
+
     try {
       const result = await run(
         [
@@ -339,17 +351,6 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
 
   it("acknowledges commands whose seq starts above 1 after a runner restart", async () => {
     const dir = await makeDir();
-    await writeFile(
-      join(dir, "runner-credential.json"),
-      JSON.stringify({
-        server: "http://orrery.test",
-        hostId: "host-1",
-        credential: "orr_rh_local-credential-1234567890",
-        displayName: "TestLaptop",
-        platform: "linux-x64",
-      }),
-      { mode: 0o600 },
-    );
     const acked: number[] = [];
     let pollCount = 0;
     const stub = await listen(async (req, res) => {
@@ -439,6 +440,18 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
       json(res, 404, { status: 404, code: "not_found", title: "Not found" });
     });
 
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: stub.url,
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
+
     try {
       const result = await run(
         [
@@ -473,17 +486,6 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
   });
   it("forwards --harness, --model and --effort on a one-shot work dispatch", async () => {
     const dir = await makeDir();
-    await writeFile(
-      join(dir, "runner-credential.json"),
-      JSON.stringify({
-        server: "http://orrery.test",
-        hostId: "host-1",
-        credential: "orr_rh_local-credential-1234567890",
-        displayName: "TestLaptop",
-        platform: "linux-x64",
-      }),
-      { mode: 0o600 },
-    );
     let dispatchBody:
       | { issueId: string; harness?: string; model?: string; effort?: string }
       | undefined;
@@ -582,6 +584,18 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
       }
       json(res, 404, { status: 404, code: "not_found", title: "Not found" });
     });
+
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: stub.url,
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
 
     try {
       const result = await run(

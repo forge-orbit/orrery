@@ -2,6 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { saveCredential, type StoredHostCredential } from "./credential.ts";
 import { delay } from "./delay.ts";
+import { validateDisplayName } from "./display-name.ts";
+import { assertSecureOrigin, canonicalizeServerUrl } from "./origin.ts";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -22,11 +24,14 @@ export interface LoginOptions {
 export async function login(options: LoginOptions): Promise<StoredHostCredential> {
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   const platform = options.platform ?? `${process.platform}-${process.arch}`;
+  const server = canonicalizeServerUrl(options.server);
+  assertSecureOrigin(server);
+  const hostDisplayName = validateDisplayName(options.hostDisplayName);
   const verifier = randomBytes(32).toString("hex");
-  const client = new OrreryClient({ server: options.server, signal: options.signal });
+  const client = new OrreryClient({ server, signal: options.signal });
 
   const device = await client.createDeviceCode({
-    hostDisplayName: options.hostDisplayName,
+    hostDisplayName,
     platform,
     verifierHash: sha256(verifier),
   });
@@ -47,7 +52,7 @@ export async function login(options: LoginOptions): Promise<StoredHostCredential
         verifier,
       });
       const stored: StoredHostCredential = {
-        server: options.server,
+        server,
         hostId: exchanged.hostId,
         credential: exchanged.credential,
         displayName: exchanged.displayName,

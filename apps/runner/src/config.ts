@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import type { DispatchOptions } from "@orrery/contract";
+import { canonicalizeServerUrl } from "./origin.ts";
 
 /** The local ACP harness the Runner supervises over stdio. */
 export interface AcpHarnessConfig {
@@ -110,7 +111,7 @@ export interface DispatchMcpContext {
 }
 
 export function ephemeralMcpConfig(context: DispatchMcpContext): EphemeralMcpServer {
-  const url = `${context.server.replace(/\/$/, "")}/mcp`;
+  const url = `${canonicalizeServerUrl(context.server)}/mcp`;
   return {
     name: "orrery",
     type: "http",

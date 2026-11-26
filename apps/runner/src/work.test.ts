@@ -54,7 +54,7 @@ const dispatch = {
 
 vi.mock("./credential.ts", () => ({
   readCredential: async () => ({
-    server: "http://orrery.test",
+    server: "http://127.0.0.1:8080",
     hostId: "host-1",
     credential: "orr_rh_local-credential-1234567890",
     displayName: "TestLaptop",
@@ -62,8 +62,11 @@ vi.mock("./credential.ts", () => ({
   }),
 }));
 
-vi.mock("./start.ts", () => ({
-  repoFingerprint: () => "a".repeat(64),
+vi.mock("./checkout.ts", () => ({
+  validateCheckout: () => ({ repoRoot: "/tmp/repo", mainRoot: "/tmp/repo" }),
+  runnerFingerprint: () => "a".repeat(64),
+  bindingFingerprint: () => "b".repeat(64),
+  mainCheckoutRoot: () => "/tmp/repo",
 }));
 
 vi.mock("./catalog.ts", () => ({
@@ -176,8 +179,9 @@ vi.mock("./supervise.ts", () => ({
 
 describe("one-shot work execution options (#241)", () => {
   it("forwards harness, model and effort without populated supervision defaults", async () => {
+    delete process.env.ORRERY_URL;
     const outcome = await work("KEY-1", {
-      server: "http://orrery.test",
+      server: "http://127.0.0.1:8080",
       harness: "node",
       model: "stub-deep",
       effort: "high",

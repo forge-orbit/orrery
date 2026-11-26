@@ -6,6 +6,8 @@ import {
   StreamChunk,
   type StreamChunk as StreamChunkType,
 } from "@orrery/contract";
+import { mainCheckoutRoot } from "./checkout.ts";
+import { assertSecureOrigin, canonicalizeServerUrl } from "./origin.ts";
 
 /**
  * Local spool for structured ACP events (#199). This module never imports the
@@ -15,12 +17,19 @@ import {
 
 /** The main checkout root, even when called from an isolated runner worktree. */
 export function mainRepositoryRoot(repoPath: string): string {
-  const commonGitDir = execFileSync(
-    "git",
-    ["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-    { encoding: "utf8" },
-  ).trim();
-  return dirname(commonGitDir);
+  // First `worktree ` entry: uniform for main checkouts, linked worktrees and
+  // submodules. The old `--git-common-dir` dirname escaped submodules into
+  // the superproject's `.git/modules` directory.
+  try {
+    return mainCheckoutRoot(repoPath);
+  } catch {
+    const commonGitDir = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { encoding: "utf8" },
+    ).trim();
+    return dirname(commonGitDir);
+  }
 }
 
 /** Spool files live under the main checkout, never inside a runner worktree. */
@@ -76,6 +85,7 @@ export class StreamSpool {
   private readonly sleepFn: (milliseconds: number) => Promise<void>;
   private readonly maxBatchSize: number;
   private readonly maxAttempts: number;
+  private readonly apiBaseUrl: string;
 
   constructor(options: StreamSpoolOptions) {
     this.options = options;
@@ -84,6 +94,10 @@ export class StreamSpool {
     this.sleepFn = options.sleep ?? defaultSleep;
     this.maxBatchSize = options.maxBatchSize ?? 100;
     this.maxAttempts = options.maxAttempts ?? 4;
+    // Credentialed flushes share the origin trust boundary: canonicalize and
+    // enforce the insecure-HTTP gate up front (warning is once per origin).
+    this.apiBaseUrl = canonicalizeServerUrl(options.apiBaseUrl);
+    assertSecureOrigin(this.apiBaseUrl);
   }
 
   /** Restore sequence numbers after a process restart; the file is the source of truth. */
@@ -189,12 +203,13 @@ export class StreamSpool {
     const fromSeq = window[0]?.seq;
     const toSeq = window.at(-1)?.seq;
     if (fromSeq === undefined || toSeq === undefined) return false;
-    const { apiBaseUrl, runnerId, dispatchId, credential, dispatchAttemptId } = this.options;
-    const url = `${apiBaseUrl.replace(/\/$/, "")}/api/runners/${encodeURIComponent(runnerId)}/dispatches/${encodeURIComponent(dispatchId)}/stream`;
+    const { runnerId, dispatchId, credential, dispatchAttemptId } = this.options;
+    const url = `${this.apiBaseUrl}/api/runners/${encodeURIComponent(runnerId)}/dispatches/${encodeURIComponent(dispatchId)}/stream`;
     let attempt = 0;
     for (;;) {
       const response = await this.fetchFn(url, {
         method: "POST",
+        redirect: "error",
         headers: {
           "content-type": "application/json",
           authorization: `Bearer ${credential}`,

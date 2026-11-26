@@ -120,10 +120,12 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
   await writeFile(join(repo, "README.md"), "initial\n");
   git(repo, ["add", "."]);
   git(repo, ["commit", "-qm", "initial"]);
+
+  const control = await TestOrrery.start();
   await writeFile(
     join(configDir, "runner-credential.json"),
     JSON.stringify({
-      server: "http://orrery.test",
+      server: control.url,
       hostId: "host-1",
       credential: "orr_rh_local-credential-1234567890",
       displayName: "TestLaptop",
@@ -131,8 +133,7 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
     }),
     { mode: 0o600 },
   );
-
-  const control = await TestOrrery.start();
+  delete process.env.ORRERY_URL;
   process.env.ORRERY_RUNNER_CONFIG_DIR = configDir;
   process.env.STUB_ACP_MODE = options.mode;
   process.env.STUB_ACP_MARKER = marker;

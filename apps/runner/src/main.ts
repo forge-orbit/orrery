@@ -4,7 +4,9 @@ import { parseArgs } from "node:util";
 import { readCredential } from "./credential.ts";
 import type { ReadyWorkFilter } from "@orrery/contract";
 import { loadSupervisionConfig } from "./config.ts";
+import { defaultHostDisplayName, validateDisplayName } from "./display-name.ts";
 import { login } from "./login.ts";
+import { assertSecureOrigin, resolveLoginOrigin } from "./origin.ts";
 import { start } from "./start.ts";
 import { work } from "./work.ts";
 
@@ -35,7 +37,7 @@ Commands:
   status                    Show the locally stored host credential
 
 Options:
-  --server URL              Orrery base URL (default: ORRERY_URL or http://localhost:8080)
+  --server URL              Orrery base URL (login: switch installations; start/work: must match enrollment)
   --host-name NAME          Display name for this machine (login)
   --platform NAME           Platform label (login)
   --agent ID                Default Agent id (start; otherwise the host owner's first Agent)
@@ -100,7 +102,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     return;
   }
 
-  const server = values.server ?? process.env.ORRERY_URL ?? "http://localhost:8080";
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.once("SIGINT", stop);
@@ -128,9 +129,33 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   try {
     switch (command) {
       case "login": {
+        let previous: { server: string; displayName: string } | undefined;
+        try {
+          const stored = await readCredential();
+          previous = { server: stored.server, displayName: stored.displayName };
+        } catch {
+          previous = undefined;
+        }
+        const server = resolveLoginOrigin({
+          ...(previous === undefined ? {} : { storedServer: previous.server }),
+          ...(values.server === undefined ? {} : { serverFlag: values.server }),
+          ...(process.env.ORRERY_URL === undefined ? {} : { envUrl: process.env.ORRERY_URL }),
+        });
+        // Validate before warning so an invalid flag never prints a switch warning.
+        assertSecureOrigin(server);
+        const hostDisplayName =
+          values["host-name"] === undefined
+            ? defaultHostDisplayName(hostname())
+            : validateDisplayName(values["host-name"]);
+        if (previous !== undefined && previous.server !== server) {
+          process.stdout.write(
+            `Warning: replacing enrollment for Runner host '${previous.displayName}' on ${previous.server} with ${server}. ` +
+              `Revoke the old Runner host in Orrery if it is no longer used.\n`,
+          );
+        }
         await login({
           server,
-          hostDisplayName: values["host-name"] ?? hostname(),
+          hostDisplayName,
           ...(values.platform === undefined ? {} : { platform: values.platform }),
           ...(values["poll-ms"] === undefined ? {} : { pollIntervalMs: Number(values["poll-ms"]) }),
           signal: controller.signal,
@@ -161,7 +186,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
               : fail("--auto-claim-filter must be assignedToMe, unassigned or all");
         const autoClaimPollMs = positive(values["auto-claim-poll-ms"], "--auto-claim-poll-ms");
         await start({
-          server,
+          ...(values.server === undefined ? {} : { server: values.server }),
           workspaceId,
           projectId,
           ...(values.agent === undefined ? {} : { agentId: values.agent }),
@@ -181,7 +206,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       case "work": {
         const target = positionals[1] ?? fail("work requires an issue ID, URL or KEY");
         const outcome = await work(target, {
-          server,
+          ...(values.server === undefined ? {} : { server: values.server }),
           ...(values.workspace === undefined ? {} : { workspace: values.workspace }),
           ...(values.repo === undefined ? {} : { repoPath: values.repo }),
           ...(values.agent === undefined ? {} : { agentId: values.agent }),
@@ -198,6 +223,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         return;
       }
       case "status": {
+        // Strictly offline: ignore --server and ORRERY_URL, make zero network calls.
         const stored = await readCredential();
         process.stdout.write(
           `Runner host '${stored.displayName}' (${stored.hostId}) enrolled with ${stored.server}.\n`,
