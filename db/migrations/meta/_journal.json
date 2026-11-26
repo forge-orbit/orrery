@@ -414,6 +414,20 @@
       "when": 1795671981334,
       "tag": "0058_typical_bruce_banner",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795683679247,
+      "tag": "0059_backfill_harness_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795683680131,
+      "tag": "0060_consolidate_harness_catalog",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,4 @@
+import { EMPTY_HARNESS_CATALOG } from "@orrery/contract";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -189,7 +190,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           displayName: "TestLaptop",
           repoFingerprint: registration.repoFingerprint,
           capabilities: [],
-          harnessCatalog: null,
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),
@@ -262,7 +263,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           displayName: "TestLaptop",
           repoFingerprint: sha256("checkout"),
           capabilities: [],
-          harnessCatalog: null,
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),
@@ -285,7 +286,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
             displayName: "TestLaptop",
             repoFingerprint: sha256("checkout"),
             capabilities: [],
-            harnessCatalog: null,
+            harnessCatalog: EMPTY_HARNESS_CATALOG,
             maxConcurrency: 1,
             activeSlotCount: 0,
             lastSeenAt: new Date().toISOString(),
@@ -356,7 +357,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           displayName: "TestLaptop",
           repoFingerprint: sha256("checkout"),
           capabilities: [],
-          harnessCatalog: null,
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),
@@ -418,7 +419,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           displayName: "TestLaptop",
           repoFingerprint: sha256("checkout"),
           capabilities: [],
-          harnessCatalog: null,
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),

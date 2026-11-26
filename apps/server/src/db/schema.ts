@@ -1611,7 +1611,10 @@ export const runners = pgTable(
      * harnesses, models and per-model reasoning-effort levels. Separate from
      * `capabilities`, which stays a flat string list.
      */
-    harnessCatalog: jsonb("harness_catalog").$type<HarnessCatalog | null>(),
+    harnessCatalog: jsonb("harness_catalog")
+      .$type<HarnessCatalog>()
+      .notNull()
+      .default(sql`'{"harnesses":[],"probedAt":"1970-01-01T00:00:00.000Z"}'::jsonb`),
     maxConcurrency: integer("max_concurrency").notNull().default(1),
     activeSlotCount: integer("active_slot_count").notNull().default(0),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),

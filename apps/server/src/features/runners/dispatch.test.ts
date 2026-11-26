@@ -463,6 +463,61 @@ describe("custom dispatch prompt (#239)", () => {
     );
   });
 
+  it("bounds prompts in Unicode code points, matching Postgres char_length", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("emoji prompt boundary");
+    const emoji = "🙂"; // one code point, two UTF-16 units
+    const atLimit = emoji.repeat(16_000);
+
+    const accepted = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: `  ${atLimit}  ` },
+      cookie: adminCookie,
+    });
+    expect(accepted.status).toBe(201);
+    expect(Dispatch.parse(await accepted.json()).prompt).toBe(atLimit);
+
+    const over = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: emoji.repeat(16_001) },
+      cookie: adminCookie,
+    });
+    await expectProblem(over, 400, "validation_failed");
+  });
+
+  it("hides a trashed issue's prompt from the single-Dispatch endpoint", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("trashed prompt issue");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: "secret prompt" },
+      cookie: adminCookie,
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+
+    const readable = await request(`/api/runners/dispatches/${dispatch.id}`, {
+      cookie: adminCookie,
+    });
+    expect(readable.status).toBe(200);
+    expect(Dispatch.parse(await readable.json()).prompt).toBe("secret prompt");
+
+    await database.db
+      .update(issues)
+      .set({ deletedAt: sql`statement_timestamp()`, deletedByHumanId: adminHumanId })
+      .where(eq(issues.id, issue.id));
+
+    await expectProblem(
+      await request(`/api/runners/dispatches/${dispatch.id}`, { cookie: adminCookie }),
+      404,
+      "dispatch_not_found",
+    );
+    const list = await request(`/api/issues/${issue.id}/dispatches`, { cookie: adminCookie });
+    expect(list.status).toBe(404);
+  });
+
   it("treats a whitespace-only prompt as omitted and rejects an over-limit prompt", async () => {
     const host = await enrollHost(adminCookie);
     const runner = await registerRunner(host.credential);

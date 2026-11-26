@@ -5880,10 +5880,7 @@
         ]
       },
       "HarnessCatalog": {
-        "type": [
-          "object",
-          "null"
-        ],
+        "type": "object",
         "properties": {
           "harnesses": {
             "type": "array",
@@ -5892,13 +5889,13 @@
             },
             "maxItems": 64
           },
-          "updatedAt": {
+          "probedAt": {
             "$ref": "#/components/schemas/Timestamp"
           }
         },
         "required": [
           "harnesses",
-          "updatedAt"
+          "probedAt"
         ]
       },
       "HarnessCatalogEntry": {
@@ -5918,39 +5915,27 @@
             "$ref": "#/components/schemas/HarnessSource"
           },
           "defaultModel": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "minLength": 1,
-            "maxLength": 200,
-            "default": null
+            "maxLength": 200
           },
           "models": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/HarnessModelCatalog"
+              "$ref": "#/components/schemas/HarnessModel"
             },
-            "maxItems": 256,
-            "default": []
+            "maxItems": 200
           },
           "probedAt": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Timestamp"
-              },
-              {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            ]
+            "$ref": "#/components/schemas/Timestamp"
           }
         },
         "required": [
           "id",
-          "displayName"
+          "displayName",
+          "defaultModel",
+          "models",
+          "probedAt"
         ]
       },
       "HarnessSource": {
@@ -5959,10 +5944,9 @@
           "preset",
           "override",
           "user"
-        ],
-        "default": "preset"
+        ]
       },
-      "HarnessModelCatalog": {
+      "HarnessModel": {
         "type": "object",
         "properties": {
           "id": {
@@ -5978,41 +5962,27 @@
           "reasoningDiscovery": {
             "$ref": "#/components/schemas/HarnessEffortDiscovery"
           },
-          "effortLevels": {
+          "supportedEfforts": {
             "type": "array",
             "items": {
               "type": "string",
               "minLength": 1,
               "maxLength": 64
             },
-            "maxItems": 32,
-            "default": []
+            "maxItems": 32
           },
           "defaultEffort": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "minLength": 1,
-            "maxLength": 64,
-            "default": null
+            "maxLength": 64
           },
           "probedAt": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Timestamp"
-              },
-              {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            ]
+            "$ref": "#/components/schemas/Timestamp"
           }
         },
         "required": [
-          "id"
+          "id",
+          "reasoningDiscovery"
         ]
       },
       "HarnessEffortDiscovery": {
@@ -6020,8 +5990,7 @@
         "enum": [
           "known",
           "unknown"
-        ],
-        "default": "unknown"
+        ]
       },
       "RunnerPresence": {
         "type": "string",
@@ -6451,8 +6420,7 @@
         "type": [
           "string",
           "null"
-        ],
-        "maxLength": 16000
+        ]
       },
       "CreateDispatchRequest": {
         "type": "object",

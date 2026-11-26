@@ -9,7 +9,7 @@ import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useToast } from "@astryxdesign/core/Toast";
-import type { Dispatch } from "@orrery/contract";
+import { MAX_DISPATCH_PROMPT_LENGTH, type Dispatch } from "@orrery/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
 import { useState } from "react";
@@ -27,9 +27,6 @@ export interface DelegatableAgent {
   id: string;
   name: string;
 }
-
-/** The maximum steering prompt a Dispatch may carry (shared contract limit). */
-const PROMPT_LIMIT = 16000;
 
 const stateLabels: Record<Dispatch["state"], string> = {
   pending: "Waiting for the Runner",
@@ -75,11 +72,14 @@ export function DelegateToRunner({
   workspaceId,
   projectId,
   agents,
+  canDelegate = true,
 }: {
   issueId: string;
   workspaceId: string;
   projectId: string;
   agents: readonly DelegatableAgent[];
+  /** Readers see Recent dispatches but never the owner-only delegation form. */
+  canDelegate?: boolean;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -152,118 +152,125 @@ export function DelegateToRunner({
     },
   });
 
-  const overLimit = prompt.length > PROMPT_LIMIT;
+  // Code points, matching Postgres char_length and the contract refinement.
+  const overLimit = Array.from(prompt.trim()).length > MAX_DISPATCH_PROMPT_LENGTH;
 
   return (
     <Stack gap={2}>
-      <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
-        <Heading level={3} color="inherit">
-          Delegate to Runner
-        </Heading>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          label="Delegate to Runner…"
-          icon={<Icon icon={Send} />}
-          data-delegate-trigger=""
-          onClick={openDialog}
-        />
-      </Stack>
-      <Text type="supporting">
-        Send this issue to one of your online Runners for this project. The issue assignee is not
-        changed.
-      </Text>
-      <Dialog
-        isOpen={isOpen}
-        onOpenChange={(open) => {
-          if (!open) setIsOpen(false);
-        }}
-        width={480}
-        purpose="form"
-      >
-        <Layout
-          header={
-            <DialogHeader
-              title="Delegate to Runner"
-              subtitle="Choose a Runner, an optional Agent and optional instructions for the Dispatch."
-              onOpenChange={(open) => setIsOpen(open)}
+      {canDelegate && (
+        <>
+          <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
+            <Heading level={3} color="inherit">
+              Delegate to Runner
+            </Heading>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              label="Delegate to Runner…"
+              icon={<Icon icon={Send} />}
+              data-delegate-trigger=""
+              onClick={openDialog}
             />
-          }
-          content={
-            <LayoutContent isScrollable>
-              <Stack gap={3} data-delegate-dialog="">
-                {error !== undefined && (
-                  <Banner
-                    status="error"
-                    title="Delegation failed"
-                    description={error}
-                    collapsible={false}
+          </Stack>
+          <Text type="supporting">
+            Send this issue to one of your online Runners for this project. The issue assignee is
+            not changed.
+          </Text>
+        </>
+      )}
+      {canDelegate && (
+        <Dialog
+          isOpen={isOpen}
+          onOpenChange={(open) => {
+            if (!open) setIsOpen(false);
+          }}
+          width={480}
+          purpose="form"
+        >
+          <Layout
+            header={
+              <DialogHeader
+                title="Delegate to Runner"
+                subtitle="Choose a Runner, an optional Agent and optional instructions for the Dispatch."
+                onOpenChange={(open) => setIsOpen(open)}
+              />
+            }
+            content={
+              <LayoutContent isScrollable>
+                <Stack gap={3} data-delegate-dialog="">
+                  {error !== undefined && (
+                    <Banner
+                      status="error"
+                      title="Delegation failed"
+                      description={error}
+                      collapsible={false}
+                    />
+                  )}
+                  <Selector
+                    label="Runner"
+                    placeholder={owned.length === 0 ? "No online Runners" : "Choose a Runner"}
+                    options={owned.map((runner) => ({
+                      value: runner.id,
+                      label: `${runner.displayName} · ${runner.presence}`,
+                    }))}
+                    value={runnerId}
+                    onChange={setRunnerId}
+                    isDisabled={owned.length === 0 || mutation.isPending}
                   />
-                )}
-                <Selector
-                  label="Runner"
-                  placeholder={owned.length === 0 ? "No online Runners" : "Choose a Runner"}
-                  options={owned.map((runner) => ({
-                    value: runner.id,
-                    label: `${runner.displayName} · ${runner.presence}`,
-                  }))}
-                  value={runnerId}
-                  onChange={setRunnerId}
-                  isDisabled={owned.length === 0 || mutation.isPending}
-                />
-                <Selector
-                  label="Agent"
-                  isOptional
-                  placeholder="Use the Runner's default Agent"
-                  options={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
-                  value={agentId}
-                  onChange={(value) => setAgentId(value ?? "")}
-                  hasClear
-                  isDisabled={mutation.isPending}
-                />
-                <TextArea
-                  label="Prompt / Instructions"
-                  isOptional
-                  value={prompt}
-                  onChange={setPrompt}
-                  rows={5}
-                  maxLength={PROMPT_LIMIT}
-                  placeholder="Optional steering for how the Agent behaves on this Dispatch…"
-                  description="Appended after the Runner's preamble; visible to everyone who can read this project."
-                  {...(overLimit
-                    ? { status: { type: "error", message: "Over the 16,000-character limit." } }
-                    : {})}
-                  isDisabled={mutation.isPending}
-                />
-              </Stack>
-            </LayoutContent>
-          }
-          footer={
-            <LayoutFooter hasDivider>
-              <Stack direction="horizontal" gap={2} justify="end">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  label="Cancel"
-                  isDisabled={mutation.isPending}
-                  onClick={() => setIsOpen(false)}
-                />
-                <Button
-                  type="button"
-                  variant="primary"
-                  label="Delegate to Runner"
-                  icon={<Icon icon={Send} />}
-                  isDisabled={runnerId === "" || overLimit || mutation.isPending}
-                  isLoading={mutation.isPending}
-                  data-delegate-dispatch=""
-                  onClick={() => mutation.mutate()}
-                />
-              </Stack>
-            </LayoutFooter>
-          }
-        />
-      </Dialog>
+                  <Selector
+                    label="Agent"
+                    isOptional
+                    placeholder="Use the Runner's default Agent"
+                    options={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
+                    value={agentId}
+                    onChange={(value) => setAgentId(value ?? "")}
+                    hasClear
+                    isDisabled={mutation.isPending}
+                  />
+                  <TextArea
+                    label="Prompt / Instructions"
+                    isOptional
+                    value={prompt}
+                    onChange={setPrompt}
+                    rows={5}
+                    maxLength={MAX_DISPATCH_PROMPT_LENGTH}
+                    placeholder="Optional steering for how the Agent behaves on this Dispatch…"
+                    description="Appended after the Runner's preamble; visible to everyone who can read this project."
+                    {...(overLimit
+                      ? { status: { type: "error", message: "Over the 16,000-character limit." } }
+                      : {})}
+                    isDisabled={mutation.isPending}
+                  />
+                </Stack>
+              </LayoutContent>
+            }
+            footer={
+              <LayoutFooter hasDivider>
+                <Stack direction="horizontal" gap={2} justify="end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    label="Cancel"
+                    isDisabled={mutation.isPending}
+                    onClick={() => setIsOpen(false)}
+                  />
+                  <Button
+                    type="button"
+                    variant="primary"
+                    label="Delegate to Runner"
+                    icon={<Icon icon={Send} />}
+                    isDisabled={runnerId === "" || overLimit || mutation.isPending}
+                    isLoading={mutation.isPending}
+                    data-delegate-dispatch=""
+                    onClick={() => mutation.mutate()}
+                  />
+                </Stack>
+              </LayoutFooter>
+            }
+          />
+        </Dialog>
+      )}
       {(dispatchList?.dispatches.length ?? 0) > 0 && (
         <Stack gap={1}>
           <Text type="supporting" weight="semibold">
