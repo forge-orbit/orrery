@@ -8,6 +8,7 @@ import type {
   DeviceCodeResponse,
   Dispatch,
   DispatchAcceptance,
+  DispatchOptions,
   ExchangeDeviceCodeRequest,
   IssueResolveRequest,
   IssueResolveResponse,
@@ -1588,7 +1589,7 @@ function createStreamHelpers(deps: RunnersDeps) {
   };
 }
 
-interface DispatchCreationInput {
+interface DispatchCreationInput extends DispatchOptions {
   runnerId: string;
   issueId: string;
   workspaceId: string;
@@ -1596,9 +1597,6 @@ interface DispatchCreationInput {
   agentId: string;
   requestedByHumanId: string;
   prompt: string | undefined;
-  harness: string | undefined;
-  model: string | undefined;
-  effort: string | undefined;
 }
 
 /**
@@ -1667,21 +1665,15 @@ async function assertIssueStillDispatchable(
   if (dispatch !== undefined) throw new RunnersError("issue_not_claimable");
 }
 
-/** Create a Dispatch when the caller already holds the issue's FOR UPDATE lock. */
-async function insertDispatchLocked(
+/**
+ * Insert one pending Dispatch and enqueue its outbox command in the same
+ * transaction. Both the locked manual path and the one-shot Runner path use it,
+ * so their rows and command payloads can never drift apart.
+ */
+async function insertDispatchRow(
   tx: DbTransaction,
   input: DispatchCreationInput,
 ): Promise<Dispatch> {
-  const [uncertain] = await tx
-    .select({ id: runnerDispatches.id })
-    .from(runnerDispatches)
-    .where(
-      and(eq(runnerDispatches.issueId, input.issueId), eq(runnerDispatches.state, "uncertain")),
-    )
-    .limit(1);
-  if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
-  await assertIssueDispatchable(tx, input.issueId, input.agentId);
-
   const [created] = await tx
     .insert(runnerDispatches)
     .values({
@@ -1720,6 +1712,23 @@ async function insertDispatchLocked(
     },
   });
   return toDispatch(row);
+}
+
+/** Create a Dispatch when the caller already holds the issue's FOR UPDATE lock. */
+async function insertDispatchLocked(
+  tx: DbTransaction,
+  input: DispatchCreationInput,
+): Promise<Dispatch> {
+  const [uncertain] = await tx
+    .select({ id: runnerDispatches.id })
+    .from(runnerDispatches)
+    .where(
+      and(eq(runnerDispatches.issueId, input.issueId), eq(runnerDispatches.state, "uncertain")),
+    )
+    .limit(1);
+  if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
+  await assertIssueDispatchable(tx, input.issueId, input.agentId);
+  return await insertDispatchRow(tx, input);
 }
 
 type ParsedIssueTarget =
@@ -2469,44 +2478,18 @@ export function createRunnersService(deps: RunnersDeps) {
         // Validate with Orrery's claim rules, without mutating issues.assignee.
         await assertIssueDispatchable(tx, issueId, agentId);
 
-        const [created] = await tx
-          .insert(runnerDispatches)
-          .values({
-            id: randomUUID(),
-            runnerId,
-            workspaceId: issue.workspaceId,
-            projectId: issue.projectId,
-            issueId,
-            requestedByHumanId: human.humanId,
-            agentId,
-            dispatchAttemptId: randomUUID(),
-            state: "pending",
-            prompt: prompt ?? null,
-            harness: input.harness ?? null,
-            model: input.model ?? null,
-            effort: input.effort ?? null,
-            createdAt: sql`statement_timestamp()`,
-          })
-          .returning({ id: runnerDispatches.id });
-        const row = await readDispatch(tx, created!.id);
-        await enqueueRunnerCommand(tx, {
+        return await insertDispatchRow(tx, {
           runnerId,
-          dispatch: { id: row.id, dispatchAttemptId: row.dispatchAttemptId },
-          kind: "dispatch",
-          payload: {
-            dispatchId: row.id,
-            dispatchAttemptId: row.dispatchAttemptId,
-            issueId,
-            projectId: issue.projectId,
-            workspaceId: issue.workspaceId,
-            agentId,
-            ...(prompt === undefined ? {} : { prompt }),
-            ...(input.harness === undefined ? {} : { harness: input.harness }),
-            ...(input.model === undefined ? {} : { model: input.model }),
-            ...(input.effort === undefined ? {} : { effort: input.effort }),
-          },
+          issueId,
+          workspaceId: issue.workspaceId,
+          projectId: issue.projectId,
+          agentId,
+          requestedByHumanId: human.humanId,
+          prompt,
+          harness: input.harness,
+          model: input.model,
+          effort: input.effort,
         });
-        return toDispatch(row);
       });
     },
 

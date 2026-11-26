@@ -38,6 +38,7 @@ import { requestStop } from "../work-sessions/index.ts";
 import { sessionsQuery } from "../work-sessions/index.ts";
 import { workspaceRunsQuery } from "../runs/index.ts";
 import { resolveUncertainDispatch } from "./commands.ts";
+import { harnessDisplayName } from "./dispatchOptions.ts";
 import { NeedsInputComposer, PausedNeedsInput } from "./NeedsInput.tsx";
 import { ContextRail, DiagnosticBanners, LeaseCountdown, StreamCard } from "./StudioParts.tsx";
 import {
@@ -347,13 +348,7 @@ export function LiveStudio({
                   data-studio-options=""
                 >
                   <HarnessBadge
-                    harness={
-                      runner?.harnessCatalog?.harnesses.find(
-                        (entry) => entry.id === (dispatch?.harness ?? run?.harness),
-                      )?.displayName ??
-                      dispatch?.harness ??
-                      run?.harness
-                    }
+                    harness={harnessDisplayName(runner, dispatch?.harness ?? run?.harness)}
                     empty="Harness unknown"
                   />
                   <Text type="supporting" color="secondary">

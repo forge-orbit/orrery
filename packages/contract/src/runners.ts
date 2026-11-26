@@ -349,6 +349,19 @@ export const DispatchEffort = z
   .meta({ id: "DispatchEffort" });
 export type DispatchEffort = z.infer<typeof DispatchEffort>;
 
+/**
+ * Optional per-dispatch execution options. One shape shared by every request,
+ * command payload and local Runner default so the data clump cannot drift.
+ */
+export const DispatchOptions = z
+  .object({
+    harness: DispatchHarness.optional(),
+    model: DispatchModel.optional(),
+    effort: DispatchEffort.optional(),
+  })
+  .meta({ id: "DispatchOptions" });
+export type DispatchOptions = z.infer<typeof DispatchOptions>;
+
 /** Thin delivery bridge; it never changes the issue's assignee. */
 export const Dispatch = z
   .object({
@@ -387,10 +400,8 @@ export const CreateDispatchRequest = z
     runnerId: RunnerId,
     agentId: z.string().min(1).max(200).optional(),
     prompt: DispatchPrompt.optional(),
-    harness: DispatchHarness.optional(),
-    model: DispatchModel.optional(),
-    effort: DispatchEffort.optional(),
   })
+  .extend(DispatchOptions.shape)
   .meta({ id: "CreateDispatchRequest" });
 export type CreateDispatchRequest = z.infer<typeof CreateDispatchRequest>;
 
@@ -418,10 +429,8 @@ export const RunnerDispatchRequest = z
   .object({
     issueId: z.string().min(1).max(200),
     prompt: DispatchPrompt.optional(),
-    harness: DispatchHarness.optional(),
-    model: DispatchModel.optional(),
-    effort: DispatchEffort.optional(),
   })
+  .extend(DispatchOptions.shape)
   .meta({ id: "RunnerDispatchRequest" });
 export type RunnerDispatchRequest = z.infer<typeof RunnerDispatchRequest>;
 
@@ -504,10 +513,8 @@ export const DispatchCommandPayload = z
     workspaceId: z.string(),
     agentId: z.string(),
     prompt: DispatchPrompt.optional(),
-    harness: DispatchHarness.optional(),
-    model: DispatchModel.optional(),
-    effort: DispatchEffort.optional(),
   })
+  .extend(DispatchOptions.shape)
   .meta({ id: "DispatchCommandPayload" });
 export type DispatchCommandPayload = z.infer<typeof DispatchCommandPayload>;
 

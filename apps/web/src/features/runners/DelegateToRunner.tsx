@@ -18,6 +18,7 @@ import { HarnessBadge, HarnessLogo, resolveHarnessKind } from "../../lib/harness
 import { Link } from "../../lib/Link.tsx";
 import { formatCompactDateTime } from "../../lib/time.ts";
 import { createDispatch } from "./commands.ts";
+import { harnessDisplayName } from "./dispatchOptions.ts";
 import {
   issueDispatchesQuery,
   workspaceRunnersQuery,
@@ -183,20 +184,23 @@ export function DelegateToRunner({
     const rememberedRunner =
       memory === undefined ? undefined : owned.find((runner) => runner.id === memory.runnerId);
     const catalog = rememberedRunner?.harnessCatalog?.harnesses ?? [];
-    const rememberedHarness = catalog.find((entry) => entry.id === memory?.harness) ?? catalog[0];
-    const rememberedModel =
-      rememberedHarness?.models.find((entry) => entry.id === memory?.model) ??
-      rememberedHarness?.models.find((entry) => entry.id === rememberedHarness.defaultModel) ??
-      rememberedHarness?.models[0];
+    // Only a Harness that still exists may restore the remembered model; a
+    // fallback Harness always starts on its own default model.
+    const matchedHarness = catalog.find((entry) => entry.id === memory?.harness);
+    const rememberedHarness = matchedHarness ?? catalog[0];
+    const matchedModel = matchedHarness?.models.find((entry) => entry.id === memory?.model);
+    const rememberedModelId = matchedModel?.id ?? defaultModelId(rememberedHarness);
+    // Effort is only restored when both the Harness and the Model matched.
     const rememberedEffort =
-      rememberedModel !== undefined &&
+      matchedHarness !== undefined &&
+      matchedModel !== undefined &&
       memory !== undefined &&
-      rememberedModel.effortLevels.includes(memory.effort)
+      matchedModel.effortLevels.includes(memory.effort)
         ? memory.effort
         : "";
     setRunnerId(rememberedRunner?.id ?? "");
     setHarnessId(rememberedHarness?.id ?? "");
-    setModelId(rememberedModel?.id ?? "");
+    setModelId(rememberedModelId);
     setEffort(rememberedEffort);
     setAgentId(
       rememberedRunner !== undefined &&
@@ -446,12 +450,10 @@ export function DelegateToRunner({
                   data-dispatch-options=""
                 >
                   <HarnessBadge
-                    harness={
-                      owned
-                        .find((runner) => runner.id === dispatch.runnerId)
-                        ?.harnessCatalog?.harnesses.find((entry) => entry.id === dispatch.harness)
-                        ?.displayName ?? dispatch.harness
-                    }
+                    harness={harnessDisplayName(
+                      owned.find((runner) => runner.id === dispatch.runnerId),
+                      dispatch.harness,
+                    )}
                     empty="Runner default"
                   />
                   {dispatch.model !== null && (

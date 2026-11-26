@@ -1,15 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { DispatchOptions } from "@orrery/contract";
 import { readCatalogCache } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
-import { HarnessLocks } from "./harnesses.ts";
 import { repoFingerprint } from "./start.ts";
 import { SlotPool, type SlotController, type SupervisionOutcome } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
-export interface WorkOptions {
+export interface WorkOptions extends DispatchOptions {
   server: string;
   /** Workspace id, name or slug used to disambiguate an issue key. */
   workspace?: string | undefined;
@@ -17,10 +17,6 @@ export interface WorkOptions {
   agentId?: string | undefined;
   /** Optional requester steering text (from `--prompt`) carried on the Dispatch. */
   prompt?: string | undefined;
-  /** Per-dispatch execution options from `--harness`, `--model` and `--effort`. */
-  harness?: string | undefined;
-  model?: string | undefined;
-  effort?: string | undefined;
   signal?: AbortSignal | undefined;
   write?: ((line: string) => void) | undefined;
   supervision?: SupervisionConfig | undefined;
@@ -184,12 +180,16 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
         projectId: resolved.projectId,
         workspaceId: resolved.workspaceId,
         agentId: acceptance.dispatch.agentId,
+        // Programmatic callers may set these without populating supervision
+        // defaults; the accepted Dispatch row is the fallback record.
+        harness: options.harness ?? acceptance.dispatch.harness ?? undefined,
+        model: options.model ?? acceptance.dispatch.model ?? undefined,
+        effort: options.effort ?? acceptance.dispatch.effort ?? undefined,
       },
       slot,
       pool,
       signal: sessionAbort.signal,
       write,
-      locks: new HarnessLocks(),
       defaultModelFor: (harnessId) =>
         cachedCatalog?.harnesses.find((entry) => entry.id === harnessId)?.defaultModel ?? null,
       onController: (ctrl) => {

@@ -261,19 +261,26 @@ test("the modal remembers choices and falls back when a Harness disappears", asy
     await expect(page.getByRole("combobox", { name: "Model" })).toContainText("Codex Mini");
     await expect(page.getByRole("combobox", { name: "Effort" })).toHaveCount(0);
 
-    // A remembered Harness that no longer exists falls back to the first one.
+    // A remembered Harness that no longer exists falls back to the first live
+    // Harness and its default model; the stale model/effort must not leak.
     await page.evaluate(
-      (projectId) =>
+      ({ projectId, runnerId }) =>
         window.localStorage.setItem(
           `orrery.delegate.${projectId}`,
-          JSON.stringify({ runnerId: "", harness: "gone", model: "gone", effort: "high" }),
+          JSON.stringify({ runnerId, harness: "gone", model: "stub-fast", effort: "high" }),
         ),
-      fixture.projectId,
+      { projectId: fixture.projectId, runnerId: fixture.runnerId },
     );
     await page.reload();
-    await openDelegate(page, fixture);
+    await page.locator("[data-delegate-trigger]").click();
+    await expect(page.locator("[data-delegate-dialog]")).toBeVisible();
+    // The remembered live Runner preselects, so inspect the fallback directly.
+    await expect(page.getByRole("combobox", { name: "Runner" })).toContainText(fixture.runnerName);
     await expect(page.getByRole("combobox", { name: "Harness" })).toContainText("OpenCode");
     await expect(page.getByRole("combobox", { name: "Model" })).toContainText("Stub Fast");
+    await expect(page.getByRole("combobox", { name: "Effort" })).toContainText(
+      "Use the model default effort",
+    );
   } finally {
     await context.close();
   }
