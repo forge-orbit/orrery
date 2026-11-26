@@ -3,26 +3,15 @@ import type {
   PowerSearchConfig,
   PowerSearchFilter,
 } from "@astryxdesign/core/PowerSearch";
-import {
-  isTerminalIssueStatus,
-  IssuePriority,
-  IssueStatus,
-  type Issue,
-  type ProjectLabel,
-} from "@orrery/contract";
+import { IssuePriority, IssueStatus, type Issue, type ProjectLabel } from "@orrery/contract";
 import { PRIORITY_LABELS } from "./IssuePriority.tsx";
 import { issueStatusLabels } from "./issue-status.ts";
 
-export type IssueLifecycleScope = "all" | "open" | "active" | "closed";
+export type IssueStatusScope = "all" | IssueStatus;
 
 export type IssueSortKey = "priority" | "newest" | "oldest" | "updated" | "number_desc";
 
-export interface IssueScopeCounts {
-  readonly all: number;
-  readonly open: number;
-  readonly active: number;
-  readonly closed: number;
-}
+export type IssueScopeCounts = Readonly<Record<IssueStatusScope, number>>;
 
 export const ISSUE_SORT_OPTIONS: readonly {
   readonly value: IssueSortKey;
@@ -52,32 +41,20 @@ function actorLabel(actor: { displayName: string; agentId?: string | null | unde
   return actor.agentId != null ? `${actor.displayName} (Agent)` : actor.displayName;
 }
 
-function isActiveIssue(issue: Issue, activeSessionIssueIds: ReadonlySet<string>): boolean {
-  return (
-    issue.status === "in_progress" ||
-    issue.status === "review" ||
-    activeSessionIssueIds.has(issue.id)
-  );
-}
-
-export function countIssueScopes(
-  issues: readonly Issue[],
-  activeSessionIssueIds: ReadonlySet<string>,
-): IssueScopeCounts {
-  let open = 0;
-  let active = 0;
-  let closed = 0;
+export function countIssueScopes(issues: readonly Issue[]): IssueScopeCounts {
+  const counts: Record<IssueStatusScope, number> = {
+    all: issues.length,
+    backlog: 0,
+    todo: 0,
+    in_progress: 0,
+    review: 0,
+    done: 0,
+    cancelled: 0,
+  };
   for (const issue of issues) {
-    if (isTerminalIssueStatus(issue.status)) {
-      closed += 1;
-    } else {
-      open += 1;
-    }
-    if (isActiveIssue(issue, activeSessionIssueIds)) {
-      active += 1;
-    }
+    counts[issue.status] += 1;
   }
-  return { all: issues.length, open, active, closed };
+  return counts;
 }
 
 export function buildIssueFilterConfig(
@@ -354,15 +331,13 @@ export function filterAndSortIssues({
   activeSessionIssueIds,
 }: {
   issues: readonly Issue[];
-  scope: IssueLifecycleScope;
+  scope: IssueStatusScope;
   filters: readonly PowerSearchFilter[];
   sort: IssueSortKey;
   activeSessionIssueIds: ReadonlySet<string>;
 }): Issue[] {
   const filtered = issues.filter((issue) => {
-    if (scope === "open" && isTerminalIssueStatus(issue.status)) return false;
-    if (scope === "closed" && !isTerminalIssueStatus(issue.status)) return false;
-    if (scope === "active" && !isActiveIssue(issue, activeSessionIssueIds)) return false;
+    if (scope !== "all" && issue.status !== scope) return false;
     for (const filter of filters) {
       if (!matchesSingleFilter(issue, filter, activeSessionIssueIds)) return false;
     }

@@ -39,8 +39,8 @@ export { AssigneeControl, type AssigneeCandidate } from "./AssigneeControl.tsx";
 export {
   countIssueScopes,
   filterAndSortIssues,
-  type IssueLifecycleScope,
   type IssueSortKey,
+  type IssueStatusScope,
 } from "./issue-filter.ts";
 export { IssueFilterBar } from "./IssueFilterBar.tsx";
 export { IssueLabels } from "./IssueLabels.tsx";

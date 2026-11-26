@@ -42,8 +42,8 @@ import {
   IssueFilterBar,
   IssuePriorityControls,
   issuesQuery,
-  type IssueLifecycleScope,
   type IssueSortKey,
+  type IssueStatusScope,
   projectAccessCandidates,
   projectAccessCandidatesQuery,
   issueStatusLabels,
@@ -176,13 +176,13 @@ function ProjectPage() {
   const navigate = useNavigate();
   const search = Route.useSearch();
   const [tab, setTab] = useState<ProjectTab>(search.tab ?? "issues");
-  const [issueScope, setIssueScope] = useState<IssueLifecycleScope>("all");
+  const [issueScope, setIssueScope] = useState<IssueStatusScope>("all");
   const [issueFilters, setIssueFilters] = useState<PowerSearchFilter[]>([]);
   const [issueSort, setIssueSort] = useState<IssueSortKey>("priority");
   const [knowledgeFilter, setKnowledgeFilter] = useState("");
   const activeTab: ProjectTab = tab === "settings" && !canManage ? "issues" : tab;
   const activeSessionIssueIds = new Set(sessionsByIssue.keys());
-  const issueScopeCounts = countIssueScopes(issues, activeSessionIssueIds);
+  const issueScopeCounts = countIssueScopes(issues);
   const visibleIssues = filterAndSortIssues({
     issues,
     scope: issueScope,
