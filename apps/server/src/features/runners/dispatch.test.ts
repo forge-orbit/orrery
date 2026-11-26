@@ -194,10 +194,15 @@ function createDispatch(
   runnerId: string,
   cookie: string,
   overrideAgentId?: string,
+  prompt?: string,
 ) {
   return request(`/api/issues/${issueId}/dispatches`, {
     method: "POST",
-    body: { runnerId, ...(overrideAgentId === undefined ? {} : { agentId: overrideAgentId }) },
+    body: {
+      runnerId,
+      ...(overrideAgentId === undefined ? {} : { agentId: overrideAgentId }),
+      ...(prompt === undefined ? {} : { prompt }),
+    },
     cookie,
   });
 }
@@ -926,3 +931,98 @@ describe("#196 review regressions", () => {
     expect(field(first, "state")).toBe("ended");
   });
 });
+
+describe("custom dispatch prompt (#239)", () => {
+  it("trims and persists a prompt, then returns it to project readers", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("custom prompt issue");
+    const prompt = "  Use an additive migration and add a regression test.  ";
+
+    const created = await createDispatch(issue.id, runner.id, adminCookie, undefined, prompt);
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch.prompt).toBe("Use an additive migration and add a regression test.");
+
+    const [row] = await database.db
+      .select({ prompt: runnerDispatches.prompt })
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.id, dispatch.id));
+    expect(row?.prompt).toBe("Use an additive migration and add a regression test.");
+
+    const reader = await insertHuman(`reader-${randomUUID()}@example.com`);
+    await database.db.insert(workspaceMemberships).values({
+      id: randomUUID(),
+      workspaceId,
+      humanId: reader.id,
+      isOwner: false,
+    });
+    await database.db.insert(projectAccessGrants).values({
+      id: randomUUID(),
+      projectId,
+      humanId: reader.id,
+      level: "read",
+      grantedByHumanId: adminHumanId,
+    });
+    const list = await request(`/api/issues/${issue.id}/dispatches`, {
+      cookie: await browserCookie(reader.id),
+    });
+    expect(list.status).toBe(200);
+    expect(one(Dispatch.array().parse(field(await list.json(), "dispatches"))).prompt).toBe(
+      "Use an additive migration and add a regression test.",
+    );
+
+    const outsider = await insertHuman(`outsider-${randomUUID()}@example.com`);
+    await expectProblem(
+      await request(`/api/issues/${issue.id}/dispatches`, {
+        cookie: await browserCookie(outsider.id),
+      }),
+      404,
+      "issue_not_found",
+    );
+  });
+
+  it("treats a blank prompt as omitted", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("blank prompt issue");
+
+    const created = await createDispatch(issue.id, runner.id, adminCookie, undefined, "   \n  ");
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch.prompt).toBeUndefined();
+    const [row] = await database.db
+      .select({ prompt: runnerDispatches.prompt })
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.id, dispatch.id));
+    expect(row?.prompt).toBeNull();
+  });
+
+  it("rejects a prompt longer than 16,000 characters with a Problem Details error", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("oversized prompt issue");
+
+    const rejected = await createDispatch(
+      issue.id,
+      runner.id,
+      adminCookie,
+      undefined,
+      "x".repeat(16_001),
+    );
+    const rejectedCopy = rejected.clone();
+    await expectProblem(rejected, 400, "validation_failed");
+    expect(Problem.parse(await rejectedCopy.json()).errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ pointer: "/prompt" })]),
+    );
+    expect(await dispatchRowsCount(runner.id)).toBe(0);
+  });
+});
+
+async function dispatchRowsCount(runnerId: string) {
+  const rows = await database.db
+    .select({ id: runnerDispatches.id })
+    .from(runnerDispatches)
+    .where(and(eq(runnerDispatches.runnerId, runnerId)));
+  return rows.length;
+}

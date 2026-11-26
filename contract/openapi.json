@@ -6224,6 +6224,9 @@
               "null"
             ]
           },
+          "prompt": {
+            "$ref": "#/components/schemas/DispatchPrompt"
+          },
           "dirtyWorktree": {
             "type": "boolean"
           },
@@ -6288,6 +6291,10 @@
           "ended"
         ]
       },
+      "DispatchPrompt": {
+        "type": "string",
+        "maxLength": 16000
+      },
       "CreateDispatchRequest": {
         "type": "object",
         "properties": {
@@ -6298,6 +6305,9 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/DispatchPrompt"
           }
         },
         "required": [
@@ -6536,6 +6546,9 @@
           },
           "agentId": {
             "type": "string"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/DispatchPrompt"
           }
         },
         "required": [
@@ -7181,6 +7194,9 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/DispatchPrompt"
           }
         },
         "required": [
@@ -17723,7 +17739,7 @@
         }
       },
       "get": {
-        "summary": "List the signed-in human's dispatches for an issue",
+        "summary": "List an issue's dispatches for a human with project Read access",
         "parameters": [
           {
             "schema": {

@@ -1,5 +1,14 @@
 export { RunnersSection } from "./components.tsx";
-export { DelegateToRunner, type DelegatableAgent } from "./DelegateToRunner.tsx";
+export {
+  DelegateToRunner,
+  type DelegatableAgent,
+  MAX_DISPATCH_PROMPT_LENGTH,
+} from "./DelegateToRunner.tsx";
+export {
+  readDelegatePreference,
+  writeDelegatePreference,
+  type DelegatePreference,
+} from "./preferences.ts";
 export { LiveStudio } from "./LiveStudio.tsx";
 export { LiveStudioLink } from "./LiveStudioLink.tsx";
 export {

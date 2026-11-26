@@ -13,6 +13,8 @@ export interface WorkOptions {
   workspace?: string | undefined;
   repoPath?: string | undefined;
   agentId?: string | undefined;
+  /** Requester instructions appended to the operational ACP preamble. */
+  prompt?: string | undefined;
   signal?: AbortSignal | undefined;
   write?: ((line: string) => void) | undefined;
   supervision?: SupervisionConfig | undefined;
@@ -28,6 +30,11 @@ export interface WorkOptions {
  */
 export async function work(target: string, options: WorkOptions): Promise<SupervisionOutcome> {
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
+  const trimmedPrompt = options.prompt?.trim();
+  const prompt = trimmedPrompt === undefined || trimmedPrompt === "" ? undefined : trimmedPrompt;
+  if (prompt !== undefined && prompt.length > 16_000) {
+    throw new Error("--prompt must be at most 16,000 characters.");
+  }
   const stored = await readCredential();
   const client = new OrreryClient({
     server: options.server,
@@ -87,6 +94,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     heartbeatTimer.unref();
     const dispatch = await client.createRunnerDispatch(runner.id, {
       issueId: resolved.issueId,
+      ...(prompt === undefined ? {} : { prompt }),
     });
     write(`Created Dispatch ${dispatch.id} for ${resolved.identifier}.`);
     const acceptance = await client.acceptDispatch(runner.id, dispatch.id);
@@ -169,6 +177,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
         projectId: resolved.projectId,
         workspaceId: resolved.workspaceId,
         agentId: acceptance.dispatch.agentId,
+        ...(prompt === undefined ? {} : { prompt }),
       },
       slot,
       pool,

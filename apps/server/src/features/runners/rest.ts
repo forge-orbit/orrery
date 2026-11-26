@@ -232,7 +232,7 @@ const createDispatch = createRoute({
 const listIssueDispatches = createRoute({
   method: "get",
   path: "/api/issues/{issueId}/dispatches",
-  summary: "List the signed-in human's dispatches for an issue",
+  summary: "List an issue's dispatches for a human with project Read access",
   request: { params: issueParams },
   responses: {
     200: {
@@ -736,10 +736,8 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
   app.openapi(createRunnerDispatch, async (c) => {
     try {
       const { runnerId } = c.req.valid("param");
-      return c.json(
-        await service.createRunnerDispatch(bearer(c), runnerId, c.req.valid("json").issueId),
-        201,
-      );
+      const { issueId, prompt } = c.req.valid("json");
+      return c.json(await service.createRunnerDispatch(bearer(c), runnerId, issueId, prompt), 201);
     } catch (error) {
       return failure(c, error);
     }

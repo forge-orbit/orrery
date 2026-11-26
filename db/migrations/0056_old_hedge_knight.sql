@@ -1,0 +1,2 @@
+ALTER TABLE "runner_dispatches" ADD COLUMN "prompt" text;--> statement-breakpoint
+ALTER TABLE "runner_dispatches" ADD CONSTRAINT "runner_dispatches_prompt_length" CHECK (length("runner_dispatches"."prompt") <= 16000);

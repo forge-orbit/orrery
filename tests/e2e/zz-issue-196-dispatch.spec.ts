@@ -112,11 +112,14 @@ test("the issue page delegates to an owned online Runner with an optional Agent"
     await signIn(page);
     await page.goto(`/issues/${issueId}`);
     await expect(page.getByRole("heading", { name: "Delegate to Runner" })).toBeVisible();
-    await page.getByRole("combobox", { name: "Runner" }).click();
-    await page.getByRole("option", { name: new RegExp(runnerDisplayName) }).click();
-    await page.getByRole("combobox", { name: /^Agent/ }).click();
-    await page.getByRole("option", { name: new RegExp(agentName) }).click();
-    await page.locator("[data-delegate-dispatch]").click();
+    await page.locator("[data-delegate-trigger]").click();
+    const dialog = page.getByRole("dialog", { name: "Delegate to Runner" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("combobox", { name: "Runner" }).click();
+    await dialog.getByRole("option", { name: new RegExp(runnerDisplayName) }).click();
+    await dialog.getByRole("combobox", { name: /^Agent/ }).click();
+    await dialog.getByRole("option", { name: new RegExp(agentName) }).click();
+    await dialog.locator("[data-delegate-dispatch]").click();
     await expect(page.getByText(/Delegated to/).first()).toBeVisible();
     await expect(page.getByText("Waiting for the Runner")).toBeVisible();
 

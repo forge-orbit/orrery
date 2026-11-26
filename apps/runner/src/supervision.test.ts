@@ -228,6 +228,28 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
     expect(worktreeList).not.toContain(String(worktree?.branch));
   });
 
+  it("appends requester instructions after the operational ACP preamble", async () => {
+    const fixture = await makeFixture({ mode: "normal" });
+    fixture.control.enqueueDispatch(
+      "TEST-PROMPT",
+      "attempt-prompt",
+      "  Use an additive migration and add a regression test.  ",
+    );
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const prompts = (await events(fixture)).filter((item) => item.event === "prompt");
+    expect(prompts).toHaveLength(1);
+    const text = str(prompts[0]?.text);
+    expect(text).toContain("Work on issue TEST-42");
+    expect(text).toContain("Do not write outside this worktree.");
+    expect(text).toContain("Additional instructions from the requester:");
+    expect(text).toContain("Use an additive migration and add a regression test.");
+    expect(text.indexOf("Do not write outside this worktree.")).toBeLessThan(
+      text.indexOf("Additional instructions from the requester:"),
+    );
+  });
+
   it("enforces the local permission policy on ACP permission requests", async () => {
     const fixture = await makeFixture({ mode: "permission" });
     fixture.control.enqueueDispatch("TEST-2", "attempt-2");

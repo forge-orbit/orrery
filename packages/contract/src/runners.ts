@@ -212,6 +212,13 @@ export const DispatchState = z
   .meta({ id: "DispatchState" });
 export type DispatchState = z.infer<typeof DispatchState>;
 
+/**
+ * Optional instructions from the requester for one Dispatch. Empty strings are
+ * treated as omitted by the server; the limit is also a Postgres CHECK.
+ */
+export const DispatchPrompt = z.string().trim().max(16_000).meta({ id: "DispatchPrompt" });
+export type DispatchPrompt = z.infer<typeof DispatchPrompt>;
+
 /** Thin delivery bridge; it never changes the issue's assignee. */
 export const Dispatch = z
   .object({
@@ -230,6 +237,7 @@ export const Dispatch = z
     lastUpSeq: z.int().min(0),
     lastDownSeq: z.int().min(0),
     branchName: z.string().nullable(),
+    prompt: DispatchPrompt.optional(),
     dirtyWorktree: z.boolean(),
     createdAt: Timestamp,
     acceptedAt: Timestamp.nullable(),
@@ -242,6 +250,7 @@ export const CreateDispatchRequest = z
   .object({
     runnerId: RunnerId,
     agentId: z.string().min(1).max(200).optional(),
+    prompt: DispatchPrompt.optional(),
   })
   .meta({ id: "CreateDispatchRequest" });
 export type CreateDispatchRequest = z.infer<typeof CreateDispatchRequest>;
@@ -267,7 +276,10 @@ export type AutoClaimResponse = z.infer<typeof AutoClaimResponse>;
 
 /** A one-shot `orrery-runner work` dispatch targets one explicitly resolved issue. */
 export const RunnerDispatchRequest = z
-  .object({ issueId: z.string().min(1).max(200) })
+  .object({
+    issueId: z.string().min(1).max(200),
+    prompt: DispatchPrompt.optional(),
+  })
   .meta({ id: "RunnerDispatchRequest" });
 export type RunnerDispatchRequest = z.infer<typeof RunnerDispatchRequest>;
 
@@ -349,6 +361,7 @@ export const DispatchCommandPayload = z
     projectId: z.string(),
     workspaceId: z.string(),
     agentId: z.string(),
+    prompt: DispatchPrompt.optional(),
   })
   .meta({ id: "DispatchCommandPayload" });
 export type DispatchCommandPayload = z.infer<typeof DispatchCommandPayload>;

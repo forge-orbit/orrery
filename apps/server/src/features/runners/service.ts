@@ -429,6 +429,12 @@ async function authenticateHostRunnerForDeps(
   return { host, runner, level };
 }
 
+/** A blank prompt is omitted everywhere: DB NULL, API response, outbox payload. */
+const normalizedPrompt = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+};
+
 /** DB-time expiry flag shared by every device-code read/write decision. */
 const dispatchBaseFields = {
   id: runnerDispatches.id,
@@ -445,6 +451,7 @@ const dispatchBaseFields = {
   lastUpSeq: runnerDispatches.lastUpSeq,
   lastDownSeq: runnerDispatches.lastDownSeq,
   branchName: runnerDispatches.branchName,
+  prompt: runnerDispatches.prompt,
   dirtyWorktree: runnerDispatches.dirtyWorktree,
   createdAt: runnerDispatches.createdAt,
   acceptedAt: runnerDispatches.acceptedAt,
@@ -469,6 +476,7 @@ type DispatchRow = {
   lastUpSeq: number;
   lastDownSeq: number;
   branchName: string | null;
+  prompt: string | null;
   dirtyWorktree: boolean;
   createdAt: Date;
   acceptedAt: Date | null;
@@ -491,6 +499,7 @@ const toDispatch = (row: DispatchRow): Dispatch => ({
   lastUpSeq: row.lastUpSeq,
   lastDownSeq: row.lastDownSeq,
   branchName: row.branchName,
+  ...(row.prompt === null ? {} : { prompt: row.prompt }),
   dirtyWorktree: row.dirtyWorktree,
   createdAt: row.createdAt.toISOString(),
   acceptedAt: row.acceptedAt?.toISOString() ?? null,
@@ -1570,6 +1579,7 @@ interface DispatchCreationInput {
   projectId: string;
   agentId: string;
   requestedByHumanId: string;
+  prompt?: string | undefined;
 }
 
 /**
@@ -1652,6 +1662,7 @@ async function insertDispatchLocked(
     .limit(1);
   if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
   await assertIssueDispatchable(tx, input.issueId, input.agentId);
+  const prompt = normalizedPrompt(input.prompt);
 
   const [created] = await tx
     .insert(runnerDispatches)
@@ -1666,6 +1677,7 @@ async function insertDispatchLocked(
       dispatchAttemptId: randomUUID(),
       state: "pending",
       createdAt: sql`statement_timestamp()`,
+      ...(prompt === undefined ? {} : { prompt }),
     })
     .returning({ id: runnerDispatches.id });
   const row = await readDispatch(tx, created!.id);
@@ -1680,6 +1692,7 @@ async function insertDispatchLocked(
       projectId: input.projectId,
       workspaceId: input.workspaceId,
       agentId: input.agentId,
+      ...(prompt === undefined ? {} : { prompt }),
     },
   });
   return toDispatch(row);
@@ -2276,6 +2289,7 @@ export function createRunnersService(deps: RunnersDeps) {
       input: CreateDispatchRequest,
     ): Promise<Dispatch> {
       const human = requireAccount(account);
+      const prompt = normalizedPrompt(input.prompt);
       return db.transaction(async (tx) => {
         const [issue] = await tx
           .select({
@@ -2396,6 +2410,7 @@ export function createRunnersService(deps: RunnersDeps) {
             dispatchAttemptId: randomUUID(),
             state: "pending",
             createdAt: sql`statement_timestamp()`,
+            ...(prompt === undefined ? {} : { prompt }),
           })
           .returning({ id: runnerDispatches.id });
         const row = await readDispatch(tx, created!.id);
@@ -2410,6 +2425,7 @@ export function createRunnersService(deps: RunnersDeps) {
             projectId: issue.projectId,
             workspaceId: issue.workspaceId,
             agentId,
+            ...(prompt === undefined ? {} : { prompt }),
           },
         });
         return toDispatch(row);
@@ -2591,6 +2607,7 @@ export function createRunnersService(deps: RunnersDeps) {
       credential: string | undefined,
       runnerId: string,
       issueId: string,
+      prompt?: string,
     ): Promise<Dispatch> {
       return db.transaction(async (tx) => {
         // Read-only live check, then lock the issue BEFORE the runner row.
@@ -2631,6 +2648,7 @@ export function createRunnersService(deps: RunnersDeps) {
           projectId: issue.projectId,
           agentId: runner.agentId,
           requestedByHumanId: host.humanId,
+          prompt,
         });
       });
     },
@@ -2685,7 +2703,9 @@ export function createRunnersService(deps: RunnersDeps) {
       });
     },
 
-    /** List a human's dispatches for an issue (never a cross-member directory). */
+    /** List a human's dispatches for an issue — including teammates' dispatches
+     * for project readers, so Live Session Studio can show the same Dispatch
+     * metadata (including the custom prompt). Access is rechecked in DB time. */
     async listIssueDispatches(
       account: SessionAccount | null,
       issueId: string,
@@ -2722,9 +2742,7 @@ export function createRunnersService(deps: RunnersDeps) {
           .from(runnerDispatches)
           .innerJoin(runners, eq(runnerDispatches.runnerId, runners.id))
           .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
-          .where(
-            and(eq(runnerDispatches.issueId, issueId), eq(runnerHosts.humanId, human.humanId)),
-          );
+          .where(eq(runnerDispatches.issueId, issueId));
         return rows.map(toDispatch);
       });
     },

@@ -193,10 +193,10 @@ async function createIssue(title: string) {
   return Issue.parse(await res.json());
 }
 
-function createDispatch(issueId: string, runnerId: string, cookie: string) {
+function createDispatch(issueId: string, runnerId: string, cookie: string, prompt?: string) {
   return request(`/api/issues/${issueId}/dispatches`, {
     method: "POST",
-    body: { runnerId },
+    body: { runnerId, ...(prompt === undefined ? {} : { prompt }) },
     cookie,
   });
 }
@@ -379,8 +379,9 @@ describe("transactional runner command outbox (#197)", () => {
     const host = await enrollHost(adminCookie);
     const runner = await registerRunner(host.credential);
     const issue = await createIssue("atomic dispatch command");
+    const prompt = "  Prefer the additive migration.  ";
 
-    const created = await createDispatch(issue.id, runner.id, adminCookie);
+    const created = await createDispatch(issue.id, runner.id, adminCookie, prompt);
     expect(created.status).toBe(201);
     const dispatch = Dispatch.parse(await created.json());
 
@@ -401,6 +402,7 @@ describe("transactional runner command outbox (#197)", () => {
       projectId,
       workspaceId,
       agentId: defaultAgentId,
+      prompt: "Prefer the additive migration.",
     });
     const [bridge] = await database.db
       .select({ lastDownSeq: runnerDispatches.lastDownSeq })
@@ -412,6 +414,25 @@ describe("transactional runner command outbox (#197)", () => {
     expect(polled.status).toBe(200);
     const body = await commandsOf(polled);
     expect(body).toMatchObject([{ seq: 1, kind: "dispatch" }]);
+    expect(body[0]).toMatchObject({ payload: { prompt: "Prefer the additive migration." } });
+  });
+
+  it("rejects an oversized prompt without persisting a dispatch or a command", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("oversized outbox prompt");
+
+    await expectProblem(
+      await createDispatch(issue.id, runner.id, adminCookie, "x".repeat(16_001)),
+      400,
+      "validation_failed",
+    );
+    expect(await commandRows(runner.id)).toHaveLength(0);
+    const rows = await database.db
+      .select({ id: runnerDispatches.id })
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.runnerId, runner.id));
+    expect(rows).toHaveLength(0);
   });
 
   it("rolls back the outbox row when the dispatch write fails", async () => {

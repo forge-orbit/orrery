@@ -1669,6 +1669,8 @@ export const runnerDispatches = pgTable(
     lastUpSeq: integer("last_up_seq").notNull().default(0),
     lastDownSeq: integer("last_down_seq").notNull().default(0),
     branchName: text("branch_name"),
+    /** Optional requester instructions, trimmed by the contract before insert. */
+    prompt: text("prompt"),
     dirtyWorktree: boolean("dirty_worktree").notNull().default(false),
     /** DB-time rate window for stream batch backpressure. */
     streamWindowStartedAt: timestamp("stream_window_started_at", { withTimezone: true }),
@@ -1690,6 +1692,7 @@ export const runnerDispatches = pgTable(
       sql`${t.lastUpSeq} >= 0 and ${t.lastDownSeq} >= 0`,
     ),
     check("runner_dispatches_stream_batch_count_nonnegative", sql`${t.streamBatchCount} >= 0`),
+    check("runner_dispatches_prompt_length", sql`length(${t.prompt}) <= 16000`),
     check(
       "runner_dispatches_accepted_fields",
       sql`(${t.state} = 'pending' and ${t.acceptedAt} is null and ${t.runId} is null and ${t.workSessionId} is null)

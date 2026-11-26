@@ -344,7 +344,12 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       });
     };
 
-    const prompt = `Work on issue ${issueKey} (${issueId}). Your cwd is the isolated worktree ${worktree.path} on branch ${worktree.branch}. Your Orrery work session (sessionId: ${sessionId}, runId: ${run.id}) is ALREADY claimed and active — do NOT call claim_issue. Orrery MCP is pre-wired with a dispatch-scoped token; use get_issue, report_progress, log_session_activity, create_comment, and stop_session directly. Do not write outside this worktree.`;
+    const preamble = `Work on issue ${issueKey} (${issueId}). Your cwd is the isolated worktree ${worktree.path} on branch ${worktree.branch}. Your Orrery work session (sessionId: ${sessionId}, runId: ${run.id}) is ALREADY claimed and active — do NOT call claim_issue. Orrery MCP is pre-wired with a dispatch-scoped token; use get_issue, report_progress, log_session_activity, create_comment, and stop_session directly. Do not write outside this worktree.`;
+    const requesterPrompt = command.prompt?.trim();
+    const prompt =
+      requesterPrompt === undefined || requesterPrompt === ""
+        ? preamble
+        : `${preamble}\n\nAdditional instructions from the requester:\n\n${requesterPrompt}`;
     let outcome = await raceWork(acp, prompt, cancelled, options.signal, requestCancel);
 
     // A finished turn with an open question is a park, not a handoff: keep the

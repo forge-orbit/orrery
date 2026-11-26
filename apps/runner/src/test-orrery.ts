@@ -134,6 +134,7 @@ export class TestOrrery {
   private readonly stopCalls: string[] = [];
   private readonly dispatchIssues = new Map<string, string>();
   private readonly dispatchAttempts = new Map<string, string>();
+  private readonly createdPrompts: Array<string | null> = [];
   private readonly streamed: TestStreamChunk[] = [];
   reconnectCalls = 0;
   /** Number of heartbeats to answer with a transient 503 before recovering. */
@@ -213,7 +214,7 @@ export class TestOrrery {
     return command;
   }
 
-  enqueueDispatch(issueId: string, attemptId: string = randomUUID()): TestCommand {
+  enqueueDispatch(issueId: string, attemptId: string = randomUUID(), prompt?: string): TestCommand {
     const dispatchId = `dispatch-${issueId}`;
     this.dispatchIssues.set(dispatchId, issueId);
     this.dispatchAttempts.set(dispatchId, attemptId);
@@ -224,6 +225,7 @@ export class TestOrrery {
       projectId: "project-test-1",
       workspaceId: "workspace-test-1",
       agentId: "agent-test-1",
+      ...(prompt === undefined ? {} : { prompt }),
     });
   }
 
@@ -285,6 +287,11 @@ export class TestOrrery {
 
   recordedStopCalls(): readonly string[] {
     return this.stopCalls;
+  }
+
+  /** Prompts sent by one-shot `orrery-runner work` create-dispatch requests. */
+  recordedPrompts(): readonly (string | null)[] {
+    return this.createdPrompts;
   }
 
   private attemptIdFor(dispatchId: string): string {
@@ -527,6 +534,58 @@ export class TestOrrery {
       session.renewals += 1;
       session.leaseExpiresAt = Date.now() + 300_000;
       sendJson(res, 200, { id: session.id, status: "active", issueId: session.issueId });
+      return;
+    }
+    if (req.method === "POST" && path === "/api/runners/issue-resolve") {
+      sendJson(res, 200, {
+        issueId: "TEST-1",
+        workspaceId: "workspace-test-1",
+        workspaceName: "Test workspace",
+        projectId: "project-test-1",
+        projectKey: "TEST",
+        identifier: "TEST-42",
+        number: 42,
+        title: "One-shot issue",
+      });
+      return;
+    }
+    const oneShotDispatch = path.match(/^\/api\/runners\/[^/]+\/dispatches$/);
+    if (req.method === "POST" && oneShotDispatch !== null) {
+      const body = recordOf(await bodyOf(req)) ?? {};
+      const issueId = str(body.issueId) || "TEST-1";
+      const dispatchId = `dispatch-${randomUUID()}`;
+      const attemptId = randomUUID();
+      this.dispatchIssues.set(dispatchId, issueId);
+      this.dispatchAttempts.set(dispatchId, attemptId);
+      const prompt = typeof body.prompt === "string" ? body.prompt : null;
+      this.createdPrompts.push(prompt);
+      const stamp = now();
+      sendJson(res, 201, {
+        id: dispatchId,
+        runnerId: "runner-test-1",
+        hostId: "host-test-1",
+        workspaceId: "workspace-test-1",
+        projectId: "project-test-1",
+        issueId,
+        requestedByHumanId: "human-test-1",
+        agentId: "agent-test-1",
+        dispatchAttemptId: attemptId,
+        state: "pending",
+        runId: null,
+        workSessionId: null,
+        lastUpSeq: 0,
+        lastDownSeq: 0,
+        branchName: null,
+        ...(prompt === null ? {} : { prompt }),
+        dirtyWorktree: false,
+        createdAt: stamp,
+        acceptedAt: null,
+        endedAt: null,
+      });
+      return;
+    }
+    if (req.method === "POST" && path.endsWith("/offline")) {
+      sendJson(res, 200, { runnerId: "runner-test-1", revokedRunners: 1 });
       return;
     }
     if (req.method === "POST" && path === "/api/runners/register") {

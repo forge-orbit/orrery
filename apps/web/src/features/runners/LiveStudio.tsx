@@ -1,6 +1,8 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -391,6 +393,26 @@ export function LiveStudio({
         <LayoutContent isScrollable>
           <Stack gap={4}>
             <DiagnosticBanners entries={activeDiagnostics} />
+            {dispatch?.prompt !== undefined && dispatch.prompt !== "" && (
+              <Card padding={3} data-dispatch-prompt-section="">
+                <Collapsible
+                  trigger={<Text weight="semibold">Custom dispatch prompt</Text>}
+                  defaultIsOpen={dispatch.prompt.length <= 240}
+                  chevronPosition="start"
+                  data-dispatch-prompt=""
+                >
+                  <Stack paddingBlockStart={2}>
+                    <CodeBlock
+                      code={dispatch.prompt}
+                      language="plaintext"
+                      container="section"
+                      size="sm"
+                      maxHeight={320}
+                    />
+                  </Stack>
+                </Collapsible>
+              </Card>
+            )}
             {openQuestion !== undefined && (
               <NeedsInputComposer question={openQuestion} issueId={issueId} />
             )}

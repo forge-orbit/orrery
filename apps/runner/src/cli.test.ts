@@ -1,12 +1,13 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { afterAll, describe, expect, it } from "vitest";
+import { TestOrrery } from "./test-orrery.ts";
 
 const deviceRequestBody = z.object({ verifierHash: z.string(), hostDisplayName: z.string() });
 const tokenRequestBody = z.object({ deviceCode: z.string(), verifier: z.string() });
@@ -17,6 +18,7 @@ const registrationBody = z.object({
 });
 
 const mainPath = fileURLToPath(new URL("./main.ts", import.meta.url));
+const stubPath = fileURLToPath(new URL("./stub-acp.ts", import.meta.url));
 const directories: string[] = [];
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -458,5 +460,81 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
     );
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("login");
+  });
+
+  it("work --prompt sends the instruction through the Dispatch into the ACP turn", async () => {
+    const dir = await makeDir();
+    const repo = join(dir, "repo");
+    const worktrees = join(dir, "worktrees");
+    const marker = join(dir, "acp.jsonl");
+    await mkdir(repo, { recursive: true });
+    const git = (args: string[]) => {
+      const result = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+    };
+    git(["init", "-q"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "Test"]);
+    await writeFile(join(repo, "README.md"), "initial\n");
+    git(["add", "."]);
+    git(["commit", "-qm", "initial"]);
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: "http://orrery.test",
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
+
+    const control = await TestOrrery.start();
+    try {
+      const result = await run(
+        [
+          "work",
+          "TEST-1",
+          "--server",
+          control.url,
+          "--repo",
+          repo,
+          "--worktree-root",
+          worktrees,
+          "--acp-command",
+          process.execPath,
+          "--acp-arg",
+          stubPath,
+          "--prompt",
+          "  Use an additive migration.  ",
+        ],
+        {
+          ORRERY_RUNNER_CONFIG_DIR: dir,
+          STUB_ACP_MODE: "normal",
+          STUB_ACP_MARKER: marker,
+        },
+      );
+      expect(result.code).toBe(0);
+      expect(control.recordedPrompts()).toEqual(["Use an additive migration."]);
+
+      const recorded = (await readFile(marker, "utf8"))
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line): Record<string, unknown> | undefined => {
+          const parsed: unknown = JSON.parse(line);
+          return typeof parsed === "object" && parsed !== null
+            ? Object.fromEntries(Object.entries(parsed))
+            : undefined;
+        })
+        .filter((item): item is Record<string, unknown> => item !== undefined);
+      const prompts = recorded.filter((item) => item.event === "prompt");
+      expect(prompts).toHaveLength(1);
+      const text = typeof prompts[0]?.text === "string" ? prompts[0].text : "";
+      expect(text).toContain("Additional instructions from the requester:");
+      expect(text).toContain("Use an additive migration.");
+    } finally {
+      await control.close();
+    }
   });
 });

@@ -95,7 +95,7 @@ function pendingPermission(id: unknown, label: string, fields: Record<string, un
 
 async function onPrompt(id: unknown): Promise<void> {
   promptId = id;
-  record({ event: "prompt", cwd: process.cwd() });
+  record({ event: "prompt", cwd: process.cwd(), text: lastPromptText });
   if (sleepMs > 0) await wait(sleepMs);
   if (mode === "crash") {
     record({ event: "crash" });
