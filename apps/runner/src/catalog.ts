@@ -111,21 +111,28 @@ export async function probeHarness(
     // Lets a test stub tell a discovery session from a real dispatch session.
     sessionMeta: { orreryProbe: true },
     worktreeReal: options.cwd,
-    requestTimeoutMs: options.timeoutMs,
     timeoutMs: options.timeoutMs,
   });
   return catalogEntryFromSession(definition, session, options.at ?? new Date().toISOString());
 }
 
-export function catalogCachePath(configDir = configDirectory()): string {
-  return join(configDir, "harness-catalog.json");
+/**
+ * One Runner owns one checkout: the cache is keyed by its opaque fingerprint so
+ * two Runners on the same host cannot overwrite each other's catalog or the
+ * `--acp-command` overrides that produced it (ADR-0011).
+ */
+export function catalogCachePath(repoFingerprint: string, configDir = configDirectory()): string {
+  return join(configDir, `harness-catalog-${repoFingerprint}.json`);
 }
 
 /** The last successfully published catalog, used to seed a fast startup register. */
-export function readCachedCatalog(configDir = configDirectory()): HarnessCatalog | null {
+export function readCachedCatalog(
+  repoFingerprint: string,
+  configDir = configDirectory(),
+): HarnessCatalog | null {
   let text: string;
   try {
-    text = readFileSync(catalogCachePath(configDir), "utf8");
+    text = readFileSync(catalogCachePath(repoFingerprint, configDir), "utf8");
   } catch {
     return null;
   }
@@ -134,11 +141,12 @@ export function readCachedCatalog(configDir = configDirectory()): HarnessCatalog
 }
 
 export async function writeCachedCatalog(
+  repoFingerprint: string,
   value: HarnessCatalog,
   configDir = configDirectory(),
 ): Promise<void> {
   await mkdir(configDir, { recursive: true, mode: 0o700 });
-  const path = catalogCachePath(configDir);
+  const path = catalogCachePath(repoFingerprint, configDir);
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await chmod(path, 0o600);
 }
@@ -151,6 +159,7 @@ export interface CatalogWriter {
 export interface CatalogPublisherOptions {
   client: CatalogWriter;
   runnerId: string;
+  repoFingerprint: string;
   configDir?: string | undefined;
   onUnauthorized?: ((message: string) => void) | undefined;
 }
@@ -165,15 +174,17 @@ export class CatalogPublisher {
   private chain: Promise<void> = Promise.resolve();
   private readonly client: CatalogWriter;
   private readonly runnerId: string;
+  private readonly repoFingerprint: string;
   private readonly configDir: string;
   private readonly onUnauthorized: ((message: string) => void) | undefined;
 
   constructor(options: CatalogPublisherOptions) {
     this.client = options.client;
     this.runnerId = options.runnerId;
+    this.repoFingerprint = options.repoFingerprint;
     this.configDir = options.configDir ?? configDirectory();
     this.onUnauthorized = options.onUnauthorized;
-    this.latest = readCachedCatalog(this.configDir) ?? EMPTY_HARNESS_CATALOG;
+    this.latest = readCachedCatalog(this.repoFingerprint, this.configDir) ?? EMPTY_HARNESS_CATALOG;
   }
 
   get current(): HarnessCatalog {
@@ -183,7 +194,7 @@ export class CatalogPublisher {
   publish(next: HarnessCatalog): Promise<void> {
     const task = this.chain.then(async () => {
       const merged = mergeHarnessCatalog(this.latest, next);
-      await writeCachedCatalog(merged, this.configDir);
+      await writeCachedCatalog(this.repoFingerprint, merged, this.configDir);
       try {
         await this.client.putCatalog(this.runnerId, merged);
       } catch (error) {

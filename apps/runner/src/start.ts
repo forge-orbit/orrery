@@ -1,12 +1,7 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import {
-  EMPTY_HARNESS_CATALOG,
-  type HarnessCatalog,
-  type HarnessCatalogEntry,
-  type ReadyWorkFilter,
-} from "@orrery/contract";
+import type { HarnessCatalog, HarnessCatalogEntry, ReadyWorkFilter } from "@orrery/contract";
 import { CatalogPublisher, probeHarness, readCachedCatalog } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
@@ -36,9 +31,8 @@ export interface StartOptions {
   autoClaim?: boolean | undefined;
   autoClaimFilter?: ReadyWorkFilter | undefined;
   autoClaimPollMs?: number | undefined;
-  /** Background catalog discovery timing (defaults: 5s per probe, 60s refresh). */
+  /** Bounded time budget for the one startup catalog probe pass (default: 5s). */
   catalogProbeTimeoutMs?: number | undefined;
-  catalogRefreshMs?: number | undefined;
   /** Test seams: inject the harness list and observe each published catalog. */
   harnessDefinitions?: HarnessDefinition[] | undefined;
   onCatalog?: ((catalog: HarnessCatalog) => void) | undefined;
@@ -82,15 +76,18 @@ export async function start(options: StartOptions): Promise<void> {
     signal: controller.signal,
   });
   const supervision = options.supervision ?? loadSupervisionConfig();
+  const fingerprint = repoFingerprint(options.repoPath ?? process.cwd());
+  // Only a cache hit seeds registration: omitting the field lets the server keep
+  // a previously stored catalog when this Runner re-registers before probing.
+  const cached = readCachedCatalog(fingerprint);
   const runner = await client.registerRunner({
     workspaceId: options.workspaceId,
     projectId: options.projectId,
     ...(options.agentId === undefined ? {} : { agentId: options.agentId }),
     ...(options.displayName === undefined ? {} : { displayName: options.displayName }),
-    repoFingerprint: repoFingerprint(options.repoPath ?? process.cwd()),
+    repoFingerprint: fingerprint,
     capabilities: options.capabilities ?? [],
-    // The cache gives us a useful initial catalog without delaying registration.
-    harnessCatalog: readCachedCatalog() ?? EMPTY_HARNESS_CATALOG,
+    ...(cached === null ? {} : { harnessCatalog: cached }),
     maxConcurrency: options.maxConcurrency ?? 1,
     ephemeral: false,
   });
@@ -98,6 +95,7 @@ export async function start(options: StartOptions): Promise<void> {
   const publisher = new CatalogPublisher({
     client,
     runnerId: runner.id,
+    repoFingerprint: fingerprint,
     onUnauthorized: (message) => revoke(message),
   });
 
@@ -347,52 +345,42 @@ export async function start(options: StartOptions): Promise<void> {
   };
 
   /**
-   * Startup discovery runs off the hot path and publishes through the
-   * serialized writer. Probe commands (#241/#242) share this publisher later;
-   * every refresh is bounded and merges known effort entries rather than
-   * overwriting them with a slow probe's `unknown` values.
+   * One bounded startup discovery pass, off the hot path. On-demand refreshes
+   * arrive in #242 via `probe_catalog`; publishing through the serialized writer
+   * merges known effort entries instead of regressing them to `unknown`.
    */
-  const catalogLoop = async (): Promise<void> => {
+  const startupCatalogProbe = async (): Promise<void> => {
     const definitions =
-      options.harnessDefinitions ?? detectHarnesses({ acpOverride: supervision.acp });
+      options.harnessDefinitions ??
+      detectHarnesses(supervision.acpOverridden ? { acpOverride: supervision.acp } : {});
     const timeoutMs = options.catalogProbeTimeoutMs ?? 5000;
-    while (!controller.signal.aborted) {
-      const harnesses: HarnessCatalogEntry[] = [];
-      for (const definition of definitions) {
-        if (controller.signal.aborted) return;
-        try {
-          harnesses.push(
-            await probeHarness(definition, {
-              cwd: options.repoPath ?? process.cwd(),
-              timeoutMs,
-            }),
-          );
-        } catch (error) {
-          write(`Harness ${definition.id} probe failed: ${String(error)}`);
-        }
-      }
+    const harnesses: HarnessCatalogEntry[] = [];
+    for (const definition of definitions) {
       if (controller.signal.aborted) return;
-      if (harnesses.length > 0 || definitions.length === 0) {
-        try {
-          await publisher.publish({ harnesses, probedAt: new Date().toISOString() });
-          options.onCatalog?.(publisher.current);
-        } catch (error) {
-          if (error instanceof RunnerRequestError && error.status === 401) {
-            revoke("Catalog publish rejected (401). Stopping local operation immediately.");
-            return;
-          }
-          write(`Catalog publish failed; retrying on next refresh: ${String(error)}`);
-        }
-      }
       try {
-        await delay(options.catalogRefreshMs ?? 60_000, controller.signal, "Runner stopped.");
-      } catch {
-        return;
+        harnesses.push(
+          await probeHarness(definition, {
+            cwd: options.repoPath ?? process.cwd(),
+            timeoutMs,
+          }),
+        );
+      } catch (error) {
+        write(`Harness ${definition.id} probe failed: ${String(error)}`);
+      }
+    }
+    if (controller.signal.aborted || harnesses.length === 0) return;
+    try {
+      await publisher.publish({ harnesses, probedAt: new Date().toISOString() });
+      options.onCatalog?.(publisher.current);
+    } catch (error) {
+      // A 401 already revoked locally via CatalogPublisher's callback.
+      if (!controller.signal.aborted) {
+        write(`Catalog publish failed: ${String(error)}`);
       }
     }
   };
 
-  await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop(), catalogLoop()]);
+  await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop(), startupCatalogProbe()]);
   options.signal?.removeEventListener("abort", onExternalAbort);
   pool.cancelAll("shutdown");
   await Promise.all(pending);

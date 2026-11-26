@@ -271,6 +271,7 @@ function handle(message: Record<string, unknown>): void {
   const method = typeof message.method === "string" ? message.method : "";
   if (method === "initialize") {
     record({ event: "initialize" });
+    if (mode === "probe-init-hang") return;
     reply(id, {
       protocolVersion: 1,
       agentInfo: { name: "stub-acp", version: "1" },

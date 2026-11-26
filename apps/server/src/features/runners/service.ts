@@ -2136,6 +2136,7 @@ export function createRunnersService(deps: RunnersDeps) {
           : await tx
               .select({ id: runners.id, harnessCatalog: runners.harnessCatalog })
               .from(runners)
+              .for("update")
               .where(
                 and(
                   eq(runners.hostId, host.host.id),
@@ -2152,12 +2153,13 @@ export function createRunnersService(deps: RunnersDeps) {
               agentId,
               displayName: input.displayName ?? host.host.displayName,
               capabilities: input.capabilities,
-              // A re-register must not discard effort levels discovered by an
-              // earlier probe (ADR-0011's DiscoveredLevelsNeverLost invariant).
-              harnessCatalog: mergeHarnessCatalog(
-                existing.harnessCatalog,
-                input.harnessCatalog ?? EMPTY_HARNESS_CATALOG,
-              ),
+              // A re-register before the startup probe finishes carries no (or
+              // an empty) catalog. Never wipe previously stored harnesses or
+              // their "known" effort levels (ADR-0011's DiscoveredLevelsNeverLost).
+              harnessCatalog:
+                input.harnessCatalog === undefined || input.harnessCatalog.harnesses.length === 0
+                  ? existing.harnessCatalog
+                  : mergeHarnessCatalog(existing.harnessCatalog, input.harnessCatalog),
               maxConcurrency: input.maxConcurrency,
               activeSlotCount: 0,
               lastSeenAt: sql`statement_timestamp()`,

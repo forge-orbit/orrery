@@ -21,6 +21,14 @@ describe("supervision config", () => {
     );
   });
 
+  it("only marks the ACP harness as overridden when a flag or env var asks for it", () => {
+    expect(loadSupervisionConfig({}, {}).acpOverridden).toBe(false);
+    expect(loadSupervisionConfig({}, { ORRERY_ACP_COMMAND: "codex" }).acpOverridden).toBe(true);
+    expect(loadSupervisionConfig({}, { ORRERY_ACP_ARGS: '["acp"]' }).acpOverridden).toBe(true);
+    expect(loadSupervisionConfig({ acp: { command: "codex" } }, {}).acpOverridden).toBe(true);
+    expect(loadSupervisionConfig({ acp: { args: ["acp"] } }, {}).acpOverridden).toBe(true);
+  });
+
   it("does not clobber one ACP flag with the other field's default", () => {
     expect(loadSupervisionConfig({ acp: { args: ["--model", "x"] } }, {}).acp).toEqual({
       command: "opencode",

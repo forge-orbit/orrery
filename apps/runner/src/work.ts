@@ -57,7 +57,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     displayName: `${stored.displayName} (one-shot)`,
     repoFingerprint: fingerprint,
     capabilities: [],
-    harnessCatalog: readCachedCatalog() ?? EMPTY_HARNESS_CATALOG,
+    harnessCatalog: readCachedCatalog(fingerprint) ?? EMPTY_HARNESS_CATALOG,
     maxConcurrency: 1,
     ephemeral: true,
   });

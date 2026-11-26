@@ -222,7 +222,7 @@ async function register(
   credential: string,
   workspaceId: string,
   projectId: string,
-  initial = EMPTY_HARNESS_CATALOG,
+  initial?: HarnessCatalog,
 ) {
   const res = await request(
     app,
@@ -233,7 +233,7 @@ async function register(
       projectId,
       repoFingerprint: tokenHash("/home/rubi/secret/project"),
       capabilities: ["opencode"],
-      harnessCatalog: initial,
+      ...(initial === undefined ? {} : { harnessCatalog: initial }),
     },
     credential,
   );
@@ -304,6 +304,28 @@ describe("runner harness catalog API", () => {
     const [stored] = await database.db.select().from(runners).where(eq(runners.id, created.id));
     expect(stored!.harnessCatalog).toEqual(initial);
     expect(stored!.capabilities).toEqual(["opencode"]);
+  });
+
+  it("keeps stored known efforts when a re-register omits or empties the catalog", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const live = catalog(
+      "2026-02-01T00:00:00.000Z",
+      entry("opencode", [knownModel("gpt-5")], "2026-02-01T00:00:00.000Z"),
+    );
+    const created = await register(credential, workspace.id, project.id, live);
+
+    const omitted = await register(credential, workspace.id, project.id);
+    expect(omitted.id).toBe(created.id);
+    expect(omitted.harnessCatalog).toEqual(live);
+
+    const emptied = await register(credential, workspace.id, project.id, EMPTY_HARNESS_CATALOG);
+    expect(emptied.id).toBe(created.id);
+    expect(emptied.harnessCatalog).toEqual(live);
+
+    const [stored] = await database.db.select().from(runners).where(eq(runners.id, created.id));
+    expect(stored!.harnessCatalog).toEqual(live);
   });
 
   it("updates the catalog under a live host credential and project access", async () => {

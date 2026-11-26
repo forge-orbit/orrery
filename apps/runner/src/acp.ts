@@ -21,8 +21,6 @@ export interface AcpStartOptions {
   onPermission?: ((params: unknown) => PermissionResponse) | undefined;
   onUpdate?: ((method: string, params: unknown) => void) | undefined;
   onStderr?: ((line: string) => void) | undefined;
-  /** Bound each JSON-RPC request; probes always pass an explicit timeout. */
-  requestTimeoutMs?: number | undefined;
 }
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void };
@@ -60,7 +58,6 @@ export class AcpStdioClient {
   private readonly onPermission: (params: unknown) => PermissionResponse;
   private readonly onUpdate: (method: string, params: unknown) => void;
   private readonly onStderr: (line: string) => void;
-  private readonly requestTimeoutMs: number | undefined;
   private nextId = 1;
   private sessionId = "";
   private buffer = "";
@@ -80,7 +77,6 @@ export class AcpStdioClient {
       ((params) => respondToPermission(params, evaluatePermission(params, options.worktreeReal)));
     this.onUpdate = options.onUpdate ?? (() => {});
     this.onStderr = options.onStderr ?? (() => {});
-    this.requestTimeoutMs = options.requestTimeoutMs;
     this.exited = new Promise<AcpExit>((resolve) => {
       child.once("close", (code, signal) => {
         const exit = { code, signal };
@@ -143,43 +139,47 @@ export class AcpStdioClient {
   static async probe(
     options: AcpStartOptions & { timeoutMs: number; sessionMeta?: Record<string, unknown> },
   ): Promise<unknown> {
-    const client = AcpStdioClient.spawnClient({ ...options, requestTimeoutMs: options.timeoutMs });
+    const deadline = Date.now() + options.timeoutMs;
+    const client = AcpStdioClient.spawnClient(options);
     try {
-      await client.request(
-        "initialize",
-        {
-          protocolVersion: 1,
-          clientInfo: { name: "orrery-runner", version: "1" },
-          clientCapabilities: {},
-        },
-        options.timeoutMs,
-      );
-      return await client.request(
-        "session/new",
-        {
-          cwd: options.cwd,
-          mcpServers: options.mcpServers,
-          ...(options.sessionMeta === undefined ? {} : options.sessionMeta),
-        },
-        options.timeoutMs,
-      );
+      // One total budget shared by both RPCs: a slow initialize cannot buy a
+      // second full timeout for session/new.
+      return await client.initializeSession(options, {
+        deadline,
+        ...(options.sessionMeta === undefined ? {} : { sessionMeta: options.sessionMeta }),
+      });
     } finally {
       await client.forceExit(250);
     }
   }
 
-  private async initializeSession(options: AcpStartOptions): Promise<void> {
-    await this.request("initialize", {
-      protocolVersion: 1,
-      clientInfo: { name: "orrery-runner", version: "1" },
-      clientCapabilities: {},
-    });
-    const session = await this.request("session/new", {
-      cwd: options.cwd,
-      mcpServers: options.mcpServers,
-    });
+  private async initializeSession(
+    options: AcpStartOptions,
+    budget?: { deadline: number; sessionMeta?: Record<string, unknown> },
+  ): Promise<unknown> {
+    const remaining = (): number | undefined =>
+      budget === undefined ? undefined : Math.max(0, budget.deadline - Date.now());
+    await this.request(
+      "initialize",
+      {
+        protocolVersion: 1,
+        clientInfo: { name: "orrery-runner", version: "1" },
+        clientCapabilities: {},
+      },
+      remaining(),
+    );
+    const session = await this.request(
+      "session/new",
+      {
+        cwd: options.cwd,
+        mcpServers: options.mcpServers,
+        ...(budget?.sessionMeta === undefined ? {} : budget.sessionMeta),
+      },
+      remaining(),
+    );
     const sessionId = asRecord(session)?.sessionId;
     this.sessionId = typeof sessionId === "string" ? sessionId : "";
+    return session;
   }
 
   get id(): string {
@@ -198,7 +198,7 @@ export class AcpStdioClient {
   private request(
     method: string,
     params: Record<string, unknown>,
-    timeoutMs: number | undefined = this.requestTimeoutMs,
+    timeoutMs?: number,
   ): Promise<unknown> {
     if (this.spawnError !== undefined) return Promise.reject(this.spawnError);
     const id = this.nextId++;

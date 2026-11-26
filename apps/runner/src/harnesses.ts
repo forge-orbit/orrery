@@ -112,20 +112,17 @@ export function detectHarnesses(options: HarnessDetectionOptions = {}): HarnessD
     }
   }
 
+  // An explicit override is always advertised as its own custom entry, even if
+  // its binary happens to share a name with an installed preset: the override's
+  // arguments may differ and must be probed as given.
   const override = options.acpOverride;
   if (override !== undefined) {
-    const alreadyPresent = detected.some(
-      (item) =>
-        item.command === override.command || basename(item.command) === basename(override.command),
-    );
-    if (!alreadyPresent) {
-      detected.push({
-        id: "custom",
-        displayName: basename(override.command) || "Custom ACP harness",
-        command: override.command,
-        args: [...override.args],
-      });
-    }
+    detected.push({
+      id: "custom",
+      displayName: basename(override.command) || "Custom ACP harness",
+      command: override.command,
+      args: [...override.args],
+    });
   }
 
   for (const user of loadUserHarnesses(options.configDir ?? configDirectory())) {

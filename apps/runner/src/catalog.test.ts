@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { type HarnessCatalog, type HarnessCatalogEntry, type HarnessModel } from "@orrery/contract";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  catalogCachePath,
   catalogEntryFromSession,
   CatalogPublisher,
   probeHarness,
@@ -20,6 +21,8 @@ import {
 import { detectHarnesses } from "./harnesses.ts";
 
 const stubPath = new URL("./stub-acp.ts", import.meta.url).pathname;
+const fingerprintA = "a".repeat(64);
+const fingerprintB = "b".repeat(64);
 const tempDirs: string[] = [];
 
 const makeDir = (): string => {
@@ -96,6 +99,29 @@ describe("built-in ACP harness detection", () => {
       args: ["--acp-arg", "stub"],
     });
     expect(detected.find((item) => item.id === "local")?.args).toEqual(["acp"]);
+  });
+
+  it("does not invent a custom entry from the default ACP config", () => {
+    const detected = detectHarnesses({ pathEnv: "", configDir: makeDir() });
+    expect(detected).toEqual([]);
+  });
+
+  it("always keeps an explicit override even when it shares a preset's basename", () => {
+    const dir = makeDir();
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    const command = join(bin, "opencode");
+    writeFileSync(command, "#!/bin/sh\n", { mode: 0o755 });
+    const detected = detectHarnesses({
+      pathEnv: bin,
+      configDir: dir,
+      acpOverride: { command, args: ["--special"] },
+    });
+    expect(detected.map((item) => item.id)).toEqual(expect.arrayContaining(["opencode", "custom"]));
+    expect(detected.find((item) => item.id === "custom")).toMatchObject({
+      command,
+      args: ["--special"],
+    });
   });
 
   it("rejects a malformed harnesses.json instead of silently skipping it", () => {
@@ -191,6 +217,19 @@ describe("bounded startup probing", () => {
     expect(statSync(alive).size).toBe(before);
     expect(readFileSync(join(dir, "marker.jsonl"), "utf8")).toContain("grandchild");
   });
+
+  it("applies one total budget across initialize and session/new", async () => {
+    process.env.STUB_ACP_MODE = "probe-init-hang";
+    const started = Date.now();
+    await expect(
+      probeHarness(
+        { id: "custom", displayName: "Stub", command: process.execPath, args: [stubPath] },
+        { cwd: makeDir(), timeoutMs: 250 },
+      ),
+    ).rejects.toThrow(/timed out/);
+    // Two independent 250ms budgets would take ~500ms; one deadline takes ~250ms.
+    expect(Date.now() - started).toBeLessThan(450);
+  });
 });
 
 describe("serialized catalog publication", () => {
@@ -203,7 +242,12 @@ describe("serialized catalog publication", () => {
         return {};
       },
     };
-    const publisher = new CatalogPublisher({ client, runnerId: "runner-1", configDir: dir });
+    const publisher = new CatalogPublisher({
+      client,
+      runnerId: "runner-1",
+      repoFingerprint: fingerprintA,
+      configDir: dir,
+    });
 
     await publisher.publish(
       catalogOf("2026-02-01T00:00:00.000Z", entryOf(knownModel, "2026-02-01T00:00:00.000Z")),
@@ -220,7 +264,34 @@ describe("serialized catalog publication", () => {
       supportedEfforts: ["low", "high"],
     });
     expect(publisher.current.probedAt).toBe("2026-02-01T00:00:00.000Z");
-    expect(readCachedCatalog(dir)).toEqual(publisher.current);
+    expect(readCachedCatalog(fingerprintA, dir)).toEqual(publisher.current);
+  });
+
+  it("keeps a separate cache per checkout fingerprint", async () => {
+    const dir = makeDir();
+    const client = { putCatalog: async () => ({}) };
+    const first = new CatalogPublisher({
+      client,
+      runnerId: "runner-a",
+      repoFingerprint: fingerprintA,
+      configDir: dir,
+    });
+    const second = new CatalogPublisher({
+      client,
+      runnerId: "runner-b",
+      repoFingerprint: fingerprintB,
+      configDir: dir,
+    });
+    const forA = catalogOf(
+      "2026-01-01T00:00:00.000Z",
+      entryOf(knownModel, "2026-01-01T00:00:00.000Z"),
+    );
+    await first.publish(forA);
+
+    expect(second.current).toEqual({ harnesses: [], probedAt: "1970-01-01T00:00:00.000Z" });
+    expect(readCachedCatalog(fingerprintA, dir)).toEqual(forA);
+    expect(readCachedCatalog(fingerprintB, dir)).toBeNull();
+    expect(catalogCachePath(fingerprintA, dir)).not.toBe(catalogCachePath(fingerprintB, dir));
   });
 
   it("never issues overlapping PUTs even when publishes are concurrent", async () => {
@@ -236,7 +307,12 @@ describe("serialized catalog publication", () => {
         return {};
       },
     };
-    const publisher = new CatalogPublisher({ client, runnerId: "runner-1", configDir: dir });
+    const publisher = new CatalogPublisher({
+      client,
+      runnerId: "runner-1",
+      repoFingerprint: fingerprintA,
+      configDir: dir,
+    });
     await Promise.all([
       publisher.publish(catalogOf("2026-01-01T00:00:00.000Z")),
       publisher.publish(catalogOf("2026-01-02T00:00:00.000Z")),
