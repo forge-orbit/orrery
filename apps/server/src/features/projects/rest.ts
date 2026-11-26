@@ -1153,14 +1153,12 @@ const projectWriteKinds = [...projectReadKinds, "insufficient_project_access"] a
 const projectUpdateKinds = [...projectWriteKinds, "project_key_immutable"] as const;
 const projectDeleteKinds = [
   ...projectReadKinds,
-  "workspace_not_found",
   "agents_cannot_delete_projects",
   "workspace_owner_required",
   "project_active_work_exists",
 ] as const;
 const projectRestoreKinds = [
   ...projectReadKinds,
-  "workspace_not_found",
   "agents_cannot_delete_projects",
   "workspace_owner_required",
   "project_purged",

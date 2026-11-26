@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { IssuesResponse, ProjectAccessLevel, WorkspaceKind, projectTools } from "@orrery/contract";
+import {
+  IssuesResponse,
+  ProjectAccessLevel,
+  ProjectLabel,
+  WorkspaceKind,
+  projectTools,
+} from "@orrery/contract";
 import type { AgentIdentity } from "@orrery/contract";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -756,6 +762,7 @@ describe("issue trash", () => {
       { id: randomUUID(), name: "manager", level: ProjectAccessLevel.enum.manage },
       { id: randomUUID(), name: "contributor", level: ProjectAccessLevel.enum.contribute },
       { id: randomUUID(), name: "reader", level: ProjectAccessLevel.enum.read },
+      { id: randomUUID(), name: "suspended", level: null },
       { id: randomUUID(), name: "non-member", level: null },
     ] as const;
     await database.db.insert(humans).values(
@@ -765,15 +772,21 @@ describe("issue trash", () => {
         passwordHash: "x",
       })),
     );
-    await database.db
-      .insert(workspaceMemberships)
-      .values(
-        roleHumans.flatMap((role) =>
-          role.name === "non-member"
-            ? []
-            : [{ id: randomUUID(), workspaceId: f.workspaceId, humanId: role.id, isOwner: false }],
-        ),
-      );
+    await database.db.insert(workspaceMemberships).values(
+      roleHumans.flatMap((role) =>
+        role.name === "non-member"
+          ? []
+          : [
+              {
+                id: randomUUID(),
+                workspaceId: f.workspaceId,
+                humanId: role.id,
+                isOwner: false,
+                suspendedAt: role.name === "suspended" ? new Date() : null,
+              },
+            ],
+      ),
+    );
     await database.db.insert(projectAccessGrants).values(
       roleHumans.flatMap(({ id, level }) =>
         level === null
@@ -813,13 +826,21 @@ describe("issue trash", () => {
     const roles = [
       ...roleHumans.map((role) => ({
         humanId: role.id,
-        status: role.name === "non-member" ? 404 : 403,
-        code: role.name === "non-member" ? "workspace_not_found" : "workspace_owner_required",
+        status: role.name === "non-member" || role.name === "suspended" ? 404 : 403,
+        code:
+          role.name === "non-member" || role.name === "suspended"
+            ? "project_not_found"
+            : "workspace_owner_required",
+        trashCode:
+          role.name === "non-member" || role.name === "suspended"
+            ? "workspace_not_found"
+            : "workspace_owner_required",
       })),
       {
         humanId: f.otherHumanId,
         status: 403,
         code: "workspace_owner_required",
+        trashCode: "workspace_owner_required",
       },
     ];
     for (const role of roles) {
@@ -838,11 +859,26 @@ describe("issue trash", () => {
       expect(restored.status).toBe(role.status);
       expect(await restored.json()).toMatchObject({ code: role.code });
 
+      const missingId = randomUUID();
+      const missingDelete = await app.request(`/api/projects/${missingId}`, {
+        method: "DELETE",
+        headers: { cookie },
+      });
+      expect(missingDelete.status).toBe(404);
+      expect(await missingDelete.json()).toMatchObject({ code: "project_not_found" });
+
+      const missingRestore = await app.request(`/api/projects/${missingId}/restore`, {
+        method: "POST",
+        headers: { cookie },
+      });
+      expect(missingRestore.status).toBe(404);
+      expect(await missingRestore.json()).toMatchObject({ code: "project_not_found" });
+
       const trash = await app.request(`/api/workspaces/${f.workspaceId}/trash/projects`, {
         headers: { cookie },
       });
       expect(trash.status).toBe(role.status);
-      expect(await trash.json()).toMatchObject({ code: role.code });
+      expect(await trash.json()).toMatchObject({ code: role.trashCode });
     }
 
     for (const request of [
@@ -879,6 +915,53 @@ describe("issue trash", () => {
       headers: { cookie: ownerCookie },
     });
     expect(restored.status).toBe(200);
+  });
+
+  it("hides labels from update and delete after their project enters Trash", async () => {
+    const f = await seed();
+    const accounts = createAccountsFeature({
+      db: database.db,
+      setupSecret: "s",
+      publicUrl: "http://orrery.test",
+    });
+    const feature = createProjectsFeature({
+      db: database.db,
+      sessionReader: accounts.sessionReader,
+      agentAuthenticator: async () => null,
+      sessionGate: async () => true,
+      issueSessionGate: liveSessionGate,
+    });
+    const app = createApp({
+      features: [accounts, feature],
+      publicUrl: "http://orrery.test",
+      log: silentLogger,
+    });
+    const cookie = await humanCookie(f.humanId);
+    const created = await app.request(`/api/projects/${f.projectId}/labels`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Sensitive", color: "#112233" }),
+    });
+    expect(created.status).toBe(201);
+    const label = ProjectLabel.parse(await created.json());
+
+    const trashed = await app.request(`/api/projects/${f.projectId}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(trashed.status).toBe(204);
+
+    const updated = await app.request(`/api/labels/${label.id}`, {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Changed after Trash" }),
+    });
+    const removed = await app.request(`/api/labels/${label.id}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(updated.status).toBe(404);
+    expect(removed.status).toBe(404);
   });
 
   it("blocks project Trash for live sessions and non-ended dispatches, then revokes offers", async () => {

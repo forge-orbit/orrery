@@ -1098,6 +1098,21 @@ async function readWorkspaceFacts(
   };
 }
 
+async function readProjectWorkspaceFacts(
+  tx: DbTransaction,
+  workspaceId: string,
+  humanId: string,
+): Promise<WorkspaceFacts> {
+  try {
+    return await readWorkspaceFacts(tx, workspaceId, humanId);
+  } catch (error) {
+    if (error instanceof ProjectsError && error.kind === "workspace_not_found") {
+      throw new ProjectsError("project_not_found");
+    }
+    throw error;
+  }
+}
+
 async function requireProject(
   tx: DbTransaction,
   projectId: string,
@@ -1292,7 +1307,7 @@ async function requireLabel(
       and(eq(workspaceMemberships.workspaceId, projects.workspaceId), membershipMatch),
     )
     .leftJoin(projectAccessGrants, and(eq(projectAccessGrants.projectId, projects.id), grantMatch))
-    .where(eq(projectLabels.id, labelId))
+    .where(and(eq(projectLabels.id, labelId), isNull(projects.deletedAt)))
     .limit(1);
 
   if (row === undefined) throw new ProjectsError("label_not_found");
@@ -2223,7 +2238,11 @@ export function createProjectsService({
           .limit(1);
         if (project === undefined) throw new ProjectsError("project_not_found");
 
-        const workspace = await readWorkspaceFacts(tx, project.workspaceId, actor.account.humanId);
+        const workspace = await readProjectWorkspaceFacts(
+          tx,
+          project.workspaceId,
+          actor.account.humanId,
+        );
         if (!workspace.isOwner) throw new ProjectsError("workspace_owner_required");
         if (project.deletedAt !== null) throw new ProjectsError("project_not_found");
 
@@ -2307,7 +2326,11 @@ export function createProjectsService({
           .limit(1);
         if (project === undefined) throw new ProjectsError("project_not_found");
 
-        const workspace = await readWorkspaceFacts(tx, project.workspaceId, actor.account.humanId);
+        const workspace = await readProjectWorkspaceFacts(
+          tx,
+          project.workspaceId,
+          actor.account.humanId,
+        );
         if (!workspace.isOwner) throw new ProjectsError("workspace_owner_required");
         if (project.deletedAt === null || project.deletedByHumanId === null) {
           throw new ProjectsError("project_not_found");
