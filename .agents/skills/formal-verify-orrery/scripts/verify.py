@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Orrery Formal Verification Model Checker (M1-M47).
+Orrery Formal Verification Model Checker (M1-M48).
 
 Extracts critical concurrency, locking, and state-transition guards directly from
 Orrery's server source and SQL migrations, then runs an exhaustive BFS finite-state
@@ -276,7 +276,7 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m9_grant_writer = "insert(projectAccessGrants)" in apply_grants_fn
     m9_apply_validates = (
-        "currentWorkspaceByProject.get(projectId) !== workspaceId" in apply_grants_fn
+        "currentById.get(projectId)?.workspaceId !== workspaceId" in apply_grants_fn
         and "if (invalid.length > 0) return invalid" in apply_grants_fn
     )
     m9_resend_copies = (
@@ -1249,7 +1249,7 @@ def extract_code_facts() -> dict[str, Any]:
         and "timed_out" not in q_src
     )
     m20_issue_lock = (
-        '.for("update")' in q_lock_fn
+        '.for("update", { of: issues })' in q_lock_fn
         and "lockIssue(tx" in q_ask_fn
         and "lockIssue(tx" in q_answer_fn
         and ".for(" in q_answer_fn
@@ -1755,7 +1755,7 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m23_db_time = (
         "lte(questions.responseDeadlineAt, sql`statement_timestamp()`)" in m23_eval_fn
-        and '.for("update")' in q_lock_fn
+        and '.for("update", { of: issues })' in q_lock_fn
     )
     m23_authorized_only = (
         "authorizedFallback: status === QuestionStatus.enum.fallback_used" in m23_to_question_fn
@@ -2561,6 +2561,266 @@ def extract_code_facts() -> dict[str, Any]:
         for tool in ('"delete_project"', '"restore_project"', '"list_project_trash"')
     )
 
+    # M48 (#251): hiding trashed projects from every downstream reader, while
+    # preserving references for restoration and serializing writes against Trash.
+    my_work_trash_src = read_text("apps/server/src/features/my-work/service.ts")
+    inbox_trash_src = read_text("apps/server/src/features/inbox/service.ts")
+    notifications_trash_src = read_text("apps/server/src/features/notifications/service.ts")
+    runners_trash_src = read_text("apps/server/src/features/runners/service.ts")
+    transfers_trash_src = read_text("apps/server/src/features/transfers/service.ts")
+    webhooks_trash_src = read_text("apps/server/src/features/webhooks/service.ts")
+    agents_trash_src = read_text("apps/server/src/features/agents/service.ts")
+    attachments_trash_src = read_text("apps/server/src/features/attachments/service.ts")
+    history_trash_src = read_text("apps/server/src/features/history/service.ts")
+    sessions_trash_src = read_text("apps/server/src/features/work-sessions/service.ts")
+    my_work_read_fn = slice_between(my_work_trash_src, "async get(actor)", "  };\n}")
+    inbox_list_fn = slice_between(inbox_trash_src, "async list(actorArg)", "async issueHistory(actorArg")
+    inbox_access_fn = slice_between(inbox_trash_src, "async function requireAccess(", "export function createInboxService(")
+    notification_access_fn = slice_between(
+        notifications_trash_src,
+        "const readableAccess =",
+        "const createForActivity:",
+    )
+    runner_fleet_fn = slice_between(
+        runners_trash_src,
+        "async listWorkspaceRunners(",
+        "async createDispatch(",
+    )
+    runner_commands_access_fn = slice_between(
+        runners_trash_src,
+        "const readRunnerAccessForCommands =",
+        "return { host, joined, revoked };",
+    )
+    runner_dispatch_fn = slice_between(
+        runners_trash_src,
+        "async function insertDispatchLocked(",
+        "type ParsedIssueTarget =",
+    )
+    runner_manual_dispatch_fn = slice_between(
+        runners_trash_src,
+        "async createDispatch(",
+        "async autoClaim(",
+    )
+    runner_auto_claim_fn = slice_between(
+        runners_trash_src,
+        "async autoClaim(",
+        "async createRunnerDispatch(",
+    )
+    runner_create_dispatch_fn = slice_between(
+        runners_trash_src,
+        "async createRunnerDispatch(",
+        "async resolveIssue(",
+    )
+    transfer_project_reads_fn = slice_between(
+        transfers_trash_src,
+        "async function readPersonalProject(",
+        "async function readSharedDestination(",
+    )
+    transfer_accept_fn = slice_between(
+        transfers_trash_src,
+        "async function acceptInTransaction(",
+        "export function createTransfersService(",
+    )
+    transfer_accept_route_fn = slice_between(
+        transfers_trash_src,
+        "async accept(account, token, key)",
+        "async complete(account, projectId, destinationWorkspaceId, key)",
+    )
+    webhook_load_fn = slice_between(
+        webhooks_trash_src,
+        "async function loadWebhook(",
+        "function toDelivery(",
+    )
+    webhook_enqueue_fn = slice_between(
+        webhooks_trash_src,
+        "const enqueueForActivity:",
+        "const attempt = async (",
+    )
+    webhook_attempt_fn = slice_between(
+        webhooks_trash_src,
+        "const attempt = async (",
+        "const finalize = async (",
+    )
+    webhook_list_fn = slice_between(
+        webhooks_trash_src,
+        "async list(actor, workspaceId)",
+        "async create(actor, workspaceId, input)",
+    )
+    agent_key_projects_fn = slice_between(
+        agents_trash_src,
+        "async function loadKeyProjects(",
+        "async function loadKeys(",
+    )
+    attachment_access_fn = slice_between(
+        attachments_trash_src,
+        "async function requireAccess(",
+        "  return {\n    assertContentLength,",
+    )
+    attachment_metadata_fn = slice_between(
+        attachments_trash_src,
+        "async listMetadata(tx, holders)",
+        "async purgeHolders(",
+    )
+    project_history_fn = slice_between(
+        history_trash_src,
+        "async projectHistory(account, projectId)",
+        "async installationHistory(account)",
+    )
+    project_access_history_fn = slice_between(
+        history_trash_src,
+        "async function loadProjectAccessEvents(",
+        "async function loadProjectActivity(",
+    )
+    sessions_lock_issue_fn = slice_between(
+        sessions_trash_src,
+        "async function lockIssue(",
+        "export async function revertIssueToTodo(",
+    )
+    sessions_project_lock_fn = slice_between(
+        sessions_lock_issue_fn,
+        "const [project] = await tx",
+        "if (project === undefined)",
+    )
+    sessions_locked_issue_fn = slice_between(
+        sessions_lock_issue_fn,
+        "const [row] = await tx",
+        "if (row === undefined)",
+    )
+    sessions_claim_fn = slice_between(
+        sessions_trash_src,
+        "export async function claimInTransaction(",
+        "export function createSessionsService(",
+    )
+    sessions_ready_work_fn = slice_between(
+        sessions_trash_src,
+        "async readyWork(actorArg, projectId, filter = \"all\")",
+        "async sweep()",
+    )
+    project_dependencies_fn = slice_between(
+        proj_src,
+        "async function loadBlockedByIdsForIssues(",
+        "async function loadBlockedByIds(",
+    )
+    invitation_grants_fn = slice_between(
+        proj_src,
+        "async function applyInvitationGrantsInTransaction(",
+        "async function lockWorkspaceOwnershipWrites",
+    )
+    runner_dispatch_project_lock_fn = slice_between(
+        runner_dispatch_fn,
+        "const [project] = await tx",
+        "if (project === undefined)",
+    )
+    runner_manual_project_lock_fn = slice_between(
+        runner_manual_dispatch_fn,
+        "const [activeProject] = await tx",
+        "if (activeProject === undefined)",
+    )
+    transfer_accept_project_lock_fn = slice_between(
+        transfer_accept_fn,
+        "const [project] = await tx",
+        "if (project === undefined)",
+    )
+
+    m48_my_work_hides_trashed_projects = (
+        "isNull(projects.deletedAt)" in my_work_read_fn
+        and "inArray(projects.workspaceId, workspaceIds)" in my_work_read_fn
+    )
+    m48_inbox_hides_trashed_projects = (
+        "isNull(projects.deletedAt)" in inbox_list_fn
+        and "isNull(projects.deletedAt)" in inbox_access_fn
+    )
+    m48_notifications_hides_trashed_projects = "${projects.deletedAt} is null" in notification_access_fn
+    m48_runner_fleet_hides_trashed_projects = (
+        ".innerJoin(projects, eq(runners.projectId, projects.id))" in runner_fleet_fn
+        and "isNull(projects.deletedAt)" in runner_fleet_fn
+    )
+    m48_runner_commands_hide_trashed_projects = (
+        "projectDeletedAt: projects.deletedAt" in runner_commands_access_fn
+        and "joined.projectDeletedAt !== null" in runner_commands_access_fn
+    )
+    m48_transfer_reads_hide_trashed_projects = (
+        transfer_project_reads_fn.count("isNull(projects.deletedAt)") >= 3
+    )
+    m48_webhook_scope_hides_trashed_projects = (
+        "isNull(projects.deletedAt)" in webhook_load_fn
+        and "isNull(projects.deletedAt)" in webhook_list_fn
+    )
+    m48_webhook_keeps_delete_delivery_only = (
+        'project.deletedAt !== null && event !== "project_deleted"' in webhook_enqueue_fn
+        and 'target.activityType !== "project_deleted"' in webhook_attempt_fn
+    )
+    m48_agent_key_scope_hides_trashed_projects = "isNull(projects.deletedAt)" in agent_key_projects_fn
+    m48_attachment_reads_hide_trashed_projects = (
+        "isNull(projects.deletedAt)" in attachment_access_fn
+        and "isNull(projects.deletedAt)" in attachment_metadata_fn
+    )
+    m48_history_hides_trashed_projects = (
+        "isNull(projects.deletedAt)" in project_history_fn
+        and "isNull(projects.deletedAt)" in project_access_history_fn
+    )
+    m48_sessions_project_active_filter = "isNull(projects.deletedAt)" in sessions_project_lock_fn
+    m48_sessions_project_row_lock = '.for("update")' in sessions_project_lock_fn
+    m48_sessions_issue_active_filter = "isNull(projects.deletedAt)" in sessions_locked_issue_fn
+    m48_sessions_lock_order = (
+        ordered(
+            sessions_lock_issue_fn,
+            "const [project]",
+            '.for("update")',
+            "const [row]",
+            '.for("update", { of: issues })',
+        )
+        and "lockIssue(tx, input.issueId)" in sessions_claim_fn
+    )
+    m48_sessions_ready_work_hides_trashed_blockers = (
+        ".innerJoin(blockerProject, eq(blockerIssue.projectId, blockerProject.id))" in sessions_ready_work_fn
+        and "isNull(blockerProject.deletedAt)" in sessions_ready_work_fn
+        and ".innerJoin(projects, eq(issues.projectId, projects.id))" in sessions_ready_work_fn
+        and "isNull(projects.deletedAt)" in sessions_ready_work_fn
+    )
+    m48_runner_auto_claim_hides_trashed_blockers = (
+        ".innerJoin(blockerProject, eq(blockerIssue.projectId, blockerProject.id))" in runner_auto_claim_fn
+        and "isNull(blockerProject.deletedAt)" in runner_auto_claim_fn
+        and "isNull(projects.deletedAt)" in runner_auto_claim_fn
+    )
+    m48_project_dependencies_hide_trashed_blockers = (
+        ".innerJoin(blockerProject, eq(blockerProject.id, blockerIssue.projectId))" in project_dependencies_fn
+        and "isNull(blockerProject.deletedAt)" in project_dependencies_fn
+    )
+    m48_invitation_grants_skip_trashed_projects = (
+        "const activeProjectIds = currentProjects" in invitation_grants_fn
+        and "project.deletedAt === null" in invitation_grants_fn
+        and "if (!activeProjectIdSet.has(offer.projectId)) continue" in invitation_grants_fn
+    )
+    m48_dispatch_project_active_filter = "isNull(projects.deletedAt)" in runner_dispatch_project_lock_fn
+    m48_dispatch_project_row_lock = '.for("update")' in runner_dispatch_project_lock_fn
+    m48_dispatch_project_scope = (
+        "eq(projects.id, input.projectId)" in runner_dispatch_project_lock_fn
+        and "eq(projects.workspaceId, input.workspaceId)" in runner_dispatch_project_lock_fn
+    )
+    m48_dispatch_shared_helper_calls = (
+        "await insertDispatchLocked(tx" in runner_auto_claim_fn
+        and "await insertDispatchLocked(tx" in runner_create_dispatch_fn
+    )
+    m48_manual_dispatch_project_active_filter = "isNull(projects.deletedAt)" in runner_manual_project_lock_fn
+    m48_manual_dispatch_project_row_lock = '.for("update")' in runner_manual_project_lock_fn
+    m48_manual_dispatch_project_scope = (
+        "eq(projects.id, issue.projectId)" in runner_manual_project_lock_fn
+        and "eq(projects.workspaceId, issue.workspaceId)" in runner_manual_project_lock_fn
+    )
+    m48_transfer_accept_project_active_filter = (
+        "isNull(projects.deletedAt)" in transfer_accept_project_lock_fn
+    )
+    m48_transfer_accept_project_row_lock = '.for("update")' in transfer_accept_project_lock_fn
+    m48_transfer_accept_project_scope = (
+        "eq(projects.id, auth.projectId)" in transfer_accept_project_lock_fn
+    )
+    m48_transfer_accept_lock_order = ordered(
+        transfer_accept_route_fn,
+        "pendingAuthorizationByToken(tx, token, true)",
+        "lockOwnershipWrites(tx)",
+        "acceptInTransaction(tx, row",
+    )
     # M33 (#99): cross-workspace My work access boundaries.
     my_work_src = read_text("apps/server/src/features/my-work/service.ts")
     my_work_rest = read_text("apps/server/src/features/my-work/rest.ts")
@@ -4182,6 +4442,39 @@ def extract_code_facts() -> dict[str, Any]:
         "m47_activity_contract": m47_activity_contract,
         "m47_http_contract": m47_http_contract,
         "m47_no_project_lifecycle_mcp": m47_no_project_lifecycle_mcp,
+
+        # M48 (#251): cross-feature Trash hiding, preserved invitations/webhooks,
+        # and project-row serialization for work/session and transfer writes.
+        "m48_my_work_hides_trashed_projects": m48_my_work_hides_trashed_projects,
+        "m48_inbox_hides_trashed_projects": m48_inbox_hides_trashed_projects,
+        "m48_notifications_hides_trashed_projects": m48_notifications_hides_trashed_projects,
+        "m48_runner_fleet_hides_trashed_projects": m48_runner_fleet_hides_trashed_projects,
+        "m48_runner_commands_hide_trashed_projects": m48_runner_commands_hide_trashed_projects,
+        "m48_transfer_reads_hide_trashed_projects": m48_transfer_reads_hide_trashed_projects,
+        "m48_webhook_scope_hides_trashed_projects": m48_webhook_scope_hides_trashed_projects,
+        "m48_webhook_keeps_delete_delivery_only": m48_webhook_keeps_delete_delivery_only,
+        "m48_agent_key_scope_hides_trashed_projects": m48_agent_key_scope_hides_trashed_projects,
+        "m48_attachment_reads_hide_trashed_projects": m48_attachment_reads_hide_trashed_projects,
+        "m48_history_hides_trashed_projects": m48_history_hides_trashed_projects,
+        "m48_sessions_project_active_filter": m48_sessions_project_active_filter,
+        "m48_sessions_project_row_lock": m48_sessions_project_row_lock,
+        "m48_sessions_issue_active_filter": m48_sessions_issue_active_filter,
+        "m48_sessions_lock_order": m48_sessions_lock_order,
+        "m48_sessions_ready_work_hides_trashed_blockers": m48_sessions_ready_work_hides_trashed_blockers,
+        "m48_runner_auto_claim_hides_trashed_blockers": m48_runner_auto_claim_hides_trashed_blockers,
+        "m48_project_dependencies_hide_trashed_blockers": m48_project_dependencies_hide_trashed_blockers,
+        "m48_invitation_grants_skip_trashed_projects": m48_invitation_grants_skip_trashed_projects,
+        "m48_dispatch_project_active_filter": m48_dispatch_project_active_filter,
+        "m48_dispatch_project_row_lock": m48_dispatch_project_row_lock,
+        "m48_dispatch_project_scope": m48_dispatch_project_scope,
+        "m48_dispatch_shared_helper_calls": m48_dispatch_shared_helper_calls,
+        "m48_manual_dispatch_project_active_filter": m48_manual_dispatch_project_active_filter,
+        "m48_manual_dispatch_project_row_lock": m48_manual_dispatch_project_row_lock,
+        "m48_manual_dispatch_project_scope": m48_manual_dispatch_project_scope,
+        "m48_transfer_accept_project_active_filter": m48_transfer_accept_project_active_filter,
+        "m48_transfer_accept_project_row_lock": m48_transfer_accept_project_row_lock,
+        "m48_transfer_accept_project_scope": m48_transfer_accept_project_scope,
+        "m48_transfer_accept_lock_order": m48_transfer_accept_lock_order,
     }
 
 
@@ -10598,6 +10891,285 @@ def check_m47(facts: dict[str, Any]) -> CheckResult:
     )
 
 
+def check_m48(facts: dict[str, Any]) -> CheckResult:
+    """#251: downstream project reads hide Trash; writes serialize with deletion.
+
+    Visibility actions run after a Trash transition. The separate two-writer
+    race model interleaves a project-row lock, a claim/dispatch/transfer commit,
+    and project deletion. It assumes M47's live-work deletion guard remains in
+    force for claims and dispatches; the real-Postgres HTTP regression exercises
+    the transaction and route wiring.
+    """
+    files = [
+        "apps/server/src/features/my-work/service.ts",
+        "apps/server/src/features/inbox/service.ts",
+        "apps/server/src/features/notifications/service.ts",
+        "apps/server/src/features/runners/service.ts",
+        "apps/server/src/features/transfers/service.ts",
+        "apps/server/src/features/webhooks/service.ts",
+        "apps/server/src/features/agents/service.ts",
+        "apps/server/src/features/attachments/service.ts",
+        "apps/server/src/features/history/service.ts",
+        "apps/server/src/features/work-sessions/service.ts",
+        "apps/server/src/features/projects/service.ts",
+    ]
+    g = {k: v for k, v in facts.items() if k.startswith("m48_")}
+    visibility_actions = {
+        "my_work": {
+            "m48_my_work_hides_trashed_projects": "trashed issue remained in My Work",
+        },
+        "inbox": {
+            "m48_inbox_hides_trashed_projects": "trashed project question remained in Inbox",
+        },
+        "notifications": {
+            "m48_notifications_hides_trashed_projects": "trashed project notification remained readable",
+        },
+        "runner_fleet": {
+            "m48_runner_fleet_hides_trashed_projects": "Runner for a trashed project remained in the fleet",
+        },
+        "runner_commands": {
+            "m48_runner_commands_hide_trashed_projects": "Runner command access remained live after project Trash",
+        },
+        "transfer_reads": {
+            "m48_transfer_reads_hide_trashed_projects": "transfer preview exposed a trashed project",
+        },
+        "webhook_scope": {
+            "m48_webhook_scope_hides_trashed_projects": "webhook configuration exposed a trashed project",
+        },
+        "webhook_delivery": {
+            "m48_webhook_keeps_delete_delivery_only": "a non-delete webhook event crossed the Trash boundary",
+        },
+        "agent_key_scope": {
+            "m48_agent_key_scope_hides_trashed_projects": "Agent API key identity exposed a trashed project",
+        },
+        "attachments": {
+            "m48_attachment_reads_hide_trashed_projects": "attachment metadata or bytes remained readable after Trash",
+        },
+        "history": {
+            "m48_history_hides_trashed_projects": "project history remained readable after Trash",
+        },
+        "session_reads": {
+            "m48_sessions_issue_active_filter": "work-session issue access remained visible after Trash",
+        },
+        "session_ready_work": {
+            "m48_sessions_ready_work_hides_trashed_blockers": "a trashed blocker kept active-project work blocked or exposed",
+        },
+        "runner_ready_work": {
+            "m48_runner_auto_claim_hides_trashed_blockers": "Runner auto-claim treated a trashed blocker as live",
+        },
+        "project_dependencies": {
+            "m48_project_dependencies_hide_trashed_blockers": "issue dependency output exposed a trashed blocker",
+        },
+        "invitation_grants": {
+            "m48_invitation_grants_skip_trashed_projects": "workspace invitation applied a project grant to Trash",
+        },
+    }
+    race_guards = {
+        "work_session_claim": {
+            "filter": [
+                "m48_sessions_project_active_filter",
+                "m48_sessions_issue_active_filter",
+            ],
+            "lock": ["m48_sessions_project_row_lock", "m48_sessions_lock_order"],
+            "refuses_live_work_trash": True,
+        },
+        "shared_dispatch_creation": {
+            "filter": [
+                "m48_dispatch_project_active_filter",
+                "m48_dispatch_project_scope",
+                "m48_dispatch_shared_helper_calls",
+            ],
+            "lock": ["m48_dispatch_project_row_lock", "m48_dispatch_shared_helper_calls"],
+            "refuses_live_work_trash": True,
+        },
+        "manual_dispatch_creation": {
+            "filter": [
+                "m48_manual_dispatch_project_active_filter",
+                "m48_manual_dispatch_project_scope",
+            ],
+            "lock": ["m48_manual_dispatch_project_row_lock"],
+            "refuses_live_work_trash": True,
+        },
+        "transfer_acceptance": {
+            "filter": [
+                "m48_transfer_accept_project_active_filter",
+                "m48_transfer_accept_project_scope",
+            ],
+            "lock": [
+                "m48_transfer_accept_project_row_lock",
+                "m48_transfer_accept_lock_order",
+            ],
+            "refuses_live_work_trash": False,
+        },
+    }
+    mapped = set().union(*(set(guards) for guards in visibility_actions.values()))
+    mapped.update(guard for race in race_guards.values() for key in ("filter", "lock") for guard in race[key])
+    if mapped != set(g):
+        raise ValueError("M48 guard mapping must cover each extracted source fact exactly once")
+
+    def run_visibility() -> CheckResult:
+        actions = tuple(visibility_actions)
+        init = (False, frozenset(), frozenset())
+
+        def next_states(state):
+            trashed, applied, violations = state
+            if not trashed:
+                yield "trash project", (True, applied, violations)
+            for action in actions:
+                if not trashed or action in applied:
+                    continue
+                missing = frozenset(
+                    violation
+                    for guard, violation in visibility_actions[action].items()
+                    if not g[guard]
+                )
+                yield f"read {action} after project Trash", (
+                    trashed,
+                    applied | {action},
+                    violations | missing,
+                )
+
+        def invariant(state):
+            _trashed, _applied, violations = state
+            if violations:
+                return False, f"cross-feature Trash hiding invariant broken: {sorted(violations)[0]}"
+            return True, ""
+
+        return bfs_check(
+            "M48-visibility",
+            "Cross-feature Project Trash Hiding (#251)",
+            "After project Trash, every downstream reader hides project data while workspace history retains the delete event and references remain restorable",
+            "safety",
+            init,
+            next_states,
+            invariant,
+            files,
+            max_states=100_000,
+        )
+
+    def run_race(operation: str, filter_ok: bool, lock_ok: bool, refuses_live_work_trash: bool):
+        # State: project trashed, operation pending, project row locked,
+        # operation committed, violation.
+        initial = (False, False, False, False, False)
+
+        def next_states(state):
+            trashed, pending, project_locked, committed, violation = state
+            out = []
+            if not trashed and not project_locked and not (
+                committed and refuses_live_work_trash
+            ):
+                out.append(("deleteProject commits Trash", (True, pending, False, committed, violation)))
+            if not pending and not committed and (not trashed or not filter_ok):
+                out.append((
+                    f"{operation} selects an active project and begins",
+                    (trashed, True, lock_ok, committed, violation),
+                ))
+            if pending:
+                out.append((
+                    f"{operation} commits",
+                    (trashed, False, False, True, violation or trashed),
+                ))
+            return out
+
+        def invariant(state):
+            if state[4]:
+                return False, f"{operation} committed after the project was trashed"
+            return True, ""
+
+        return bfs_check(
+            f"M48-{operation.replace(' ', '-')}",
+            "Project Trash Write Serialization (#251)",
+            f"{operation} either commits before Trash or is refused after Trash; no write commits through the race",
+            "safety",
+            initial,
+            next_states,
+            invariant,
+            files,
+        )
+
+    def run() -> CheckResult:
+        visibility = run_visibility()
+        if visibility.status != "verified":
+            return visibility
+        states = visibility.states_explored
+        transitions = visibility.transitions_explored
+        for operation, guards in race_guards.items():
+            filter_ok = all(g[name] for name in guards["filter"])
+            lock_ok = all(g[name] for name in guards["lock"])
+            race = run_race(
+                operation.replace("_", " "),
+                filter_ok,
+                lock_ok,
+                guards["refuses_live_work_trash"],
+            )
+            states += race.states_explored
+            transitions += race.transitions_explored
+            if race.status != "verified":
+                return CheckResult(
+                    "M48",
+                    "Cross-feature Project Trash Hiding and Write Serialization (#251)",
+                    "Downstream reads hide trashed project data, and claim, dispatch, and transfer writes serialize against project Trash",
+                    "safety",
+                    race.status,
+                    states,
+                    transitions,
+                    race.summary,
+                    race.counterexample,
+                    files,
+                )
+        return CheckResult(
+            "M48",
+            "Cross-feature Project Trash Hiding and Write Serialization (#251)",
+            "Downstream reads hide trashed project data, and claim, dispatch, and transfer writes serialize against project Trash",
+            "safety",
+            "verified",
+            states,
+            transitions,
+            "All downstream visibility paths and project-row claim, dispatch and transfer races are safe",
+            [],
+            files,
+        )
+
+    result = run()
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run()
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M48",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M48",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -10649,6 +11221,7 @@ def main() -> None:
         check_m45(facts),
         check_m46(facts),
         check_m47(facts),
+        check_m48(facts),
     ]
 
     if "--json" in sys.argv:
