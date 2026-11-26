@@ -127,8 +127,7 @@ export function resolveCredentialedOrigin(options: CredentialedOriginOptions): s
           `Use 'orrery-runner login --server <url>' to switch installations.`,
       );
     }
-  }
-  if (options.envUrl !== undefined && options.envUrl !== "") {
+  } else if (options.envUrl !== undefined && options.envUrl !== "") {
     const asserted = canonicalizeServerUrl(options.envUrl);
     if (asserted !== stored) {
       throw new Error(

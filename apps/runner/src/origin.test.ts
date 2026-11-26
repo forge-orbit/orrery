@@ -76,10 +76,26 @@ describe("server URL canonicalizer (#264)", () => {
     expect(() =>
       resolveCredentialedOrigin({ storedServer: stored, serverFlag: "https://other.test/" }),
     ).toThrow(/does not match enrolled origin/);
-    // Mismatched ORRERY_URL fails too.
+    // Mismatched ORRERY_URL fails when --server is omitted.
     expect(() =>
       resolveCredentialedOrigin({ storedServer: stored, envUrl: "https://other.test/" }),
     ).toThrow(/ORRERY_URL/);
+    // Explicit --server matching stored origin takes precedence over a different ORRERY_URL.
+    expect(
+      resolveCredentialedOrigin({
+        storedServer: stored,
+        serverFlag: "https://example.com/app",
+        envUrl: "https://other.test/",
+      }),
+    ).toBe("https://example.com/app");
+    // Explicit --server mismatching stored origin still fails even if ORRERY_URL matches.
+    expect(() =>
+      resolveCredentialedOrigin({
+        storedServer: stored,
+        serverFlag: "https://other.test/",
+        envUrl: stored,
+      }),
+    ).toThrow(/--server/);
   });
 
   it("resolves login origins (reuse, fallback, mismatch)", () => {
