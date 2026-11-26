@@ -1,5 +1,6 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
 import { PowerSearch, type PowerSearchFilter } from "@astryxdesign/core/PowerSearch";
 import { Section } from "@astryxdesign/core/Section";
@@ -48,6 +49,7 @@ export function IssueFilterBar({
   filteredCount: number;
   onReset: () => void;
 }) {
+  const isCompact = useMediaQuery("(max-width: 48rem)");
   const config = useMemo(() => buildIssueFilterConfig(issues, labels), [issues, labels]);
   const isFiltered = scope !== "all" || filters.length > 0;
   const hasNonDefaultState = isFiltered || sort !== "priority";
@@ -60,37 +62,64 @@ export function IssueFilterBar({
           filters={filters}
           onChange={(next) => onFiltersChange([...next])}
           label="Filter project issues"
-          placeholder="Search issues or filter by status, label, assignee, priority, agent session…"
+          placeholder={
+            isCompact
+              ? "Search or filter issues…"
+              : "Search issues or filter by status, label, assignee, priority, agent session…"
+          }
           size="sm"
           startIcon={<Icon icon={Search} size="sm" />}
           {...(isFiltered ? { resultCount: `${filteredCount} of ${issues.length}` } : {})}
           data-issue-power-search=""
         />
         <Stack direction="horizontal" gap={2} vAlign="center" justify="between" wrap="wrap">
-          <Stack
-            direction="horizontal"
-            gap={1}
-            vAlign="center"
-            wrap="wrap"
-            role="group"
-            aria-label="Filter issues by status"
-          >
-            {SCOPE_OPTIONS.map(({ id, label }) => {
-              const count = counts[id];
-              return (
-                <ToggleButton
-                  key={id}
-                  label={`${label} (${count})`}
-                  isPressed={scope === id}
-                  size="sm"
-                  data-issue-scope={id}
-                  onPressedChange={(pressed) => onScopeChange(pressed ? id : "all")}
-                >
-                  {label} <Badge label={count} />
-                </ToggleButton>
-              );
-            })}
-          </Stack>
+          {isCompact ? (
+            <Selector
+              label="Filter issues by status"
+              isLabelHidden
+              id="project-issues-status-filter"
+              variant="secondary"
+              size="sm"
+              value={scope}
+              onChange={(value) => {
+                if (value === "all") {
+                  onScopeChange("all");
+                  return;
+                }
+                const parsed = IssueStatus.safeParse(value);
+                if (parsed.success) onScopeChange(parsed.data);
+              }}
+              options={SCOPE_OPTIONS.map(({ id, label }) => ({
+                value: id,
+                label: id === "all" ? `Status: All (${counts.all})` : `${label} (${counts[id]})`,
+              }))}
+            />
+          ) : (
+            <Stack
+              direction="horizontal"
+              gap={1}
+              vAlign="center"
+              wrap="wrap"
+              role="group"
+              aria-label="Filter issues by status"
+            >
+              {SCOPE_OPTIONS.map(({ id, label }) => {
+                const count = counts[id];
+                return (
+                  <ToggleButton
+                    key={id}
+                    label={`${label} (${count})`}
+                    isPressed={scope === id}
+                    size="sm"
+                    data-issue-scope={id}
+                    onPressedChange={(pressed) => onScopeChange(pressed ? id : "all")}
+                  >
+                    {label} <Badge label={count} />
+                  </ToggleButton>
+                );
+              })}
+            </Stack>
+          )}
           <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
             <Selector
               label="Sort issues"
