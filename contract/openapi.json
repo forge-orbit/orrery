@@ -6386,7 +6386,7 @@
             "$ref": "#/components/schemas/DispatchState"
           },
           "prompt": {
-            "$ref": "#/components/schemas/DispatchPrompt"
+            "$ref": "#/components/schemas/NullableDispatchPrompt"
           },
           "runId": {
             "type": [
@@ -6479,7 +6479,7 @@
           "ended"
         ]
       },
-      "DispatchPrompt": {
+      "NullableDispatchPrompt": {
         "type": [
           "string",
           "null"
@@ -6503,6 +6503,9 @@
         "required": [
           "runnerId"
         ]
+      },
+      "DispatchPrompt": {
+        "type": "string"
       },
       "IssueDispatchesResponse": {
         "type": "object",
@@ -18380,38 +18383,8 @@
               }
             }
           },
-          "403": {
-            "description": "The viewer cannot read this project",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
           "404": {
             "description": "No such Dispatch is accessible",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The Dispatch is unavailable",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too many requests; try again later",
             "content": {
               "application/problem+json": {
                 "schema": {

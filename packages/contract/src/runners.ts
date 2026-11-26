@@ -158,8 +158,19 @@ export function mergeHarnessCatalog(
         ...harness,
         ...(previous === undefined ? {} : { probedAt: laterTimestamp(previous.probedAt, harness.probedAt) }),
         models: harness.models.map((model) => {
+          const key = `${harness.id}\u0000${model.id}`;
+          const prior = known.get(key);
+          // A known entry with no effort levels is not evidence that the
+          // previously discovered levels disappeared (#242 partial probes).
+          if (
+            model.reasoningDiscovery === "known" &&
+            prior !== undefined &&
+            (model.supportedEfforts?.length ?? 0) === 0 &&
+            (prior.supportedEfforts?.length ?? 0) > 0
+          ) {
+            return prior;
+          }
           if (model.reasoningDiscovery === "known") return model;
-          const prior = known.get(`${harness.id}\u0000${model.id}`);
           if (prior === undefined) return model;
           return {
             ...model,
@@ -336,8 +347,14 @@ export const DispatchPrompt = z
   .meta({ id: "DispatchPrompt" });
 export type DispatchPrompt = z.infer<typeof DispatchPrompt>;
 
-/** Only the response field is nullable; requests keep blank-as-omitted. */
-export const NullableDispatchPrompt = DispatchPrompt.nullable();
+/**
+ * Only the response field is nullable; requests keep blank-as-omitted. The
+ * separate component id keeps the shared `DispatchPrompt` schema string-only
+ * in OpenAPI instead of inheriting nullability from `.nullable()`.
+ */
+export const NullableDispatchPrompt = DispatchPrompt.nullable().meta({
+  id: "NullableDispatchPrompt",
+});
 
 /** Database-backed reconciliation state of a Dispatch. */
 export const DispatchState = z

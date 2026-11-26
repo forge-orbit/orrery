@@ -267,6 +267,37 @@ describe("harness catalog merge", () => {
     expect(merged.harnesses[0]!.probedAt).toBe("2026-01-05T00:00:00.000Z");
   });
 
+  it("does not let known-with-no-efforts overwrite discovered effort levels", () => {
+    const stored = catalog(
+      "2026-01-05T00:00:00.000Z",
+      entry("opencode", [knownModel("gpt-5")], "2026-01-05T00:00:00.000Z"),
+    );
+    // A partial probe can publish a `known` model whose effort options it did
+    // not see; that must not erase the levels discovered by an earlier probe.
+    const incoming = catalog(
+      "2026-01-06T00:00:00.000Z",
+      entry(
+        "opencode",
+        [
+          {
+            id: "gpt-5",
+            label: "GPT-5",
+            reasoningDiscovery: "known",
+            supportedEfforts: [],
+            probedAt: "2026-01-06T00:00:00.000Z",
+          },
+        ],
+        "2026-01-06T00:00:00.000Z",
+      ),
+    );
+    const merged = mergeHarnessCatalog(stored, incoming);
+    expect(merged.harnesses[0]!.models[0]).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "low",
+    });
+  });
+
   it("keeps a restored harness's known efforts through a later stale refresh", () => {
     // The runner's partial refresh republishes a failed harness verbatim from
     // its last published catalog; the server must not drop it or regress it.

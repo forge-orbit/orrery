@@ -1106,3 +1106,103 @@ describe("#196 review regressions", () => {
     expect(field(first, "state")).toBe("ended");
   });
 });
+
+async function promptedFixture() {
+  const host = await enrollHost(adminCookie);
+  const runner = await registerRunner(host.credential);
+  const issue = await createIssue(`single-dispatch-acl-${randomUUID()}`);
+  const created = await request(`/api/issues/${issue.id}/dispatches`, {
+    method: "POST",
+    body: { runnerId: runner.id, prompt: "restricted prompt" },
+    cookie: adminCookie,
+  });
+  expect(created.status).toBe(201);
+  return { host, runner, issue, dispatch: Dispatch.parse(await created.json()) };
+}
+
+const readAsHost = (credential: string, dispatchId: string) =>
+  request(`/api/runners/dispatches/${dispatchId}`, { token: credential });
+
+const readAsOwner = (dispatchId: string) =>
+  request(`/api/runners/dispatches/${dispatchId}`, { cookie: adminCookie });
+
+async function addSecondOwner() {
+  const other = await insertHuman(`second-owner-${randomUUID()}@example.com`);
+  await database.db.insert(workspaceMemberships).values({
+    id: randomUUID(),
+    workspaceId,
+    humanId: other.id,
+    isOwner: true,
+  });
+  return other;
+}
+
+describe("single-Dispatch live access boundary (#239/#257)", () => {
+  it("answers an anonymous read with 401 while the owner still sees the prompt", async () => {
+    const { dispatch } = await promptedFixture();
+    await expectProblem(
+      await request(`/api/runners/dispatches/${dispatch.id}`),
+      401,
+      "invalid_credential",
+    );
+    const owner = await readAsOwner(dispatch.id);
+    expect(owner.status).toBe(200);
+    expect(Dispatch.parse(await owner.json()).prompt).toBe("restricted prompt");
+  });
+
+  it("refuses a revoked Runner's host credential with a non-enumerating 404", async () => {
+    const { host, runner, dispatch } = await promptedFixture();
+    expect((await readAsHost(host.credential, dispatch.id)).status).toBe(200);
+    await database.db
+      .update(runners)
+      .set({ revokedAt: sql`statement_timestamp()` })
+      .where(eq(runners.id, runner.id));
+    await expectProblem(await readAsHost(host.credential, dispatch.id), 404, "dispatch_not_found");
+    expect((await readAsOwner(dispatch.id)).status).toBe(200);
+  });
+
+  it("refuses a host whose owner lost workspace membership", async () => {
+    const { host, dispatch } = await promptedFixture();
+    expect((await readAsHost(host.credential, dispatch.id)).status).toBe(200);
+    await addSecondOwner();
+    await database.db
+      .delete(workspaceMemberships)
+      .where(
+        and(
+          eq(workspaceMemberships.workspaceId, workspaceId),
+          eq(workspaceMemberships.humanId, adminHumanId),
+        ),
+      );
+    await expectProblem(await readAsHost(host.credential, dispatch.id), 404, "dispatch_not_found");
+    await expectProblem(await readAsOwner(dispatch.id), 404, "dispatch_not_found");
+  });
+
+  it("refuses a host whose owner lost project Read", async () => {
+    const { host, dispatch } = await promptedFixture();
+    expect((await readAsHost(host.credential, dispatch.id)).status).toBe(200);
+    // A demoted member without an explicit grant has no project access.
+    await addSecondOwner();
+    await database.db
+      .update(workspaceMemberships)
+      .set({ isOwner: false })
+      .where(
+        and(
+          eq(workspaceMemberships.workspaceId, workspaceId),
+          eq(workspaceMemberships.humanId, adminHumanId),
+        ),
+      );
+    await expectProblem(await readAsHost(host.credential, dispatch.id), 404, "dispatch_not_found");
+    await expectProblem(await readAsOwner(dispatch.id), 404, "dispatch_not_found");
+  });
+
+  it("hides a trashed project's Dispatch prompt from both host and owner", async () => {
+    const { host, dispatch } = await promptedFixture();
+    expect((await readAsHost(host.credential, dispatch.id)).status).toBe(200);
+    await database.db
+      .update(projects)
+      .set({ deletedAt: sql`statement_timestamp()`, deletedByHumanId: adminHumanId })
+      .where(eq(projects.id, projectId));
+    await expectProblem(await readAsHost(host.credential, dispatch.id), 404, "dispatch_not_found");
+    await expectProblem(await readAsOwner(dispatch.id), 404, "dispatch_not_found");
+  });
+});

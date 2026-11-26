@@ -26,6 +26,7 @@ interface Fixture {
   secondIssueId: string;
   runnerId: string;
   runnerDisplayName: string;
+  hostId: string;
   hostCredential: string;
   agentId: string;
   agentName: string;
@@ -156,7 +157,9 @@ async function seedFixture(): Promise<Fixture> {
     data: { deviceCode: text(field(deviceBody, "deviceCode"), "device code"), verifier },
   });
   expect(exchanged.status()).toBe(200);
-  const credential = text(field(await exchanged.json(), "credential"), "host credential");
+  const exchangeBody = await exchanged.json();
+  const credential = text(field(exchangeBody, "credential"), "host credential");
+  const hostId = text(field(exchangeBody, "hostId"), "host id");
   await recordSecret(credential);
 
   const runnerDisplayName = `e2e-prompt-runner-${randomUUID().slice(0, 6)}`;
@@ -231,6 +234,7 @@ async function seedFixture(): Promise<Fixture> {
     secondIssueId,
     runnerId,
     runnerDisplayName,
+    hostId,
     hostCredential: credential,
     agentId,
     agentName,
@@ -325,6 +329,7 @@ test("a project reader can expand the custom prompt in Live Session Studio", asy
     );
     const promptSection = page.locator("[data-dispatch-prompt]");
     await expect(promptSection).toBeVisible();
+    await expect(promptSection.getByText("Show the full prompt")).toBeVisible();
     await promptSection.getByText("Show the full prompt").click();
     await expect(promptSection.getByText(PROMPT)).toBeVisible();
   } finally {
@@ -402,5 +407,57 @@ test("an uncertain dispatch is visible to a reader but only resolvable by its ow
     await expect(ownerPage.locator("[data-resolve-dispatch]")).toHaveCount(2);
   } finally {
     await ownerContext.close();
+  }
+});
+
+test("a cold open keeps the remembered Runner until the fleet resolves", async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: baseUrl });
+  const page = await context.newPage();
+  try {
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await page.evaluate(
+      ([projectId, runnerId, agentId]) => {
+        window.localStorage.setItem(
+          `orrery.delegate.${projectId}`,
+          JSON.stringify({ runnerId, agentId }),
+        );
+      },
+      [fixture.projectId, fixture.runnerId, fixture.agentId],
+    );
+    // Hold the owner-only fleet response so the dialog is clicked cold.
+    await page.route("**/api/workspaces/*/runners", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await route.continue();
+    });
+    await page.goto(`/issues/${fixture.secondIssueId}`, { waitUntil: "commit" });
+    await page.locator("[data-delegate-trigger]").click();
+    const dialog = page.getByRole("dialog", { name: "Delegate to Runner" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("combobox", { name: "Runner" })).toContainText(
+      fixture.runnerDisplayName,
+    );
+    await expect(dialog.getByRole("combobox", { name: /^Agent/ })).toContainText(fixture.agentName);
+    await expect(dialog.locator("[data-delegate-dispatch]")).toBeEnabled();
+  } finally {
+    await context.close();
+  }
+});
+
+test("a remembered Runner that is no longer owned falls back cleanly", async ({ browser }) => {
+  const revoked = await admin.post(`/api/runner-hosts/${fixture.hostId}/revoke`, { data: {} });
+  expect(revoked.status()).toBe(200);
+  const context = await browser.newContext({ baseURL: baseUrl });
+  const page = await context.newPage();
+  try {
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    // Fresh navigation, so the fleet query no longer serves the pre-revoke cache.
+    await page.goto(`/issues/${fixture.issueId}`);
+    await page.locator("[data-delegate-trigger]").click();
+    const dialog = page.getByRole("dialog", { name: "Delegate to Runner" });
+    await expect(dialog).toBeVisible();
+    await expect(page.getByText("No online Runners")).toBeVisible();
+    await expect(dialog.locator("[data-delegate-dispatch]")).toBeDisabled();
+  } finally {
+    await context.close();
   }
 });

@@ -266,10 +266,7 @@ const listIssueDispatches = createRoute({
 const readDispatchErrors = {
   400: problem("The dispatch request is invalid"),
   401: problem("Not signed in, or the Runner host credential is invalid"),
-  403: problem("The viewer cannot read this project"),
   404: problem("No such Dispatch is accessible"),
-  409: problem("The Dispatch is unavailable"),
-  429: problem("Too many requests; try again later"),
 };
 
 const readDispatchRoute = createRoute({
@@ -598,6 +595,19 @@ function failure(c: Context, error: unknown) {
   throw error;
 }
 
+/** `getDispatch` only emits validation, credential and non-enumeration failures. */
+function readDispatchFailure(c: Context, error: unknown) {
+  if (!(error instanceof RunnersError)) throw error;
+  const status = statusFor[error.kind];
+  if (status !== 400 && status !== 401 && status !== 404) throw error;
+  return problemResponse(c, {
+    status,
+    code: error.kind,
+    title: error.message,
+    ...(error.detail === undefined ? {} : { detail: error.detail }),
+  });
+}
+
 function streamFailure(c: Context, error: unknown) {
   if (error instanceof RunnersError && error.kind === "stream_rate_limited") {
     c.header("Retry-After", String(error.retryAfter ?? 60));
@@ -744,7 +754,7 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
       const { dispatchId } = c.req.valid("param");
       return c.json(await service.getDispatch(bearer(c), await sessionReader(c), dispatchId), 200);
     } catch (error) {
-      return failure(c, error);
+      return readDispatchFailure(c, error);
     }
   });
 

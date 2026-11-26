@@ -2904,11 +2904,12 @@ export function createRunnersService(deps: RunnersDeps) {
       return db.transaction(async (tx) => {
         const dispatch = await readDispatch(tx, dispatchId);
         const [issue] = await tx
-          .select({ deletedAt: issues.deletedAt })
+          .select({ deletedAt: issues.deletedAt, projectDeletedAt: projects.deletedAt })
           .from(issues)
+          .innerJoin(projects, eq(issues.projectId, projects.id))
           .where(eq(issues.id, dispatch.issueId))
           .limit(1);
-        if (issue === undefined || issue.deletedAt !== null) {
+        if (issue === undefined || issue.deletedAt !== null || issue.projectDeletedAt !== null) {
           throw new RunnersError("dispatch_not_found");
         }
         if (account !== null) {
@@ -2923,9 +2924,30 @@ export function createRunnersService(deps: RunnersDeps) {
           }
           return toDispatch(dispatch);
         }
-        // Runner host credential: the host owns every Runner it enrolled.
+        // Runner host credential: a still-valid credential alone is not enough.
+        // Re-check the owner's live Runner, workspace membership and project
+        // Read in this transaction. Every denial is a 404, never an oracle for
+        // a Dispatch id the host can no longer see (#239 live ACL).
         const host = await readHostByCredential(tx, credential);
-        if (dispatch.hostId !== host.host.id) throw new RunnersError("dispatch_not_found");
+        const [runner] = await tx
+          .select({ revokedAt: runners.revokedAt })
+          .from(runners)
+          .where(eq(runners.id, dispatch.runnerId))
+          .limit(1);
+        if (
+          dispatch.hostId !== host.host.id ||
+          runner === undefined ||
+          runner.revokedAt !== null ||
+          !(await canSeeWorkspace(tx, dispatch.workspaceId, host.humanId))
+        ) {
+          throw new RunnersError("dispatch_not_found");
+        }
+        const ceiling = await projectAccessCeiling(tx, dispatch.workspaceId, host.humanId, [
+          dispatch.projectId,
+        ]);
+        if (!hasAccess(ceiling.get(dispatch.projectId), "read", projectAccessAtLeast)) {
+          throw new RunnersError("dispatch_not_found");
+        }
         return toDispatch(dispatch);
       });
     },

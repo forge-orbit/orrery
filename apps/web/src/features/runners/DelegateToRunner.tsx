@@ -83,11 +83,17 @@ export function DelegateToRunner({
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { data: fleet } = useQuery(workspaceRunnersQuery(workspaceId));
+  // Project readers see Recent dispatches but never the owner-only fleet.
+  const { data: fleet } = useQuery({
+    ...workspaceRunnersQuery(workspaceId),
+    enabled: canDelegate,
+  });
   const { data: dispatchList } = useQuery(issueDispatchesQuery(issueId));
   const [isOpen, setIsOpen] = useState(false);
-  const [runnerId, setRunnerId] = useState("");
-  const [agentId, setAgentId] = useState("");
+  // Explicit user overrides. Undefined means "no choice yet", so a cold open
+  // never clears a remembered choice while the fleet query is still loading.
+  const [runnerOverride, setRunnerOverride] = useState<string | undefined>(undefined);
+  const [agentOverride, setAgentOverride] = useState<string | undefined>(undefined);
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string>();
 
@@ -101,20 +107,28 @@ export function DelegateToRunner({
         runner.revokedAt === null,
     );
 
+  // Validate the remembered choice against live data on every render. Until
+  // the fleet resolves there is nothing to validate against, so the remembered
+  // id survives a cold open and is applied as soon as data is present.
+  const memory = readDelegateMemory(projectId);
+  const rememberedRunner =
+    fleet === undefined || memory === undefined
+      ? undefined
+      : owned.find((runner) => runner.id === memory.runnerId);
+  const runnerId = runnerOverride ?? rememberedRunner?.id ?? "";
+  const agentId =
+    agentOverride ??
+    (rememberedRunner !== undefined &&
+    memory !== undefined &&
+    agents.some((agent) => agent.id === memory.agentId)
+      ? memory.agentId
+      : "");
+
   function openDialog() {
-    // Remembered selections only apply while that Runner is still owned and
-    // online for this project; the prompt always starts blank.
-    const memory = readDelegateMemory(projectId);
-    const rememberedRunner =
-      memory === undefined ? undefined : owned.find((runner) => runner.id === memory.runnerId);
-    setRunnerId(rememberedRunner?.id ?? "");
-    setAgentId(
-      rememberedRunner !== undefined &&
-        memory !== undefined &&
-        agents.some((agent) => agent.id === memory.agentId)
-        ? memory.agentId
-        : "",
-    );
+    // Prompt always starts blank; the Runner and Agent come from the derived
+    // choice above, so a click before the fleet settles cannot reset them.
+    setRunnerOverride(undefined);
+    setAgentOverride(undefined);
     setPrompt("");
     setError(undefined);
     setIsOpen(true);
@@ -215,7 +229,7 @@ export function DelegateToRunner({
                       label: `${runner.displayName} · ${runner.presence}`,
                     }))}
                     value={runnerId}
-                    onChange={setRunnerId}
+                    onChange={setRunnerOverride}
                     isDisabled={owned.length === 0 || mutation.isPending}
                   />
                   <Selector
@@ -224,7 +238,7 @@ export function DelegateToRunner({
                     placeholder="Use the Runner's default Agent"
                     options={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
                     value={agentId}
-                    onChange={(value) => setAgentId(value ?? "")}
+                    onChange={(value) => setAgentOverride(value ?? "")}
                     hasClear
                     isDisabled={mutation.isPending}
                   />

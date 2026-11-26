@@ -81,35 +81,29 @@ export interface ProbeHarnessOptions {
   signal?: AbortSignal | undefined;
 }
 
-/**
- * A bounded ACP discovery session; never leaves a probe process group behind.
- * The per-Harness lock keeps a probe from switching the Harness's default
- * model while a Dispatch for that same Harness is starting (ADR-0011).
- */
+/** A bounded ACP discovery session; never leaves a probe process group behind. */
 export async function probeHarness(
   definition: HarnessDefinition,
   options: ProbeHarnessOptions,
 ): Promise<HarnessCatalogEntry> {
-  {
-    const { session, initResult } = await AcpStdioClient.probe({
-      command: definition.command,
-      args: definition.args,
-      cwd: options.cwd,
-      ...(options.env === undefined ? {} : { env: options.env }),
-      mcpServers: [],
-      // Lets a test stub tell a discovery session from a real dispatch session.
-      sessionMeta: { orreryProbe: true },
-      worktreeReal: options.cwd,
-      timeoutMs: options.timeoutMs,
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-    return catalogEntryFromSession(
-      definition,
-      initResult,
-      session,
-      options.at ?? new Date().toISOString(),
-    );
-  }
+  const { session, initResult } = await AcpStdioClient.probe({
+    command: definition.command,
+    args: definition.args,
+    cwd: options.cwd,
+    ...(options.env === undefined ? {} : { env: options.env }),
+    mcpServers: [],
+    // Lets a test stub tell a discovery session from a real dispatch session.
+    sessionMeta: { orreryProbe: true },
+    worktreeReal: options.cwd,
+    timeoutMs: options.timeoutMs,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  return catalogEntryFromSession(
+    definition,
+    initResult,
+    session,
+    options.at ?? new Date().toISOString(),
+  );
 }
 
 /**
