@@ -6,6 +6,7 @@ import {
   DeviceCodeResponse,
   Dispatch,
   DispatchAcceptance,
+  type ExecutionDefaults,
   type HarnessCatalog,
   HostCredentialResponse,
   Issue,
@@ -175,6 +176,7 @@ async function registerRunner(
   credential: string,
   agent = defaultAgentId,
   harnessCatalog?: HarnessCatalog,
+  defaults?: ExecutionDefaults,
 ) {
   const res = await request("/api/runners/register", {
     method: "POST",
@@ -184,6 +186,7 @@ async function registerRunner(
       agentId: agent,
       repoFingerprint: fingerprint,
       ...(harnessCatalog === undefined ? {} : { harnessCatalog }),
+      ...(defaults === undefined ? {} : { defaults }),
     },
     token: credential,
   });
@@ -1250,6 +1253,168 @@ describe("per-dispatch harness, model and effort (#241)", () => {
       harness: "opencode",
       model: null,
     });
+  });
+
+  it("records registered CLI defaults on UI dispatches without explicit choices", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential, defaultAgentId, undefined, {
+      harness: "  opencode  ",
+      model: "stub-model-1",
+      effort: "high",
+    });
+    const issue = await createIssue("UI dispatch with runner defaults");
+
+    const created = await createDispatchWithOptions(issue.id, runner.id, adminCookie, {});
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch).toMatchObject({
+      harness: "opencode",
+      model: "stub-model-1",
+      effort: "high",
+    });
+    const [row] = await database.db
+      .select()
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.id, dispatch.id));
+    expect(row).toMatchObject({ harness: "opencode", model: "stub-model-1", effort: "high" });
+    const [command] = await database.db
+      .select({ payload: runnerCommands.payload })
+      .from(runnerCommands)
+      .where(eq(runnerCommands.runnerId, runner.id));
+    expect(command?.payload).toMatchObject({
+      dispatchId: dispatch.id,
+      harness: "opencode",
+      model: "stub-model-1",
+      effort: "high",
+    });
+
+    // The Run is created from the Dispatch, so it records the same effective
+    // choices instead of a fallback harness and a null model.
+    const accepted = await request(`/api/runners/${runner.id}/dispatches/${dispatch.id}/accept`, {
+      method: "POST",
+      token: host.credential,
+    });
+    expect(accepted.status).toBe(200);
+    const acceptance = DispatchAcceptance.parse(await accepted.json());
+    expect(acceptance.run).toMatchObject({ harness: "opencode", model: "stub-model-1" });
+    const [runRow] = await database.db.select().from(runs).where(eq(runs.id, acceptance.run.id));
+    expect(runRow).toMatchObject({ harness: "opencode", model: "stub-model-1" });
+
+    // An explicit per-field choice wins; the other fields still come from the
+    // Runner's registered defaults.
+    const overrideIssue = await createIssue("UI dispatch with an explicit model");
+    const overridden = await createDispatchWithOptions(overrideIssue.id, runner.id, adminCookie, {
+      model: "stub-model-2",
+    });
+    expect(Dispatch.parse(await overridden.json())).toMatchObject({
+      harness: "opencode",
+      model: "stub-model-2",
+      effort: "high",
+    });
+  });
+
+  it("ignores execution choices supplied by a human instead of the Runner host", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential, defaultAgentId, undefined, {
+      harness: "opencode",
+      model: "stub-model-1",
+    });
+    const issue = await createIssue("human cannot set runner defaults");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      cookie: adminCookie,
+      body: {
+        runnerId: runner.id,
+        defaults: { harness: "unauthorised", model: "unauthorised" },
+      },
+    });
+    expect(created.status).toBe(201);
+    expect(Dispatch.parse(await created.json())).toMatchObject({
+      harness: "opencode",
+      model: "stub-model-1",
+    });
+    expect(await dispatchRowsCount(runner.id)).toBe(1);
+  });
+
+  it("records registered defaults on an auto-claimed dispatch", async () => {
+    const host = await enrollHost(adminCookie);
+    // A dedicated project keeps the claim deterministic (the shared project
+    // has issues from earlier cases in this suite).
+    const [autoProject] = await database.db
+      .insert(projects)
+      .values({
+        id: randomUUID(),
+        workspaceId,
+        name: "Auto-claim defaults",
+        key: `AD${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`,
+        createdByHumanId: adminHumanId,
+      })
+      .returning();
+    const autoProjectId = autoProject!.id;
+    const runnerResponse = await request("/api/runners/register", {
+      method: "POST",
+      token: host.credential,
+      body: {
+        workspaceId,
+        projectId: autoProjectId,
+        agentId: defaultAgentId,
+        repoFingerprint: fingerprint,
+        defaults: { harness: "opencode", model: "stub-model-1", effort: "high" },
+      },
+    });
+    expect(runnerResponse.status).toBe(201);
+    const runner = Runner.parse(await runnerResponse.json());
+    expect(runner.defaults).toEqual({
+      harness: "opencode",
+      model: "stub-model-1",
+      effort: "high",
+    });
+    const issue = await request(`/api/projects/${autoProjectId}/issues`, {
+      method: "POST",
+      cookie: adminCookie,
+      body: { title: "auto-claimed with defaults" },
+    });
+    expect(issue.status).toBe(201);
+    const issueId = Issue.parse(await issue.json()).id;
+
+    const claimed = await request(`/api/runners/${runner.id}/auto-claim`, {
+      method: "POST",
+      token: host.credential,
+      body: { filter: "all" },
+    });
+    expect(claimed.status).toBe(200);
+    const dispatch = Dispatch.parse(field(await claimed.json(), "dispatch"));
+    expect(dispatch.issueId).toBe(issueId);
+    expect(dispatch).toMatchObject({
+      harness: "opencode",
+      model: "stub-model-1",
+      effort: "high",
+    });
+    const [command] = await database.db
+      .select({ payload: runnerCommands.payload })
+      .from(runnerCommands)
+      .where(eq(runnerCommands.runnerId, runner.id));
+    expect(command?.payload).toMatchObject({
+      dispatchId: dispatch.id,
+      harness: "opencode",
+      model: "stub-model-1",
+      effort: "high",
+    });
+  });
+
+  it("clears stale defaults when a Runner re-registers without CLI flags", async () => {
+    const host = await enrollHost(adminCookie);
+    await registerRunner(host.credential, defaultAgentId, undefined, {
+      harness: "opencode",
+      model: "stub-model-1",
+    });
+    const runner = await registerRunner(host.credential);
+    expect(runner.defaults).toEqual({});
+    const issue = await createIssue("no stale defaults");
+    const created = await createDispatchWithOptions(issue.id, runner.id, adminCookie, {});
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch.harness).toBeUndefined();
+    expect(dispatch.model).toBeUndefined();
   });
 });
 

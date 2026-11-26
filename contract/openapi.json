@@ -5814,6 +5814,9 @@
           "harnessCatalog": {
             "$ref": "#/components/schemas/HarnessCatalog"
           },
+          "defaults": {
+            "$ref": "#/components/schemas/ExecutionDefaults"
+          },
           "maxConcurrency": {
             "type": "integer",
             "minimum": 1,
@@ -5870,6 +5873,7 @@
           "repoFingerprint",
           "capabilities",
           "harnessCatalog",
+          "defaults",
           "maxConcurrency",
           "activeSlotCount",
           "lastSeenAt",
@@ -5975,6 +5979,32 @@
           "reasoningDiscovery"
         ]
       },
+      "ExecutionDefaults": {
+        "type": "object",
+        "properties": {
+          "harness": {
+            "$ref": "#/components/schemas/DispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/DispatchModel"
+          },
+          "effort": {
+            "$ref": "#/components/schemas/DispatchEffort"
+          }
+        }
+      },
+      "DispatchHarness": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "DispatchModel": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "DispatchEffort": {
+        "type": "string",
+        "maxLength": 64
+      },
       "RunnerPresence": {
         "type": "string",
         "enum": [
@@ -6019,6 +6049,9 @@
           },
           "harnessCatalog": {
             "$ref": "#/components/schemas/HarnessCatalog"
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/ExecutionDefaults"
           },
           "maxConcurrency": {
             "type": "integer",
@@ -6179,6 +6212,9 @@
           "harnessCatalog": {
             "$ref": "#/components/schemas/HarnessCatalog"
           },
+          "defaults": {
+            "$ref": "#/components/schemas/ExecutionDefaults"
+          },
           "maxConcurrency": {
             "type": "integer",
             "minimum": 1,
@@ -6244,6 +6280,7 @@
           "repoFingerprint",
           "capabilities",
           "harnessCatalog",
+          "defaults",
           "maxConcurrency",
           "activeSlotCount",
           "lastSeenAt",
@@ -6410,18 +6447,6 @@
       "DispatchPrompt": {
         "type": "string",
         "maxLength": 16000
-      },
-      "DispatchHarness": {
-        "type": "string",
-        "maxLength": 64
-      },
-      "DispatchModel": {
-        "type": "string",
-        "maxLength": 200
-      },
-      "DispatchEffort": {
-        "type": "string",
-        "maxLength": 64
       },
       "CreateDispatchRequest": {
         "type": "object",

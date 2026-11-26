@@ -16,6 +16,7 @@ import {
   projects,
   runnerDispatches,
   runners,
+  runs,
   workSessions,
   workspaceMemberships,
 } from "../../db/schema.ts";
@@ -588,6 +589,90 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
       const chunks = await streamOf(str(field(dispatch, "runnerId")), str(field(dispatch, "id")));
       expect(chunks.length).toBeGreaterThan(0);
       expect(chunks.some((chunk) => field(chunk, "kind") === "event")).toBe(true);
+    } finally {
+      started.child.kill("SIGTERM");
+      await Promise.race([started.done, new Promise<void>((resolve) => setTimeout(resolve, 5000))]);
+    }
+  });
+
+  it("start --harness/--model/--effort records the effective options on auto-claimed work", async () => {
+    const key = `DF${randomBytes(3).toString("hex").toUpperCase()}`;
+    const project = await api(`/api/workspaces/${world.workspaceA}/projects`, {
+      method: "POST",
+      cookie: world.cookie,
+      body: { name: "Defaults project", key },
+    });
+    if (project.status !== 201) throw new Error(`project failed: ${JSON.stringify(project.body)}`);
+    const projectId = str(field(project.body, "id"));
+    const issue = await makeIssue("auto-claim with CLI defaults", {
+      projectId,
+      agentId: world.agentId,
+    });
+    const started = spawnCli([
+      "start",
+      "--server",
+      world.baseUrl,
+      "--workspace",
+      world.workspaceA,
+      "--project",
+      projectId,
+      "--agent",
+      world.agentId,
+      "--repo",
+      world.repo,
+      "--concurrency",
+      "1",
+      "--heartbeat-ms",
+      "100",
+      "--auto-claim",
+      "--auto-claim-poll-ms",
+      "100",
+      "--harness",
+      "custom",
+      "--model",
+      "stub-model-2",
+      "--effort",
+      "high",
+      "--lease-renew-ms",
+      "60",
+      "--cancel-grace-ms",
+      "500",
+      ...acpArgs(),
+    ]);
+    try {
+      const dispatch = await until(async () => (await dispatchesOf(issue.id))[0], 30_000);
+      expect(recordOf(dispatch)).toMatchObject({
+        harness: "custom",
+        model: "stub-model-2",
+        effort: "high",
+      });
+      const dispatchId = str(field(dispatch, "id"));
+      // The server creates the Run at accept, just after the Dispatch command
+      // is observed; wait for that boundary before comparing metadata.
+      const acceptedRow = await until(async () => {
+        const [current] = await database.db
+          .select()
+          .from(runnerDispatches)
+          .where(eq(runnerDispatches.id, dispatchId));
+        return current?.runId === null || current === undefined ? undefined : current;
+      }, 30_000);
+      expect(acceptedRow).toMatchObject({
+        harness: "custom",
+        model: "stub-model-2",
+        effort: "high",
+      });
+      const [run] = await database.db
+        .select()
+        .from(runs)
+        .where(eq(runs.id, acceptedRow.runId ?? ""));
+      // The Run is built from the Dispatch, so it cannot record a fallback
+      // harness or a null model while the Runner executes a different choice.
+      expect(run).toMatchObject({ harness: "custom", model: "stub-model-2" });
+      const chunks = await until(async () => {
+        const current = await streamOf(str(field(dispatch, "runnerId")), dispatchId);
+        return current.length > 0 ? current : undefined;
+      }, 30_000);
+      expect(chunks.length).toBeGreaterThan(0);
     } finally {
       started.child.kill("SIGTERM");
       await Promise.race([started.done, new Promise<void>((resolve) => setTimeout(resolve, 5000))]);

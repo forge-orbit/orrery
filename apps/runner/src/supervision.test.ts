@@ -733,6 +733,48 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
     });
   });
 
+  it("applies the cached default model of the local default Harness when nothing is selected", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      harnessDefinitions: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          command: process.execPath,
+          args: [stubPath],
+        },
+      ],
+      harnessCatalog: {
+        probedAt: "2026-01-01T00:00:00.000Z",
+        harnesses: [
+          {
+            id: "opencode",
+            displayName: "OpenCode",
+            defaultModel: "stub-model-1",
+            models: [
+              {
+                id: "stub-model-1",
+                reasoningDiscovery: "known",
+                supportedEfforts: ["low", "high"],
+                defaultEffort: "low",
+              },
+            ],
+            probedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+    // No harness, model or effort on the Dispatch and no CLI defaults: the
+    // Harness backing the effective ACP command supplies its cached default.
+    fixture.control.enqueueDispatch("TEST-241-6", "attempt-241-6");
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    const recorded = await events(fixture);
+    expect(recorded.find((item) => item.event === "set_model")).toMatchObject({
+      modelId: "stub-model-1",
+    });
+  });
+
   it("drains a disconnected slot before shutdown completes", async () => {
     const fixture = await makeFixture({ mode: "ignore-term", cancelGraceMs: 80 });
     fixture.control.enqueueDispatch("TEST-13", "attempt-13");

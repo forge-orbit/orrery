@@ -9,6 +9,7 @@ import type {
   Dispatch,
   DispatchAcceptance,
   ExchangeDeviceCodeRequest,
+  ExecutionDefaults,
   HarnessCatalog,
   IssueResolveRequest,
   IssueResolveResponse,
@@ -290,6 +291,7 @@ const runnerFields = {
   repoFingerprint: runners.repoFingerprint,
   capabilities: runners.capabilities,
   harnessCatalog: runners.harnessCatalog,
+  executionDefaults: runners.executionDefaults,
   maxConcurrency: runners.maxConcurrency,
   activeSlotCount: runners.activeSlotCount,
   lastSeenAt: runners.lastSeenAt,
@@ -309,6 +311,7 @@ type RunnerRow = {
   repoFingerprint: string;
   capabilities: string[];
   harnessCatalog: HarnessCatalog;
+  executionDefaults: ExecutionDefaults;
   maxConcurrency: number;
   activeSlotCount: number;
   lastSeenAt: Date;
@@ -328,6 +331,7 @@ const toRunnerResponse = (row: RunnerRow): Runner => ({
   repoFingerprint: row.repoFingerprint,
   capabilities: row.capabilities,
   harnessCatalog: row.harnessCatalog,
+  defaults: row.executionDefaults,
   maxConcurrency: row.maxConcurrency,
   activeSlotCount: row.activeSlotCount,
   lastSeenAt: row.lastSeenAt.toISOString(),
@@ -452,6 +456,18 @@ const normalizedPrompt = (value: string | undefined): string | undefined => {
 const normalizedOption = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+};
+
+/** CLI defaults are registered by the Runner host; blanks stay omitted. */
+const normalizedDefaults = (value: ExecutionDefaults | undefined): ExecutionDefaults => {
+  const harness = normalizedOption(value?.harness);
+  const model = normalizedOption(value?.model);
+  const effort = normalizedOption(value?.effort);
+  return {
+    ...(harness === undefined ? {} : { harness }),
+    ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
+  };
 };
 
 /** DB-time expiry flag shared by every device-code read/write decision. */
@@ -2130,6 +2146,9 @@ export function createRunnersService(deps: RunnersDeps) {
       input: RegisterRunnerRequest,
     ): Promise<Runner> {
       return db.transaction(async (tx) => {
+        // The running process declares its flags; a re-register without them
+        // clears stale defaults instead of silently executing old choices.
+        const defaults = normalizedDefaults(input.defaults);
         const host = await readHostByCredential(tx, credential);
         // Workspace first: never reveal whether a project id exists in a workspace
         // the host owner cannot see.
@@ -2202,6 +2221,7 @@ export function createRunnersService(deps: RunnersDeps) {
                 input.harnessCatalog === undefined || input.harnessCatalog.harnesses.length === 0
                   ? existing.harnessCatalog
                   : mergeHarnessCatalog(existing.harnessCatalog, input.harnessCatalog),
+              executionDefaults: defaults,
               maxConcurrency: input.maxConcurrency,
               activeSlotCount: 0,
               lastSeenAt: sql`statement_timestamp()`,
@@ -2225,6 +2245,7 @@ export function createRunnersService(deps: RunnersDeps) {
             repoFingerprint: fingerprint,
             capabilities: input.capabilities,
             harnessCatalog: input.harnessCatalog ?? EMPTY_HARNESS_CATALOG,
+            executionDefaults: defaults,
             maxConcurrency: input.maxConcurrency,
             activeSlotCount: 0,
           })
@@ -2359,9 +2380,11 @@ export function createRunnersService(deps: RunnersDeps) {
     ): Promise<Dispatch> {
       const human = requireAccount(account);
       const prompt = normalizedPrompt(input.prompt);
-      const harness = normalizedOption(input.harness);
-      const model = normalizedOption(input.model);
-      const effort = normalizedOption(input.effort);
+      // Only the human's explicit choices are catalogue-checked. Runner
+      // defaults come from the authenticated Runner host's own local config.
+      const requestedHarness = normalizedOption(input.harness);
+      const requestedModel = normalizedOption(input.model);
+      const requestedEffort = normalizedOption(input.effort);
       return db.transaction(async (tx) => {
         const [issue] = await tx
           .select({
@@ -2422,16 +2445,26 @@ export function createRunnersService(deps: RunnersDeps) {
         ) {
           throw new RunnersError("runner_unavailable");
         }
-        // A Runner that published a catalog is authoritative for its Harness
-        // ids. An empty catalog means "not discovered yet": accept the choice
-        // and let the local Runner resolve it against its own registry.
+        // A Runner that published a catalog is authoritative for the Harness
+        // ids a human may select. An empty catalog means "not discovered yet":
+        // accept the choice and let the local Runner resolve it against its
+        // own registry. The Runner's registered defaults need no catalog check.
         if (
-          harness !== undefined &&
+          requestedHarness !== undefined &&
           joined.runner.harnessCatalog.harnesses.length > 0 &&
-          !joined.runner.harnessCatalog.harnesses.some((candidate) => candidate.id === harness)
+          !joined.runner.harnessCatalog.harnesses.some(
+            (candidate) => candidate.id === requestedHarness,
+          )
         ) {
-          throw new RunnersError("unknown_harness", undefined, harness);
+          throw new RunnersError("unknown_harness", undefined, requestedHarness);
         }
+        // Per-field fallback: an explicit choice wins, and every effective
+        // value is persisted on the Dispatch so the Run and readers agree with
+        // what the Runner will actually execute.
+        const harness =
+          requestedHarness ?? normalizedOption(joined.runner.executionDefaults.harness);
+        const model = requestedModel ?? normalizedOption(joined.runner.executionDefaults.model);
+        const effort = requestedEffort ?? normalizedOption(joined.runner.executionDefaults.effort);
 
         const agentId = input.agentId ?? joined.runner.agentId;
         const [agent] = await tx
@@ -2669,6 +2702,9 @@ export function createRunnersService(deps: RunnersDeps) {
               projectId: runner.projectId,
               agentId: runner.agentId,
               requestedByHumanId: host.humanId,
+              // Auto-claim has no human choices: record the Runner's CLI
+              // defaults on the Dispatch, exactly as its local execution uses.
+              ...runner.executionDefaults,
             });
             return { dispatch };
           } catch (error) {

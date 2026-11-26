@@ -193,6 +193,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           repoFingerprint: registration.repoFingerprint,
           capabilities: [],
           harnessCatalog: EMPTY_HARNESS_CATALOG,
+          defaults: {},
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),
@@ -266,6 +267,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           repoFingerprint: sha256("checkout"),
           capabilities: [],
           harnessCatalog: EMPTY_HARNESS_CATALOG,
+          defaults: {},
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),
@@ -289,6 +291,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
             repoFingerprint: sha256("checkout"),
             capabilities: [],
             harnessCatalog: EMPTY_HARNESS_CATALOG,
+            defaults: {},
             maxConcurrency: 1,
             activeSlotCount: 0,
             lastSeenAt: new Date().toISOString(),
@@ -333,6 +336,90 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
     }
   });
 
+  it("registers --harness/--model/--effort defaults so the server can record them", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: "http://orrery.test",
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
+    const registrationWithDefaults = registrationBody.extend({
+      defaults: z.object({ harness: z.string(), model: z.string(), effort: z.string() }),
+    });
+    let registration: z.infer<typeof registrationWithDefaults> | undefined;
+    let heartbeats = 0;
+    const stub = await listen(async (req, res) => {
+      if (req.method === "POST" && req.url === "/api/runners/register") {
+        const body = registrationWithDefaults.parse(await bodyOf(req));
+        registration = body;
+        json(res, 201, {
+          id: "runner-defaults",
+          hostId: "host-1",
+          workspaceId: body.workspaceId,
+          projectId: body.projectId,
+          agentId: "agent-1",
+          displayName: "TestLaptop",
+          repoFingerprint: body.repoFingerprint,
+          capabilities: [],
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
+          defaults: body.defaults,
+          maxConcurrency: 1,
+          activeSlotCount: 0,
+          lastSeenAt: new Date().toISOString(),
+          disconnectedAt: null,
+          revokedAt: null,
+          createdAt: new Date().toISOString(),
+          presence: "online",
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/runner-defaults/heartbeat") {
+        heartbeats += 1;
+        json(res, 401, { status: 401, code: "invalid_credential", title: "Revoked" });
+        return;
+      }
+      json(res, 404, { status: 404, code: "not_found", title: "Not found" });
+    });
+
+    try {
+      const result = await run(
+        [
+          "start",
+          "--server",
+          stub.url,
+          "--workspace",
+          "workspace-1",
+          "--project",
+          "project-1",
+          "--heartbeat-ms",
+          "50",
+          "--harness",
+          "opencode",
+          "--model",
+          "stub-model-2",
+          "--effort",
+          "high",
+        ],
+        { ORRERY_RUNNER_CONFIG_DIR: dir },
+      );
+      expect(result.code).toBe(0);
+      expect(registration?.defaults).toEqual({
+        harness: "opencode",
+        model: "stub-model-2",
+        effort: "high",
+      });
+      expect(heartbeats).toBe(1);
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("acknowledges commands whose seq starts above 1 after a runner restart", async () => {
     const dir = await makeDir();
     await writeFile(
@@ -360,6 +447,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           repoFingerprint: sha256("checkout"),
           capabilities: [],
           harnessCatalog: EMPTY_HARNESS_CATALOG,
+          defaults: {},
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),
@@ -422,6 +510,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           repoFingerprint: sha256("checkout"),
           capabilities: [],
           harnessCatalog: EMPTY_HARNESS_CATALOG,
+          defaults: {},
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),

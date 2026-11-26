@@ -185,6 +185,7 @@ export class TestOrrery {
       repoFingerprint: "0".repeat(64),
       capabilities: [],
       harnessCatalog: EMPTY_HARNESS_CATALOG,
+      defaults: {},
       maxConcurrency: 1,
       activeSlotCount: 0,
       lastSeenAt: now(),

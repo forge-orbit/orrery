@@ -4,6 +4,7 @@ import {
   AssigneeType,
   AttachmentHolderType,
   DispatchState,
+  type ExecutionDefaults,
   FallbackPolicy,
   type HarnessCatalog,
   InvitationDelivery,
@@ -1611,6 +1612,11 @@ export const runners = pgTable(
       .$type<HarnessCatalog>()
       .notNull()
       .default(sql`'{"harnesses":[],"probedAt":"1970-01-01T00:00:00.000Z"}'::jsonb`),
+    /** CLI defaults used when a Dispatch carries no explicit execution choice. */
+    executionDefaults: jsonb("execution_defaults")
+      .$type<ExecutionDefaults>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     maxConcurrency: integer("max_concurrency").notNull().default(1),
     activeSlotCount: integer("active_slot_count").notNull().default(0),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),

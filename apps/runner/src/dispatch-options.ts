@@ -42,6 +42,42 @@ const nonBlank = (value: string | undefined): string | undefined => {
   return trimmed === undefined || trimmed === "" ? undefined : trimmed;
 };
 
+/**
+ * The ACP command in effect without a selected Harness still belongs to a
+ * local Harness: either the `--acp-command` override (`custom`) or an installed
+ * preset/user entry with the same command and args. Resolve it through the same
+ * registry the startup probe uses, so probe and spawn share one lock identity
+ * instead of an executable path or alias (#241).
+ */
+function defaultHarnessDefinition(context: DispatchOptionsContext): HarnessDefinition | undefined {
+  const definitions =
+    context.definitions ??
+    detectHarnesses({
+      ...(context.acpOverride === undefined ? {} : { acpOverride: context.acpOverride }),
+      ...(context.configDir === undefined ? {} : { configDir: context.configDir }),
+      ...(context.pathEnv === undefined ? {} : { pathEnv: context.pathEnv }),
+    });
+  const { command, args } = context.defaultCommand;
+  return definitions.find(
+    (item) =>
+      item.command === command &&
+      item.args.length === args.length &&
+      item.args.every((arg, index) => arg === args[index]),
+  );
+}
+
+/** Wire form of CLI defaults: blanks are never sent to the control plane. */
+export function executionChoicePayload(choice: ExecutionChoice | undefined): ExecutionChoice {
+  const harness = nonBlank(choice?.harness);
+  const model = nonBlank(choice?.model);
+  const effort = nonBlank(choice?.effort);
+  return {
+    ...(harness === undefined ? {} : { harness }),
+    ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
+  };
+}
+
 /** Dispatch choices win over `start`/`work` defaults; blanks are omitted. */
 export function mergeExecutionChoice(
   dispatch: ExecutionChoice,
@@ -67,6 +103,20 @@ export function resolveExecutionChoice(
   const model = nonBlank(choice.model);
   const effort = nonBlank(choice.effort);
   if (harness === undefined) {
+    const definition = defaultHarnessDefinition(context);
+    if (definition !== undefined) {
+      const entry = context.catalog?.harnesses.find((item) => item.id === definition.id);
+      // A Dispatch without `model` must explicitly use the cached default of
+      // the local Harness that actually backs the effective ACP command.
+      const effectiveModel = model ?? nonBlank(entry?.defaultModel);
+      return {
+        kind: "harness",
+        definition,
+        ...(effectiveModel === undefined ? {} : { model: effectiveModel }),
+        ...(effort === undefined ? {} : { effort }),
+        defaultModelUsed: model === undefined && effectiveModel !== undefined,
+      };
+    }
     return {
       kind: "default",
       command: context.defaultCommand,

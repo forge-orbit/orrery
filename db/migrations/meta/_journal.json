@@ -414,6 +414,13 @@
       "when": 1795663528048,
       "tag": "0058_daffy_network",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795665826727,
+      "tag": "0059_handy_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }

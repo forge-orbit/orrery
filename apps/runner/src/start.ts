@@ -7,7 +7,7 @@ import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
-import type { ExecutionChoice } from "./dispatch-options.ts";
+import { executionChoicePayload, type ExecutionChoice } from "./dispatch-options.ts";
 import { detectHarnesses, type HarnessDefinition } from "./harnesses.ts";
 import { SlotPool, type SlotController } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
@@ -92,6 +92,9 @@ export async function start(options: StartOptions): Promise<void> {
     repoFingerprint: fingerprint,
     capabilities: options.capabilities ?? [],
     ...(cached === null ? {} : { harnessCatalog: cached }),
+    // The server records these on every Dispatch it creates for this Runner
+    // (UI delegation and auto-claim), so metadata matches local execution.
+    defaults: executionChoicePayload(options.defaults),
     maxConcurrency: options.maxConcurrency ?? 1,
     ephemeral: false,
   });

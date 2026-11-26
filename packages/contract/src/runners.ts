@@ -159,6 +159,32 @@ export function mergeHarnessCatalog(
   });
 }
 
+/**
+ * Optional per-Dispatch execution choices. They are identifiers, never
+ * executable paths or flags; the Runner resolves them through its own local
+ * registry. Empty strings are treated as omitted by the server.
+ */
+export const DispatchHarness = z.string().trim().max(64).meta({ id: "DispatchHarness" });
+export type DispatchHarness = z.infer<typeof DispatchHarness>;
+export const DispatchModel = z.string().trim().max(200).meta({ id: "DispatchModel" });
+export type DispatchModel = z.infer<typeof DispatchModel>;
+export const DispatchEffort = z.string().trim().max(64).meta({ id: "DispatchEffort" });
+export type DispatchEffort = z.infer<typeof DispatchEffort>;
+
+/**
+ * Defaults a Runner applies to dispatches that carry no explicit choice. The
+ * Runner registers them with its host credential; the server records the
+ * effective values on the Dispatch so the Run and readers agree with execution.
+ */
+export const ExecutionDefaults = z
+  .object({
+    harness: DispatchHarness.optional(),
+    model: DispatchModel.optional(),
+    effort: DispatchEffort.optional(),
+  })
+  .meta({ id: "ExecutionDefaults" });
+export type ExecutionDefaults = z.infer<typeof ExecutionDefaults>;
+
 export const Runner = z
   .object({
     id: RunnerId,
@@ -170,6 +196,8 @@ export const Runner = z
     repoFingerprint: Sha256Hex,
     capabilities: z.array(z.string().min(1).max(64)).max(64),
     harnessCatalog: HarnessCatalog,
+    /** Effective CLI defaults for dispatches that omit their own choices. */
+    defaults: ExecutionDefaults,
     maxConcurrency: z.int().min(1).max(64),
     activeSlotCount: z.int().min(0).max(64),
     lastSeenAt: Timestamp,
@@ -268,6 +296,8 @@ export const RegisterRunnerRequest = z
     capabilities: z.array(z.string().min(1).max(64)).max(64).default([]),
     /** Seeded from the local cache or a fast startup probe; refined via PUT /catalog. */
     harnessCatalog: HarnessCatalog.optional(),
+    /** CLI `--harness`/`--model`/`--effort` defaults applied to unchosen dispatches. */
+    defaults: ExecutionDefaults.optional(),
     maxConcurrency: z.int().min(1).max(64).default(1),
     /** One-shot `orrery-runner work` runners never reuse a persistent row. */
     ephemeral: z.boolean().default(false),
@@ -315,18 +345,6 @@ export const DispatchPrompt = z
   .max(MAX_DISPATCH_PROMPT_LENGTH)
   .meta({ id: "DispatchPrompt" });
 export type DispatchPrompt = z.infer<typeof DispatchPrompt>;
-
-/**
- * Optional per-Dispatch execution choices. They are identifiers, never
- * executable paths or flags; the Runner resolves them through its own local
- * registry. Empty strings are treated as omitted by the server.
- */
-export const DispatchHarness = z.string().trim().max(64).meta({ id: "DispatchHarness" });
-export type DispatchHarness = z.infer<typeof DispatchHarness>;
-export const DispatchModel = z.string().trim().max(200).meta({ id: "DispatchModel" });
-export type DispatchModel = z.infer<typeof DispatchModel>;
-export const DispatchEffort = z.string().trim().max(64).meta({ id: "DispatchEffort" });
-export type DispatchEffort = z.infer<typeof DispatchEffort>;
 
 /** Thin delivery bridge; it never changes the issue's assignee. */
 export const Dispatch = z
