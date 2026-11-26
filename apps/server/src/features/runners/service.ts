@@ -1666,14 +1666,10 @@ async function assertIssueStillDispatchable(
 }
 
 /**
- * Insert one pending Dispatch and enqueue its outbox command in the same
- * transaction. Both the locked manual path and the one-shot Runner path use it,
- * so their rows and command payloads can never drift apart.
+ * Insert one pending Dispatch row and build its outbox payload so callers
+ * enqueue the command in the same transaction without drifting fields.
  */
-async function insertDispatchRow(
-  tx: DbTransaction,
-  input: DispatchCreationInput,
-): Promise<Dispatch> {
+async function insertDispatchRow(tx: DbTransaction, input: DispatchCreationInput) {
   const [created] = await tx
     .insert(runnerDispatches)
     .values({
@@ -1694,24 +1690,19 @@ async function insertDispatchRow(
     })
     .returning({ id: runnerDispatches.id });
   const row = await readDispatch(tx, created!.id);
-  await enqueueRunnerCommand(tx, {
-    runnerId: input.runnerId,
-    dispatch: { id: row.id, dispatchAttemptId: row.dispatchAttemptId },
-    kind: "dispatch",
-    payload: {
-      dispatchId: row.id,
-      dispatchAttemptId: row.dispatchAttemptId,
-      issueId: input.issueId,
-      projectId: input.projectId,
-      workspaceId: input.workspaceId,
-      agentId: input.agentId,
-      ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
-      ...(input.harness === undefined ? {} : { harness: input.harness }),
-      ...(input.model === undefined ? {} : { model: input.model }),
-      ...(input.effort === undefined ? {} : { effort: input.effort }),
-    },
-  });
-  return toDispatch(row);
+  const payload = {
+    dispatchId: row.id,
+    dispatchAttemptId: row.dispatchAttemptId,
+    issueId: input.issueId,
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+    agentId: input.agentId,
+    ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
+    ...(input.harness === undefined ? {} : { harness: input.harness }),
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.effort === undefined ? {} : { effort: input.effort }),
+  };
+  return { row, payload };
 }
 
 /** Create a Dispatch when the caller already holds the issue's FOR UPDATE lock. */
@@ -1728,7 +1719,14 @@ async function insertDispatchLocked(
     .limit(1);
   if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
   await assertIssueDispatchable(tx, input.issueId, input.agentId);
-  return await insertDispatchRow(tx, input);
+  const { row, payload } = await insertDispatchRow(tx, input);
+  await enqueueRunnerCommand(tx, {
+    runnerId: input.runnerId,
+    dispatch: { id: row.id, dispatchAttemptId: row.dispatchAttemptId },
+    kind: "dispatch",
+    payload,
+  });
+  return toDispatch(row);
 }
 
 type ParsedIssueTarget =
@@ -2478,7 +2476,7 @@ export function createRunnersService(deps: RunnersDeps) {
         // Validate with Orrery's claim rules, without mutating issues.assignee.
         await assertIssueDispatchable(tx, issueId, agentId);
 
-        return await insertDispatchRow(tx, {
+        const { row, payload } = await insertDispatchRow(tx, {
           runnerId,
           issueId,
           workspaceId: issue.workspaceId,
@@ -2490,6 +2488,13 @@ export function createRunnersService(deps: RunnersDeps) {
           model: input.model,
           effort: input.effort,
         });
+        await enqueueRunnerCommand(tx, {
+          runnerId,
+          dispatch: { id: row.id, dispatchAttemptId: row.dispatchAttemptId },
+          kind: "dispatch",
+          payload,
+        });
+        return toDispatch(row);
       });
     },
 
