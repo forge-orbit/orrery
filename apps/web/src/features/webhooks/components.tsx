@@ -96,7 +96,13 @@ const eventGroups: readonly {
 }[] = [
   {
     title: "Project",
-    events: ["project_created", "project_renamed", "project_fallback_policy_changed"],
+    events: [
+      "project_created",
+      "project_renamed",
+      "project_fallback_policy_changed",
+      "project_deleted",
+      "project_restored",
+    ],
   },
   {
     title: "Issues",

@@ -45,6 +45,8 @@ const labels: Record<string, string> = {
   project_created: "created the project",
   project_renamed: "renamed the project",
   project_fallback_policy_changed: "changed the project fallback policy",
+  project_deleted: "moved the project to Trash",
+  project_restored: "restored the project from Trash",
   project_label_created: "created a project label",
   project_label_edited: "edited a project label",
   project_label_deleted: "deleted a project label",

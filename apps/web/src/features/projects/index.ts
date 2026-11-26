@@ -9,6 +9,7 @@ export {
   createProjectLabel,
   deleteIssue,
   deleteKnowledgeEntry,
+  deleteProject,
   deleteProjectLabel,
   detachIssueLabel,
   removeBlockedBy,
@@ -16,6 +17,7 @@ export {
   removeProjectAccess,
   restoreIssue,
   restoreKnowledgeEntry,
+  restoreProject,
   setProjectAccess,
   setProjectFallbackPolicy,
   updateIssue,
@@ -64,6 +66,7 @@ export {
   projectLabelsQuery,
   projectQuery,
   projectTrashQuery,
+  workspaceTrashProjectsQuery,
   readyWorkQuery,
   projectsQuery,
 } from "./queries.ts";
