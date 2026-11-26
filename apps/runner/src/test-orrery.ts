@@ -139,8 +139,9 @@ export class TestOrrery {
   private readonly createdPrompts: Array<string | null> = [];
   private readonly createdExecutions: Array<Record<string, unknown>> = [];
   private readonly streamed: TestStreamChunk[] = [];
-  private readonly catalogs: HarnessCatalog[] = [];
   reconnectCalls = 0;
+  /** Harness catalogs PUT by the runner's background sync (issue #240). */
+  catalogs: HarnessCatalog[] = [];
   /** Number of heartbeats to answer with a transient 503 before recovering. */
   transientHeartbeatFailures = 0;
   reconnectAttempts: Array<{ dispatchAttemptId: string; lastSeq: number }> = [];
@@ -638,7 +639,10 @@ export class TestOrrery {
       const body = recordOf(await bodyOf(req)) ?? {};
       const parsed = HarnessCatalog.safeParse(body);
       if (parsed.success) this.catalogs.push(parsed.data);
-      sendJson(res, 200, this.runner());
+      sendJson(res, 200, {
+        ...this.runner(),
+        harnessCatalog: parsed.success ? parsed.data : this.runner().harnessCatalog,
+      });
       return;
     }
     if (req.method === "POST" && path.endsWith("/reconnect")) {

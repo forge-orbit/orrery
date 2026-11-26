@@ -93,7 +93,7 @@ Completing a work session by moving its issue to Review for human inspection rat
 _Avoid_: Close, release
 
 **Trash**:
-The 30-day recovery period for soft-deleted items before their content is scrubbed while preserving activity history and identifiers.
+The 30-day recovery period for soft-deleted items and projects before their content is scrubbed while preserving activity history and identifiers.
 _Avoid_: Hard delete, archive
 
 **Notification**:

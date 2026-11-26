@@ -67,6 +67,8 @@ export class AcpStdioClient {
   private stderrBuffer = "";
   private spawnError: Error | undefined;
   private exitValue: AcpExit | undefined;
+  /** Raw `initialize` result, captured for the catalog discovery parser. */
+  initResult: unknown;
   cancelSent = false;
   termSent = false;
   killSent = false;
@@ -141,10 +143,10 @@ export class AcpStdioClient {
    */
   static async probe(
     options: AcpStartOptions & { timeoutMs: number; sessionMeta?: Record<string, unknown> },
-  ): Promise<unknown> {
+  ): Promise<{ session: unknown; initResult: unknown }> {
     const started = await AcpStdioClient.startProbe(options);
     try {
-      return started.session;
+      return { session: started.session, initResult: started.client.initResult };
     } finally {
       await started.client.forceExit(250);
     }
@@ -189,7 +191,7 @@ export class AcpStdioClient {
   ): Promise<unknown> {
     const remaining = (): number | undefined =>
       budget === undefined ? undefined : Math.max(0, budget.deadline - Date.now());
-    await this.request(
+    this.initResult = await this.request(
       "initialize",
       {
         protocolVersion: 1,

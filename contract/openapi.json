@@ -5915,6 +5915,9 @@
             "minLength": 1,
             "maxLength": 120
           },
+          "source": {
+            "$ref": "#/components/schemas/HarnessSource"
+          },
           "defaultModel": {
             "type": "string",
             "minLength": 1,
@@ -5939,6 +5942,14 @@
           "probedAt"
         ]
       },
+      "HarnessSource": {
+        "type": "string",
+        "enum": [
+          "preset",
+          "override",
+          "user"
+        ]
+      },
       "HarnessModel": {
         "type": "object",
         "properties": {
@@ -5953,11 +5964,7 @@
             "maxLength": 200
           },
           "reasoningDiscovery": {
-            "type": "string",
-            "enum": [
-              "known",
-              "unknown"
-            ]
+            "$ref": "#/components/schemas/HarnessEffortDiscovery"
           },
           "supportedEfforts": {
             "type": "array",
@@ -5972,11 +5979,21 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          },
+          "probedAt": {
+            "$ref": "#/components/schemas/Timestamp"
           }
         },
         "required": [
           "id",
           "reasoningDiscovery"
+        ]
+      },
+      "HarnessEffortDiscovery": {
+        "type": "string",
+        "enum": [
+          "known",
+          "unknown"
         ]
       },
       "ExecutionDefaults": {

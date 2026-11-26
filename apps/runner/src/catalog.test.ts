@@ -33,16 +33,19 @@ const makeDir = (): string => {
   return dir;
 };
 
+const AT = "2026-05-01T00:00:00.000Z";
 const knownModel: HarnessModel = {
   id: "stub-model-1",
   reasoningDiscovery: "known",
   supportedEfforts: ["low", "high"],
   defaultEffort: "low",
+  probedAt: AT,
 };
 
 const entryOf = (model: HarnessModel, probedAt: string): HarnessCatalogEntry => ({
   id: "custom",
   displayName: "Stub",
+  source: "user",
   defaultModel: "stub-model-1",
   models: [model],
   probedAt,
@@ -136,7 +139,14 @@ describe("built-in ACP harness detection", () => {
 describe("ACP session/new parsing", () => {
   it("marks only the active model's reasoning effort as known", () => {
     const parsed = catalogEntryFromSession(
-      { id: "codex", displayName: "Codex", command: "codex", args: ["acp"] },
+      {
+        id: "codex",
+        displayName: "Codex",
+        source: "preset" as const,
+        command: "codex",
+        args: ["acp"],
+      },
+      undefined,
       {
         sessionId: "s1",
         models: {
@@ -154,7 +164,7 @@ describe("ACP session/new parsing", () => {
           },
         ],
       },
-      "2026-05-01T00:00:00.000Z",
+      AT,
     );
     expect(parsed.defaultModel).toBe("gpt-5");
     expect(parsed.models[0]).toEqual({
@@ -163,19 +173,24 @@ describe("ACP session/new parsing", () => {
       reasoningDiscovery: "known",
       supportedEfforts: ["low", "high"],
       defaultEffort: "low",
+      probedAt: AT,
     });
     expect(parsed.models[1]).toEqual({
       id: "gpt-5-mini",
       label: "GPT-5 mini",
-      reasoningDiscovery: "unknown",
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "low",
+      probedAt: AT,
     });
   });
 
   it("treats missing models and configOptions as unknown", () => {
     const parsed = catalogEntryFromSession(
-      { id: "custom", displayName: "Stub", command: "stub", args: [] },
+      { id: "custom", displayName: "Stub", source: "user" as const, command: "stub", args: [] },
+      undefined,
       { sessionId: "s1" },
-      "2026-05-01T00:00:00.000Z",
+      AT,
     );
     expect(parsed.models).toEqual([]);
     expect(parsed.defaultModel).toBe("default");
@@ -186,7 +201,13 @@ describe("bounded startup probing", () => {
   it("reads models and configOptions from the deterministic ACP stub", async () => {
     process.env.STUB_ACP_MODE = "normal";
     const entry = await probeHarness(
-      { id: "custom", displayName: "Stub", command: process.execPath, args: [stubPath] },
+      {
+        id: "custom",
+        displayName: "Stub",
+        source: "user" as const,
+        command: process.execPath,
+        args: [stubPath],
+      },
       { cwd: makeDir(), timeoutMs: 2000 },
     );
     expect(entry.models.map((model) => model.id)).toContain("stub-model-1");
@@ -207,7 +228,13 @@ describe("bounded startup probing", () => {
 
     await expect(
       probeHarness(
-        { id: "custom", displayName: "Stub", command: process.execPath, args: [stubPath] },
+        {
+          id: "custom",
+          displayName: "Stub",
+          source: "user" as const,
+          command: process.execPath,
+          args: [stubPath],
+        },
         { cwd: dir, timeoutMs: 250 },
       ),
     ).rejects.toThrow(/timed out/);
@@ -225,7 +252,13 @@ describe("bounded startup probing", () => {
     const started = Date.now();
     await expect(
       probeHarness(
-        { id: "custom", displayName: "Stub", command: process.execPath, args: [stubPath] },
+        {
+          id: "custom",
+          displayName: "Stub",
+          source: "user" as const,
+          command: process.execPath,
+          args: [stubPath],
+        },
         { cwd: makeDir(), timeoutMs: 250 },
       ),
     ).rejects.toThrow(/timed out/);
@@ -257,7 +290,14 @@ describe("serialized catalog publication", () => {
     await publisher.publish(
       catalogOf(
         "2026-01-01T00:00:00.000Z",
-        entryOf({ id: "stub-model-1", reasoningDiscovery: "unknown" }, "2026-01-01T00:00:00.000Z"),
+        entryOf(
+          {
+            id: "stub-model-1",
+            reasoningDiscovery: "unknown",
+            probedAt: "2026-01-01T00:00:00.000Z",
+          },
+          "2026-01-01T00:00:00.000Z",
+        ),
       ),
     );
 
@@ -374,7 +414,15 @@ describe("serialized catalog publication", () => {
     const published: HarnessCatalog[] = [];
     const warnings: string[] = [];
     await runStartupCatalogProbe({
-      definitions: [{ id: "opencode", displayName: "OpenCode", command: "missing", args: ["acp"] }],
+      definitions: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          source: "preset" as const,
+          command: "missing",
+          args: ["acp"],
+        },
+      ],
       probe: async () => {
         throw new Error("probe failed");
       },

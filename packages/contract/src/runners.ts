@@ -72,24 +72,39 @@ export const RunnerHost = z
   .meta({ id: "RunnerHost" });
 export type RunnerHost = z.infer<typeof RunnerHost>;
 
+/**
+ * How much a Runner currently knows about one model's reasoning-effort
+ * options: `"known"` only when the Harness advertised them.
+ */
+export const HarnessEffortDiscovery = z.enum(["known", "unknown"]).meta({ id: "HarnessEffortDiscovery" });
+export type HarnessEffortDiscovery = z.infer<typeof HarnessEffortDiscovery>;
+
 /** One model an ACP harness advertised during a discovery probe. */
 export const HarnessModel = z
   .object({
-    id: z.string().min(1).max(200),
-    label: z.string().min(1).max(200).optional(),
-    reasoningDiscovery: z.enum(["known", "unknown"]),
-    supportedEfforts: z.array(z.string().min(1).max(64)).max(32).optional(),
-    defaultEffort: z.string().min(1).max(64).optional(),
+    id: z.string().trim().min(1).max(200),
+    label: z.string().trim().min(1).max(200).optional(),
+    reasoningDiscovery: HarnessEffortDiscovery,
+    /** Supported effort levels in ascending order, e.g. `["low", "high"]`. */
+    supportedEfforts: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
+    defaultEffort: z.string().trim().min(1).max(64).optional(),
+    /** When the Runner last parsed this model's discovery payload. */
+    probedAt: Timestamp.optional(),
   })
   .meta({ id: "HarnessModel" });
 export type HarnessModel = z.infer<typeof HarnessModel>;
 
+/** Where a Runner found a Harness: a built-in preset, `--acp-command`, or `harnesses.json`. */
+export const HarnessSource = z.enum(["preset", "override", "user"]).meta({ id: "HarnessSource" });
+export type HarnessSource = z.infer<typeof HarnessSource>;
+
 /** One ACP harness discovered on a Runner host, with its probed model list. */
 export const HarnessCatalogEntry = z
   .object({
-    id: z.string().min(1).max(64),
-    displayName: z.string().min(1).max(120),
-    defaultModel: z.string().min(1).max(200),
+    id: z.string().trim().min(1).max(64),
+    displayName: z.string().trim().min(1).max(120),
+    source: HarnessSource.optional(),
+    defaultModel: z.string().trim().min(1).max(200),
     models: z.array(HarnessModel).max(200),
     probedAt: Timestamp,
   })
@@ -118,7 +133,8 @@ const laterTimestamp = (a: string, b: string): string => (Date.parse(a) >= Date.
  * effort levels were discovered once must never regress to `unknown` just because
  * a later probe only saw its default model (or a delayed refresh arrives late).
  * Harnesses that are no longer advertised are dropped, so the catalog still
- * reflects what is installed now.
+ * reflects what is installed now (a transient all-probes-failed pass publishes
+ * nothing, keeping the last good catalog).
  */
 export function mergeHarnessCatalog(
   stored: HarnessCatalog | undefined | null,
@@ -152,6 +168,7 @@ export function mergeHarnessCatalog(
               ? {}
               : { supportedEfforts: [...prior.supportedEfforts] }),
             ...(prior.defaultEffort === undefined ? {} : { defaultEffort: prior.defaultEffort }),
+            probedAt: model.probedAt ?? prior.probedAt,
           };
         }),
       };

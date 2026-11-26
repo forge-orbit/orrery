@@ -9,12 +9,12 @@ import {
   type HarnessModel,
   mergeHarnessCatalog,
 } from "@orrery/contract";
-import { z } from "zod";
 import { AcpStdioClient } from "./acp.ts";
 import { RunnerRequestError } from "./client.ts";
 import { configDirectory } from "./credential.ts";
 import { harnessesJsonPath, type HarnessDefinition } from "./harnesses.ts";
 import { harnessLockKey, withHarnessLock } from "./harness-lock.ts";
+import { currentConfigValues, parseDiscovery } from "./probe.ts";
 
 /** ACP config option ids that carry reasoning-effort choices for the active model. */
 export const REASONING_OPTION_IDS = new Set([
@@ -26,102 +26,25 @@ export const REASONING_OPTION_IDS = new Set([
   "thinking_level",
 ]);
 
-const AcpSessionNew = z.object({
-  sessionId: z.string().optional(),
-  models: z
-    .object({
-      availableModels: z
-        .array(z.object({ modelId: z.string().min(1), name: z.string().optional() }))
-        .optional(),
-      currentModelId: z.string().optional(),
-    })
-    .optional(),
-  configOptions: z
-    .array(
-      z.object({
-        id: z.string(),
-        options: z
-          .array(z.object({ value: z.string().min(1), name: z.string().optional() }))
-          .optional(),
-        currentValue: z.string().optional(),
-      }),
-    )
-    .optional(),
-});
-
-interface SessionInfo {
-  available: Array<{ modelId: string; name?: string | undefined }>;
-  options: Array<{
-    id: string;
-    values: string[];
-    currentValue?: string | undefined;
-  }>;
-  efforts: string[];
-  defaultEffort?: string | undefined;
-  currentModelId?: string | undefined;
-}
-
-/** Parse the raw `session/new` (or model-switch) result without trusting it. */
-function sessionInfo(session: unknown): SessionInfo | undefined {
-  const parsed = AcpSessionNew.safeParse(session);
-  if (!parsed.success) return undefined;
-  const available = parsed.data.models?.availableModels ?? [];
-  const options = (parsed.data.configOptions ?? []).map((option) =>
-    Object.assign(
-      { id: option.id, values: (option.options ?? []).map((item) => item.value) },
-      option.currentValue === undefined ? {} : { currentValue: option.currentValue },
-    ),
-  );
-  const reasoning = options.find((option) => REASONING_OPTION_IDS.has(option.id));
-  const efforts = [...new Set(reasoning?.values ?? [])];
-  const currentValue = reasoning?.currentValue;
-  const defaultEffort =
-    currentValue !== undefined && efforts.includes(currentValue) ? currentValue : efforts[0];
-  return {
-    available,
-    options,
-    efforts,
-    ...(defaultEffort === undefined ? {} : { defaultEffort }),
-    ...(parsed.data.models?.currentModelId === undefined
-      ? {}
-      : { currentModelId: parsed.data.models.currentModelId }),
-  };
-}
-
-/** Turn one raw `session/new` result into a published catalog entry. */
+/**
+ * Turn one raw discovery payload pair into a published catalog entry. The
+ * shared dialect-tolerant parser reads both `initialize` models and
+ * `session/new` config options (PR #255), so the same logic also parses a
+ * `probeModel` model-switch result.
+ */
 export function catalogEntryFromSession(
   definition: HarnessDefinition,
+  initResult: unknown,
   session: unknown,
   probedAt: string = new Date().toISOString(),
 ): HarnessCatalogEntry {
-  const info = sessionInfo(session);
-  const available = info?.available ?? [];
-  const efforts = info?.efforts ?? [];
-  const defaultEffort = info?.defaultEffort;
-  const defaultModel = info?.currentModelId ?? available[0]?.modelId ?? "default";
-
-  const models: HarnessModel[] = [];
-  for (const model of available) {
-    // ACP only reports configOptions for the currently active model. Everything
-    // else stays `unknown` until a targeted probe discovers its effort levels.
-    const known = model.modelId === defaultModel && efforts.length > 0;
-    const published: HarnessModel = {
-      id: model.modelId,
-      reasoningDiscovery: known ? "known" : "unknown",
-    };
-    if (model.name !== undefined && model.name !== "") published.label = model.name;
-    if (known) {
-      published.supportedEfforts = efforts;
-      if (defaultEffort !== undefined) published.defaultEffort = defaultEffort;
-    }
-    models.push(published);
-  }
-
+  const discovery = parseDiscovery(initResult, session, probedAt);
   return {
     id: definition.id,
     displayName: definition.displayName,
-    defaultModel,
-    models,
+    source: definition.source,
+    defaultModel: discovery.defaultModel,
+    models: discovery.models,
     probedAt,
   };
 }
@@ -143,7 +66,7 @@ export async function probeHarness(
   options: ProbeHarnessOptions,
 ): Promise<HarnessCatalogEntry> {
   return await withHarnessLock(harnessLockKey(definition), async () => {
-    const session = await AcpStdioClient.probe({
+    const { session, initResult } = await AcpStdioClient.probe({
       command: definition.command,
       args: definition.args,
       cwd: options.cwd,
@@ -154,7 +77,12 @@ export async function probeHarness(
       worktreeReal: options.cwd,
       timeoutMs: options.timeoutMs,
     });
-    return catalogEntryFromSession(definition, session, options.at ?? new Date().toISOString());
+    return catalogEntryFromSession(
+      definition,
+      initResult,
+      session,
+      options.at ?? new Date().toISOString(),
+    );
   });
 }
 
@@ -282,17 +210,15 @@ export async function probeModel(
         timeoutMs: options.timeoutMs,
       });
       client = started.client;
-      const initial = sessionInfo(started.session);
+      const at = options.at ?? new Date().toISOString();
+      const initial = parseDiscovery(started.client.initResult, started.session, at);
       previous = {
-        ...(initial?.currentModelId === undefined
+        ...(initial.defaultModel === undefined || initial.defaultModel === "default"
           ? options.fallbackModel === undefined
             ? {}
             : { model: options.fallbackModel }
-          : { model: initial.currentModelId }),
-        options: (initial?.options ?? [])
-          .filter((option) => option.currentValue !== undefined)
-          .slice(0, MAX_RESTORED_OPTIONS)
-          .map((option) => ({ id: option.id, value: option.currentValue! })),
+          : { model: initial.defaultModel }),
+        options: currentConfigValues(started.session).slice(0, MAX_RESTORED_OPTIONS),
       };
       // ACP reports configOptions for the active model, so read them *after*
       // switching instead of reusing the previous model's effort levels.
@@ -301,19 +227,23 @@ export async function probeModel(
         { sessionId: client.id, modelId },
         deadline,
       );
-      const after = sessionInfo(switched);
-      if (after !== undefined) {
-        // A successful switch that advertised no reasoning options is still a
-        // completed discovery: publish `known` with an empty effort list so the
-        // UI hides the selector and reselecting the model does not re-probe it
-        // forever. Only a failed/timed-out switch leaves it `unknown`.
-        discovered = {
-          id: modelId,
-          reasoningDiscovery: "known",
-          supportedEfforts: after.efforts,
-          ...(after.defaultEffort === undefined ? {} : { defaultEffort: after.defaultEffort }),
-        };
-      }
+      // Parse the switched result with the exact same parser as startup
+      // discovery; the `seeds` entry guarantees the switched model is present
+      // even when the harness only reports efforts for its active model.
+      const after = parseDiscovery(client.initResult, switched, at, [modelId]);
+      const parsed = after.models.find((candidate) => candidate.id === modelId);
+      // A successful switch that advertised no reasoning options is still a
+      // completed discovery: publish `known` with an empty effort list so the
+      // UI hides the selector and reselecting the model does not re-probe it
+      // forever. Only a failed/timed-out switch leaves it `unknown`.
+      discovered = {
+        id: modelId,
+        ...(parsed?.label === undefined ? {} : { label: parsed.label }),
+        reasoningDiscovery: "known",
+        supportedEfforts: parsed?.supportedEfforts ?? [],
+        ...(parsed?.defaultEffort === undefined ? {} : { defaultEffort: parsed.defaultEffort }),
+        probedAt: at,
+      };
     } catch (error) {
       failure = error;
       // A hung/killed session never revealed its active model. Use the cached
@@ -399,6 +329,7 @@ export function catalogWithProbedModel(
   const entry: HarnessCatalogEntry = {
     id: definition.id,
     displayName: definition.displayName,
+    source: existing?.source ?? definition.source,
     defaultModel: existing?.defaultModel ?? model.id,
     models:
       existing === undefined

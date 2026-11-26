@@ -411,15 +411,22 @@
     {
       "idx": 58,
       "version": "7",
-      "when": 1795668316601,
-      "tag": "0058_ordinary_tarantula",
+      "when": 1795671981334,
+      "tag": "0058_typical_bruce_banner",
       "breakpoints": true
     },
     {
       "idx": 59,
       "version": "7",
-      "when": 1795676313823,
-      "tag": "0059_clean_spitfire",
+      "when": 1795677856374,
+      "tag": "0059_ordinary_tarantula",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795677872257,
+      "tag": "0060_clean_spitfire",
       "breakpoints": true
     }
   ]

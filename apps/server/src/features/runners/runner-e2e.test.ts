@@ -99,6 +99,8 @@ async function freePort(): Promise<number> {
 }
 
 async function markerEvents(): Promise<Array<Record<string, unknown>>> {
+  // Catalog probes (issue #240) run the same stub; their records carry
+  // `probe: true` and never count as dispatch-supervision activity.
   try {
     return (await readFile(world.marker, "utf8"))
       .split("\n")
@@ -106,12 +108,12 @@ async function markerEvents(): Promise<Array<Record<string, unknown>>> {
       .map((line): Record<string, unknown> => {
         const parsed: unknown = JSON.parse(line);
         return recordOf(parsed) ?? {};
-      });
+      })
+      .filter((item) => item.probe !== true);
   } catch {
     return [];
   }
 }
-
 async function setMode(mode: string): Promise<void> {
   await writeFile(world.modeFile, mode);
 }
@@ -187,6 +189,39 @@ async function waitForRunnerOnline(): Promise<void> {
       ? true
       : undefined;
   }, 15_000);
+}
+
+/**
+ * Issue #240: the started runner probes its `--acp-command` override (the
+ * stub) in the background and publishes the Harness catalog via
+ * `PUT /api/runners/{runnerId}/catalog`; the Fleet response must expose it.
+ * Other preset harnesses may also exist on the test machine's PATH, so the
+ * lookup targets the override entry by id, not the first harness.
+ */
+async function waitForRunnerCatalog(): Promise<Record<string, unknown>> {
+  // Our reviewed detection publishes the explicit --acp-command override as
+  // the "custom" entry (PR #255's basename id would collide with a preset).
+  const id = "custom";
+  try {
+    return await until(async () => {
+      const fleet = await api(`/api/workspaces/${world.workspaceId}/runners`, {
+        cookie: world.cookie,
+      });
+      const runners = list(field(fleet.body, "hosts")).flatMap((host) =>
+        list(field(host, "runners")),
+      );
+      const found = runners.find((item) => field(item, "id") === world.runnerId);
+      const catalog = recordOf(field(found, "harnessCatalog"));
+      const harnesses = list(catalog?.harnesses);
+      const entry = harnesses.find((item) => field(item, "id") === id);
+      if (entry === undefined) return undefined;
+      return recordOf(entry) ?? {};
+    });
+  } catch (error) {
+    throw new Error(`catalog entry '${id}' never appeared; runner output:\n${world.output}`, {
+      cause: error,
+    });
+  }
 }
 
 async function createIssue(title: string): Promise<string> {
@@ -432,6 +467,18 @@ afterAll(async () => {
 describe("orrery-runner against a real Orrery server (#198)", { timeout: 120_000 }, () => {
   it("renews the real lease and completes a clean turn as review with a pruned worktree", async () => {
     await waitForRunnerOnline();
+    // The background probe publishes the stub's advertised models; the Fleet
+    // may also hold preset harnesses found on the test machine's PATH.
+    const harness = await waitForRunnerCatalog();
+    const models = list(harness.models).map((model) => recordOf(model) ?? {});
+    const ids = models.map((model) => str(field(model, "id"))).toSorted();
+    // The ported parser reads models from both initialize and session/new.
+    expect(ids).toEqual(["stub-deep", "stub-fast", "stub-model-1", "stub-model-2"]);
+    const fast = models.find((model) => str(field(model, "id")) === "stub-fast");
+    expect(field(fast, "reasoningDiscovery")).toBe("known");
+    expect(field(fast, "defaultEffort")).toBe("low");
+    const deep = models.find((model) => str(field(model, "id")) === "stub-deep");
+    expect(field(deep, "reasoningDiscovery")).toBe("known");
     await setMode("normal");
     const issueId = await dispatch("real lease renewal");
     const session = await until(async () => {

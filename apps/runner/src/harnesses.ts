@@ -3,10 +3,14 @@ import { basename, delimiter, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { configDirectory } from "./credential.ts";
 
+export type HarnessSourceKind = "preset" | "override" | "user";
+
 /** A locally executable ACP harness the Runner may probe and delegate to. */
 export interface HarnessDefinition {
   id: string;
   displayName: string;
+  /** Where this definition came from; published in the catalog for the Fleet. */
+  source?: HarnessSourceKind | undefined;
   command: string;
   args: string[];
 }
@@ -16,13 +20,19 @@ export interface HarnessDefinition {
  * A CLI is advertised only when its command is actually installed on PATH.
  */
 export const BUILTIN_ACP_HARNESSES: readonly HarnessDefinition[] = [
-  { id: "opencode", displayName: "OpenCode", command: "opencode", args: ["acp"] },
-  { id: "codex", displayName: "Codex", command: "codex", args: ["acp"] },
-  { id: "claude", displayName: "Claude Code", command: "claude", args: ["--acp"] },
-  { id: "omp", displayName: "Oh My Pi", command: "omp", args: ["acp"] },
-  { id: "grok", displayName: "Grok", command: "grok", args: ["acp"] },
-  { id: "hermes", displayName: "Hermes", command: "hermes", args: ["acp"] },
-  { id: "cursor", displayName: "Cursor", command: "cursor", args: ["acp"] },
+  { id: "opencode", source: "preset", displayName: "OpenCode", command: "opencode", args: ["acp"] },
+  { id: "codex", source: "preset", displayName: "Codex", command: "codex", args: ["acp"] },
+  {
+    id: "claude",
+    source: "preset",
+    displayName: "Claude Code",
+    command: "claude",
+    args: ["--acp"],
+  },
+  { id: "omp", source: "preset", displayName: "Oh My Pi", command: "omp", args: ["acp"] },
+  { id: "grok", source: "preset", displayName: "Grok", command: "grok", args: ["acp"] },
+  { id: "hermes", source: "preset", displayName: "Hermes", command: "hermes", args: ["acp"] },
+  { id: "cursor", source: "preset", displayName: "Cursor", command: "cursor", args: ["acp"] },
 ];
 
 const UserHarness = z.object({
@@ -87,6 +97,7 @@ export function loadUserHarnesses(configDir = configDirectory()): HarnessDefinit
   return configured.map((item) => ({
     id: item.id,
     displayName: item.displayName,
+    source: "user" as const,
     command: item.command,
     args: item.args === undefined ? ["acp"] : [...item.args],
   }));
@@ -120,6 +131,7 @@ export function detectHarnesses(options: HarnessDetectionOptions = {}): HarnessD
     detected.push({
       id: "custom",
       displayName: basename(override.command) || "Custom ACP harness",
+      source: "override" as const,
       command: override.command,
       args: [...override.args],
     });

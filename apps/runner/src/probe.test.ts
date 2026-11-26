@@ -6,11 +6,13 @@ import { EMPTY_HARNESS_CATALOG, type HarnessCatalog } from "@orrery/contract";
 import { afterEach, describe, expect, it } from "vitest";
 import { catalogWithProbedModel, probeModel } from "./catalog.ts";
 import { harnessLockKey, withHarnessLock } from "./harness-lock.ts";
+import { currentConfigValues, parseDiscovery } from "./probe.ts";
 
 const stubPath = fileURLToPath(new URL("./stub-acp.ts", import.meta.url));
 const definition = {
   id: "opencode",
   displayName: "OpenCode",
+  source: "preset" as const,
   command: process.execPath,
   args: [stubPath],
 };
@@ -221,5 +223,103 @@ describe("per-Harness lock identity (#241/#242)", () => {
     ]);
     expect(order.indexOf("alias:start")).toBeGreaterThan(order.indexOf("first:end"));
     expect(order.indexOf("unrelated:start")).toBeLessThan(order.indexOf("first:end"));
+  });
+});
+
+/**
+ * PR #255's dialect-tolerant discovery parser, ported into the shared probe
+ * stack so both startup discovery and `probeModel` read the same shapes.
+ */
+describe("ACP discovery parser (ported from PR #255)", () => {
+  const AT = "2026-06-01T00:00:00.000Z";
+
+  it("seeds models advertised only on initialize", () => {
+    const discovery = parseDiscovery(
+      { models: { availableModels: [{ modelId: "init-only", name: "Init Only" }] } },
+      {},
+      AT,
+    );
+    expect(discovery.models).toEqual([
+      { id: "init-only", label: "Init Only", reasoningDiscovery: "unknown", probedAt: AT },
+    ]);
+    expect(discovery.defaultModel).toBe("init-only");
+  });
+
+  it("scopes effort options carrying modelId to that model only", () => {
+    const discovery = parseDiscovery(
+      undefined,
+      {
+        configOptions: [
+          {
+            id: "model",
+            state: {
+              currentValue: "m2",
+              options: [{ value: "m1" }, { value: "m2" }],
+            },
+          },
+          {
+            id: "reasoning_effort",
+            modelId: "m2",
+            state: { currentValue: "high", options: [{ value: "low" }, { value: "high" }] },
+          },
+        ],
+      },
+      AT,
+    );
+    expect(discovery.defaultModel).toBe("m2");
+    expect(discovery.models.find((model) => model.id === "m1")).toMatchObject({
+      reasoningDiscovery: "unknown",
+    });
+    expect(discovery.models.find((model) => model.id === "m2")).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "high",
+      probedAt: AT,
+    });
+  });
+
+  it("accepts bare-string refs, choices and a default field", () => {
+    const discovery = parseDiscovery(
+      { models: ["a"] },
+      {
+        configOptions: [
+          {
+            id: "model",
+            options: ["a", "b"],
+            current: "b",
+          },
+          {
+            id: "thought_level",
+            choices: [{ level: "low" }, { level: "high" }],
+            default: "high",
+          },
+        ],
+      },
+      AT,
+    );
+    expect(discovery.models.map((model) => model.id)).toEqual(["a", "b"]);
+    expect(discovery.defaultModel).toBe("b");
+    for (const model of discovery.models) {
+      expect(model).toMatchObject({
+        reasoningDiscovery: "known",
+        supportedEfforts: ["low", "high"],
+        defaultEffort: "high",
+      });
+    }
+  });
+
+  it("extracts current config values for post-probe restore", () => {
+    expect(
+      currentConfigValues({
+        configOptions: [
+          { id: "model", state: { currentValue: "b" } },
+          { id: "thought_level", currentValue: "high" },
+          { id: "other" },
+        ],
+      }),
+    ).toEqual([
+      { id: "model", value: "b" },
+      { id: "thought_level", value: "high" },
+    ]);
   });
 });

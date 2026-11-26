@@ -43,6 +43,7 @@ const knownModel = (id: string): HarnessModel => ({
   reasoningDiscovery: "known",
   supportedEfforts: ["low", "high"],
   defaultEffort: "low",
+  probedAt: "2026-01-01T00:00:00.000Z",
 });
 
 const entry = (
@@ -52,6 +53,7 @@ const entry = (
 ): HarnessCatalogEntry => ({
   id: harnessId,
   displayName: `Harness ${harnessId}`,
+  source: "preset" as const,
   defaultModel: models[0]?.id ?? "default",
   models,
   probedAt,
@@ -251,7 +253,7 @@ describe("harness catalog merge", () => {
       "2026-01-01T00:00:00.000Z",
       entry(
         "opencode",
-        [{ id: "gpt-5", reasoningDiscovery: "unknown" }],
+        [{ id: "gpt-5", reasoningDiscovery: "unknown", probedAt: "2026-01-01T00:00:00.000Z" }],
         "2026-01-01T00:00:00.000Z",
       ),
     );
@@ -271,12 +273,16 @@ describe("harness catalog merge", () => {
       stored,
       catalog(
         "2026-01-02T00:00:00.000Z",
-        entry("codex", [knownModel("gpt-5"), { id: "gpt-5-mini", reasoningDiscovery: "unknown" }]),
+        entry("codex", [
+          knownModel("gpt-5"),
+          { id: "gpt-5-mini", reasoningDiscovery: "unknown", probedAt: "2026-01-01T00:00:00.000Z" },
+        ]),
       ),
     );
     expect(merged.harnesses[0]!.models[1]).toEqual({
       id: "gpt-5-mini",
       reasoningDiscovery: "unknown",
+      probedAt: "2026-01-01T00:00:00.000Z",
     });
   });
 });
@@ -375,7 +381,7 @@ describe("runner harness catalog API", () => {
       "2026-01-01T00:00:00.000Z",
       entry(
         "opencode",
-        [{ id: "gpt-5", reasoningDiscovery: "unknown" }],
+        [{ id: "gpt-5", reasoningDiscovery: "unknown", probedAt: "2026-01-01T00:00:00.000Z" }],
         "2026-01-01T00:00:00.000Z",
       ),
     );
@@ -410,5 +416,54 @@ describe("runner harness catalog API", () => {
     expect(fleet.status).toBe(200);
     const parsed = WorkspaceRunnersFleet.parse(await fleet.json());
     expect(parsed.hosts[0]!.runners[0]!.harnessCatalog).toEqual(live);
+  });
+
+  it("drops harnesses no longer advertised by a live catalog update", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const created = await register(credential, workspace.id, project.id);
+    const both = catalog(
+      "2026-05-01T00:00:00.000Z",
+      entry("opencode", [knownModel("gpt-5")]),
+      entry("codex", [knownModel("gpt-5-codex")]),
+    );
+    expect(
+      (await request(app, "PUT", `/api/runners/${created.id}/catalog`, both, credential)).status,
+    ).toBe(200);
+
+    // A probe that no longer sees codex (it was uninstalled) publishes only
+    // opencode; the stored catalog must stop advertising codex.
+    const onlyOne = catalog("2026-05-02T00:00:00.000Z", entry("opencode", [knownModel("gpt-5")]));
+    const res = await request(
+      app,
+      "PUT",
+      `/api/runners/${created.id}/catalog`,
+      onlyOne,
+      credential,
+    );
+    expect(res.status).toBe(200);
+    expect(Runner.parse(await res.json()).harnessCatalog?.harnesses.map((item) => item.id)).toEqual(
+      ["opencode"],
+    );
+  });
+
+  it("rejects an invalid catalog body as a Problem", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const created = await register(credential, workspace.id, project.id);
+    const res = await request(
+      app,
+      "PUT",
+      `/api/runners/${created.id}/catalog`,
+      {
+        harnesses: [{ id: "x" }],
+        probedAt: "not-a-date",
+      },
+      credential,
+    );
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type")).toContain("application/problem+json");
   });
 });

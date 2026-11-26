@@ -1,5 +1,5 @@
 {
-  "id": "68f57696-2a4c-43aa-b740-5b78b4f6b0e8",
+  "id": "d665ec06-90bf-4efb-ac21-77a359b474d0",
   "prevId": "93bc4458-3dc9-411b-86e1-5334d8dcb273",
   "version": "7",
   "dialect": "postgresql",
@@ -4714,24 +4714,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "harness": {
-          "name": "harness",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "effort": {
-          "name": "effort",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "dirty_worktree": {
           "name": "dirty_worktree",
           "type": "boolean",
@@ -4950,10 +4932,6 @@
           "name": "runner_dispatches_stream_batch_count_nonnegative",
           "value": "\"runner_dispatches\".\"stream_batch_count\" >= 0"
         },
-        "runner_dispatches_option_lengths": {
-          "name": "runner_dispatches_option_lengths",
-          "value": "length(\"runner_dispatches\".\"harness\") <= 64 and length(\"runner_dispatches\".\"model\") <= 200 and length(\"runner_dispatches\".\"effort\") <= 64"
-        },
         "runner_dispatches_prompt_bounded": {
           "name": "runner_dispatches_prompt_bounded",
           "value": "\"runner_dispatches\".\"prompt\" is null or char_length(\"runner_dispatches\".\"prompt\") <= 16000"
@@ -5139,15 +5117,7 @@
           "name": "harness_catalog",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'{\"harnesses\":[],\"probedAt\":\"1970-01-01T00:00:00.000Z\"}'::jsonb"
-        },
-        "execution_defaults": {
-          "name": "execution_defaults",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
+          "notNull": false
         },
         "max_concurrency": {
           "name": "max_concurrency",

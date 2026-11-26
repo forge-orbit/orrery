@@ -179,21 +179,26 @@ async function until(
 
 async function events(fixture: Fixture): Promise<MarkerEvent[]> {
   try {
-    return (await readFile(fixture.marker, "utf8"))
-      .split("\n")
-      .filter((line) => line.trim() !== "")
-      .map((line): MarkerEvent => {
-        const parsed: unknown = JSON.parse(line);
-        const record = recordOf(parsed) ?? {};
-        const event: MarkerEvent = {
-          at: typeof record.at === "number" ? record.at : 0,
-          event: str(record.event),
-        };
-        for (const [key, value] of Object.entries(record)) {
-          if (key !== "at" && key !== "event") event[key] = value;
-        }
-        return event;
-      });
+    return (
+      (await readFile(fixture.marker, "utf8"))
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line): MarkerEvent => {
+          const parsed: unknown = JSON.parse(line);
+          const record = recordOf(parsed) ?? {};
+          const event: MarkerEvent = {
+            at: typeof record.at === "number" ? record.at : 0,
+            event: str(record.event),
+          };
+          for (const [key, value] of Object.entries(record)) {
+            if (key !== "at" && key !== "event") event[key] = value;
+          }
+          return event;
+        })
+        // Catalog probes (issue #240) run the same stub; their records carry
+        // `probe: true` and never count as dispatch-supervision activity.
+        .filter((item) => item.probe !== true)
+    );
   } catch {
     return [];
   }
@@ -934,7 +939,9 @@ describe("on-demand catalog probes (#242)", { timeout: 30_000 }, () => {
       expect.objectContaining({
         id: "stub-model-2",
         reasoningDiscovery: "known",
-        supportedEfforts: ["balanced", "fast"],
+        // The startup probe learns the harness's global efforts; the targeted
+        // model probe adds its own. Known efforts are never dropped (#240).
+        supportedEfforts: ["low", "high", "balanced", "fast"],
       }),
     );
     expect(await readFile(fixture.defaultFile, "utf8")).toBe("stub-model-1");

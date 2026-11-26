@@ -5,7 +5,6 @@ import {
   DeviceCodeResponse,
   Dispatch,
   DispatchAcceptance,
-  type HarnessCatalog,
   HostCredentialResponse,
   IssueResolveResponse,
   ReconnectResponse,
@@ -17,6 +16,7 @@ import {
   type CommandsQuery,
   type CreateDeviceCodeRequest,
   type ExchangeDeviceCodeRequest,
+  type HarnessCatalog,
   type HeartbeatRequest,
   type IssueResolveRequest,
   type ReconnectRequest,
@@ -69,7 +69,7 @@ export class OrreryClient {
     }
     if (!response.ok) {
       let code: string | null = null;
-      let detail = response.statusText;
+      let detail: string = response.statusText;
       try {
         const body = z
           .object({

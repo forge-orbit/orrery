@@ -1,6 +1,6 @@
 {
-  "id": "a576e5e2-076a-4aa7-b3e7-11e731424187",
-  "prevId": "68f57696-2a4c-43aa-b740-5b78b4f6b0e8",
+  "id": "1c8b5f48-bf53-439d-87f8-42c2bb6c6345",
+  "prevId": "d665ec06-90bf-4efb-ac21-77a359b474d0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4268,13 +4268,13 @@
           "name": "dispatch_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "dispatch_attempt_id": {
           "name": "dispatch_attempt_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "seq": {
           "name": "seq",
@@ -4410,11 +4410,7 @@
         },
         "runner_commands_kind": {
           "name": "runner_commands_kind",
-          "value": "\"runner_commands\".\"kind\" in ('dispatch', 'cancel', 'input_resolved', 'probe_model', 'probe_catalog')"
-        },
-        "runner_commands_dispatch_ids": {
-          "name": "runner_commands_dispatch_ids",
-          "value": "(\"runner_commands\".\"kind\" in ('dispatch', 'cancel', 'input_resolved') and \"runner_commands\".\"dispatch_id\" is not null and \"runner_commands\".\"dispatch_attempt_id\" is not null) or (\"runner_commands\".\"kind\" in ('probe_model', 'probe_catalog') and \"runner_commands\".\"dispatch_id\" is null and \"runner_commands\".\"dispatch_attempt_id\" is null)"
+          "value": "\"runner_commands\".\"kind\" in ('dispatch', 'cancel', 'input_resolved')"
         },
         "runner_commands_expires_after_created": {
           "name": "runner_commands_expires_after_created",
