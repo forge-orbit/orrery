@@ -6,6 +6,8 @@ import {
   ApproveDeviceCodeResponse,
   AutoClaimRequest,
   AutoClaimResponse,
+  CatalogProbeRequest,
+  CatalogProbeResponse,
   CommandsQuery,
   CreateDeviceCodeRequest,
   CreateDispatchRequest,
@@ -197,6 +199,37 @@ const updateRunnerCatalog = createRoute({
       content: { "application/json": { schema: Runner } },
     },
     ...enrollErrors,
+  },
+});
+
+const probeCatalogErrors = {
+  400: problem("The catalog probe request is invalid"),
+  401: problem("Not signed in"),
+  403: problem("Only the human who owns this Runner host may probe its catalog"),
+  404: problem("No such Runner is accessible"),
+  409: problem("The Runner is offline or unavailable"),
+  429: {
+    ...problem("This catalog probe was requested too recently"),
+    headers: z.object({ "Retry-After": z.string() }),
+  },
+};
+
+const probeCatalog = createRoute({
+  method: "post",
+  path: "/api/runners/{runnerId}/catalog/probe",
+  summary: "Request an on-demand Harness catalog probe",
+  description:
+    "Owner-only. Enqueues a short-lived probe_model or probe_catalog command on the Runner's durable outbox and rings the pg_notify doorbell; a per-runner/harness/model cooldown applies.",
+  request: {
+    params: runnerParams,
+    body: { content: { "application/json": { schema: CatalogProbeRequest } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "The enqueued probe command",
+      content: { "application/json": { schema: CatalogProbeResponse } },
+    },
+    ...probeCatalogErrors,
   },
 });
 
@@ -559,6 +592,7 @@ const statusFor = {
   stream_batch_too_large: 400,
   stream_rate_limited: 429,
   stream_rollup_failed: 409,
+  probe_rate_limited: 429,
 } as const satisfies Record<RunnersErrorKind, Status>;
 
 function failure(c: Context, error: unknown) {
@@ -580,6 +614,13 @@ function streamFailure(c: Context, error: unknown) {
   return failure(c, error);
 }
 
+function probeFailure(c: Context, error: unknown) {
+  if (error instanceof RunnersError && error.kind === "probe_rate_limited") {
+    c.header("Retry-After", String(error.retryAfter ?? 30));
+  }
+  return failure(c, error);
+}
+
 export const routes = [
   createDeviceCode,
   previewDeviceCode,
@@ -588,6 +629,7 @@ export const routes = [
   registerRunner,
   heartbeat,
   updateRunnerCatalog,
+  probeCatalog,
   listWorkspaceRunners,
   revokeRunnerHost,
   createDispatch,
@@ -664,6 +706,18 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
       return c.json(await service.updateCatalog(bearer(c), runnerId, c.req.valid("json")), 200);
     } catch (error) {
       return failure(c, error);
+    }
+  });
+
+  app.openapi(probeCatalog, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      return c.json(
+        await service.probeCatalog(await sessionReader(c), runnerId, c.req.valid("json")),
+        200,
+      );
+    } catch (error) {
+      return probeFailure(c, error);
     }
   });
 

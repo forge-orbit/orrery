@@ -142,18 +142,45 @@ export class AcpStdioClient {
   static async probe(
     options: AcpStartOptions & { timeoutMs: number; sessionMeta?: Record<string, unknown> },
   ): Promise<unknown> {
+    const started = await AcpStdioClient.startProbe(options);
+    try {
+      return started.session;
+    } finally {
+      await started.client.forceExit(250);
+    }
+  }
+
+  /**
+   * Start a probe session without tearing it down. The caller owns the client
+   * and can issue further bounded RPCs (model switch, options, restore) against
+   * one shared deadline before calling `forceExit`.
+   */
+  static async startProbe(
+    options: AcpStartOptions & { timeoutMs: number; sessionMeta?: Record<string, unknown> },
+  ): Promise<{ client: AcpStdioClient; session: unknown; deadline: number }> {
     const deadline = Date.now() + options.timeoutMs;
     const client = AcpStdioClient.spawnClient(options);
     try {
       // One total budget shared by both RPCs: a slow initialize cannot buy a
       // second full timeout for session/new.
-      return await client.initializeSession(options, {
+      const session = await client.initializeSession(options, {
         deadline,
         ...(options.sessionMeta === undefined ? {} : { sessionMeta: options.sessionMeta }),
       });
-    } finally {
+      return { client, session, deadline };
+    } catch (error) {
       await client.forceExit(250);
+      throw error;
     }
+  }
+
+  /** Issue one RPC against a caller-owned deadline (minimum 1ms, never unbounded). */
+  async requestInBudget(
+    method: string,
+    params: Record<string, unknown>,
+    deadline: number,
+  ): Promise<unknown> {
+    return await this.request(method, params, Math.max(1, deadline - Date.now()));
   }
 
   private async initializeSession(

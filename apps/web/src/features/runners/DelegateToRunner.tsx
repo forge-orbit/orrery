@@ -9,15 +9,19 @@ import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useToast } from "@astryxdesign/core/Toast";
-import { MAX_DISPATCH_PROMPT_LENGTH, type Dispatch } from "@orrery/contract";
+import {
+  MAX_DISPATCH_PROMPT_LENGTH,
+  type CatalogProbeRequest,
+  type Dispatch,
+} from "@orrery/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Send } from "lucide-react";
-import { useState } from "react";
+import { RefreshCw, Send } from "lucide-react";
+import { useRef, useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
 import { HarnessBadge } from "../../lib/harness.tsx";
 import { Link } from "../../lib/Link.tsx";
 import { formatCompactDateTime } from "../../lib/time.ts";
-import { createDispatch } from "./commands.ts";
+import { createDispatch, probeRunnerCatalog } from "./commands.ts";
 import {
   issueDispatchesQuery,
   workspaceRunnersQuery,
@@ -42,6 +46,18 @@ const stateLabels: Record<Dispatch["state"], string> = {
   ended: "Ended",
 };
 
+/** The enqueue response is not the probe result: keep the pending UI up until
+ * the Runner publishes a catalog (picked up by the 4s fleet poll) or this cap. */
+const PROBE_GRACE_MS = 8_000;
+
+type ProbeInput = {
+  runnerId: string;
+  request: CatalogProbeRequest;
+  key: string;
+  baselineProbedAt: string;
+  generation: number;
+};
+
 /**
  * Owner-only issue dispatch from the issue detail page. A compact trigger keeps
  * the Recent dispatches list visible and opens a focused form dialog (#239).
@@ -59,12 +75,19 @@ export function DelegateToRunner({
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { data: fleet } = useQuery(workspaceRunnersQuery(workspaceId));
-  const { data: dispatchList } = useQuery(issueDispatchesQuery(issueId));
   const [isOpen, setIsOpen] = useState(false);
+  // While the dialog is open Query keeps the fleet fresh, so a catalog the
+  // Runner publishes after a probe appears without a React effect or a click.
+  const { data: fleet } = useQuery(workspaceRunnersQuery(workspaceId, isOpen));
+  const { data: dispatchList } = useQuery(issueDispatchesQuery(issueId));
   const [preference, setPreference] = useState<DelegatePreference>({ runnerId: "", agentId: "" });
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string>();
+  const [probeState, setProbeState] = useState<Omit<ProbeInput, "runnerId" | "request">>();
+  const [probeExpired, setProbeExpired] = useState(false);
+  const [probeFailed, setProbeFailed] = useState(false);
+  const probeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const probeGeneration = useRef(0);
 
   const owned = (fleet?.hosts ?? [])
     .filter((host) => host.canRevoke)
@@ -89,8 +112,44 @@ export function DelegateToRunner({
   const models = selectedHarness?.models ?? [];
   const selectedModel = models.find((item) => item.id === model);
   const efforts = selectedModel?.supportedEfforts ?? [];
+  // A model with no reasoning options is published as `known` + empty efforts,
+  // so the Effort control is hidden and selecting it does not re-probe forever.
+  const knownWithoutEfforts =
+    selectedModel !== undefined &&
+    selectedModel.reasoningDiscovery === "known" &&
+    efforts.length === 0;
+  const probingKeyForModel = `${runnerId}\u0000${harness}\u0000${model}`;
+  // The catalog the Runner publishes advances `probedAt`; derive the end of a
+  // probe from that live query data instead of clearing on the enqueue reply.
+  const catalogProbedAt = selectedRunner?.harnessCatalog.probedAt;
+  const catalogUpdated =
+    probeState !== undefined &&
+    catalogProbedAt !== undefined &&
+    Date.parse(catalogProbedAt) > Date.parse(probeState.baselineProbedAt);
+  const probeActive = probeState !== undefined && !probeExpired && !probeFailed && !catalogUpdated;
+  const probingEffort = probeActive && probeState.key === probingKeyForModel;
+  const probingCatalog = probeActive && probeState.key === "catalog";
+  const probeMessage =
+    probeState !== undefined && !catalogUpdated && (probeFailed || probeExpired)
+      ? probeState.key === "catalog"
+        ? "Catalog refresh did not finish; you can still delegate."
+        : "Reasoning levels could not be discovered; you can still delegate."
+      : undefined;
+  const effortDescription = probingEffort
+    ? "Discovering reasoning levels…"
+    : efforts.length === 0
+      ? "Reasoning levels not discovered yet"
+      : undefined;
   const trimmedPrompt = prompt.trim();
   const promptTooLong = trimmedPrompt.length > MAX_DISPATCH_PROMPT_LENGTH;
+
+  const clearProbe = () => {
+    if (probeTimer.current !== undefined) clearTimeout(probeTimer.current);
+    probeTimer.current = undefined;
+    setProbeState(undefined);
+    setProbeExpired(false);
+    setProbeFailed(false);
+  };
 
   const openDialog = () => {
     setPreference(
@@ -105,6 +164,7 @@ export function DelegateToRunner({
     // A new delegation never carries the previous issue's instructions.
     setPrompt("");
     setError(undefined);
+    clearProbe();
     setIsOpen(true);
   };
 
@@ -112,6 +172,7 @@ export function DelegateToRunner({
     setIsOpen(false);
     setPrompt("");
     setError(undefined);
+    clearProbe();
   };
 
   const mutation = useMutation({
@@ -152,9 +213,60 @@ export function DelegateToRunner({
     },
   });
 
+  // Probing is deliberately independent of the dispatch mutation: the Delegate
+  // button stays clickable while the Runner discovers a model's effort levels.
+  const probeMutation = useMutation({
+    mutationFn: (input: ProbeInput) => probeRunnerCatalog(input.runnerId, input.request),
+    onMutate: (input) => {
+      if (probeTimer.current !== undefined) clearTimeout(probeTimer.current);
+      probeTimer.current = undefined;
+      probeGeneration.current = input.generation;
+      setProbeState({
+        key: input.key,
+        baselineProbedAt: input.baselineProbedAt,
+        generation: input.generation,
+      });
+      setProbeExpired(false);
+      setProbeFailed(false);
+    },
+    onSettled: async (_data, _error, input) => {
+      // An older enqueue settling must not cap a newer probe's indicator.
+      if (input.generation !== probeGeneration.current) return;
+      probeTimer.current = setTimeout(() => setProbeExpired(true), PROBE_GRACE_MS);
+      await queryClient.invalidateQueries({ queryKey: workspaceRunnersQueryKey(workspaceId) });
+    },
+    onError: (_error, input) => {
+      if (input.generation === probeGeneration.current) setProbeFailed(true);
+    },
+  });
+
+  const startProbe = (request: CatalogProbeRequest, key: string) => {
+    probeGeneration.current += 1;
+    probeMutation.mutate({
+      runnerId,
+      request,
+      key,
+      baselineProbedAt: selectedRunner?.harnessCatalog.probedAt ?? "",
+      generation: probeGeneration.current,
+    });
+  };
+
   const submit = () => {
     if (runnerId === "" || promptTooLong) return;
     mutation.mutate();
+  };
+
+  const selectModel = (value: string | null) => {
+    const next = value ?? "";
+    // Clear the stale Effort before anything async happens.
+    setPreference((current) => ({ ...current, model: next, effort: "" }));
+    const candidate = models.find((item) => item.id === next);
+    if (candidate?.reasoningDiscovery === "unknown" && runnerId !== "" && harness !== "") {
+      startProbe(
+        { kind: "model", harness, model: next },
+        `${runnerId}\u0000${harness}\u0000${next}`,
+      );
+    }
   };
 
   return (
@@ -257,6 +369,24 @@ export function DelegateToRunner({
                   }
                   isDisabled={owned.length === 0 || mutation.isPending}
                 />
+                {/* A Runner with an empty, never-probed catalog is exactly the
+                    case that needs a manual refresh, so this action never sits
+                    behind the harness list. */}
+                {runnerId !== "" && (
+                  <HStack gap={2} hAlign="end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      label="Refresh catalog"
+                      icon={<Icon icon={RefreshCw} />}
+                      isLoading={probingCatalog}
+                      isDisabled={probingCatalog}
+                      data-delegate-refresh-catalog=""
+                      onClick={() => startProbe({ kind: "catalog" }, "catalog")}
+                    />
+                  </HStack>
+                )}
                 {harnesses.length > 0 && (
                   <VStack gap={3}>
                     <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
@@ -298,19 +428,12 @@ export function DelegateToRunner({
                               : "Reasoning levels not probed yet",
                         }))}
                         value={model ?? ""}
-                        onChange={(value) =>
-                          // Switching Model immediately clears stale Effort.
-                          setPreference((current) => ({
-                            ...current,
-                            model: value ?? "",
-                            effort: "",
-                          }))
-                        }
+                        onChange={selectModel}
                         isDisabled={mutation.isPending}
                         data-delegate-model=""
                       />
                     )}
-                    {model !== "" && efforts.length > 0 && (
+                    {model !== "" && !knownWithoutEfforts && (
                       <Selector
                         label="Effort"
                         placeholder="Choose a reasoning effort"
@@ -318,6 +441,10 @@ export function DelegateToRunner({
                         value={effort === "" ? null : effort}
                         hasClear
                         isOptional
+                        {...(effortDescription === undefined
+                          ? {}
+                          : { description: effortDescription })}
+                        isLoading={probingEffort}
                         onChange={(value) =>
                           setPreference((current) => ({ ...current, effort: value ?? "" }))
                         }
@@ -326,6 +453,11 @@ export function DelegateToRunner({
                       />
                     )}
                   </VStack>
+                )}
+                {probeMessage !== undefined && (
+                  <Text type="supporting" color="secondary">
+                    {probeMessage}
+                  </Text>
                 )}
                 <Selector
                   label="Agent"

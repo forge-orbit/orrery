@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import type { HarnessCatalog, HarnessCatalogEntry, ReadyWorkFilter } from "@orrery/contract";
-import { CatalogPublisher, probeHarness, readCachedCatalog } from "./catalog.ts";
+import {
+  catalogWithProbedModel,
+  CatalogPublisher,
+  probeHarness,
+  probeModel,
+  readCachedCatalog,
+} from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
@@ -106,6 +112,39 @@ export async function start(options: StartOptions): Promise<void> {
     onUnauthorized: (message) => revoke(message),
   });
 
+  const localDefinitions = (): HarnessDefinition[] =>
+    options.harnessDefinitions ??
+    detectHarnesses(supervision.acpOverridden ? { acpOverride: supervision.acp } : {});
+
+  const refreshAllCatalogs = async (): Promise<HarnessCatalogEntry[]> => {
+    const entries: HarnessCatalogEntry[] = [];
+    for (const definition of localDefinitions()) {
+      if (controller.signal.aborted) break;
+      try {
+        entries.push(
+          await probeHarness(definition, {
+            cwd: options.repoPath ?? process.cwd(),
+            timeoutMs: options.catalogProbeTimeoutMs ?? 5000,
+          }),
+        );
+      } catch (error) {
+        write(`Harness ${definition.id} probe failed: ${String(error)}`);
+      }
+    }
+    return entries;
+  };
+
+  const publishCatalogEntries = async (entries: HarnessCatalogEntry[]): Promise<void> => {
+    if (controller.signal.aborted || entries.length === 0) return;
+    try {
+      await publisher.publish({ harnesses: entries, probedAt: new Date().toISOString() });
+      options.onCatalog?.(publisher.current);
+    } catch (error) {
+      // A 401 already revoked locally via CatalogPublisher's callback.
+      if (!controller.signal.aborted) write(`Catalog publish failed: ${String(error)}`);
+    }
+  };
+
   // Startup/recovery reconciliation marks uncertain attempts and lets an
   // agent reconnecting after sleep stream into Live Session Studio seamlessly.
   const reconnected = await client.reconnect(runner.id, { activeAttempts: [] }).catch((error) => {
@@ -181,6 +220,9 @@ export async function start(options: StartOptions): Promise<void> {
     // Commands applied above the pinned cursor are replayed by the outbox but
     // must not be applied twice while a dispatch waits for a free slot.
     const replayed = new Set<number>();
+    // A replayed probe command must never run a second ACP session while the
+    // first one is still switching the Harness's CLI default.
+    const activeProbes = new Set<string>();
     while (!controller.signal.aborted) {
       let batch: Awaited<ReturnType<OrreryClient["pollCommands"]>>;
       try {
@@ -207,6 +249,56 @@ export async function start(options: StartOptions): Promise<void> {
         if (command.seq <= afterSeq || replayed.has(command.seq)) continue;
         if (Date.parse(command.expiresAt) <= Date.now()) {
           replayed.add(command.seq);
+          continue;
+        }
+        if (command.kind === "probe_model" || command.kind === "probe_catalog") {
+          // Probes never acquire a work slot: a full pool or a queued dispatch
+          // must not head-of-line block catalog discovery (#242).
+          const key =
+            command.kind === "probe_model"
+              ? `model\u0000${command.payload.harness}\u0000${command.payload.model}`
+              : "catalog";
+          if (activeProbes.has(key)) {
+            replayed.add(command.seq);
+            continue;
+          }
+          activeProbes.add(key);
+          replayed.add(command.seq);
+          const task = (async () => {
+            try {
+              if (command.kind === "probe_catalog") {
+                await publishCatalogEntries(await refreshAllCatalogs());
+                return;
+              }
+              const { harness, model } = command.payload;
+              const definition = localDefinitions().find((item) => item.id === harness);
+              if (definition === undefined) {
+                write(`Probe rejected: Harness ${harness} is not in the local registry.`);
+                return;
+              }
+              const result = await probeModel(definition, model, {
+                cwd: options.repoPath ?? process.cwd(),
+                timeoutMs: options.catalogProbeTimeoutMs ?? 5000,
+                fallbackModel: publisher.current.harnesses.find((item) => item.id === harness)
+                  ?.defaultModel,
+              });
+              write(
+                `Probe ${harness}/${model}: ${result.status}; restored=${String(result.restored)}${result.recovery ? " via recovery" : ""}.`,
+              );
+              if (result.model !== undefined && result.restored) {
+                await publisher.publish(
+                  catalogWithProbedModel(publisher.current, definition, result.model),
+                );
+                options.onCatalog?.(publisher.current);
+              }
+            } catch (error) {
+              if (!controller.signal.aborted) write(`Catalog probe failed: ${String(error)}`);
+            } finally {
+              activeProbes.delete(key);
+            }
+          })();
+          pending.add(task);
+          void task.finally(() => pending.delete(task));
           continue;
         }
         if (command.kind === "dispatch") {
@@ -359,34 +451,7 @@ export async function start(options: StartOptions): Promise<void> {
    * merges known effort entries instead of regressing them to `unknown`.
    */
   const startupCatalogProbe = async (): Promise<void> => {
-    const definitions =
-      options.harnessDefinitions ??
-      detectHarnesses(supervision.acpOverridden ? { acpOverride: supervision.acp } : {});
-    const timeoutMs = options.catalogProbeTimeoutMs ?? 5000;
-    const harnesses: HarnessCatalogEntry[] = [];
-    for (const definition of definitions) {
-      if (controller.signal.aborted) return;
-      try {
-        harnesses.push(
-          await probeHarness(definition, {
-            cwd: options.repoPath ?? process.cwd(),
-            timeoutMs,
-          }),
-        );
-      } catch (error) {
-        write(`Harness ${definition.id} probe failed: ${String(error)}`);
-      }
-    }
-    if (controller.signal.aborted || harnesses.length === 0) return;
-    try {
-      await publisher.publish({ harnesses, probedAt: new Date().toISOString() });
-      options.onCatalog?.(publisher.current);
-    } catch (error) {
-      // A 401 already revoked locally via CatalogPublisher's callback.
-      if (!controller.signal.aborted) {
-        write(`Catalog publish failed: ${String(error)}`);
-      }
-    }
+    await publishCatalogEntries(await refreshAllCatalogs());
   };
 
   await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop(), startupCatalogProbe()]);
