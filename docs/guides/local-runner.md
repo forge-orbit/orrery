@@ -73,7 +73,7 @@ orrery-runner status
 No long-lived workspace API key (`orr_ak_...`) is written to your machine. Every workspace and
 project check runs live against Postgres on each request.
 
-> **Single enrollment per machine.** `runner-credential.json` holds one active installation at
+> **Single enrollment per Runner host.** `runner-credential.json` holds one active installation at
 > a time. `login --server <other>` replaces the stored credential (warning with the previous
 > host name and server); revoke the old Runner host in Orrery if it is no longer used. The
 > enrolled installation URL is authoritative afterwards: `start`, `work`, and `init` fail fast
@@ -170,7 +170,7 @@ Built-in `--harness` presets invoke each vendor's real ACP stdio command under a
 | `cursor` | `cursor-agent acp` | See <https://cursor.com> |
 
 ```sh
-orrery-runner start --harness codex --model stub-deep --effort high
+orrery-runner start --harness codex --model <MODEL_ID> --effort high
 ```
 
 Passing `--harness` together with `--acp-command` / `--acp-arg` (or `ORRERY_ACP_COMMAND` /
@@ -297,13 +297,13 @@ marks the attempt `uncertain` instead of auto-rerunning it:
 | Flag | Env var | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
 | `--server URL` | `ORRERY_URL` | enrolled origin (`login`: `ORRERY_URL` else `http://localhost:8080`) | all (`start`/`work`/`init` must match enrollment) | Orrery base URL (`PUBLIC_URL`) |
-| `--host-name NAME` | — | OS hostname | `login` | Display name for this machine |
+| `--host-name NAME` | — | OS hostname | `login` | Display name for this Runner host |
 | `--platform NAME` | — | `<platform>-<arch>` | `login` | Platform label shown in Runner Fleet |
 | `--workspace ID` | — | saved binding or picker | `start`, `work`, `init` | Workspace ID, name, or slug (`work`: disambiguates an issue key) |
 | `--project ID` | — | saved binding or picker | `start`, `init` | Project ID, key, or name |
 | `--agent ID` | — | owner's first Agent | `start`, `work`, `init` | Agent ID or name |
 | `--reconfigure` | — | `false` | `start` | Re-resolve targets and update the saved binding (saved only after registration) |
-| `--name NAME` | — | host display name | `start` | Runner display name |
+| `--name NAME` | — | `<enrolled-host-name> · <repo-dir>` (plus `(<worktree-dir>)` in linked worktrees) | `start` | Runner display name |
 | `--capability NAME` | — | `[]` | `start` | Repeatable declared capability (first entry sets default Run harness label) |
 | `--concurrency N` | — | `1` | `start` | Max concurrent local slots (`1`–`64`) |
 | `--repo PATH` | — | current directory | `start`, `work`, `init` | Local git checkout path |
@@ -325,3 +325,16 @@ marks the attempt `uncertain` instead of auto-rerunning it:
 
 For the full architectural specification, lock order, and rejected alternatives, see
 [ADR-0010](../adr/0010-local-agent-runner-and-live-streaming.md).
+
+## 6. Maintainer release process
+
+Every pull request packs the standalone tarball and smoke-tests it in isolation
+(`node scripts/smoke-runner-pack.mjs`, wired into CI). Every `v*` tag publishes
+`@forge-orbit/orrery-runner` to npm idempotently with OIDC provenance
+(`--provenance --access public`, `--tag next` for prereleases) and stamps the tag version
+into the bundle before building, so `orrery-runner --version` reports the release.
+
+One-time bootstrap prerequisite before the first tagged publish: claim/verify the
+`@forge-orbit` npm org, perform the initial bootstrap publish, and configure GitHub Actions
+OIDC Trusted Publishing for `forge-orbit/orrery` (`ci.yml`). Until then, tagged builds fail
+at the npm publish step while PR checks and the Docker image publish keep working.

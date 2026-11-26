@@ -169,13 +169,14 @@ jobs:
   # One-time maintainer bootstrap prerequisite for the `npm` job below: the
   # `@forge-orbit` npm org must be claimed/verified, an initial bootstrap
   # publish of `@forge-orbit/orrery-runner` must exist, and GitHub Actions
-  # OIDC Trusted Publishing must be configured for `forge-orbit/orrery`.
-  # Until then, tagged `v*` builds will fail at the publish step while the
-  # Docker image publish and PR checks keep working. See
-  # docs/guides/local-runner.md for the end-user install story.
+  # OIDC Trusted Publishing must be configured for `forge-orbit/orrery`
+  # (`ci.yml`). Until then, tagged `v*` builds will fail at the publish step
+  # while the Docker image publish and PR checks keep working. See
+  # docs/guides/local-runner.md for the end-user install story and the
+  # maintainer release prerequisite.
   npm:
     name: Publish runner to npm
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'forge-orbit/orrery'
     needs: [publish]
     runs-on: ubuntu-latest
     permissions:
@@ -204,11 +205,13 @@ jobs:
             exit 1
           fi
           # Idempotency: skip when this version is already on npm.
-          if npm view "@forge-orbit/orrery-runner@$VERSION" version 2>/dev/null | grep -qx "$VERSION"; then
+          if npm view "@forge-orbit/orrery-runner@$VERSION" version 2>/dev/null | grep -Fqx "$VERSION"; then
             echo "Version $VERSION is already published; skipping."
             exit 0
           fi
           # Stamp the release version before building so the bundle bakes it in.
+          # (`prepack` also rebuilds on publish, but the explicit build keeps
+          # the stamp-then-build ordering obvious.)
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             const path = "apps/runner/package.json";

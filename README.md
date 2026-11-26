@@ -168,13 +168,13 @@ npm install -g @forge-orbit/orrery-runner
 npx @forge-orbit/orrery-runner --help
 ```
 
-1. Enroll your machine once via browser device-code login:
+1. Enroll your Runner host once via browser device-code login:
 
    ```sh
    orrery-runner login --server https://orrery.example.com
    ```
 
-   One machine holds one active enrollment at a time; logging in elsewhere replaces the stored credential.
+   One Runner host holds one active enrollment at a time; logging in elsewhere replaces the stored credential.
 
 2. From your repository, remember a workspace/project binding and start a persistent project runner with zero flags:
 
@@ -193,7 +193,11 @@ npx @forge-orbit/orrery-runner --help
    orrery-runner work PROJ-42
    ```
 
-`orrery-runner` supervises OpenCode (`opencode acp`) by default, supports the `codex`, `claude`, `omp`, `grok`, `hermes`, and `cursor` ACP presets via `--harness`, and any ACP stdio client via `--acp-command` and `--acp-arg` (see `orrery-runner --help`). Dirty, unpushed, or deadline-paused worktrees are preserved on disk. See the [Local agent runner guide](docs/guides/local-runner.md) for all flags, permission rules, and security details.
+`orrery-runner` supervises OpenCode (`opencode acp`) by default, supports the `codex`, `claude`, `omp`, `grok`, `hermes`, and `cursor` ACP presets via `--harness` (with `--model` / `--effort` defaults for model and reasoning effort), and any ACP stdio client via `--acp-command` and `--acp-arg` (see `orrery-runner --help`; `orrery-runner --version` needs no enrollment). Each checkout remembers its workspace/project binding in `~/.config/orrery/repos.json`, and dirty, unpushed, or deadline-paused worktrees are preserved on disk.
+
+> Not an OS sandbox: the runner's local permission policy is an application-layer gate, not an OS or process sandbox. Allowed commands run with your Runner host user's privileges. If you need hard confinement, run `orrery-runner` inside a container, VM, or OS sandbox wrapper.
+
+See the [Local agent runner guide](docs/guides/local-runner.md) for all flags, permission rules, and security details.
 
 ### Option 2: Connect Claude Code, Codex, or Cursor over MCP
 
