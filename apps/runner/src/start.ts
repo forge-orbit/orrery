@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import type { HarnessCatalog, HarnessCatalogEntry, ReadyWorkFilter } from "@orrery/contract";
-import { CatalogPublisher, probeHarness, readCachedCatalog } from "./catalog.ts";
+import type { HarnessCatalog, ReadyWorkFilter } from "@orrery/contract";
+import {
+  CatalogPublisher,
+  harnessConfigKey,
+  probeHarness,
+  readCachedCatalog,
+  runStartupCatalogProbe,
+} from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
@@ -81,9 +87,12 @@ export async function start(options: StartOptions): Promise<void> {
   });
   const supervision = options.supervision ?? loadSupervisionConfig();
   const fingerprint = repoFingerprint(options.repoPath ?? process.cwd());
+  const configKey = harnessConfigKey(
+    supervision.acpOverridden ? { acpOverride: supervision.acp } : {},
+  );
   // Only a cache hit seeds registration: omitting the field lets the server keep
   // a previously stored catalog when this Runner re-registers before probing.
-  const cached = readCachedCatalog(fingerprint);
+  const cached = readCachedCatalog(fingerprint, undefined, configKey);
   const runner = await client.registerRunner({
     workspaceId: options.workspaceId,
     projectId: options.projectId,
@@ -103,6 +112,7 @@ export async function start(options: StartOptions): Promise<void> {
     client,
     runnerId: runner.id,
     repoFingerprint: fingerprint,
+    configKey,
     onUnauthorized: (message) => revoke(message),
   });
 
@@ -363,24 +373,21 @@ export async function start(options: StartOptions): Promise<void> {
       options.harnessDefinitions ??
       detectHarnesses(supervision.acpOverridden ? { acpOverride: supervision.acp } : {});
     const timeoutMs = options.catalogProbeTimeoutMs ?? 5000;
-    const harnesses: HarnessCatalogEntry[] = [];
-    for (const definition of definitions) {
-      if (controller.signal.aborted) return;
-      try {
-        harnesses.push(
-          await probeHarness(definition, {
+    try {
+      await runStartupCatalogProbe({
+        definitions,
+        probe: (definition) =>
+          probeHarness(definition, {
             cwd: options.repoPath ?? process.cwd(),
             timeoutMs,
           }),
-        );
-      } catch (error) {
-        write(`Harness ${definition.id} probe failed: ${String(error)}`);
-      }
-    }
-    if (controller.signal.aborted || harnesses.length === 0) return;
-    try {
-      await publisher.publish({ harnesses, probedAt: new Date().toISOString() });
-      options.onCatalog?.(publisher.current);
+        publish: async (catalog) => {
+          await publisher.publish(catalog);
+          options.onCatalog?.(publisher.current);
+        },
+        isAborted: () => controller.signal.aborted,
+        write,
+      });
     } catch (error) {
       // A 401 already revoked locally via CatalogPublisher's callback.
       if (!controller.signal.aborted) {

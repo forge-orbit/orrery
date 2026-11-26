@@ -1501,6 +1501,54 @@ describe("per-dispatch harness, model and effort (#241)", () => {
     });
   });
 
+  it("never inherits another Harness's model and effort across a harness boundary", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential, defaultAgentId, undefined, {
+      harness: "opencode",
+      model: "stub-model-1",
+      effort: "high",
+    });
+    const issue = await createIssue("cross-harness defaults");
+    const created = await createDispatchWithOptions(issue.id, runner.id, adminCookie, {
+      harness: "codex",
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch.harness).toBe("codex");
+    expect(dispatch.model).toBeUndefined();
+    expect(dispatch.effort).toBeUndefined();
+    const [row] = await database.db
+      .select({
+        harness: runnerDispatches.harness,
+        model: runnerDispatches.model,
+        effort: runnerDispatches.effort,
+      })
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.id, dispatch.id));
+    expect(row).toMatchObject({ harness: "codex", model: null, effort: null });
+    const [command] = await database.db
+      .select({ payload: runnerCommands.payload })
+      .from(runnerCommands)
+      .where(eq(runnerCommands.runnerId, runner.id));
+    expect(command?.payload).toMatchObject({ dispatchId: dispatch.id, harness: "codex" });
+    expect(field(command?.payload, "model")).toBeUndefined();
+    expect(field(command?.payload, "effort")).toBeUndefined();
+
+    // Defaults without a harness belong to no Harness: an explicit Harness
+    // still must not inherit their model.
+    const other = await registerRunner(host.credential, defaultAgentId, undefined, {
+      model: "stub-model-1",
+    });
+    const otherIssue = await createIssue("explicit harness without default harness");
+    const otherCreated = await createDispatchWithOptions(otherIssue.id, other.id, adminCookie, {
+      harness: "codex",
+    });
+    expect(otherCreated.status).toBe(201);
+    const otherDispatch = Dispatch.parse(await otherCreated.json());
+    expect(otherDispatch.harness).toBe("codex");
+    expect(otherDispatch.model).toBeUndefined();
+  });
+
   it("ignores execution choices supplied by a human instead of the Runner host", async () => {
     const host = await enrollHost(adminCookie);
     const runner = await registerRunner(host.credential, defaultAgentId, undefined, {

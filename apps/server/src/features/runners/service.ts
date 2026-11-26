@@ -447,23 +447,17 @@ async function authenticateHostRunnerForDeps(
   return { host, runner, level };
 }
 
-/** A blank prompt is omitted everywhere: DB NULL, API response, outbox payload. */
-const normalizedPrompt = (value: string | undefined): string | undefined => {
-  const trimmed = value?.trim();
-  return trimmed === undefined || trimmed === "" ? undefined : trimmed;
-};
-
-/** Blank execution choices are omitted everywhere, exactly like a blank prompt. */
-const normalizedOption = (value: string | undefined): string | undefined => {
+/** Blank prompts and execution choices are omitted everywhere: DB NULL, API response, outbox payload. */
+const normalizedChoice = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed === "" ? undefined : trimmed;
 };
 
 /** CLI defaults are registered by the Runner host; blanks stay omitted. */
 const normalizedDefaults = (value: ExecutionDefaults | undefined): ExecutionDefaults => {
-  const harness = normalizedOption(value?.harness);
-  const model = normalizedOption(value?.model);
-  const effort = normalizedOption(value?.effort);
+  const harness = normalizedChoice(value?.harness);
+  const model = normalizedChoice(value?.model);
+  const effort = normalizedChoice(value?.effort);
   return {
     ...(harness === undefined ? {} : { harness }),
     ...(model === undefined ? {} : { model }),
@@ -1710,10 +1704,10 @@ async function insertDispatchLocked(
     .limit(1);
   if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
   await assertIssueDispatchable(tx, input.issueId, input.agentId);
-  const prompt = normalizedPrompt(input.prompt);
-  const harness = normalizedOption(input.harness);
-  const model = normalizedOption(input.model);
-  const effort = normalizedOption(input.effort);
+  const prompt = normalizedChoice(input.prompt);
+  const harness = normalizedChoice(input.harness);
+  const model = normalizedChoice(input.model);
+  const effort = normalizedChoice(input.effort);
 
   const [created] = await tx
     .insert(runnerDispatches)
@@ -2380,12 +2374,12 @@ export function createRunnersService(deps: RunnersDeps) {
       input: CreateDispatchRequest,
     ): Promise<Dispatch> {
       const human = requireAccount(account);
-      const prompt = normalizedPrompt(input.prompt);
+      const prompt = normalizedChoice(input.prompt);
       // Only the human's explicit choices are catalogue-checked. Runner
       // defaults come from the authenticated Runner host's own local config.
-      const requestedHarness = normalizedOption(input.harness);
-      const requestedModel = normalizedOption(input.model);
-      const requestedEffort = normalizedOption(input.effort);
+      const requestedHarness = normalizedChoice(input.harness);
+      const requestedModel = normalizedChoice(input.model);
+      const requestedEffort = normalizedChoice(input.effort);
       return db.transaction(async (tx) => {
         const [issue] = await tx
           .select({
@@ -2459,13 +2453,18 @@ export function createRunnersService(deps: RunnersDeps) {
         ) {
           throw new RunnersError("unknown_harness", undefined, requestedHarness);
         }
-        // Per-field fallback: an explicit choice wins, and every effective
-        // value is persisted on the Dispatch so the Run and readers agree with
-        // what the Runner will actually execute.
-        const harness =
-          requestedHarness ?? normalizedOption(joined.runner.executionDefaults.harness);
-        const model = requestedModel ?? normalizedOption(joined.runner.executionDefaults.model);
-        const effort = requestedEffort ?? normalizedOption(joined.runner.executionDefaults.effort);
+        // Execution defaults belong to ONE local Harness. An explicit Harness
+        // that differs from the defaults' Harness must not inherit its model or
+        // effort: those belong to another CLI and the local catalog resolves
+        // the new Harness's own default. Explicit choices always win.
+        const defaults = joined.runner.executionDefaults;
+        const defaultHarness = normalizedChoice(defaults.harness);
+        const sameHarness = requestedHarness === undefined || requestedHarness === defaultHarness;
+        const harness = requestedHarness ?? defaultHarness;
+        const model =
+          requestedModel ?? (sameHarness ? normalizedChoice(defaults.model) : undefined);
+        const effort =
+          requestedEffort ?? (sameHarness ? normalizedChoice(defaults.effort) : undefined);
 
         const agentId = input.agentId ?? joined.runner.agentId;
         const [agent] = await tx

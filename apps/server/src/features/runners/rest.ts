@@ -186,7 +186,7 @@ const updateRunnerCatalog = createRoute({
   path: "/api/runners/{runnerId}/catalog",
   summary: "Publish a Runner's discovered Harness catalog",
   description:
-    "Host-credential authenticated and project-access checked. Previously known per-model effort levels are preserved; heartbeats never carry the catalog.",
+    "Host-credential authenticated and project-access checked. Previously known per-model effort levels are preserved. Heartbeat requests are lean; the heartbeat response is the full Runner, including its catalog.",
   request: {
     params: runnerParams,
     body: { content: { "application/json": { schema: HarnessCatalog } }, required: true },

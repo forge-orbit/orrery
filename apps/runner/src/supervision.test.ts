@@ -681,6 +681,31 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
     expect((await events(fixture)).some((item) => item.event === "prompt")).toBe(false);
   });
 
+  it("spools acp_spawn_failed and releases the session when the executable is missing", async () => {
+    const missing = join(tmpdir(), `orrery-missing-harness-${Date.now()}`);
+    const fixture = await makeFixture({
+      mode: "normal",
+      harnessDefinitions: [
+        {
+          id: "opencode",
+          displayName: "Missing harness",
+          command: missing,
+          args: ["acp"],
+        },
+      ],
+    });
+    fixture.control.enqueueDispatch("TEST-241-5", "attempt-241-5", undefined, {
+      harness: "opencode",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("released");
+    await until(() =>
+      fixture.control.chunks().some((chunk) => chunk.diagnostic?.kind === "acp_spawn_failed"),
+    );
+    expect(fixture.lines.join("\n")).toContain("ACP start failed");
+    expect((await events(fixture)).some((item) => item.event === "prompt")).toBe(false);
+  });
+
   it("omits an unsupported effort with a non-fatal warning and still completes", async () => {
     const fixture = await makeFixture({
       mode: "effort-reject",

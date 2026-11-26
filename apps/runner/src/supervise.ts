@@ -345,19 +345,29 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     acp = await withHarnessLock(harnessLockKey(commandSpec), async () => {
       let started: AcpStdioClient | undefined;
       try {
-        started = await AcpStdioClient.start({
-          command: commandSpec.command,
-          args: [...commandSpec.args],
-          cwd: sessionWorktree.path,
-          env: Object.fromEntries(mcpConfig.env.map((item) => [item.name, item.value])),
-          worktreeReal: sessionWorktree.realPath,
-          mcpServers,
-          onUpdate: (method, params) => spoolEvent(method, params),
-          onStderr: (line) => {
-            write(`acp stderr: ${line}`);
-            spoolStderr(line);
-          },
-        });
+        try {
+          started = await AcpStdioClient.start({
+            command: commandSpec.command,
+            args: [...commandSpec.args],
+            cwd: sessionWorktree.path,
+            env: Object.fromEntries(mcpConfig.env.map((item) => [item.name, item.value])),
+            worktreeReal: sessionWorktree.realPath,
+            mcpServers,
+            onUpdate: (method, params) => spoolEvent(method, params),
+            onStderr: (line) => {
+              write(`acp stderr: ${line}`);
+              spoolStderr(line);
+            },
+          });
+        } catch (error) {
+          // A raw ENOENT/handshake failure must reach the typed diagnostic
+          // path, not just the supervision log (spec #236/#241).
+          throw new DispatchOptionFailure(
+            "acp_spawn_failed",
+            `ACP start failed for Harness ${harnessId} (${commandSpec.command}): ${String(error)}`,
+            harnessId,
+          );
+        }
         if (resolved.model !== undefined) {
           try {
             await started.setModel(resolved.model);
@@ -620,7 +630,17 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
               message: error.message,
               ...(error.harness === undefined ? {} : { harness: error.harness }),
             }
-          : { kind: "acp_spawn_failed", version: 1, message: error.message };
+          : {
+              kind: "acp_spawn_failed",
+              version: 1,
+              // A model rejection uses the same diagnostic kind (the contract
+              // has no dedicated one) but says why it happened; it is never
+              // mislabelled as a generic spawn failure.
+              message:
+                error.kind === "model_rejected"
+                  ? `Model rejected: ${error.message}`
+                  : `ACP start failed: ${error.message}`,
+            };
       // Awaited before the final flush so the diagnostic reaches the stream
       // rollup together with the released session.
       await spoolChunk({ kind: "diagnostic", diagnostic });

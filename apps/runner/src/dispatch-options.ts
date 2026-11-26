@@ -42,6 +42,18 @@ const nonBlank = (value: string | undefined): string | undefined => {
   return trimmed === undefined || trimmed === "" ? undefined : trimmed;
 };
 
+/** One local-registry seam for both default and explicit Harness resolution. */
+function localDefinitions(context: DispatchOptionsContext): readonly HarnessDefinition[] {
+  return (
+    context.definitions ??
+    detectHarnesses({
+      ...(context.acpOverride === undefined ? {} : { acpOverride: context.acpOverride }),
+      ...(context.configDir === undefined ? {} : { configDir: context.configDir }),
+      ...(context.pathEnv === undefined ? {} : { pathEnv: context.pathEnv }),
+    })
+  );
+}
+
 /**
  * The ACP command in effect without a selected Harness still belongs to a
  * local Harness: either the `--acp-command` override (`custom`) or an installed
@@ -50,13 +62,7 @@ const nonBlank = (value: string | undefined): string | undefined => {
  * instead of an executable path or alias (#241).
  */
 function defaultHarnessDefinition(context: DispatchOptionsContext): HarnessDefinition | undefined {
-  const definitions =
-    context.definitions ??
-    detectHarnesses({
-      ...(context.acpOverride === undefined ? {} : { acpOverride: context.acpOverride }),
-      ...(context.configDir === undefined ? {} : { configDir: context.configDir }),
-      ...(context.pathEnv === undefined ? {} : { pathEnv: context.pathEnv }),
-    });
+  const definitions = localDefinitions(context);
   const { command, args } = context.defaultCommand;
   return definitions.find(
     (item) =>
@@ -112,13 +118,7 @@ export function resolveExecutionChoice(
       ...(effort === undefined ? {} : { effort }),
     };
   }
-  const definitions =
-    context.definitions ??
-    detectHarnesses({
-      ...(context.acpOverride === undefined ? {} : { acpOverride: context.acpOverride }),
-      ...(context.configDir === undefined ? {} : { configDir: context.configDir }),
-      ...(context.pathEnv === undefined ? {} : { pathEnv: context.pathEnv }),
-    });
+  const definitions = localDefinitions(context);
   const definition = definitions.find((item) => item.id === harness);
   if (definition === undefined) {
     return { kind: "error", reason: "harness_not_installed", harness };
@@ -137,11 +137,16 @@ export function resolveExecutionChoice(
 }
 
 /** A wrapper so callers can name why a Harness/model application failed. */
+export type DispatchOptionFailureKind =
+  | "harness_not_installed"
+  | "model_rejected"
+  | "acp_spawn_failed";
+
 export class DispatchOptionFailure extends Error {
-  readonly kind: "harness_not_installed" | "model_rejected";
+  readonly kind: DispatchOptionFailureKind;
   readonly harness: string | undefined;
 
-  constructor(kind: "harness_not_installed" | "model_rejected", message: string, harness?: string) {
+  constructor(kind: DispatchOptionFailureKind, message: string, harness?: string) {
     super(message);
     this.name = "DispatchOptionFailure";
     this.kind = kind;

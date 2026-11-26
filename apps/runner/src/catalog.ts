@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ import { z } from "zod";
 import { AcpStdioClient } from "./acp.ts";
 import { RunnerRequestError } from "./client.ts";
 import { configDirectory } from "./credential.ts";
-import type { HarnessDefinition } from "./harnesses.ts";
+import { harnessesJsonPath, type HarnessDefinition } from "./harnesses.ts";
 import { harnessLockKey, withHarnessLock } from "./harness-lock.ts";
 
 /** ACP config option ids that carry reasoning-effort choices for the active model. */
@@ -124,26 +125,60 @@ export async function probeHarness(
 }
 
 /**
- * One Runner owns one checkout: the cache is keyed by its opaque fingerprint so
- * two Runners on the same host cannot overwrite each other's catalog or the
- * `--acp-command` overrides that produced it (ADR-0011).
+ * The effective local Harness configuration belongs in the cache identity: two
+ * Runners on the same checkout with different `--acp-command` overrides or
+ * `harnesses.json` contents otherwise overwrite each other's discovery state
+ * (ADR-0011).
  */
-export function catalogCachePath(repoFingerprint: string, configDir = configDirectory()): string {
-  return join(configDir, `harness-catalog-${repoFingerprint}.json`);
+export function harnessConfigKey(
+  options: {
+    acpOverride?: { command: string; args: readonly string[] } | undefined;
+    configDir?: string | undefined;
+  } = {},
+): string {
+  const configDir = options.configDir ?? configDirectory();
+  let harnessesText: string | null = null;
+  try {
+    harnessesText = readFileSync(harnessesJsonPath(configDir), "utf8");
+  } catch {
+    // No user registry file: the override alone identifies the configuration.
+  }
+  return createHash("sha256")
+    .update(JSON.stringify([options.acpOverride ?? null, harnessesText]))
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/** One Runner owns one checkout AND one local Harness configuration. */
+export function catalogCachePath(
+  repoFingerprint: string,
+  configDir = configDirectory(),
+  configKey = "",
+): string {
+  const suffix = configKey === "" ? "" : `-${configKey}`;
+  return join(configDir, `harness-catalog-${repoFingerprint}${suffix}.json`);
 }
 
 /** The last successfully published catalog, used to seed a fast startup register. */
 export function readCachedCatalog(
   repoFingerprint: string,
   configDir = configDirectory(),
+  configKey = "",
 ): HarnessCatalog | null {
   let text: string;
   try {
-    text = readFileSync(catalogCachePath(repoFingerprint, configDir), "utf8");
+    text = readFileSync(catalogCachePath(repoFingerprint, configDir, configKey), "utf8");
   } catch {
     return null;
   }
-  const parsed = HarnessCatalog.safeParse(JSON.parse(text));
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    // A truncated or corrupt local cache must never abort Runner startup.
+    return null;
+  }
+  const parsed = HarnessCatalog.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -151,9 +186,10 @@ export async function writeCachedCatalog(
   repoFingerprint: string,
   value: HarnessCatalog,
   configDir = configDirectory(),
+  configKey = "",
 ): Promise<void> {
   await mkdir(configDir, { recursive: true, mode: 0o700 });
-  const path = catalogCachePath(repoFingerprint, configDir);
+  const path = catalogCachePath(repoFingerprint, configDir, configKey);
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await chmod(path, 0o600);
 }
@@ -168,6 +204,7 @@ export interface CatalogPublisherOptions {
   runnerId: string;
   repoFingerprint: string;
   configDir?: string | undefined;
+  configKey?: string | undefined;
   onUnauthorized?: ((message: string) => void) | undefined;
 }
 
@@ -183,6 +220,7 @@ export class CatalogPublisher {
   private readonly runnerId: string;
   private readonly repoFingerprint: string;
   private readonly configDir: string;
+  private readonly configKey: string;
   private readonly onUnauthorized: ((message: string) => void) | undefined;
 
   constructor(options: CatalogPublisherOptions) {
@@ -190,8 +228,11 @@ export class CatalogPublisher {
     this.runnerId = options.runnerId;
     this.repoFingerprint = options.repoFingerprint;
     this.configDir = options.configDir ?? configDirectory();
+    this.configKey = options.configKey ?? "";
     this.onUnauthorized = options.onUnauthorized;
-    this.latest = readCachedCatalog(this.repoFingerprint, this.configDir) ?? EMPTY_HARNESS_CATALOG;
+    this.latest =
+      readCachedCatalog(this.repoFingerprint, this.configDir, this.configKey) ??
+      EMPTY_HARNESS_CATALOG;
   }
 
   get current(): HarnessCatalog {
@@ -201,7 +242,7 @@ export class CatalogPublisher {
   publish(next: HarnessCatalog): Promise<void> {
     const task = this.chain.then(async () => {
       const merged = mergeHarnessCatalog(this.latest, next);
-      await writeCachedCatalog(this.repoFingerprint, merged, this.configDir);
+      await writeCachedCatalog(this.repoFingerprint, merged, this.configDir, this.configKey);
       try {
         await this.client.putCatalog(this.runnerId, merged);
       } catch (error) {
@@ -218,4 +259,41 @@ export class CatalogPublisher {
     this.chain = task.catch(() => {});
     return task;
   }
+}
+
+export interface StartupCatalogProbeOptions {
+  definitions: readonly HarnessDefinition[];
+  probe: (definition: HarnessDefinition) => Promise<HarnessCatalogEntry>;
+  publish: (catalog: HarnessCatalog) => Promise<void>;
+  isAborted?: (() => boolean) | undefined;
+  write?: ((line: string) => void) | undefined;
+  now?: (() => string) | undefined;
+}
+
+/**
+ * One bounded startup discovery pass. An empty local registry is a successful
+ * detection: publishing an empty catalog lets the server drop Harnesses the
+ * Runner no longer has. Definitions that all fail to probe keep the last good
+ * catalog instead of wiping it on a transient outage.
+ */
+export async function runStartupCatalogProbe(options: StartupCatalogProbeOptions): Promise<void> {
+  const aborted = options.isAborted ?? (() => false);
+  const write = options.write ?? (() => {});
+  const now = options.now ?? (() => new Date().toISOString());
+  if (aborted()) return;
+  if (options.definitions.length === 0) {
+    await options.publish({ harnesses: [], probedAt: now() });
+    return;
+  }
+  const harnesses: HarnessCatalogEntry[] = [];
+  for (const definition of options.definitions) {
+    if (aborted()) return;
+    try {
+      harnesses.push(await options.probe(definition));
+    } catch (error) {
+      write(`Harness ${definition.id} probe failed: ${String(error)}`);
+    }
+  }
+  if (aborted() || harnesses.length === 0) return;
+  await options.publish({ harnesses, probedAt: now() });
 }

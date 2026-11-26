@@ -15,8 +15,10 @@ import {
   catalogCachePath,
   catalogEntryFromSession,
   CatalogPublisher,
+  harnessConfigKey,
   probeHarness,
   readCachedCatalog,
+  runStartupCatalogProbe,
 } from "./catalog.ts";
 import { detectHarnesses } from "./harnesses.ts";
 
@@ -318,5 +320,70 @@ describe("serialized catalog publication", () => {
       publisher.publish(catalogOf("2026-01-02T00:00:00.000Z")),
     ]);
     expect(peak).toBe(1);
+  });
+
+  it("treats a corrupt cache file as no cache instead of aborting startup", () => {
+    const dir = makeDir();
+    writeFileSync(catalogCachePath(fingerprintA, dir), "{truncated-json");
+    expect(readCachedCatalog(fingerprintA, dir)).toBeNull();
+  });
+
+  it("keys the catalog cache by the effective local harness configuration", () => {
+    const dir = makeDir();
+    const first = harnessConfigKey({
+      configDir: dir,
+      acpOverride: { command: "/opt/one", args: ["acp"] },
+    });
+    const second = harnessConfigKey({
+      configDir: dir,
+      acpOverride: { command: "/opt/two", args: ["acp"] },
+    });
+    expect(first).not.toBe(second);
+    expect(catalogCachePath(fingerprintA, dir, first)).not.toBe(
+      catalogCachePath(fingerprintA, dir, second),
+    );
+
+    writeFileSync(
+      join(dir, "harnesses.json"),
+      JSON.stringify([{ id: "a", displayName: "A", command: "/opt/a" }]),
+    );
+    const withFile = harnessConfigKey({ configDir: dir });
+    writeFileSync(
+      join(dir, "harnesses.json"),
+      JSON.stringify([{ id: "b", displayName: "B", command: "/opt/b" }]),
+    );
+    expect(harnessConfigKey({ configDir: dir })).not.toBe(withFile);
+  });
+
+  it("publishes an empty catalog when the local registry has no harnesses", async () => {
+    const published: HarnessCatalog[] = [];
+    await runStartupCatalogProbe({
+      definitions: [],
+      probe: async () => {
+        throw new Error("no harness should be probed");
+      },
+      publish: async (catalog) => {
+        published.push(catalog);
+      },
+    });
+    expect(published).toHaveLength(1);
+    expect(published[0]?.harnesses).toEqual([]);
+  });
+
+  it("keeps the last good catalog when every detected harness probe fails", async () => {
+    const published: HarnessCatalog[] = [];
+    const warnings: string[] = [];
+    await runStartupCatalogProbe({
+      definitions: [{ id: "opencode", displayName: "OpenCode", command: "missing", args: ["acp"] }],
+      probe: async () => {
+        throw new Error("probe failed");
+      },
+      publish: async (catalog) => {
+        published.push(catalog);
+      },
+      write: (line) => warnings.push(line),
+    });
+    expect(published).toEqual([]);
+    expect(warnings.join("\n")).toContain("probe failed");
   });
 });
