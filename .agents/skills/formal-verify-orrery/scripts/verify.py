@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Orrery Formal Verification Model Checker (M1-M46).
+Orrery Formal Verification Model Checker (M1-M47).
 
 Extracts critical concurrency, locking, and state-transition guards directly from
 Orrery's server source and SQL migrations, then runs an exhaustive BFS finite-state
@@ -2379,6 +2379,163 @@ def extract_code_facts() -> dict[str, Any]:
         and "isNull(issues.deletedAt)" in ready_fn
     )
 
+    # M47 (#250): project Trash lifecycle. Keep every fact scoped to the owning
+    # service method, route, schema table, or migration so an unrelated issue
+    # Trash guard cannot satisfy a project lifecycle property.
+    project_rest = read_text("apps/server/src/features/projects/rest.ts")
+    project_mcp = read_text("apps/server/src/features/projects/mcp.ts")
+    project_contract = read_text("packages/contract/src/projects.ts")
+    mig_0056 = read_text("db/migrations/0056_robust_sasquatch.sql")
+    delete_project_fn = slice_between(
+        proj_src, "async deleteProject(actorArg, projectId)", "async restoreProject("
+    )
+    restore_project_fn = slice_between(
+        proj_src, "async restoreProject(actorArg, projectId)", "async listWorkspaceProjectTrash("
+    )
+    project_trash_list_fn = slice_between(
+        proj_src, "async listWorkspaceProjectTrash(actorArg, workspaceId)", "async createProject("
+    )
+    require_project_human_fn = slice_between(
+        proj_src, "function requireProjectHuman(", "function humanIdOf("
+    )
+    lock_project_fn = slice_between(
+        proj_src, "async function lockProjectForMutation(", "async function lockIssueForMutation("
+    )
+    require_project_fn = slice_between(proj_src, "async function requireProject(", "async function requireIssue(")
+    require_issue_fn = slice_between(proj_src, "async function requireIssue(", "async function loadLabelsForIssues(")
+    require_knowledge_fn = slice_between(proj_src, "async function requireKnowledge(", "type RecordActivityInput =")
+    list_projects_fn = slice_between(
+        proj_src, "async listProjects(actorArg, workspaceId)", "async getProject("
+    )
+    create_project_fn = slice_between(proj_src, "async createProject(", "async updateProject(")
+    project_table = slice_between(schema_src, "export const projects = pgTable(", "export const projectTransferAuthorizations")
+    workspace_event_types = slice_between(schema_src, "export const workspaceEventTypes = [", "export type WorkspaceEventType")
+    routes = slice_between(project_rest, "export const routes = [", "];" )
+    delete_project_route = slice_between(project_rest, "const deleteProject = createRoute(", "const restoreProject = createRoute(")
+    restore_project_route = slice_between(project_rest, "const restoreProject = createRoute(", "const listWorkspaceProjectTrash = createRoute(")
+    project_trash_list_route = slice_between(project_rest, "const listWorkspaceProjectTrash = createRoute(", "const setProjectFallbackPolicy = createRoute(")
+    project_status_map = slice_between(project_rest, "const statusFor = {", "} as const satisfies Record<ProjectsErrorKind, number>")
+
+    transfer_lock_end = delete_project_fn.find("await lockWorkspaceOwnershipWrites(tx)")
+    m47_project_owner_gate = (
+        "requireProjectHuman(actorArg)" in delete_project_fn
+        and "requireProjectHuman(actorArg)" in restore_project_fn
+        and "requireProjectHuman(actorArg)" in project_trash_list_fn
+        and 'actor.kind === "agent"' in require_project_human_fn
+        and '"agents_cannot_delete_projects"' in require_project_human_fn
+        and '"workspace_owner_required"' in delete_project_fn
+        and '"workspace_owner_required"' in restore_project_fn
+        and '"workspace_owner_required"' in project_trash_list_fn
+    )
+    m47_project_row_lock = (
+        "lockProjectForMutation(tx, projectId)" in delete_project_fn
+        and "lockProjectForMutation(tx, projectId)" in restore_project_fn
+        and '.for("update")' in lock_project_fn
+    )
+    m47_transfer_lock_order = (
+        transfer_lock_end > 0
+        and ".from(projectTransferAuthorizations)" in delete_project_fn[:transfer_lock_end]
+        and '.for("update")' in delete_project_fn[:transfer_lock_end]
+        and delete_project_fn.find("lockProjectForMutation(tx, projectId)") > transfer_lock_end
+    )
+    m47_live_session_guard = (
+        "eq(workSessions.status, \"active\")" in delete_project_fn
+        and "gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`)" in delete_project_fn
+        and '"project_active_work_exists"' in delete_project_fn
+    )
+    m47_dispatch_guard = (
+        'inArray(runnerDispatches.state, ["pending", "active", "uncertain"])' in delete_project_fn
+        and "isNull(runnerDispatches.endedAt)" in delete_project_fn
+        and '"project_active_work_exists"' in delete_project_fn
+    )
+    m47_transfer_revocation = (
+        ".update(projectTransferAuthorizations)" in delete_project_fn
+        and 'status: "revoked"' in delete_project_fn
+        and 'eq(projectTransferAuthorizations.status, "pending")' in delete_project_fn
+        and "revokedAt: sql`statement_timestamp()`" in delete_project_fn
+    )
+    m47_delete_transaction = "await db.transaction(async (tx)" in delete_project_fn
+    m47_delete_project_activity = (
+        'type: "project_deleted"' in delete_project_fn
+        and "await recordActivity(tx" in delete_project_fn
+    )
+    m47_delete_workspace_event = (
+        'type: "project_deleted"' in delete_project_fn
+        and "await tx.insert(workspaceEvents).values" in delete_project_fn
+        and "subjectHumanId: actor.account.humanId" in delete_project_fn
+    )
+    m47_restore_window = (
+        "lockProjectForMutation(tx, projectId)" in restore_project_fn
+        and "trashExpired: sql<boolean>" in restore_project_fn
+        and "THIRTY_DAYS_AGO" in restore_project_fn
+        and "project.purgedAt !== null || project.trashExpired" in restore_project_fn
+        and '"project_purged"' in restore_project_fn
+        and "deletedAt: null" in restore_project_fn
+        and "deletedByHumanId: null" in restore_project_fn
+    )
+    m47_restore_transaction = "return db.transaction(async (tx)" in restore_project_fn
+    m47_restore_project_activity = (
+        'type: "project_restored"' in restore_project_fn
+        and "await recordActivity(tx" in restore_project_fn
+    )
+    m47_restore_workspace_event = (
+        'type: "project_restored"' in restore_project_fn
+        and "await tx.insert(workspaceEvents).values" in restore_project_fn
+        and "subjectHumanId: actor.account.humanId" in restore_project_fn
+    )
+    m47_trash_list_window = (
+        '"workspace_owner_required"' in project_trash_list_fn
+        and "isNotNull(projects.deletedAt)" in project_trash_list_fn
+        and "isNull(projects.purgedAt)" in project_trash_list_fn
+        and "gt(projects.deletedAt, THIRTY_DAYS_AGO)" in project_trash_list_fn
+    )
+    m47_active_project_hiding = (
+        "isNull(projects.deletedAt)" in require_project_fn
+        and "isNull(projects.deletedAt)" in list_projects_fn
+        and "isNull(projects.deletedAt)" in require_issue_fn
+        and "isNull(projects.deletedAt)" in require_knowledge_fn
+    )
+    m47_tombstone_constraints = (
+        'deletedAt: timestamp("deleted_at"' in project_table
+        and 'deletedByHumanId: text("deleted_by_human_id")' in project_table
+        and 'purgedAt: timestamp("purged_at"' in project_table
+        and "projects_deleted_actor_matches" in project_table
+        and "projects_purged_requires_deleted" in project_table
+        and "projects_deleted_actor_matches" in mig_0056
+        and "projects_purged_requires_deleted" in mig_0056
+    )
+    m47_project_key_lifecycle = (
+        'uniqueIndex("one_project_key_per_workspace")' in project_table
+        and '.where(sql`${t.purgedAt} is null`)' in project_table
+        and "isNull(projects.purgedAt)" in create_project_fn
+        and 'WHERE "projects"."purged_at" is null' in mig_0056
+    )
+    m47_activity_contract = (
+        '"project_deleted"' in project_contract
+        and '"project_restored"' in project_contract
+        and '"project_deleted"' in workspace_event_types
+        and '"project_restored"' in workspace_event_types
+        and "project_deleted" in mig_0056
+        and "project_restored" in mig_0056
+    )
+    m47_http_contract = (
+        'path: "/api/projects/{projectId}"' in delete_project_route
+        and 'path: "/api/projects/{projectId}/restore"' in restore_project_route
+        and 'path: "/api/workspaces/{workspaceId}/trash/projects"' in project_trash_list_route
+        and "TrashedProjectsResponse" in project_trash_list_route
+        and 'project_active_work_exists: 409' in project_status_map
+        and 'project_purged: 410' in project_status_map
+        and 'agents_cannot_delete_projects: 403' in project_status_map
+        and "deleteProject" in routes
+        and "restoreProject" in routes
+        and "listWorkspaceProjectTrash" in routes
+        and "TrashedProject" in project_contract
+    )
+    m47_no_project_lifecycle_mcp = not any(
+        tool in project_mcp
+        for tool in ('"delete_project"', '"restore_project"', '"list_project_trash"')
+    )
+
     # M33 (#99): cross-workspace My work access boundaries.
     my_work_src = read_text("apps/server/src/features/my-work/service.ts")
     my_work_rest = read_text("apps/server/src/features/my-work/rest.ts")
@@ -3976,6 +4133,28 @@ def extract_code_facts() -> dict[str, Any]:
         "m46_permission_size": m46_permission_size,
         "m46_park_resume": m46_park_resume,
         "m46_contract": m46_contract,
+
+        # M47 (#250): owner-only project Trash lifecycle and REST surface.
+        "m47_project_owner_gate": m47_project_owner_gate,
+        "m47_project_row_lock": m47_project_row_lock,
+        "m47_transfer_lock_order": m47_transfer_lock_order,
+        "m47_live_session_guard": m47_live_session_guard,
+        "m47_dispatch_guard": m47_dispatch_guard,
+        "m47_transfer_revocation": m47_transfer_revocation,
+        "m47_delete_transaction": m47_delete_transaction,
+        "m47_delete_project_activity": m47_delete_project_activity,
+        "m47_delete_workspace_event": m47_delete_workspace_event,
+        "m47_restore_window": m47_restore_window,
+        "m47_restore_transaction": m47_restore_transaction,
+        "m47_restore_project_activity": m47_restore_project_activity,
+        "m47_restore_workspace_event": m47_restore_workspace_event,
+        "m47_trash_list_window": m47_trash_list_window,
+        "m47_active_project_hiding": m47_active_project_hiding,
+        "m47_tombstone_constraints": m47_tombstone_constraints,
+        "m47_project_key_lifecycle": m47_project_key_lifecycle,
+        "m47_activity_contract": m47_activity_contract,
+        "m47_http_contract": m47_http_contract,
+        "m47_no_project_lifecycle_mcp": m47_no_project_lifecycle_mcp,
     }
 
 
@@ -10250,6 +10429,146 @@ def check_m46(facts: dict[str, Any]) -> CheckResult:
     )
 
 
+def check_m47(facts: dict[str, Any]) -> CheckResult:
+    """#250: owner-only project Trash lifecycle with bounded race guards.
+
+    Lifecycle transactions are atomic in this abstraction. Concurrent work
+    session claim/Dispatch creation and cross-feature hiding belong to #251;
+    automatic purge belongs to #252.
+    """
+    files = [
+        "apps/server/src/features/projects/service.ts",
+        "apps/server/src/features/projects/rest.ts",
+        "apps/server/src/db/schema.ts",
+        "db/migrations/0056_robust_sasquatch.sql",
+        "packages/contract/src/projects.ts",
+        "contract/openapi.json",
+    ]
+    g = {k: v for k, v in facts.items() if k.startswith("m47_")}
+    guard_violations = {
+        "owner_gate": {
+            "m47_project_owner_gate": "non_owner_or_agent_mutated_project_trash",
+        },
+        "project_row_lock": {
+            "m47_project_row_lock": "delete_and_restore_mutations_were_not_row_serialized",
+        },
+        "active_work_guard": {
+            "m47_live_session_guard": "project_deleted_with_live_work_session",
+            "m47_dispatch_guard": "project_deleted_with_live_runner_dispatch",
+        },
+        "transfer_delete": {
+            "m47_transfer_lock_order": "project_delete_and_transfer_accept_used_inconsistent_lock_order",
+            "m47_transfer_revocation": "pending_transfer_authorization_survived_project_delete",
+        },
+        "delete_commit": {
+            "m47_delete_transaction": "project_tombstone_and_delete_audit_were_not_atomic",
+            "m47_delete_project_activity": "project_delete_missing_project_activity",
+            "m47_delete_workspace_event": "project_delete_missing_workspace_audit",
+        },
+        "restore_window": {
+            "m47_restore_window": "purged_or_expired_project_restored_or_tombstone_not_cleared",
+        },
+        "restore_commit": {
+            "m47_restore_transaction": "project_restore_and_restore_audit_were_not_atomic",
+            "m47_restore_project_activity": "project_restore_missing_project_activity",
+            "m47_restore_workspace_event": "project_restore_missing_workspace_audit",
+        },
+        "trash_listing": {
+            "m47_trash_list_window": "workspace_trash_exposed_project_outside_owner_and_retention_scope",
+        },
+        "active_lookup": {
+            "m47_active_project_hiding": "trashed_project_or_child_remained_in_core_project_reads",
+        },
+        "schema_invariants": {
+            "m47_tombstone_constraints": "project_tombstone_actor_or_purge_constraint_missing",
+        },
+        "key_reuse": {
+            "m47_project_key_lifecycle": "project_key_reused_before_purge_or_remained_reserved_after_purge",
+        },
+        "contract_surface": {
+            "m47_activity_contract": "project_lifecycle_audit_types_missing_from_contract_or_schema",
+            "m47_http_contract": "project_trash_rest_contract_or_problem_mapping_missing",
+        },
+        "mcp_scope": {
+            "m47_no_project_lifecycle_mcp": "project_lifecycle_mcp_surface_added_outside_issue_scope",
+        },
+    }
+    if set().union(*(set(guards) for guards in guard_violations.values())) != set(g):
+        raise ValueError("M47 guard mapping must cover each extracted source fact exactly once")
+    actions = tuple(guard_violations)
+
+    def run(check_id: str) -> CheckResult:
+        init = (frozenset(), frozenset())
+
+        def next_states(state):
+            applied, _violations = state
+            for action in actions:
+                if action in applied:
+                    continue
+                found = frozenset(
+                    violation
+                    for guard, violation in guard_violations[action].items()
+                    if not g[guard]
+                )
+                yield f"{action} (after {sorted(applied)})", (applied | {action}, found)
+
+        def invariant(state):
+            _applied, violations = state
+            if violations:
+                return False, f"project Trash invariant broken: {sorted(violations)[0]}"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Owner-only Project Trash Lifecycle (#250)",
+            "Project deletion and restoration are owner-only, row-serialized and bounded by live-work and retention guards; audit writes are atomic; Trash reads, active reads, tombstone constraints, key reuse and REST contracts preserve lifecycle rules",
+            "safety",
+            init,
+            next_states,
+            invariant,
+            files,
+        )
+
+    result = run("M47")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M47-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M47",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M47",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -10300,6 +10619,7 @@ def main() -> None:
         check_m44(facts),
         check_m45(facts),
         check_m46(facts),
+        check_m47(facts),
     ]
 
     if "--json" in sys.argv:
