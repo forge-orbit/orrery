@@ -163,6 +163,15 @@ export async function resolveHarness(
 }
 
 /**
+ * The lock identity is the local executable + args, not the advertised id: a
+ * preset and an identical custom/user entry share the same on-disk CLI default
+ * and must never mutate it concurrently (ADR-0011, #242).
+ */
+export function harnessLockKey(spec: { command: string; args: readonly string[] }): string {
+  return JSON.stringify([spec.command, [...spec.args]]);
+}
+
+/**
  * A lightweight per-Harness mutex. Catalog probes temporarily switch a
  * Harness's default model, so a Dispatch for the same Harness must never spawn
  * ACP until the probe has restored it (issue #241). Work in the callback runs

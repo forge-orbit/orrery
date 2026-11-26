@@ -10,7 +10,12 @@ import { AcpStdioClient } from "./acp.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import type { SupervisionConfig } from "./config.ts";
 import { ephemeralMcpConfig } from "./config.ts";
-import { HarnessLocks, resolveHarness, type HarnessDefinition } from "./harnesses.ts";
+import {
+  harnessLockKey,
+  HarnessLocks,
+  resolveHarness,
+  type HarnessDefinition,
+} from "./harnesses.ts";
 import { McpAuthError, RunnerMcpClient } from "./mcp-client.ts";
 import { effortConfigIds } from "./probe.ts";
 import {
@@ -367,7 +372,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     const locks = options.locks ?? new HarnessLocks();
     const worktreePath = worktree.path;
     const worktreeReal = worktree.realPath;
-    acp = await locks.run(harness.id, async () => {
+    acp = await locks.run(harnessLockKey(harness), async () => {
       if (cancelledAlready) throw new Error("dispatch cancelled before ACP start");
       // Read the cached Harness default inside the per-Harness lock so a
       // dispatch queued behind a startup probe sees the freshly probed default.

@@ -53,7 +53,7 @@ const harnessCatalog = {
         {
           id: "codex-mini",
           label: "Codex Mini",
-          reasoningDiscovery: "unknown",
+          reasoningDiscovery: "known",
           supportedEfforts: [],
         },
       ],

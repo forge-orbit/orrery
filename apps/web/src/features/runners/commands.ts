@@ -1,5 +1,10 @@
-import type { CreateDispatchRequest } from "@orrery/contract";
-import { ApproveDeviceCodeResponse, Dispatch, RevokeRunnerHostResponse } from "@orrery/contract";
+import type { CatalogProbeRequest, CreateDispatchRequest } from "@orrery/contract";
+import {
+  ApproveDeviceCodeResponse,
+  CatalogProbeResponse,
+  Dispatch,
+  RevokeRunnerHostResponse,
+} from "@orrery/contract";
 import { post, postJson } from "../../lib/api.ts";
 
 export function approveDeviceCode(userCode: string) {
@@ -17,6 +22,13 @@ export function revokeRunnerHost(hostId: string) {
 export function createDispatch(issueId: string, input: CreateDispatchRequest) {
   return postJson(`/api/issues/${encodeURIComponent(issueId)}/dispatches`, input, (value) =>
     Dispatch.parse(value),
+  );
+}
+
+/** Ask the Runner to discover one model's efforts or refresh its whole catalog. */
+export function probeRunnerCatalog(runnerId: string, input: CatalogProbeRequest) {
+  return postJson(`/api/runners/${encodeURIComponent(runnerId)}/catalog/probe`, input, (value) =>
+    CatalogProbeResponse.parse(value),
   );
 }
 

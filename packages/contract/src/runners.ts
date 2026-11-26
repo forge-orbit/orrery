@@ -459,6 +459,28 @@ export const CreateDispatchRequest = z
   .meta({ id: "CreateDispatchRequest" });
 export type CreateDispatchRequest = z.infer<typeof CreateDispatchRequest>;
 
+/** On-demand discovery requested by the Runner's owner (ADR-0011, #242). */
+export const CatalogProbeRequest = z
+  .discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("model"),
+      harness: DispatchHarness,
+      model: DispatchModel,
+    }),
+    z.object({ kind: z.literal("catalog") }),
+  ])
+  .meta({ id: "CatalogProbeRequest" });
+export type CatalogProbeRequest = z.infer<typeof CatalogProbeRequest>;
+
+export const CatalogProbeResponse = z
+  .object({
+    commandId: z.string(),
+    kind: z.enum(["probe_model", "probe_catalog"]),
+    cooldownSeconds: z.int().nonnegative(),
+  })
+  .meta({ id: "CatalogProbeResponse" });
+export type CatalogProbeResponse = z.infer<typeof CatalogProbeResponse>;
+
 export const IssueDispatchesResponse = z
   .object({ dispatches: z.array(Dispatch) })
   .meta({ id: "IssueDispatchesResponse" });
@@ -552,9 +574,9 @@ export const DispatchScope = z
   .meta({ id: "DispatchScope" });
 export type DispatchScope = z.infer<typeof DispatchScope>;
 
-/** The three server-to-runner control commands carried by the transactional outbox. */
+/** Server-to-runner control commands carried by the transactional outbox. */
 export const RunnerCommandKind = z
-  .enum(["dispatch", "cancel", "input_resolved"])
+  .enum(["dispatch", "cancel", "input_resolved", "probe_model", "probe_catalog"])
   .meta({ id: "RunnerCommandKind" });
 export type RunnerCommandKind = z.infer<typeof RunnerCommandKind>;
 
@@ -594,8 +616,31 @@ export const InputResolvedCommandPayload = z
   .meta({ id: "InputResolvedCommandPayload" });
 export type InputResolvedCommandPayload = z.infer<typeof InputResolvedCommandPayload>;
 
+/**
+ * Runner-level probes carry only opaque local identifiers. No path, command or
+ * flag from the control plane is ever executed by the Runner (ADR-0011).
+ */
+export const ProbeModelCommandPayload = z
+  .object({
+    harness: DispatchHarness,
+    model: DispatchModel,
+  })
+  .meta({ id: "ProbeModelCommandPayload" });
+export type ProbeModelCommandPayload = z.infer<typeof ProbeModelCommandPayload>;
+
+export const ProbeCatalogCommandPayload = z
+  .object({})
+  .meta({ id: "ProbeCatalogCommandPayload" });
+export type ProbeCatalogCommandPayload = z.infer<typeof ProbeCatalogCommandPayload>;
+
 export const RunnerCommandPayload = z
-  .union([DispatchCommandPayload, CancelCommandPayload, InputResolvedCommandPayload])
+  .union([
+    DispatchCommandPayload,
+    CancelCommandPayload,
+    InputResolvedCommandPayload,
+    ProbeModelCommandPayload,
+    ProbeCatalogCommandPayload,
+  ])
   .meta({ id: "RunnerCommandPayload" });
 export type RunnerCommandPayload = z.infer<typeof RunnerCommandPayload>;
 
@@ -603,25 +648,50 @@ const runnerCommandBase = {
   commandId: z.string().min(1),
   runnerId: RunnerId,
   seq: z.int().positive(),
-  dispatchId: DispatchId,
-  dispatchAttemptId: DispatchAttemptId,
   createdAt: Timestamp,
   expiresAt: Timestamp,
 };
 
+const dispatchCommandBase = {
+  ...runnerCommandBase,
+  dispatchId: DispatchId,
+  dispatchAttemptId: DispatchAttemptId,
+};
+
+/** Probe commands are runner-level: they belong to no Dispatch attempt. */
+const probeCommandBase = {
+  ...runnerCommandBase,
+  dispatchId: z.null(),
+  dispatchAttemptId: z.null(),
+};
+
 export const DispatchRunnerCommand = z
-  .object({ ...runnerCommandBase, kind: z.literal("dispatch"), payload: DispatchCommandPayload })
+  .object({ ...dispatchCommandBase, kind: z.literal("dispatch"), payload: DispatchCommandPayload })
   .meta({ id: "DispatchRunnerCommand" });
 export const CancelRunnerCommand = z
-  .object({ ...runnerCommandBase, kind: z.literal("cancel"), payload: CancelCommandPayload })
+  .object({ ...dispatchCommandBase, kind: z.literal("cancel"), payload: CancelCommandPayload })
   .meta({ id: "CancelRunnerCommand" });
 export const InputResolvedRunnerCommand = z
   .object({
-    ...runnerCommandBase,
+    ...dispatchCommandBase,
     kind: z.literal("input_resolved"),
     payload: InputResolvedCommandPayload,
   })
   .meta({ id: "InputResolvedRunnerCommand" });
+export const ProbeModelRunnerCommand = z
+  .object({
+    ...probeCommandBase,
+    kind: z.literal("probe_model"),
+    payload: ProbeModelCommandPayload,
+  })
+  .meta({ id: "ProbeModelRunnerCommand" });
+export const ProbeCatalogRunnerCommand = z
+  .object({
+    ...probeCommandBase,
+    kind: z.literal("probe_catalog"),
+    payload: ProbeCatalogCommandPayload,
+  })
+  .meta({ id: "ProbeCatalogRunnerCommand" });
 
 /** One durable, ordered command from a Runner's outbox. */
 export const RunnerCommand = z
@@ -629,6 +699,8 @@ export const RunnerCommand = z
     DispatchRunnerCommand,
     CancelRunnerCommand,
     InputResolvedRunnerCommand,
+    ProbeModelRunnerCommand,
+    ProbeCatalogRunnerCommand,
   ])
   .meta({ id: "RunnerCommand" });
 export type RunnerCommand = z.infer<typeof RunnerCommand>;
