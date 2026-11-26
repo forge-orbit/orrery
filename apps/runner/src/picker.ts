@@ -22,7 +22,9 @@ export async function readlineChoose<T>(
   title: string,
   options: PickerOption<T>[],
   stdout: NodeJS.WriteStream = process.stdout,
+  signal?: AbortSignal,
 ): Promise<T | null> {
+  if (signal?.aborted === true) return null;
   const rl = createInterface({ input: process.stdin, output: stdout });
   try {
     stdout.write(`${title}\n`);
@@ -30,7 +32,10 @@ export async function readlineChoose<T>(
     for (;;) {
       let answer: string | null;
       try {
-        answer = await rl.question(`Choose 1-${options.length} (or 'q' to quit): `);
+        answer = await rl.question(
+          `Choose 1-${options.length} (or 'q' to quit): `,
+          signal === undefined ? {} : { signal },
+        );
       } catch {
         return null;
       }
@@ -54,6 +59,7 @@ export interface PickerDeps {
   choose?: ChooseFn | undefined;
   isTTY?: boolean | undefined;
   write?: ((line: string) => void) | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface PickedTargets {
@@ -97,7 +103,9 @@ function pickerDeps(deps: PickerDeps): {
   return {
     write: deps.write ?? ((line: string) => process.stdout.write(`${line}\n`)),
     isTTY: deps.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY),
-    choose: deps.choose ?? readlineChoose,
+    choose:
+      deps.choose ??
+      ((title, options) => readlineChoose(title, options, process.stdout, deps.signal)),
   };
 }
 

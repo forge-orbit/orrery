@@ -36,6 +36,7 @@ export interface ResolutionRequest {
   storedHostId: string;
   write: (line: string) => void;
   choose?: ChooseFn | undefined;
+  signal?: AbortSignal | undefined;
   isTTY: boolean;
   /**
    * `init` and `start --reconfigure` always persist (and never reuse the old
@@ -99,43 +100,54 @@ const staleWorkspaceError = (workspaceId: string): Error =>
  */
 export function mapRegistrationError(
   error: unknown,
-  ids: { workspaceId: string; projectId: string },
+  ids: {
+    workspaceId: string;
+    projectId: string;
+    hasBinding?: boolean | undefined;
+    workspaceFromBinding?: boolean | undefined;
+    projectFromBinding?: boolean | undefined;
+    agentFromBinding?: boolean | undefined;
+  },
 ): Error {
   if (!(error instanceof RunnerRequestError)) {
     return error instanceof Error ? error : new Error(String(error));
   }
-  const unchanged = "The saved binding was left unchanged.";
+  const hasBinding = ids.hasBinding ?? true;
+  const workspaceLabel = ids.workspaceFromBinding === false ? "Workspace" : "The saved workspace";
+  const projectLabel = ids.projectFromBinding === false ? "Project" : "The saved project";
+  const agentLabel = ids.agentFromBinding === false ? "Agent" : "The saved agent";
+  const unchanged = hasBinding ? " The saved binding was left unchanged." : "";
   if (error.status === 401) {
     return new Error(
       `Orrery rejected the Runner host credential (401). ` +
-        `Run 'orrery-runner login' to re-enroll this host, then retry. ${unchanged}`,
+        `Run 'orrery-runner login' to re-enroll this host, then retry.${unchanged}`,
     );
   }
   if (error.status === 404 && error.code === "workspace_not_found") {
     return new Error(
-      `The saved workspace '${ids.workspaceId}' is no longer accessible ` +
+      `${workspaceLabel} '${ids.workspaceId}' is no longer accessible ` +
         `(access revoked or workspace removed). Run 'orrery-runner start --reconfigure' or ` +
-        `'orrery-runner init --workspace <ID> --project <ID>' to choose new targets. ${unchanged}`,
+        `'orrery-runner init --workspace <ID> --project <ID>' to choose new targets.${unchanged}`,
     );
   }
   if (error.status === 404 && error.code === "project_not_found") {
     return new Error(
-      `The saved project '${ids.projectId}' was not found. It may have been moved to Trash ` +
+      `${projectLabel} '${ids.projectId}' was not found. It may have been moved to Trash ` +
         `(restorable for 30 days) or your access was revoked. Run ` +
         `'orrery-runner start --reconfigure' or 'orrery-runner init --workspace <ID> --project <ID>' ` +
-        `to choose new targets. ${unchanged}`,
+        `to choose new targets.${unchanged}`,
     );
   }
   if (error.status === 404 && error.code === "agent_not_found") {
     return new Error(
-      `The saved agent is no longer available (deleted or not owned by this host's human). ` +
-        `Run 'orrery-runner start --reconfigure' or pass --agent explicitly. ${unchanged}`,
+      `${agentLabel} is no longer available (deleted or not owned by this host's human). ` +
+        `Run 'orrery-runner start --reconfigure' or pass --agent explicitly.${unchanged}`,
     );
   }
   if (error.status === 409 && error.code === "no_default_agent") {
     return new Error(
       `This host's human has no agent to run as by default. Create an agent, then run ` +
-        `'orrery-runner start --reconfigure' or pass --agent explicitly. ${unchanged}`,
+        `'orrery-runner start --reconfigure' or pass --agent explicitly.${unchanged}`,
     );
   }
   return error;
@@ -256,7 +268,12 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
       const picked = await pickProjectInWorkspace(
         workspace,
         targets,
-        { choose: request.choose, isTTY: request.isTTY, write: request.write },
+        {
+          choose: request.choose,
+          isTTY: request.isTTY,
+          write: request.write,
+          signal: request.signal,
+        },
         { agent: agentOverride },
       );
       usedPicker = true;
@@ -329,7 +346,12 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
   } else {
     const picked = await pickTargets(
       targets,
-      { choose: request.choose, isTTY: request.isTTY, write: request.write },
+      {
+        choose: request.choose,
+        isTTY: request.isTTY,
+        write: request.write,
+        signal: request.signal,
+      },
       { agent: agentOverride },
     );
     usedPicker = true;

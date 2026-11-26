@@ -77,8 +77,8 @@ project check runs live against Postgres on each request.
 > a time. `login --server <other>` replaces the stored credential (warning with the previous
 > host name and server); revoke the old Runner host in Orrery if it is no longer used. The
 > enrolled installation URL is authoritative afterwards: `start`, `work`, and `init` fail fast
-> if `--server` or `ORRERY_URL` points anywhere else, so the host credential can never leak to
-> the wrong origin.
+> if the effective server assertion (`--server`, or `ORRERY_URL` when `--server` is omitted)
+> points anywhere else, so the host credential can never leak to the wrong origin.
 
 ## 2. Run modes
 
@@ -94,7 +94,7 @@ orrery-runner start   # reuses the saved binding and heartbeats until stopped
 ```
 
 On first run with no saved binding, `start` opens the same numbered picker
-(workspace → project → default agent) and saves it before registering. Later runs reuse the
+(workspace → project → default agent) and saves the binding after registration succeeds. Later runs reuse the
 binding with no prompts and no extra network round-trip. Explicit `--workspace` / `--project`
 / `--agent` flags override the saved binding for that run only without modifying it; names,
 slugs, and keys work anywhere an ID does (`--workspace Acme --project ONE --agent Ada`).

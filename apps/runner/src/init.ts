@@ -11,6 +11,7 @@ export interface InitOptions {
   project?: string | undefined;
   agentId?: string | undefined;
   repoPath?: string | undefined;
+  signal?: AbortSignal | undefined;
   write?: ((line: string) => void) | undefined;
   choose?: ChooseFn | undefined;
   isTTY?: boolean | undefined;
@@ -38,7 +39,11 @@ export async function init(options: InitOptions): Promise<void> {
   validateCheckout(repoPath);
   const fingerprint = bindingFingerprint(repoPath);
 
-  const client = new OrreryClient({ server, credential: stored.credential });
+  const client = new OrreryClient({
+    server,
+    credential: stored.credential,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
   const bindings = await readReposFile();
   const previous = findBinding(bindings, server, fingerprint);
   const resolved = await resolveTargets({
@@ -53,6 +58,7 @@ export async function init(options: InitOptions): Promise<void> {
     storedHostId: stored.hostId,
     write,
     choose: options.choose,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
     isTTY: options.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY),
     alwaysSave: true,
   });

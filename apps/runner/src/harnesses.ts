@@ -1,9 +1,10 @@
 import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { basename, delimiter, isAbsolute, join } from "node:path";
+import type { HarnessSource } from "@orrery/contract";
 import { z } from "zod";
 import { configDirectory } from "./credential.ts";
 
-export type HarnessSourceKind = "preset" | "override" | "user";
+export type HarnessSourceKind = HarnessSource;
 
 /** A locally executable ACP harness the Runner may probe and delegate to. */
 export interface HarnessDefinition {

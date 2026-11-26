@@ -177,7 +177,7 @@ jobs:
   npm:
     name: Publish runner to npm
     if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'forge-orbit/orrery'
-    needs: [publish]
+    needs: [publish, runner-pack]
     runs-on: ubuntu-latest
     permissions:
       contents: read

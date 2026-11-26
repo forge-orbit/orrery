@@ -81,13 +81,13 @@ Built-in `--harness` presets (`opencode`, `codex`, `claude`, `omp`, `grok`, `her
 
 ## Enrollment and bindings
 
-- **Single enrollment per machine.** The host credential lives at
+- **Single enrollment per Runner host.** The host credential lives at
   `~/.config/orrery/runner-credential.json` (`0600`, override the directory with
   `ORRERY_RUNNER_CONFIG_DIR`). Only one Orrery installation is active at a time; logging in
   to a different server replaces the stored credential.
 - The enrolled installation URL is authoritative: `start`, `work`, and `init` fail fast if
-  `--server` or `ORRERY_URL` points anywhere else, so the host credential can never leak to
-  the wrong origin.
+  the effective server assertion (`--server`, or `ORRERY_URL` when `--server` is omitted)
+  points anywhere else, so the host credential can never leak to the wrong origin.
 - Checkout bindings live in `~/.config/orrery/repos.json` (`0600`), keyed by checkout, and
   are never stored inside the repository.
 

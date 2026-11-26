@@ -207,6 +207,7 @@ export async function start(options: StartOptions): Promise<void> {
       storedHostId: stored.hostId,
       write,
       choose: options.choose,
+      signal: controller.signal,
       isTTY: options.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY),
       alwaysSave: options.reconfigure === true,
     });
@@ -226,9 +227,14 @@ export async function start(options: StartOptions): Promise<void> {
     } catch (error) {
       // A stale binding never auto-deletes `repos.json`: report the exact
       // cause with its remediation and leave the file unchanged.
+      const usedSavedBinding = binding !== undefined && options.reconfigure !== true;
       throw mapRegistrationError(error, {
         workspaceId: resolved.workspaceId,
         projectId: resolved.projectId,
+        hasBinding: binding !== undefined,
+        workspaceFromBinding: usedSavedBinding && options.workspaceId === undefined,
+        projectFromBinding: usedSavedBinding && options.projectId === undefined,
+        agentFromBinding: usedSavedBinding && options.agentId === undefined,
       });
     }
     // Persist the (possibly new) binding only after `registerRunner` succeeds,

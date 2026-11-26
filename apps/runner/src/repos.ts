@@ -1,6 +1,7 @@
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { Sha256Hex } from "@orrery/contract";
 import { z } from "zod";
 import { configDirectory } from "./credential.ts";
 import { canonicalizeServerUrl } from "./origin.ts";
@@ -17,7 +18,7 @@ import { canonicalizeServerUrl } from "./origin.ts";
 export const RepoBinding = z
   .object({
     server: z.string().min(1),
-    bindingFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+    bindingFingerprint: Sha256Hex,
     workspaceId: z.string().min(1),
     projectId: z.string().min(1),
     agentId: z.string().min(1).optional(),

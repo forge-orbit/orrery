@@ -54,7 +54,7 @@ Options:
   --server URL              Orrery base URL (login: switch installations; start/work/init: must match enrollment)
   --host-name NAME          Display name for this machine (login)
   --platform NAME           Platform label (login)
-  --agent ID-OR-NAME        Default Agent (start/init; otherwise the host owner's first Agent)
+  --agent ID-OR-NAME        Default Agent (start/init/work; otherwise the host owner's first Agent)
   --name NAME               Runner display name (start)
   --capability NAME         Declared capability, repeatable (start)
   --concurrency N           Max concurrent local slots, 1-64 (start; default: 1)
@@ -195,6 +195,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           ...(values.project === undefined ? {} : { project: values.project }),
           ...(values.agent === undefined ? {} : { agentId: values.agent }),
           ...(values.repo === undefined ? {} : { repoPath: values.repo }),
+          signal: controller.signal,
         });
         return;
       }
@@ -275,5 +276,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
+  } finally {
+    process.removeListener("SIGINT", stop);
+    process.removeListener("SIGTERM", stop);
   }
 }

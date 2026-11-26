@@ -587,7 +587,7 @@ export const RunnerTargetWorkspace = z
     slug: z.string().max(200),
     kind: WorkspaceKind,
     /** Empty when the host owner holds no `Contribute+` project here. */
-    projects: z.array(RunnerTargetProject).max(2000),
+    projects: z.array(RunnerTargetProject).max(RUNNER_TARGETS_MAX_PROJECTS),
   })
   .meta({ id: "RunnerTargetWorkspace" });
 export type RunnerTargetWorkspace = z.infer<typeof RunnerTargetWorkspace>;
@@ -602,9 +602,9 @@ export type RunnerTargetAgent = z.infer<typeof RunnerTargetAgent>;
 
 export const RunnerTargetsResponse = z
   .object({
-    workspaces: z.array(RunnerTargetWorkspace).max(200),
+    workspaces: z.array(RunnerTargetWorkspace).max(RUNNER_TARGETS_MAX_WORKSPACES),
     /** Top-level: agents are installation-wide, never nested per workspace. */
-    agents: z.array(RunnerTargetAgent).max(200),
+    agents: z.array(RunnerTargetAgent).max(RUNNER_TARGETS_MAX_AGENTS),
     /** First-created agent, sharing `registerRunner`'s deterministic ordering. */
     defaultAgentId: z.string().min(1).max(200).nullable(),
   })
