@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HarnessCatalog } from "@orrery/contract";
-import { writeCatalogCache } from "./catalog.ts";
+import { harnessConfigKey, writeCachedCatalog } from "./catalog.ts";
 import { loadSupervisionConfig } from "./config.ts";
 import type { SlotController } from "./slots.ts";
-import { start } from "./start.ts";
+import { repoFingerprint, start } from "./start.ts";
 import { TestOrrery, type TestActivity, type TestSession } from "./test-orrery.ts";
 
 interface Fixture {
@@ -130,10 +130,6 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
   else process.env.STUB_ACP_REJECT_MODEL = options.rejectModel;
   if (options.rejectEffort === true) process.env.STUB_ACP_REJECT_EFFORT = "1";
   else delete process.env.STUB_ACP_REJECT_EFFORT;
-  // The cache is read before registration, exactly like a real cold start.
-  if (options.cachedCatalog !== undefined) {
-    await writeCatalogCache(options.cachedCatalog, configDir);
-  }
   const stop = new AbortController();
   const lines: string[] = [];
   const config = loadSupervisionConfig({
@@ -145,6 +141,15 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
     ...(options.defaults?.effort === undefined ? {} : { effort: options.defaults.effort }),
     worktreeRoot: worktrees,
   });
+  // The cache is read before registration, exactly like a real cold start.
+  if (options.cachedCatalog !== undefined) {
+    await writeCachedCatalog(
+      repoFingerprint(repo),
+      options.cachedCatalog,
+      configDir,
+      harnessConfigKey({ acpOverride: config.acp }),
+    );
+  }
   const done = start({
     server: control.url,
     workspaceId: "workspace-1",
@@ -616,34 +621,37 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
   });
 });
 
-const catalogWithDefault = (defaultModel: string): HarnessCatalog => ({
-  harnesses: [
-    {
-      id: "node",
-      displayName: "Node stub",
-      source: "override",
-      defaultModel,
-      models: [
-        {
-          id: defaultModel,
-          label: "Stub Deep",
-          reasoningDiscovery: "known",
-          effortLevels: ["low", "medium", "high"],
-          defaultEffort: "medium",
-          probedAt: null,
-        },
-      ],
-      probedAt: null,
-    },
-  ],
-  updatedAt: new Date().toISOString(),
-});
+const catalogWithDefault = (defaultModel: string): HarnessCatalog => {
+  const at = new Date().toISOString();
+  return {
+    harnesses: [
+      {
+        id: "custom",
+        displayName: "Node stub",
+        source: "override",
+        defaultModel,
+        models: [
+          {
+            id: defaultModel,
+            label: "Stub Deep",
+            reasoningDiscovery: "known",
+            supportedEfforts: ["low", "medium", "high"],
+            defaultEffort: "medium",
+            probedAt: at,
+          },
+        ],
+        probedAt: at,
+      },
+    ],
+    probedAt: at,
+  };
+};
 
 describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, () => {
   it("applies the chosen Harness, model and effort over ACP", async () => {
     const fixture = await makeFixture({ mode: "normal" });
     fixture.control.enqueueDispatch("TEST-241-MODEL", undefined, {
-      harness: "node",
+      harness: "custom",
       model: "stub-deep",
       effort: "high",
     });
@@ -666,7 +674,7 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
       cachedCatalog: catalogWithDefault("stub-deep"),
       defaultModel: "stub-deep",
     });
-    fixture.control.enqueueDispatch("TEST-241-DEFAULT", undefined, { harness: "node" });
+    fixture.control.enqueueDispatch("TEST-241-DEFAULT", undefined, { harness: "custom" });
     const session = await settledSession(fixture);
     expect(session.status).toBe("completed");
 
@@ -697,7 +705,7 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
   it("reports a rejected model as a typed diagnostic and releases the session", async () => {
     const fixture = await makeFixture({ mode: "normal", rejectModel: "stub-deep" });
     fixture.control.enqueueDispatch("TEST-241-REJECT", undefined, {
-      harness: "node",
+      harness: "custom",
       model: "stub-deep",
     });
     const session = await settledSession(fixture);
@@ -715,7 +723,7 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
   it("omits unsupported effort with a warning chunk and keeps the turn alive", async () => {
     const fixture = await makeFixture({ mode: "normal", rejectEffort: true });
     fixture.control.enqueueDispatch("TEST-241-EFFORT", undefined, {
-      harness: "node",
+      harness: "custom",
       effort: "high",
     });
     const session = await settledSession(fixture);
@@ -734,7 +742,7 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
   it("uses local CLI defaults when the dispatch carries no options", async () => {
     const fixture = await makeFixture({
       mode: "normal",
-      defaults: { harness: "node", model: "stub-deep", effort: "high" },
+      defaults: { harness: "custom", model: "stub-deep", effort: "high" },
     });
     fixture.control.enqueueDispatch("TEST-241-CLI");
     const session = await settledSession(fixture);

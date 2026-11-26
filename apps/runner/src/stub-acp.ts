@@ -17,6 +17,7 @@ if (process.env.STUB_ACP_MODE_FILE !== undefined) {
   }
 }
 const marker = process.env.STUB_ACP_MARKER ?? "";
+const defaultFile = process.env.STUB_ACP_DEFAULT_FILE ?? "";
 const sleepMs = Number(process.env.STUB_ACP_SLEEP_MS ?? "0");
 // Probe sessions set this so test markers can tell catalog probes apart.
 const probeSession = process.env.STUB_ACP_PROBE === "1";
@@ -77,6 +78,19 @@ const stubConfigOptions =
       ]
     : [globalEffortOption];
 
+/** Simulates the CLI's persisted default model across probe/recovery processes. */
+const readDefaultModel = (): string => {
+  if (defaultFile === "") return "stub-model-1";
+  try {
+    return readFileSync(defaultFile, "utf8").trim() || "stub-model-1";
+  } catch {
+    return "stub-model-1";
+  }
+};
+const writeDefaultModel = (modelId: string): void => {
+  if (defaultFile !== "") writeFileSync(defaultFile, modelId);
+};
+
 const record = (event: Record<string, unknown>): void => {
   if (marker !== "")
     appendFileSync(
@@ -100,6 +114,7 @@ const recordOf = (value: unknown): Record<string, unknown> | undefined =>
     : undefined;
 
 let cancelled = false;
+let isRecovery = false;
 let sessionId = "stub-session-1";
 let promptId: unknown;
 let promptCount = 0;
@@ -336,7 +351,7 @@ function handle(message: Record<string, unknown>): void {
   const method = typeof message.method === "string" ? message.method : "";
   if (method === "initialize") {
     record({ event: "initialize" });
-    if (hangHandshake) return;
+    if ((mode === "probe-init-hang" && !isRecovery) || hangHandshake) return;
     reply(id, {
       protocolVersion: 1,
       agentInfo: { name: "stub-acp", version: "1" },
@@ -346,15 +361,190 @@ function handle(message: Record<string, unknown>): void {
     return;
   }
   if (method === "session/new") {
-    record({ event: "session/new", params: message.params });
-    const value = recordOf(message.params)?.sessionId;
-    if (typeof value === "string") sessionId = value;
-    reply(id, {
-      ...(catalogAd === "all" || catalogAd === "per-model"
-        ? { configOptions: stubConfigOptions }
-        : {}),
-      sessionId,
+    // Catalog discovery is a separate session; keeping it out of `session/new`
+    // marker events keeps dispatch supervision assertions deterministic.
+    const params = recordOf(message.params);
+    record({
+      event: params?.orreryProbe === true ? "catalog-probe" : "session/new",
+      params: message.params,
     });
+    const value = params?.sessionId;
+    if (typeof value === "string") sessionId = value;
+    isRecovery = params?.orreryRecovery === true;
+    if (mode === "probe-hang" && !isRecovery) {
+      // Never reply: the runner must bound the wait and kill the whole group,
+      // including this detached grandchild that keeps writing a heartbeat.
+      const aliveFile = process.env.STUB_ACP_ALIVE_FILE;
+      if (aliveFile !== undefined) {
+        const heartbeat = [
+          "setInterval(()=>{try{require('fs').appendFileSync(",
+          JSON.stringify(aliveFile),
+          ",'alive\\n')}catch{}},50)",
+        ].join("");
+        grandchild = spawn(process.execPath, ["-e", heartbeat], {
+          stdio: "ignore",
+          detached: false,
+        });
+        record({ event: "grandchild", pid: grandchild.pid ?? -1 });
+      }
+      return;
+    }
+    const currentModelId = readDefaultModel();
+    record({
+      event: "session-model",
+      currentModelId,
+      ...(typeof params?.orreryProbeModel === "string"
+        ? { requestedModel: params.orreryProbeModel }
+        : {}),
+      ...(params?.orreryRecovery === true ? { recovery: true } : {}),
+    });
+    reply(id, {
+      sessionId,
+      models: {
+        availableModels: [
+          { modelId: "stub-model-1", name: "Stub Model 1" },
+          { modelId: "stub-model-2", name: "Stub Model 2" },
+        ],
+        currentModelId,
+      },
+      configOptions:
+        catalogAd === "none" || catalogAd === "effortless"
+          ? []
+          : catalogAd === "per-model"
+            ? stubConfigOptions
+            : [
+                {
+                  id: "thought_level",
+                  name: "Thinking level",
+                  type: "select",
+                  options: [
+                    { value: "low", name: "Low" },
+                    { value: "high", name: "High" },
+                  ],
+                  currentValue: "low",
+                },
+              ],
+    });
+    return;
+  }
+  if (method === "session/set_model") {
+    const params = recordOf(message.params) ?? {};
+    const modelId = params.modelId;
+    const rejected = mode === "model-reject";
+    record({ event: "set_model", ...(typeof modelId === "string" ? { modelId } : {}), rejected });
+    if (typeof modelId === "string" && mode !== "model-reject") writeDefaultModel(modelId);
+    if (mode === "probe-kill" && modelId === "stub-model-2" && !isRecovery) {
+      // The probe process disappears after changing the CLI default; only a
+      // fresh one-shot recovery session can put it back.
+      process.exit(0);
+    }
+    if (mode === "probe-timeout" && modelId === "stub-model-2") {
+      // A timed-out probe killed before it could confirm the switch: the
+      // persisted default is already changed, so recovery must put it back.
+      return;
+    }
+    if (mode === "model-aware" && modelId === "stub-model-2") {
+      // ACP only reports configOptions for the active model; the switched
+      // model exposes a different option id and different effort levels.
+      reply(id, {
+        configOptions: [
+          {
+            id: "reasoning_effort",
+            options: [
+              { value: "balanced", name: "Balanced" },
+              { value: "fast", name: "Fast" },
+            ],
+            currentValue: "balanced",
+          },
+        ],
+      });
+      return;
+    }
+    if (mode === "model-no-effort" && modelId === "stub-model-2") {
+      // A model that genuinely exposes no reasoning options still answers the
+      // switch with an empty configOptions list.
+      reply(id, { configOptions: [] });
+      return;
+    }
+    if (
+      rejected ||
+      mode === "model-unsupported" ||
+      rejectModel.has("*") ||
+      (typeof modelId === "string" && rejectModel.has(modelId))
+    ) {
+      send({
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: rejected || rejectModel.size > 0 ? -32000 : -32601,
+          message:
+            rejected || rejectModel.size > 0
+              ? `unknown model ${typeof modelId === "string" ? modelId : ""}`
+              : "unsupported session/set_model",
+        },
+      });
+      return;
+    }
+    reply(id, {});
+    return;
+  }
+  if (method === "session/set_config_option") {
+    const params = recordOf(message.params) ?? {};
+    const configId =
+      typeof params.configId === "string"
+        ? params.configId
+        : typeof params.optionId === "string"
+          ? params.optionId
+          : undefined;
+    const value = typeof params.value === "string" ? params.value : undefined;
+    const modelRejected =
+      configId === "model" &&
+      (rejectModel.has("*") || (value !== undefined && rejectModel.has(value)));
+    const effortRejected = configId !== "model" && (mode === "effort-reject" || rejectEffort);
+    const rejected = modelRejected || effortRejected;
+    record({
+      event: "set_config_option",
+      ...(configId === undefined ? {} : { configId, optionId: configId }),
+      ...(value === undefined ? {} : { value }),
+      rejected,
+    });
+    if (modelRejected) {
+      send({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32602, message: `unknown model ${value ?? ""}` },
+      });
+      return;
+    }
+    if (effortRejected || (configId !== "model" && mode === "effort-unsupported")) {
+      send({
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: effortRejected ? -32000 : -32601,
+          message: effortRejected
+            ? "config option rejected"
+            : "unsupported session/set_config_option",
+        },
+      });
+      return;
+    }
+    if (configId === "model" && mode === "model-switch-effort" && value === "stub-model-2") {
+      reply(id, {
+        configOptions: [
+          {
+            id: "reasoning_effort",
+            options: [
+              { value: "balanced", name: "Balanced" },
+              { value: "fast", name: "Fast" },
+            ],
+            currentValue: "balanced",
+          },
+        ],
+      });
+      return;
+    }
+    reply(id, {});
     return;
   }
   if (method === "session/prompt") {
@@ -375,41 +565,6 @@ function handle(message: Record<string, unknown>): void {
     record({ event: "cancel" });
     if (mode === "hang" || mode === "ignore-term") {
       if (mode === "hang") process.exit(0);
-      return;
-    }
-    reply(id, {});
-    return;
-  }
-  if (method === "session/set_config_option") {
-    const fields = recordOf(message.params) ?? {};
-    const configId = typeof fields.configId === "string" ? fields.configId : "";
-    const value = typeof fields.value === "string" ? fields.value : "";
-    record({ event: "set_config_option", configId, value });
-    if (configId === "model" && (rejectModel.has("*") || rejectModel.has(value))) {
-      send({ jsonrpc: "2.0", id, error: { code: -32602, message: `unknown model ${value}` } });
-      return;
-    }
-    if (configId !== "model" && rejectEffort) {
-      send({
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32601, message: `unknown config option ${configId}` },
-      });
-      return;
-    }
-    reply(id, {
-      configOptions: Array.isArray(recordOf(message.params)?.configOptions)
-        ? recordOf(message.params)?.configOptions
-        : [],
-    });
-    return;
-  }
-  if (method === "session/set_model") {
-    const fields = recordOf(message.params) ?? {};
-    const modelId = typeof fields.modelId === "string" ? fields.modelId : "";
-    record({ event: "set_model", modelId });
-    if (rejectModel.has("*") || rejectModel.has(modelId)) {
-      send({ jsonrpc: "2.0", id, error: { code: -32602, message: `unknown model ${modelId}` } });
       return;
     }
     reply(id, {});

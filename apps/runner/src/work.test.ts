@@ -67,7 +67,9 @@ vi.mock("./start.ts", () => ({
 }));
 
 vi.mock("./catalog.ts", () => ({
-  readCatalogCache: async () => null,
+  harnessConfigKey: () => "default",
+  readCachedCatalog: () => null,
+  verifiedDefaultModel: () => null,
 }));
 
 vi.mock("./client.ts", () => {

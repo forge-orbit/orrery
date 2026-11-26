@@ -425,8 +425,22 @@
     {
       "idx": 60,
       "version": "7",
-      "when": 1795684132863,
-      "tag": "0060_aberrant_wong",
+      "when": 1795687242471,
+      "tag": "0060_backfill_harness_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795687266940,
+      "tag": "0061_consolidate_harness_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795698559212,
+      "tag": "0062_sleepy_vampiro",
       "breakpoints": true
     }
   ]

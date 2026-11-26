@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DispatchOptions } from "@orrery/contract";
-import { readCatalogCache } from "./catalog.ts";
+import { harnessConfigKey, readCachedCatalog, verifiedDefaultModel } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
@@ -166,7 +166,10 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
       }
     };
 
-    const cachedCatalog = await readCatalogCache();
+    const configKey = harnessConfigKey(
+      supervision.acpOverridden ? { acpOverride: supervision.acp } : {},
+    );
+    const cachedCatalog = readCachedCatalog(repoFingerprint(repoPath), undefined, configKey);
     const controller = await superviseDispatch({
       server: options.server,
       repoPath,
@@ -190,8 +193,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
       pool,
       signal: sessionAbort.signal,
       write,
-      defaultModelFor: (harnessId) =>
-        cachedCatalog?.harnesses.find((entry) => entry.id === harnessId)?.defaultModel ?? null,
+      defaultModelFor: (harnessId) => verifiedDefaultModel(cachedCatalog, harnessId),
       onController: (ctrl) => {
         activeController = ctrl;
         commandLoopPromise = runCommandLoop();

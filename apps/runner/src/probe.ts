@@ -1,23 +1,21 @@
-import type { HarnessCatalogEntry, HarnessModelCatalog } from "@orrery/contract";
-import { AcpStdioClient } from "./acp.ts";
-import type { HarnessDefinition } from "./harnesses.ts";
+import type { HarnessModel } from "@orrery/contract";
 
 /**
- * Bounded-timeout ACP discovery of one locally installed Harness (issue #240):
- * spawn the harness's ACP stdio command detached, run `initialize` and
- * `session/new` under strict deadlines, read the advertised `models` and
- * `configOptions` (such as `thought_level` / `reasoning_effort`), then tear
- * the whole process group down cleanly so nothing leaks.
+ * Dialect-tolerant ACP discovery parsing (ported from PR #255, issue #240).
+ *
+ * Harnesses disagree about where they advertise models and reasoning-effort
+ * choices: `initialize.models`, `session/new.models.availableModels`, a
+ * `model` config option, bare-string model ids, `options`/`choices`, and
+ * effort options that are either global or scoped to one `modelId`. This
+ * module reads all of those shapes without trusting the payload, and is the
+ * single parser used by startup catalog discovery (ADR-0011).
  */
 
-/** Hard deadline for the whole `initialize` -> `session/new` handshake. */
-export const PROBE_HANDSHAKE_TIMEOUT_MS = 10_000;
-/** Grace period for the final teardown; SIGTERM then SIGKILL the group. */
-export const PROBE_TEARDOWN_GRACE_MS = 2_000;
-
-export type ProbeOutcome =
-  | { ok: true; models: HarnessModelCatalog[]; defaultModel: string | null; probedAt: string }
-  | { ok: false; reason: string };
+export interface Discovery {
+  models: HarnessModel[];
+  defaultModel: string;
+  probedAt: string;
+}
 
 const recordOf = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null
@@ -29,11 +27,10 @@ const stringOf = (value: unknown): string | undefined =>
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
-/** A model reference: `{ modelId | id, name | label }` in any ACP dialect. */
+/** A model reference in any ACP dialect, including a bare string id. */
 function parseModelRef(value: unknown): { id: string; label?: string } | undefined {
   const record = recordOf(value);
   if (record === undefined) {
-    // A bare string is accepted as a model id.
     const id = stringOf(value);
     return id === undefined ? undefined : { id };
   }
@@ -48,46 +45,53 @@ function parseModelRef(value: unknown): { id: string; label?: string } | undefin
 }
 
 function seedModel(
-  models: Map<string, HarnessModelCatalog>,
+  models: Map<string, HarnessModel>,
   parsed: { id: string; label?: string },
+  probedAt: string,
 ): void {
   if (models.has(parsed.id)) return;
   models.set(parsed.id, {
     id: parsed.id,
     ...(parsed.label === undefined ? {} : { label: parsed.label }),
     reasoningDiscovery: "unknown",
-    effortLevels: [],
-    defaultEffort: null,
-    probedAt: null,
+    probedAt,
   });
 }
 
 /** Models advertised on an `initialize` result under `models`. */
-function parseInitializeModels(result: unknown): {
-  models: Map<string, HarnessModelCatalog>;
-  current: string | null;
-} {
-  const models = new Map<string, HarnessModelCatalog>();
-  let current: string | null = null;
+function parseInitializeModels(
+  result: unknown,
+  models: Map<string, HarnessModel>,
+  probedAt: string,
+): string | null {
   const container = recordOf(result)?.models;
-  if (container === undefined) return { models, current };
-  const shape = recordOf(container);
+  if (container === undefined) return null;
   if (Array.isArray(container)) {
-    for (const ref of container) seedModel(models, parseModelRef(ref) ?? { id: "" });
-    return { models, current };
+    for (const ref of container) {
+      const parsed = parseModelRef(ref);
+      if (parsed !== undefined) seedModel(models, parsed, probedAt);
+    }
+    return null;
   }
-  if (shape !== undefined) {
-    const refs = [...list(shape.availableModels), ...list(shape.models)];
-    for (const ref of refs) seedModel(models, parseModelRef(ref) ?? { id: "" });
-    current = stringOf(shape.currentModel) ?? stringOf(shape.current) ?? null;
+  const shape = recordOf(container);
+  if (shape === undefined) return null;
+  const refs = [...list(shape.availableModels), ...list(shape.models)];
+  for (const ref of refs) {
+    const parsed = parseModelRef(ref);
+    if (parsed !== undefined) seedModel(models, parsed, probedAt);
   }
-  return { models, current };
+  return (
+    stringOf(shape.currentModelId) ??
+    stringOf(shape.currentModel) ??
+    stringOf(shape.current) ??
+    null
+  );
 }
 
 /** The choices of one session-config option, in any ACP dialect. */
 function parseOptionChoices(option: Record<string, unknown>): {
   values: string[];
-  default: string | null;
+  default: string | undefined;
 } {
   const state = recordOf(option.state) ?? {};
   const raw = [
@@ -115,7 +119,7 @@ function parseOptionChoices(option: Record<string, unknown>): {
     stringOf(option.currentValue) ??
     stringOf(option.current) ??
     stringOf(option.default) ??
-    (values.length > 0 ? values[0]! : null);
+    values[0];
   return { values, default: defaultValue };
 }
 
@@ -124,14 +128,25 @@ const isEffortOption = (id: string, name: string): boolean =>
 
 const isModelOption = (id: string, name: string): boolean => id === "model" || /model/i.test(name);
 
+type EffortChoice = { values: string[]; default: string | undefined };
+
 /**
  * Candidate config ids for applying a reasoning effort to one model, in
  * preference order: the session's advertised effort option(s) scoped to that
  * model, then any global effort option, then the two well-known ACP ids.
+ * Prefers the post-switch `setModel` response when it carries `configOptions`,
+ * falling back to the initial `session/new` response.
  */
-export function effortConfigIds(sessionResult: unknown, modelId: string | undefined): string[] {
+export function effortConfigIds(
+  sessionResult: unknown,
+  modelId: string | undefined,
+  fallbackSessionResult?: unknown,
+): string[] {
+  const primary = list(recordOf(sessionResult)?.configOptions);
+  const options =
+    primary.length > 0 ? primary : list(recordOf(fallbackSessionResult)?.configOptions);
   const ids: string[] = [];
-  for (const raw of list(recordOf(sessionResult)?.configOptions)) {
+  for (const raw of options) {
     const option = recordOf(raw);
     if (option === undefined) continue;
     const id = stringOf(option.id) ?? stringOf(option.configId);
@@ -148,22 +163,25 @@ export function effortConfigIds(sessionResult: unknown, modelId: string | undefi
 }
 
 /**
- * `configOptions` advertised on a `session/new` result: one option carries the
- * model list, one (per model or global) the effort levels. An effort option
- * carrying a `modelId` scopes to that model only; otherwise it applies to
- * every discovered model. Returns the session's default model, or null when
- * the harness advertised nothing.
+ * `configOptions` on a `session/new` (or model-switch) result: one option may
+ * carry the model list, and one (per model or global) the effort levels. An
+ * effort option carrying a `modelId` scopes to that model only. An unscoped
+ * option describes the ACTIVE model only (the standard ACP shape) — applying
+ * it to every model would falsely mark unprobed models `known` and break #242
+ * on-demand probing. Returns the advertised default model id.
  */
 function parseConfigOptions(
   result: unknown,
-  models: Map<string, HarnessModelCatalog>,
+  models: Map<string, HarnessModel>,
   probedAt: string,
+  activeModelHint: string | undefined,
 ): string | null {
   const options = list(recordOf(result)?.configOptions);
   if (options.length === 0) return null;
   let defaultModel: string | null = null;
-  const scopedEfforts = new Map<string, { values: string[]; default: string | null }>();
-  let globalEfforts: { values: string[]; default: string | null } | undefined;
+  let configActive: string | undefined;
+  const scopedEfforts = new Map<string, EffortChoice>();
+  let globalEfforts: EffortChoice | undefined;
 
   for (const raw of options) {
     const option = recordOf(raw);
@@ -174,8 +192,9 @@ function parseConfigOptions(
       stringOf(option.modelId) ?? stringOf(recordOf(option.scope)?.modelId) ?? undefined;
     if (isModelOption(id, name)) {
       const { values, default: current } = parseOptionChoices(option);
-      for (const value of values) seedModel(models, { id: value });
+      for (const value of values) seedModel(models, { id: value }, probedAt);
       defaultModel = current ?? defaultModel;
+      configActive = current ?? configActive;
       continue;
     }
     if (isEffortOption(id, name)) {
@@ -185,89 +204,74 @@ function parseConfigOptions(
     }
   }
 
-  const withEfforts = (
-    model: HarnessModelCatalog,
-    efforts: { values: string[]; default: string | null },
-  ): HarnessModelCatalog => ({
-    ...model,
+  const withEfforts = (model: HarnessModel, efforts: EffortChoice): HarnessModel => ({
+    id: model.id,
+    ...(model.label === undefined ? {} : { label: model.label }),
     reasoningDiscovery: "known",
-    effortLevels: [...efforts.values],
-    defaultEffort: efforts.default,
+    supportedEfforts: [...efforts.values],
+    ...(efforts.default === undefined ? {} : { defaultEffort: efforts.default }),
     probedAt,
   });
   for (const model of models.values()) {
     const scoped = scopedEfforts.get(model.id);
     if (scoped !== undefined) models.set(model.id, withEfforts(model, scoped));
-    else if (globalEfforts !== undefined) models.set(model.id, withEfforts(model, globalEfforts));
+  }
+  // Unscoped efforts belong to the one model the session actually selected.
+  const active = configActive ?? activeModelHint;
+  if (globalEfforts !== undefined && active !== undefined) {
+    const model = models.get(active);
+    if (model !== undefined) models.set(active, withEfforts(model, globalEfforts));
   }
   return defaultModel;
 }
 
-/**
- * Probe one harness: spawn its ACP command, run the `initialize` and
- * `session/new` handshake under a strict deadline, read the discovery
- * payloads, then tear the probe process group down cleanly. A spawn failure
- * or a lost handshake returns `{ ok: false }` — the catalog keeps any
- * previously known entry for that harness instead.
- */
-export async function probeHarness(
-  harness: HarnessDefinition,
-  options: {
-    cwd: string;
-    signal?: AbortSignal | undefined;
-    /** Test seam: a smaller deadline keeps probe tests fast. */
-    handshakeTimeoutMs?: number | undefined;
-  },
-): Promise<ProbeOutcome> {
-  const probedAt = new Date().toISOString();
-  if (options.signal?.aborted === true) return { ok: false, reason: "Runner stopped." };
-  let client: AcpStdioClient | undefined;
-  try {
-    client = await AcpStdioClient.start({
-      command: harness.command,
-      args: harness.args,
-      cwd: options.cwd,
-      // A probe-specific env marker lets test stubs tell probe sessions apart
-      // from real dispatch supervision sessions.
-      env: { STUB_ACP_PROBE: "1" },
-      mcpServers: [],
-      worktreeReal: options.cwd,
-      handshakeTimeoutMs: options.handshakeTimeoutMs ?? PROBE_HANDSHAKE_TIMEOUT_MS,
-      captureHandshake: true,
-      signal: options.signal,
-      onUpdate: () => {},
-      onStderr: () => {},
-    });
-    const initModels = parseInitializeModels(client.initResult);
-    const models = initModels.models;
-    const defaultModel = parseConfigOptions(client.sessionResult, models, probedAt);
-    const resolvedDefault = defaultModel ?? initModels.current;
-    return {
-      ok: true,
-      models: [...models.values()],
-      defaultModel:
-        resolvedDefault !== null && models.has(resolvedDefault) ? resolvedDefault : null,
-      probedAt,
-    };
-  } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
-  } finally {
-    // Never leak the detached process group, even when a deadline fired.
-    if (client !== undefined) await client.forceExit(PROBE_TEARDOWN_GRACE_MS);
+/** Current config-option values, restored after an on-demand model probe. */
+export function currentConfigValues(result: unknown): Array<{ id: string; value: string }> {
+  const values: Array<{ id: string; value: string }> = [];
+  for (const raw of list(recordOf(result)?.configOptions)) {
+    const option = recordOf(raw);
+    if (option === undefined) continue;
+    const id = stringOf(option.id) ?? stringOf(option.configId);
+    const state = recordOf(option.state) ?? {};
+    const value =
+      stringOf(state.currentValue) ??
+      stringOf(state.current) ??
+      stringOf(option.currentValue) ??
+      stringOf(option.current);
+    if (id !== undefined && value !== undefined) values.push({ id, value });
   }
+  return values;
 }
 
-/** Builds the catalog entry for a successful probe. */
-export function entryFromProbe(
-  harness: HarnessDefinition,
-  outcome: Extract<ProbeOutcome, { ok: true }>,
-): HarnessCatalogEntry {
+/**
+ * Parse one discovery payload pair into published catalog models. `seeds`
+ * adds model ids that must be present even when the harness only reports
+ * effort options for the active model.
+ */
+export function parseDiscovery(
+  initResult: unknown,
+  sessionResult: unknown,
+  probedAt: string,
+  seeds: readonly string[] = [],
+): Discovery {
+  const models = new Map<string, HarnessModel>();
+  const initCurrent = parseInitializeModels(initResult, models, probedAt);
+  // A session/new result may also advertise its own model list and active
+  // model (the ACP dialect our stub uses); read it with the same helper.
+  const sessionCurrent = parseInitializeModels(sessionResult, models, probedAt);
+  for (const id of seeds) seedModel(models, { id }, probedAt);
+  // Explicit seeds name the model being discovered, so they outrank the
+  // session's own active-model hint.
+  const activeModelHint = sessionCurrent ?? seeds[0] ?? initCurrent ?? undefined;
+  const configCurrent = parseConfigOptions(sessionResult, models, probedAt, activeModelHint);
+  const first = models.keys().next().value;
+  const defaultModel = configCurrent ?? sessionCurrent ?? initCurrent ?? first ?? "default";
+  // The advertised default may name a model the harness never seeded; keep it
+  // as the default only when it is one we actually know about.
   return {
-    id: harness.id,
-    displayName: harness.displayName,
-    source: harness.source,
-    defaultModel: outcome.defaultModel,
-    models: outcome.models,
-    probedAt: outcome.probedAt,
+    models: [...models.values()],
+    defaultModel:
+      defaultModel !== null && models.has(defaultModel) ? defaultModel : (first ?? "default"),
+    probedAt,
   };
 }

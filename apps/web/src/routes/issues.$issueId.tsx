@@ -969,14 +969,13 @@ function IssuePage() {
 
       <SessionStatus issueId={issue.id} projectId={issue.projectId} canContribute={canContribute} />
 
-      {canContribute && (
-        <DelegateToRunner
-          issueId={issue.id}
-          workspaceId={project.workspaceId}
-          projectId={issue.projectId}
-          agents={myAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
-        />
-      )}
+      <DelegateToRunner
+        issueId={issue.id}
+        workspaceId={project.workspaceId}
+        projectId={issue.projectId}
+        agents={myAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+        canDelegate={canContribute}
+      />
 
       <SessionInspector
         key={`${issue.id}:${inspector ?? false}:${inspectorSession ?? ""}`}

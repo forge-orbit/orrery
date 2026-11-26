@@ -481,6 +481,61 @@ describe("custom dispatch prompt (#239)", () => {
     );
   });
 
+  it("bounds prompts in Unicode code points, matching Postgres char_length", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("emoji prompt boundary");
+    const emoji = "🙂"; // one code point, two UTF-16 units
+    const atLimit = emoji.repeat(16_000);
+
+    const accepted = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: `  ${atLimit}  ` },
+      cookie: adminCookie,
+    });
+    expect(accepted.status).toBe(201);
+    expect(Dispatch.parse(await accepted.json()).prompt).toBe(atLimit);
+
+    const over = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: emoji.repeat(16_001) },
+      cookie: adminCookie,
+    });
+    await expectProblem(over, 400, "validation_failed");
+  });
+
+  it("hides a trashed issue's prompt from the single-Dispatch endpoint", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("trashed prompt issue");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: "secret prompt" },
+      cookie: adminCookie,
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+
+    const readable = await request(`/api/runners/dispatches/${dispatch.id}`, {
+      cookie: adminCookie,
+    });
+    expect(readable.status).toBe(200);
+    expect(Dispatch.parse(await readable.json()).prompt).toBe("secret prompt");
+
+    await database.db
+      .update(issues)
+      .set({ deletedAt: sql`statement_timestamp()`, deletedByHumanId: adminHumanId })
+      .where(eq(issues.id, issue.id));
+
+    await expectProblem(
+      await request(`/api/runners/dispatches/${dispatch.id}`, { cookie: adminCookie }),
+      404,
+      "dispatch_not_found",
+    );
+    const list = await request(`/api/issues/${issue.id}/dispatches`, { cookie: adminCookie });
+    expect(list.status).toBe(404);
+  });
+
   it("treats a whitespace-only prompt as omitted and rejects an over-limit prompt", async () => {
     const host = await enrollHost(adminCookie);
     const runner = await registerRunner(host.credential);
@@ -564,28 +619,31 @@ describe("custom dispatch prompt (#239)", () => {
   });
 });
 
-const catalogWith = (catalogDefault: string): HarnessCatalog => ({
-  harnesses: [
-    {
-      id: "opencode",
-      displayName: "OpenCode",
-      source: "preset",
-      defaultModel: catalogDefault,
-      models: [
-        {
-          id: catalogDefault,
-          label: "Catalog Model",
-          reasoningDiscovery: "known",
-          effortLevels: ["low", "medium", "high"],
-          defaultEffort: "medium",
-          probedAt: null,
-        },
-      ],
-      probedAt: null,
-    },
-  ],
-  updatedAt: new Date().toISOString(),
-});
+const catalogWith = (catalogDefault: string): HarnessCatalog => {
+  const at = new Date().toISOString();
+  return {
+    harnesses: [
+      {
+        id: "opencode",
+        displayName: "OpenCode",
+        source: "preset",
+        defaultModel: catalogDefault,
+        models: [
+          {
+            id: catalogDefault,
+            label: "Catalog Model",
+            reasoningDiscovery: "known",
+            supportedEfforts: ["low", "medium", "high"],
+            defaultEffort: "medium",
+            probedAt: at,
+          },
+        ],
+        probedAt: at,
+      },
+    ],
+    probedAt: at,
+  };
+};
 
 describe("per-dispatch harness, model and effort (#241)", () => {
   it("persists harness, model and effort on the dispatch and its outbox command", async () => {
@@ -1190,5 +1248,105 @@ describe("#196 review regressions", () => {
     const dispatches = field(await list.json(), "dispatches");
     const first = Array.isArray(dispatches) ? dispatches[0] : undefined;
     expect(field(first, "state")).toBe("ended");
+  });
+});
+
+async function promptedFixture() {
+  const host = await enrollHost(adminCookie);
+  const runner = await registerRunner(host.credential);
+  const issue = await createIssue(`single-dispatch-acl-${randomUUID()}`);
+  const created = await request(`/api/issues/${issue.id}/dispatches`, {
+    method: "POST",
+    body: { runnerId: runner.id, prompt: "restricted prompt" },
+    cookie: adminCookie,
+  });
+  expect(created.status).toBe(201);
+  return { host, runner, issue, dispatch: Dispatch.parse(await created.json()) };
+}
+
+const readAsHost = (credential: string, dispatchId: string) =>
+  request(`/api/runners/dispatches/${dispatchId}`, { token: credential });
+
+const readAsOwner = (dispatchId: string) =>
+  request(`/api/runners/dispatches/${dispatchId}`, { cookie: adminCookie });
+
+async function addSecondOwner() {
+  const other = await insertHuman(`second-owner-${randomUUID()}@example.com`);
+  await database.db.insert(workspaceMemberships).values({
+    id: randomUUID(),
+    workspaceId,
+    humanId: other.id,
+    isOwner: true,
+  });
+  return other;
+}
+
+describe("single-Dispatch live access boundary (#239/#257)", () => {
+  it("answers an anonymous read with 401 while the owner still sees the prompt", async () => {
+    const { dispatch } = await promptedFixture();
+    await expectProblem(
+      await request(`/api/runners/dispatches/${dispatch.id}`),
+      401,
+      "invalid_credential",
+    );
+    const owner = await readAsOwner(dispatch.id);
+    expect(owner.status).toBe(200);
+    expect(Dispatch.parse(await owner.json()).prompt).toBe("restricted prompt");
+  });
+
+  it("refuses a revoked Runner's host credential with a non-enumerating 404", async () => {
+    const { host, runner, dispatch } = await promptedFixture();
+    expect((await readAsHost(host.credential, dispatch.id)).status).toBe(200);
+    await database.db
+      .update(runners)
+      .set({ revokedAt: sql`statement_timestamp()` })
+      .where(eq(runners.id, runner.id));
+    await expectProblem(await readAsHost(host.credential, dispatch.id), 404, "dispatch_not_found");
+    expect((await readAsOwner(dispatch.id)).status).toBe(200);
+  });
+
+  it("refuses a host whose owner lost workspace membership", async () => {
+    const { host, dispatch } = await promptedFixture();
+    expect((await readAsHost(host.credential, dispatch.id)).status).toBe(200);
+    await addSecondOwner();
+    await database.db
+      .delete(workspaceMemberships)
+      .where(
+        and(
+          eq(workspaceMemberships.workspaceId, workspaceId),
+          eq(workspaceMemberships.humanId, adminHumanId),
+        ),
+      );
+    await expectProblem(await readAsHost(host.credential, dispatch.id), 404, "dispatch_not_found");
+    await expectProblem(await readAsOwner(dispatch.id), 404, "dispatch_not_found");
+  });
+
+  it("refuses a host whose owner lost project Read", async () => {
+    const { host, dispatch } = await promptedFixture();
+    expect((await readAsHost(host.credential, dispatch.id)).status).toBe(200);
+    // A demoted member without an explicit grant has no project access.
+    await addSecondOwner();
+    await database.db
+      .update(workspaceMemberships)
+      .set({ isOwner: false })
+      .where(
+        and(
+          eq(workspaceMemberships.workspaceId, workspaceId),
+          eq(workspaceMemberships.humanId, adminHumanId),
+        ),
+      );
+    await expectProblem(await readAsHost(host.credential, dispatch.id), 404, "dispatch_not_found");
+    await expectProblem(await readAsOwner(dispatch.id), 404, "dispatch_not_found");
+  });
+
+  it("hides a trashed project's Dispatch prompt from both host and owner", async () => {
+    const { host, dispatch } = await promptedFixture();
+    expect((await readAsHost(host.credential, dispatch.id)).status).toBe(200);
+    await database.db
+      .update(projects)
+      .set({ deletedAt: sql`statement_timestamp()`, deletedByHumanId: adminHumanId })
+      .where(eq(projects.id, projectId));
+    await expectProblem(await readAsHost(host.credential, dispatch.id), 404, "dispatch_not_found");
+    await expectProblem(await readAsOwner(dispatch.id), 404, "dispatch_not_found");
   });
 });

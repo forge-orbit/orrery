@@ -264,10 +264,11 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     let harness: HarnessDefinition;
     if (requestedHarness === undefined) {
       // No override: keep the configured ACP command as the Runner default.
-      const id = basename(config.acp.command);
+      // Explicit --acp-command overrides are published under id "custom" (PR #260).
+      const id = config.acpOverridden ? "custom" : basename(config.acp.command);
       harness = {
         id,
-        displayName: id,
+        displayName: basename(config.acp.command) || id,
         source: "override",
         command: config.acp.command,
         args: [...config.acp.args],
@@ -275,7 +276,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     } else {
       const resolved = await resolveHarness(
         requestedHarness,
-        config.acpExplicit ? { command: config.acp.command, args: config.acp.args } : undefined,
+        config.acpOverridden ? { command: config.acp.command, args: config.acp.args } : undefined,
       );
       if (resolved === undefined) {
         throw new DispatchOptionError({
@@ -366,9 +367,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
         env: Object.fromEntries(mcpConfig.env.map((item) => [item.name, item.value])),
         worktreeReal,
         mcpServers,
-        // Keep the session's config options so effort is applied to the option
-        // id this Harness actually advertises.
-        captureHandshake: true,
+        signal: options.signal,
         onUpdate: (method, params) => spoolEvent(method, params),
         onStderr: (line) => {
           write(`acp stderr: ${line}`);
@@ -376,9 +375,10 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
         },
       });
       try {
+        let modelSwitchResult: unknown;
         if (requestedModel !== undefined) {
           try {
-            await client.setModel(requestedModel);
+            modelSwitchResult = await client.setModel(requestedModel);
           } catch (error) {
             throw new DispatchOptionError({
               kind: "model_rejected",
@@ -393,7 +393,11 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
         }
         if (requestedEffort !== undefined) {
           let applied = false;
-          for (const configId of effortConfigIds(client.sessionResult, requestedModel)) {
+          for (const configId of effortConfigIds(
+            modelSwitchResult,
+            requestedModel,
+            client.sessionResult,
+          )) {
             if (await client.setEffort(configId, requestedEffort)) {
               applied = true;
               break;

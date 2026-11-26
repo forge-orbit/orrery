@@ -1,0 +1,2 @@
+ALTER TABLE "runners" ALTER COLUMN "harness_catalog" SET DEFAULT '{"harnesses":[],"probedAt":"1970-01-01T00:00:00.000Z"}'::jsonb;--> statement-breakpoint
+ALTER TABLE "runners" ALTER COLUMN "harness_catalog" SET NOT NULL;

@@ -4,6 +4,7 @@
  * the same black-box fetch/MCP client it uses against Orrery itself.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { EMPTY_HARNESS_CATALOG } from "@orrery/contract";
 import { randomUUID } from "node:crypto";
 
 export interface TestSession {
@@ -187,7 +188,7 @@ export class TestOrrery {
       displayName: "TestLaptop",
       repoFingerprint: "0".repeat(64),
       capabilities: [],
-      harnessCatalog: null,
+      harnessCatalog: EMPTY_HARNESS_CATALOG,
       maxConcurrency: 1,
       activeSlotCount: 0,
       lastSeenAt: now(),

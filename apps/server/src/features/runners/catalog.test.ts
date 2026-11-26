@@ -1,15 +1,19 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import type { FleetRunner } from "@orrery/contract";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   DeviceCodeResponse,
-  HostCredentialResponse,
-  Problem,
+  EMPTY_HARNESS_CATALOG,
   type HarnessCatalog,
+  type HarnessCatalogEntry,
+  HostCredentialResponse,
+  type HarnessModel,
+  mergeHarnessCatalog,
   type ProjectAccessLevel,
   Runner,
   WorkspaceRunnersFleet,
 } from "@orrery/contract";
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -18,7 +22,6 @@ import {
   browserSessions,
   humans,
   projects,
-  runnerDeviceCodeAttempts,
   runnerDeviceCodes,
   runnerHosts,
   runners,
@@ -34,35 +37,52 @@ import { projectAccessAtLeast } from "../projects/index.ts";
 import { createRunnersFeature } from "./index.ts";
 
 const PUBLIC_URL = "http://orrery.test";
-/** Overrides used to simulate a human losing read access to a project. */
 const accessOverrides = new Map<string, ProjectAccessLevel | null>();
 
-const postJson = (app: Hono, path: string, body: unknown, cookie?: string, bearer?: string) =>
+const knownModel = (id: string): HarnessModel => ({
+  id,
+  label: `Model ${id}`,
+  reasoningDiscovery: "known",
+  supportedEfforts: ["low", "high"],
+  defaultEffort: "low",
+  probedAt: "2026-01-01T00:00:00.000Z",
+});
+
+const entry = (
+  harnessId: string,
+  models: HarnessModel[],
+  probedAt = "2026-01-01T00:00:00.000Z",
+): HarnessCatalogEntry => ({
+  id: harnessId,
+  displayName: `Harness ${harnessId}`,
+  source: "preset" as const,
+  defaultModel: models[0]?.id ?? "default",
+  models,
+  probedAt,
+});
+
+const catalog = (probedAt: string, ...harnesses: HarnessCatalogEntry[]): HarnessCatalog => ({
+  harnesses,
+  probedAt,
+});
+
+const request = (
+  app: Hono,
+  method: string,
+  path: string,
+  body: unknown,
+  bearer?: string,
+  cookie?: string,
+) =>
   app.request(path, {
-    method: "POST",
+    method,
     headers: {
       "content-type": "application/json",
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
       ...(cookie ? { cookie } : {}),
-      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
     },
     body: JSON.stringify(body),
   });
-
-const putJson = (app: Hono, path: string, body: unknown, bearer?: string) =>
-  app.request(path, {
-    method: "PUT",
-    headers: {
-      "content-type": "application/json",
-      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-
-async function expectProblem(res: Response, status: number, code: string) {
-  expect(res.status).toBe(status);
-  expect(res.headers.get("content-type")).toBe("application/problem+json");
-  expect(Problem.parse(await res.json())).toMatchObject({ status, code });
-}
 
 let pg: StartedPostgreSqlContainer;
 let database: Database;
@@ -108,7 +128,6 @@ afterEach(async () => {
   accessOverrides.clear();
   await database.db.delete(runners);
   await database.db.delete(runnerDeviceCodes);
-  await database.db.delete(runnerDeviceCodeAttempts);
   await database.db.delete(runnerHosts);
   await database.db.delete(browserSessions);
   await database.db.delete(agents);
@@ -170,245 +189,442 @@ async function insertWorkspaceAndProject(humanId: string) {
   return { workspace: workspace!, project: project!, agent: agent! };
 }
 
-async function enrollHostWithCookie(displayName = "rubis-laptop") {
-  const { cookie, human } = await insertHuman();
+async function enrollHost(cookie: string) {
   const verifier = randomBytes(32).toString("hex");
-  const created = await postJson(app, "/api/runners/device-codes", {
-    hostDisplayName: displayName,
-    platform: "linux-x64",
-    verifierHash: tokenHash(verifier),
-  });
-  expect(created.status).toBe(201);
-  const device = DeviceCodeResponse.parse(await created.json());
-  const approved = await postJson(
+  const created = await request(
     app,
-    `/api/runners/device-codes/${device.userCode}/approve`,
-    {},
+    "POST",
+    "/api/runners/device-codes",
+    {
+      hostDisplayName: "rubis-laptop",
+      platform: "linux-x64",
+      verifierHash: tokenHash(verifier),
+    },
+    undefined,
     cookie,
   );
-  expect(approved.status).toBe(200);
-  const exchanged = await postJson(app, "/api/runners/device-codes/token", {
+  expect(created.status).toBe(201);
+  const device = DeviceCodeResponse.parse(await created.json());
+  const approval = await request(
+    app,
+    "POST",
+    `/api/runners/device-codes/${device.userCode}/approve`,
+    {},
+    undefined,
+    cookie,
+  );
+  expect(approval.status).toBe(200);
+  const exchanged = await request(app, "POST", "/api/runners/device-codes/token", {
     deviceCode: device.deviceCode,
     verifier,
   });
   expect(exchanged.status).toBe(200);
-  const credential = HostCredentialResponse.parse(await exchanged.json());
-  return {
-    credential: credential.credential,
-    hostId: credential.hostId,
-    humanId: human.id,
-    cookie,
-  };
+  return HostCredentialResponse.parse(await exchanged.json()).credential;
 }
 
-async function registerRunner(
+async function register(
   credential: string,
-  opts: {
-    workspaceId: string;
-    projectId: string;
-    repoFingerprint?: string;
-    harnessCatalog?: HarnessCatalog;
-  },
+  workspaceId: string,
+  projectId: string,
+  initial?: HarnessCatalog,
 ) {
-  const res = await postJson(
+  const res = await request(
     app,
+    "POST",
     "/api/runners/register",
     {
-      workspaceId: opts.workspaceId,
-      projectId: opts.projectId,
-      repoFingerprint: opts.repoFingerprint ?? tokenHash("/home/rubi/secret/project"),
-      ...(opts.harnessCatalog === undefined ? {} : { harnessCatalog: opts.harnessCatalog }),
+      workspaceId,
+      projectId,
+      repoFingerprint: tokenHash("/home/rubi/secret/project"),
+      capabilities: ["opencode"],
+      ...(initial === undefined ? {} : { harnessCatalog: initial }),
     },
-    undefined,
     credential,
   );
   expect(res.status).toBe(201);
   return Runner.parse(await res.json());
 }
 
-const catalogWith = (modelId: string, known: boolean): HarnessCatalog => ({
-  harnesses: [
-    {
-      id: "opencode",
-      displayName: "OpenCode",
-      source: "preset",
-      defaultModel: modelId,
-      models: [
-        {
-          id: modelId,
-          reasoningDiscovery: known ? "known" : "unknown",
-          effortLevels: known ? ["low", "medium", "high"] : [],
-          defaultEffort: known ? "medium" : null,
-          probedAt: "2026-01-01T00:00:00.000Z",
-        },
-      ],
+describe("harness catalog merge", () => {
+  it("never regresses a known model's effort levels on a stale refresh", () => {
+    const stored = catalog(
+      "2026-01-05T00:00:00.000Z",
+      entry("opencode", [knownModel("gpt-5")], "2026-01-05T00:00:00.000Z"),
+    );
+    const incoming = catalog(
+      "2026-01-01T00:00:00.000Z",
+      entry(
+        "opencode",
+        [{ id: "gpt-5", reasoningDiscovery: "unknown", probedAt: "2026-01-01T00:00:00.000Z" }],
+        "2026-01-01T00:00:00.000Z",
+      ),
+    );
+    const merged = mergeHarnessCatalog(stored, incoming);
+    expect(merged.harnesses[0]!.models[0]).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "low",
+    });
+    expect(merged.probedAt).toBe("2026-01-05T00:00:00.000Z");
+    expect(merged.harnesses[0]!.probedAt).toBe("2026-01-05T00:00:00.000Z");
+  });
+
+  it("does not let known-with-no-efforts overwrite discovered effort levels", () => {
+    const stored = catalog(
+      "2026-01-05T00:00:00.000Z",
+      entry("opencode", [knownModel("gpt-5")], "2026-01-05T00:00:00.000Z"),
+    );
+    // A partial probe can publish a `known` model whose effort options it did
+    // not see; that must not erase the levels discovered by an earlier probe.
+    const incoming = catalog(
+      "2026-01-06T00:00:00.000Z",
+      entry(
+        "opencode",
+        [
+          {
+            id: "gpt-5",
+            label: "GPT-5",
+            reasoningDiscovery: "known",
+            supportedEfforts: [],
+            probedAt: "2026-01-06T00:00:00.000Z",
+          },
+        ],
+        "2026-01-06T00:00:00.000Z",
+      ),
+    );
+    const merged = mergeHarnessCatalog(stored, incoming);
+    expect(merged.harnesses[0]!.models[0]).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "low",
+    });
+  });
+
+  it("keeps a restored harness's known efforts through a later stale refresh", () => {
+    // The runner's partial refresh republishes a failed harness verbatim from
+    // its last published catalog; the server must not drop it or regress it.
+    const restored = entry("opencode", [knownModel("gpt-5")], "2026-01-01T00:00:00.000Z");
+    const stored = catalog("2026-05-01T00:00:00.000Z", restored);
+    const stale = catalog(
+      "2026-05-02T00:00:00.000Z",
+      entry(
+        "opencode",
+        [
+          {
+            id: "gpt-5",
+            reasoningDiscovery: "unknown",
+            probedAt: "2026-05-02T00:00:00.000Z",
+          },
+        ],
+        "2026-05-02T00:00:00.000Z",
+      ),
+    );
+    const merged = mergeHarnessCatalog(stored, stale);
+    expect(merged.harnesses.map((item) => item.id)).toEqual(["opencode"]);
+    expect(merged.harnesses[0]!.models[0]).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "low",
+    });
+  });
+
+  it("keeps genuinely new unknown models unknown", () => {
+    const stored = catalog("2026-01-01T00:00:00.000Z", entry("codex", [knownModel("gpt-5")]));
+    const merged = mergeHarnessCatalog(
+      stored,
+      catalog(
+        "2026-01-02T00:00:00.000Z",
+        entry("codex", [
+          knownModel("gpt-5"),
+          { id: "gpt-5-mini", reasoningDiscovery: "unknown", probedAt: "2026-01-01T00:00:00.000Z" },
+        ]),
+      ),
+    );
+    expect(merged.harnesses[0]!.models[1]).toEqual({
+      id: "gpt-5-mini",
+      reasoningDiscovery: "unknown",
       probedAt: "2026-01-01T00:00:00.000Z",
-    },
-  ],
-  updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
 });
 
-describe("runner harness catalog (issue #240)", () => {
-  it("stores a registration's optional initial catalog and returns it on the Runner", async () => {
-    const { credential, humanId } = await enrollHostWithCookie();
-    const { workspace, project } = await insertWorkspaceAndProject(humanId);
-    const runner = await registerRunner(credential, {
-      workspaceId: workspace.id,
-      projectId: project.id,
-      harnessCatalog: catalogWith("model-a", true),
-    });
-    expect(runner.harnessCatalog).toEqual(catalogWith("model-a", true));
-    // Persisted as JSONB, separate from capabilities.
-    const [row] = await database.db.select().from(runners).where(eq(runners.id, runner.id));
-    expect(row?.harnessCatalog).toEqual(catalogWith("model-a", true));
-  });
+describe("runner harness catalog API", () => {
+  it("persists the initial catalog on register and preserves it on heartbeat", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const initial = catalog("2026-02-01T00:00:00.000Z", entry("opencode", [knownModel("gpt-5")]));
+    const created = await register(credential, workspace.id, project.id, initial);
+    expect(created.harnessCatalog).toEqual(initial);
+    expect(created.capabilities).toEqual(["opencode"]);
 
-  it("merges a catalog PUT without regressing a known model's efforts", async () => {
-    const { credential, humanId } = await enrollHostWithCookie();
-    const { workspace, project } = await insertWorkspaceAndProject(humanId);
-    const runner = await registerRunner(credential, {
-      workspaceId: workspace.id,
-      projectId: project.id,
-      harnessCatalog: catalogWith("model-a", true),
-    });
-    // A slower startup probe later reports the model "unknown" again.
-    const res = await putJson(
+    const beat = await request(
       app,
-      `/api/runners/${runner.id}/catalog`,
-      catalogWith("model-a", false),
-      credential,
-    );
-    expect(res.status).toBe(200);
-    const updated = Runner.parse(await res.json());
-    const model = updated.harnessCatalog?.harnesses[0]?.models.find(
-      (entry) => entry.id === "model-a",
-    );
-    expect(model?.reasoningDiscovery).toBe("known");
-    expect(model?.effortLevels).toEqual(["low", "medium", "high"]);
-    // The newer harness-level fields still come through the merge.
-    expect(updated.harnessCatalog?.harnesses[0]?.probedAt).toBe("2026-01-01T00:00:00.000Z");
-  });
-
-  it("adds models the stored catalog never saw", async () => {
-    const { credential, humanId } = await enrollHostWithCookie();
-    const { workspace, project } = await insertWorkspaceAndProject(humanId);
-    const runner = await registerRunner(credential, {
-      workspaceId: workspace.id,
-      projectId: project.id,
-      harnessCatalog: catalogWith("model-a", true),
-    });
-    const res = await putJson(
-      app,
-      `/api/runners/${runner.id}/catalog`,
-      catalogWith("model-b", true),
-      credential,
-    );
-    const updated = Runner.parse(await res.json());
-    const modelIds = updated.harnessCatalog?.harnesses[0]?.models.map((entry) => entry.id);
-    expect(modelIds).toEqual(["model-a", "model-b"]);
-  });
-
-  it("keeps the catalog untouched across heartbeats", async () => {
-    const { credential, humanId } = await enrollHostWithCookie();
-    const { workspace, project } = await insertWorkspaceAndProject(humanId);
-    const runner = await registerRunner(credential, {
-      workspaceId: workspace.id,
-      projectId: project.id,
-      harnessCatalog: catalogWith("model-a", true),
-    });
-    const res = await postJson(
-      app,
-      `/api/runners/${runner.id}/heartbeat`,
+      "POST",
+      `/api/runners/${created.id}/heartbeat`,
       { activeSlotCount: 0 },
-      undefined,
+      credential,
+    );
+    expect(beat.status).toBe(200);
+    expect(Runner.parse(await beat.json()).harnessCatalog).toEqual(initial);
+
+    const [stored] = await database.db.select().from(runners).where(eq(runners.id, created.id));
+    expect(stored!.harnessCatalog).toEqual(initial);
+    expect(stored!.capabilities).toEqual(["opencode"]);
+  });
+
+  it("keeps stored known efforts when a re-register omits or empties the catalog", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const live = catalog(
+      "2026-02-01T00:00:00.000Z",
+      entry("opencode", [knownModel("gpt-5")], "2026-02-01T00:00:00.000Z"),
+    );
+    const created = await register(credential, workspace.id, project.id, live);
+
+    const omitted = await register(credential, workspace.id, project.id);
+    expect(omitted.id).toBe(created.id);
+    expect(omitted.harnessCatalog).toEqual(live);
+
+    const emptied = await register(credential, workspace.id, project.id, EMPTY_HARNESS_CATALOG);
+    expect(emptied.id).toBe(created.id);
+    expect(emptied.harnessCatalog).toEqual(live);
+
+    const [stored] = await database.db.select().from(runners).where(eq(runners.id, created.id));
+    expect(stored!.harnessCatalog).toEqual(live);
+  });
+
+  it("updates the catalog under a live host credential and project access", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const created = await register(credential, workspace.id, project.id);
+
+    const updated = catalog(
+      "2026-03-01T00:00:00.000Z",
+      entry("codex", [knownModel("gpt-5-codex")]),
+    );
+    const res = await request(
+      app,
+      "PUT",
+      `/api/runners/${created.id}/catalog`,
+      updated,
       credential,
     );
     expect(res.status).toBe(200);
-    const heartbeated = Runner.parse(await res.json());
-    expect(heartbeated.harnessCatalog).toEqual(catalogWith("model-a", true));
+    expect(Runner.parse(await res.json()).harnessCatalog).toEqual(updated);
+
+    const [stored] = await database.db.select().from(runners).where(eq(runners.id, created.id));
+    expect(stored!.harnessCatalog).toEqual(updated);
+
+    expect((await request(app, "PUT", `/api/runners/${created.id}/catalog`, updated)).status).toBe(
+      401,
+    );
+    accessOverrides.set(project.id, null);
+    expect(
+      (await request(app, "PUT", `/api/runners/${created.id}/catalog`, updated, credential)).status,
+    ).toBe(401);
   });
 
-  it("shows the catalog on the workspace Runners Fleet", async () => {
-    const { credential, humanId, cookie } = await enrollHostWithCookie();
-    const { workspace, project } = await insertWorkspaceAndProject(humanId);
-    const runner = await registerRunner(credential, {
-      workspaceId: workspace.id,
-      projectId: project.id,
-      harnessCatalog: catalogWith("model-a", true),
+  it("merges known effort entries when a slower refresh publishes unknown ones", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const created = await register(credential, workspace.id, project.id);
+
+    const first = catalog("2026-02-01T00:00:00.000Z", entry("opencode", [knownModel("gpt-5")]));
+    expect(
+      (await request(app, "PUT", `/api/runners/${created.id}/catalog`, first, credential)).status,
+    ).toBe(200);
+
+    const stale = catalog(
+      "2026-01-01T00:00:00.000Z",
+      entry(
+        "opencode",
+        [{ id: "gpt-5", reasoningDiscovery: "unknown", probedAt: "2026-01-01T00:00:00.000Z" }],
+        "2026-01-01T00:00:00.000Z",
+      ),
+    );
+    const second = await request(
+      app,
+      "PUT",
+      `/api/runners/${created.id}/catalog`,
+      stale,
+      credential,
+    );
+    expect(second.status).toBe(200);
+    const merged = Runner.parse(await second.json()).harnessCatalog;
+    expect(merged.harnesses[0]!.models[0]).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "low",
     });
-    const fleetRes = await app.request(`/api/workspaces/${workspace.id}/runners`, {
+    expect(merged.probedAt).toBe("2026-02-01T00:00:00.000Z");
+  });
+
+  it("exposes each fleet runner's live catalog", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const live = catalog("2026-04-01T00:00:00.000Z", entry("hermes", [knownModel("sonnet")]));
+    const created = await register(credential, workspace.id, project.id);
+    await request(app, "PUT", `/api/runners/${created.id}/catalog`, live, credential);
+
+    const fleet = await app.request(`/api/workspaces/${workspace.id}/runners`, {
       headers: { cookie },
     });
-    expect(fleetRes.status).toBe(200);
-    const fleet = WorkspaceRunnersFleet.parse(await fleetRes.json());
-    const fleetRunner: FleetRunner | undefined = fleet.hosts
-      .flatMap((host) => host.runners)
-      .find((entry) => entry.id === runner.id);
-    expect(fleetRunner?.harnessCatalog).toEqual(catalogWith("model-a", true));
+    expect(fleet.status).toBe(200);
+    const parsed = WorkspaceRunnersFleet.parse(await fleet.json());
+    expect(parsed.hosts[0]!.runners[0]!.harnessCatalog).toEqual(live);
   });
 
-  it("rejects a catalog PUT without or with the wrong host credential", async () => {
-    const { credential, humanId } = await enrollHostWithCookie();
-    const { workspace, project } = await insertWorkspaceAndProject(humanId);
-    const runner = await registerRunner(credential, {
-      workspaceId: workspace.id,
-      projectId: project.id,
-    });
-    const anonymous = await putJson(
-      app,
-      `/api/runners/${runner.id}/catalog`,
-      catalogWith("m", true),
+  it("drops harnesses no longer advertised by a live catalog update", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const created = await register(credential, workspace.id, project.id);
+    const both = catalog(
+      "2026-05-01T00:00:00.000Z",
+      entry("opencode", [knownModel("gpt-5")]),
+      entry("codex", [knownModel("gpt-5-codex")]),
     );
-    expect(anonymous.status).toBe(401);
-    await expectProblem(anonymous, 401, "invalid_credential");
-    const other = await enrollHostWithCookie("other-laptop");
-    await expectProblem(
-      await putJson(
-        app,
-        `/api/runners/${runner.id}/catalog`,
-        catalogWith("m", true),
-        other.credential,
-      ),
-      404,
-      "runner_not_found",
-    );
-  });
+    expect(
+      (await request(app, "PUT", `/api/runners/${created.id}/catalog`, both, credential)).status,
+    ).toBe(200);
 
-  it("rejects a catalog PUT for a revoked runner", async () => {
-    const { credential, humanId } = await enrollHostWithCookie();
-    const { workspace, project } = await insertWorkspaceAndProject(humanId);
-    const runner = await registerRunner(credential, {
-      workspaceId: workspace.id,
-      projectId: project.id,
-    });
-    await database.db
-      .update(runners)
-      .set({ revokedAt: sql`statement_timestamp()` })
-      .where(eq(runners.id, runner.id));
-    const res = await putJson(
+    // A probe that no longer sees codex (it was uninstalled) publishes only
+    // opencode; the stored catalog must stop advertising codex.
+    const onlyOne = catalog("2026-05-02T00:00:00.000Z", entry("opencode", [knownModel("gpt-5")]));
+    const res = await request(
       app,
-      `/api/runners/${runner.id}/catalog`,
-      catalogWith("m", true),
+      "PUT",
+      `/api/runners/${created.id}/catalog`,
+      onlyOne,
       credential,
     );
-    expect(res.status).toBe(401);
-    await expectProblem(res, 401, "runner_revoked");
+    expect(res.status).toBe(200);
+    expect(Runner.parse(await res.json()).harnessCatalog?.harnesses.map((item) => item.id)).toEqual(
+      ["opencode"],
+    );
   });
 
-  it("validates the catalog body as a Problem", async () => {
-    const { credential, humanId } = await enrollHostWithCookie();
-    const { workspace, project } = await insertWorkspaceAndProject(humanId);
-    const runner = await registerRunner(credential, {
-      workspaceId: workspace.id,
-      projectId: project.id,
-    });
-    const res = await putJson(
+  it("rejects an invalid catalog body as a Problem", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const created = await register(credential, workspace.id, project.id);
+    const res = await request(
       app,
-      `/api/runners/${runner.id}/catalog`,
-      { harnesses: [{ id: "x" }], updatedAt: "not-a-date" },
+      "PUT",
+      `/api/runners/${created.id}/catalog`,
+      {
+        harnesses: [{ id: "x" }],
+        probedAt: "not-a-date",
+      },
       credential,
     );
     expect(res.status).toBe(400);
-    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(res.headers.get("content-type")).toContain("application/problem+json");
+  });
+
+  it("migration 0060 normalizes legacy PR #255 non-null catalogs so Fleet, register and PUT succeed", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const created = await register(credential, workspace.id, project.id);
+
+    // Simulate a legacy PR #255 catalog row written before PR #260 deployed.
+    const legacyRow = {
+      harnesses: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          source: "preset",
+          defaultModel: null,
+          models: [
+            {
+              id: "gpt-5",
+              reasoningDiscovery: "known",
+              effortLevels: ["low", "high"],
+              defaultEffort: null,
+              probedAt: null,
+            },
+          ],
+          probedAt: null,
+        },
+      ],
+      updatedAt: "2026-11-20T10:00:00.000Z",
+    };
+    await database.db.execute(
+      sql`UPDATE "runners" SET "harness_catalog" = ${JSON.stringify(legacyRow)}::jsonb WHERE "id" = ${created.id}`,
+    );
+
+    const migrationSql = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../../../../db/migrations/0060_backfill_harness_catalog.sql",
+      ),
+      "utf8",
+    );
+    for (const statement of migrationSql.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim();
+      if (trimmed !== "") await database.db.execute(sql.raw(trimmed));
+    }
+
+    // 1. Fleet UI query parses cleanly under the new contract.
+    const fleet = await app.request(`/api/workspaces/${workspace.id}/runners`, {
+      headers: { cookie },
+    });
+    expect(fleet.status).toBe(200);
+    const parsedFleet = WorkspaceRunnersFleet.parse(await fleet.json());
+    expect(parsedFleet.hosts[0]!.runners[0]!.harnessCatalog).toMatchObject({
+      probedAt: "2026-11-20T10:00:00.000Z",
+      harnesses: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          defaultModel: "gpt-5",
+          probedAt: "2026-11-20T10:00:00.000Z",
+          models: [
+            {
+              id: "gpt-5",
+              reasoningDiscovery: "known",
+              supportedEfforts: ["low", "high"],
+            },
+          ],
+        },
+      ],
+    });
+
+    // 2. Upgraded runner re-registering without a local cache parses cleanly.
+    const reRegistered = await register(credential, workspace.id, project.id);
+    expect(reRegistered.harnessCatalog.harnesses[0]!.models[0]!.supportedEfforts).toEqual([
+      "low",
+      "high",
+    ]);
+
+    // 3. PUT /catalog with an unknown refresh preserves known efforts without HTTP 500.
+    const put = await request(
+      app,
+      "PUT",
+      `/api/runners/${created.id}/catalog`,
+      catalog(
+        "2026-11-26T12:00:00.000Z",
+        entry(
+          "opencode",
+          [{ id: "gpt-5", reasoningDiscovery: "unknown", probedAt: "2026-11-26T12:00:00.000Z" }],
+          "2026-11-26T12:00:00.000Z",
+        ),
+      ),
+      credential,
+    );
+    expect(put.status).toBe(200);
+    const merged = Runner.parse(await put.json()).harnessCatalog;
+    expect(merged.harnesses[0]!.models[0]).toMatchObject({
+      id: "gpt-5",
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+    });
   });
 });
