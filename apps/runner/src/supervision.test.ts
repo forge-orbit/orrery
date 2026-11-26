@@ -854,7 +854,21 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
 
 describe("on-demand catalog probes (#242)", { timeout: 30_000 }, () => {
   it("runs probe_catalog with every work slot busy and publishes the refresh", async () => {
-    const fixture = await makeFixture({ mode: "hang", concurrency: 1 });
+    // One explicit, probe-friendly harness: `hang` keeps the only work slot
+    // busy at session/prompt, while the per-Harness lock is released after
+    // session/new so a real catalog probe must still run and publish.
+    const fixture = await makeFixture({
+      mode: "hang",
+      concurrency: 1,
+      harnessDefinitions: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          command: process.execPath,
+          args: [stubPath],
+        },
+      ],
+    });
     fixture.control.enqueueDispatch("PROBE-BUSY", "attempt-probe-busy");
     await until(() => sessions(fixture).length === 1);
     expect(sessions(fixture)[0]?.status).toBe("active");
@@ -865,6 +879,8 @@ describe("on-demand catalog probes (#242)", { timeout: 30_000 }, () => {
       return recorded.filter((item) => item.event === "catalog-probe").length >= 2;
     });
 
+    // The refresh publish is asynchronous; wait for it rather than racing it.
+    await until(() => fixture.control.publishedCatalogs().length >= 2);
     // A busy work slot never head-of-line blocks the runner-level command.
     expect(sessions(fixture)[0]?.status).toBe("active");
     expect(fixture.control.publishedCatalogs().length).toBeGreaterThanOrEqual(2);

@@ -267,6 +267,34 @@ describe("harness catalog merge", () => {
     expect(merged.harnesses[0]!.probedAt).toBe("2026-01-05T00:00:00.000Z");
   });
 
+  it("keeps a restored harness's known efforts through a later stale refresh", () => {
+    // The runner's partial refresh republishes a failed harness verbatim from
+    // its last published catalog; the server must not drop it or regress it.
+    const restored = entry("opencode", [knownModel("gpt-5")], "2026-01-01T00:00:00.000Z");
+    const stored = catalog("2026-05-01T00:00:00.000Z", restored);
+    const stale = catalog(
+      "2026-05-02T00:00:00.000Z",
+      entry(
+        "opencode",
+        [
+          {
+            id: "gpt-5",
+            reasoningDiscovery: "unknown",
+            probedAt: "2026-05-02T00:00:00.000Z",
+          },
+        ],
+        "2026-05-02T00:00:00.000Z",
+      ),
+    );
+    const merged = mergeHarnessCatalog(stored, stale);
+    expect(merged.harnesses.map((item) => item.id)).toEqual(["opencode"]);
+    expect(merged.harnesses[0]!.models[0]).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "low",
+    });
+  });
+
   it("keeps genuinely new unknown models unknown", () => {
     const stored = catalog("2026-01-01T00:00:00.000Z", entry("codex", [knownModel("gpt-5")]));
     const merged = mergeHarnessCatalog(

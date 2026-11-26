@@ -435,3 +435,110 @@ describe("serialized catalog publication", () => {
     expect(warnings.join("\n")).toContain("probe failed");
   });
 });
+
+/** Fixtures for the partial-refresh regression: a harness with known efforts. */
+const def = (id: string) => ({
+  id,
+  displayName: `Harness ${id}`,
+  source: "preset" as const,
+  command: "missing",
+  args: ["acp"],
+});
+const model = (id: string): HarnessModel => ({
+  ...knownModel,
+  id,
+  label: `Model ${id}`,
+  probedAt: "2026-01-01T00:00:00.000Z",
+});
+const entry = (id: string, m: HarnessModel, probedAt: string): HarnessCatalogEntry => ({
+  id,
+  displayName: `Harness ${id}`,
+  source: "preset",
+  defaultModel: m.id,
+  models: [m],
+  probedAt,
+});
+const catalog = (probedAt: string, ...harnesses: HarnessCatalogEntry[]): HarnessCatalog => ({
+  harnesses,
+  probedAt,
+});
+
+describe("partial catalog refresh (#240 regression)", () => {
+  it("keeps a previously known harness whose probe fails while another succeeds", async () => {
+    const published: HarnessCatalog[] = [];
+    const previousOpencode = entry("opencode", model("gpt-5"), "2026-01-01T00:00:00.000Z");
+    const previous = catalog(
+      "2026-01-01T00:00:00.000Z",
+      previousOpencode,
+      entry("codex", model("gpt-5-codex"), "2026-01-01T00:00:00.000Z"),
+    );
+    const freshCodex = entry("codex", model("gpt-5-codex-2"), "2026-02-01T00:00:00.000Z");
+
+    await runStartupCatalogProbe({
+      definitions: [def("opencode"), def("codex")],
+      previous,
+      probe: async (definition) => {
+        if (definition.id === "opencode") throw new Error("transient opencode failure");
+        return freshCodex;
+      },
+      publish: async (value) => {
+        published.push(value);
+      },
+    });
+
+    expect(published).toHaveLength(1);
+    expect(published[0]?.harnesses.find((item) => item.id === "opencode")).toEqual(
+      previousOpencode,
+    );
+    expect(published[0]?.harnesses.find((item) => item.id === "codex")).toEqual(freshCodex);
+  });
+
+  it("omits a failing harness that was never in the previous catalog", async () => {
+    const published: HarnessCatalog[] = [];
+    const previous = catalog(
+      "2026-01-01T00:00:00.000Z",
+      entry("codex", model("gpt-5-codex"), "2026-01-01T00:00:00.000Z"),
+    );
+    const freshCodex = entry("codex", model("gpt-5-codex"), "2026-02-01T00:00:00.000Z");
+
+    await runStartupCatalogProbe({
+      definitions: [def("brand-new"), def("codex")],
+      previous,
+      probe: async (definition) => {
+        if (definition.id === "brand-new") throw new Error("never known");
+        return freshCodex;
+      },
+      publish: async (value) => {
+        published.push(value);
+      },
+    });
+
+    expect(published).toHaveLength(1);
+    expect(published[0]?.harnesses.map((item) => item.id)).toEqual(["codex"]);
+  });
+
+  it("does not publish when every probe fails even with a previous catalog", async () => {
+    const published: HarnessCatalog[] = [];
+    const previous = catalog(
+      "2026-01-01T00:00:00.000Z",
+      entry("opencode", model("gpt-5"), "2026-01-01T00:00:00.000Z"),
+      entry("codex", model("gpt-5-codex"), "2026-01-01T00:00:00.000Z"),
+    );
+    const warnings: string[] = [];
+
+    await runStartupCatalogProbe({
+      definitions: [def("opencode"), def("codex")],
+      previous,
+      probe: async () => {
+        throw new Error("all probes failed");
+      },
+      publish: async (value) => {
+        published.push(value);
+      },
+      write: (line) => warnings.push(line),
+    });
+
+    expect(published).toEqual([]);
+    expect(warnings.join("\n")).toContain("all probes failed");
+  });
+});

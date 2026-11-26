@@ -140,6 +140,9 @@ export async function start(options: StartOptions): Promise<void> {
           await publisher.publish(catalog);
           options.onCatalog?.(publisher.current);
         },
+        // A failed probe in a partial refresh must carry over its last known
+        // entry rather than letting the merge drop that harness (#240).
+        previous: publisher.current,
         isAborted: () => controller.signal.aborted,
         write,
       });

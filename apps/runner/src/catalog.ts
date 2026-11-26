@@ -486,16 +486,25 @@ export interface StartupCatalogProbeOptions {
   definitions: readonly HarnessDefinition[];
   probe: (definition: HarnessDefinition) => Promise<HarnessCatalogEntry>;
   publish: (catalog: HarnessCatalog) => Promise<void>;
+  /**
+   * The last published catalog. An entry whose probe fails but which was
+   * previously discovered is carried over verbatim, so a transient failure
+   * cannot erase a known Harness or its effort levels (#240).
+   */
+  previous?: HarnessCatalog | undefined;
   isAborted?: (() => boolean) | undefined;
   write?: ((line: string) => void) | undefined;
   now?: (() => string) | undefined;
 }
 
 /**
- * One bounded startup discovery pass. An empty local registry is a successful
- * detection: publishing an empty catalog lets the server drop Harnesses the
- * Runner no longer has. Definitions that all fail to probe keep the last good
- * catalog instead of wiping it on a transient outage.
+ * One bounded discovery pass, shared by startup and the `probe_catalog`
+ * command. An empty local registry is a successful detection: publishing an
+ * empty catalog lets the server drop Harnesses the Runner no longer has.
+ * A harness that is still installed but whose individual probe fails keeps its
+ * previous entry; a harness never seen before is omitted. If every probe
+ * fails, nothing is published, so the last good catalog survives a transient
+ * outage (ADR-0011, #240/#242).
  */
 export async function runStartupCatalogProbe(options: StartupCatalogProbeOptions): Promise<void> {
   const aborted = options.isAborted ?? (() => false);
@@ -507,14 +516,20 @@ export async function runStartupCatalogProbe(options: StartupCatalogProbeOptions
     return;
   }
   const harnesses: HarnessCatalogEntry[] = [];
+  let succeeded = 0;
   for (const definition of options.definitions) {
     if (aborted()) return;
     try {
       harnesses.push(await options.probe(definition));
+      succeeded += 1;
     } catch (error) {
       write(`Harness ${definition.id} probe failed: ${String(error)}`);
+      const prior = options.previous?.harnesses.find((item) => item.id === definition.id);
+      if (prior !== undefined) harnesses.push(prior);
     }
   }
-  if (aborted() || harnesses.length === 0) return;
+  // A partial refresh with at least one success is publishable; restoring a
+  // failed harness's prior entry must not count as a successful discovery.
+  if (aborted() || succeeded === 0) return;
   await options.publish({ harnesses, probedAt: now() });
 }
