@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readCatalogCache } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
+import { HarnessLocks } from "./harnesses.ts";
 import { repoFingerprint } from "./start.ts";
 import { SlotPool, type SlotController, type SupervisionOutcome } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
@@ -15,6 +17,10 @@ export interface WorkOptions {
   agentId?: string | undefined;
   /** Optional requester steering text (from `--prompt`) carried on the Dispatch. */
   prompt?: string | undefined;
+  /** Per-dispatch execution options from `--harness`, `--model` and `--effort`. */
+  harness?: string | undefined;
+  model?: string | undefined;
+  effort?: string | undefined;
   signal?: AbortSignal | undefined;
   write?: ((line: string) => void) | undefined;
   supervision?: SupervisionConfig | undefined;
@@ -92,6 +98,9 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
       ...(options.prompt === undefined || options.prompt.trim() === ""
         ? {}
         : { prompt: options.prompt }),
+      ...(options.harness === undefined ? {} : { harness: options.harness }),
+      ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
     });
     write(`Created Dispatch ${dispatch.id} for ${resolved.identifier}.`);
     const acceptance = await client.acceptDispatch(runner.id, dispatch.id);
@@ -161,6 +170,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
       }
     };
 
+    const cachedCatalog = await readCatalogCache();
     const controller = await superviseDispatch({
       server: options.server,
       repoPath,
@@ -179,6 +189,9 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
       pool,
       signal: sessionAbort.signal,
       write,
+      locks: new HarnessLocks(),
+      defaultModelFor: (harnessId) =>
+        cachedCatalog?.harnesses.find((entry) => entry.id === harnessId)?.defaultModel ?? null,
       onController: (ctrl) => {
         activeController = ctrl;
         commandLoopPromise = runCommandLoop();

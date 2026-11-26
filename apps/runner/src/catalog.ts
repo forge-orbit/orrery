@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { HarnessCatalog, mergeHarnessCatalog, type HarnessCatalogEntry } from "@orrery/contract";
 import type { OrreryClient } from "./client.ts";
 import { configDirectory } from "./credential.ts";
-import { discoverHarnesses, type AcpOverride } from "./harnesses.ts";
+import { discoverHarnesses, HarnessLocks, type AcpOverride } from "./harnesses.ts";
 import { entryFromProbe, probeHarness } from "./probe.ts";
 
 /**
@@ -103,6 +103,8 @@ export interface CatalogSyncOptions {
   signal: AbortSignal;
   write?: ((line: string) => void) | undefined;
   configDir?: string | undefined;
+  /** Shared with dispatch supervision: never probe and spawn one Harness at once. */
+  locks?: HarnessLocks | undefined;
 }
 
 /**
@@ -118,6 +120,7 @@ export function startCatalogSync(options: CatalogSyncOptions): {
 } {
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   const configDir = options.configDir ?? configDirectory();
+  const locks = options.locks ?? new HarnessLocks();
   const publisher = new CatalogPublisher(
     options.client,
     options.runnerId,
@@ -132,7 +135,11 @@ export function startCatalogSync(options: CatalogSyncOptions): {
       const harnesses = await discoverHarnesses(options.override, configDir);
       for (const harness of harnesses) {
         if (options.signal.aborted) return;
-        const outcome = await probeHarness(harness, { cwd: options.cwd, signal: options.signal });
+        // The probe may temporarily switch this Harness's default model, so a
+        // Dispatch spawn for the same Harness waits for it (issue #241).
+        const outcome = await locks.run(harness.id, () =>
+          probeHarness(harness, { cwd: options.cwd, signal: options.signal }),
+        );
         if (!outcome.ok) {
           write(`Harness probe failed for ${harness.id}: ${outcome.reason}`);
           continue;

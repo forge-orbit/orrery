@@ -6,7 +6,13 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type { HarnessCatalog } from "@orrery/contract";
 import { CatalogPublisher, readCatalogCache, writeCatalogCache } from "./catalog.ts";
 import type { OrreryClient } from "./client.ts";
-import { commandExists, discoverHarnesses, loadUserHarnesses } from "./harnesses.ts";
+import {
+  commandExists,
+  discoverHarnesses,
+  HarnessLocks,
+  loadUserHarnesses,
+  resolveHarness,
+} from "./harnesses.ts";
 import { probeHarness } from "./probe.ts";
 
 const stubPath = fileURLToPath(new URL("./stub-acp.ts", import.meta.url));
@@ -369,3 +375,60 @@ async function statMode(path: string): Promise<string> {
   const info = await stat(path);
   return (info.mode & 0o777).toString(8);
 }
+
+describe("local-only Harness resolution (#241)", () => {
+  it("resolves a requested id only from the local registry allowlist", async () => {
+    const { root } = await keep();
+    const override = { command: process.execPath, args: [stubPath] };
+    const resolved = await resolveHarness("node", override, root);
+    expect(resolved?.command).toBe(process.execPath);
+    expect(resolved?.args).toEqual([stubPath]);
+    // An id nobody configured is unavailable even when the server names it.
+    expect(await resolveHarness("server-says-run-this", override, root)).toBeUndefined();
+    // A user harness works without any preset install.
+    await writeFile(
+      join(root, "harnesses.json"),
+      JSON.stringify({
+        harnesses: [{ id: "team", command: process.execPath, args: [stubPath] }],
+      }),
+    );
+    expect((await resolveHarness("team", undefined, root))?.source).toBe("user");
+  });
+});
+
+describe("per-Harness spawn lock (#241)", () => {
+  it("serializes work for one Harness while other Harnesses still run", async () => {
+    const locks = new HarnessLocks();
+    const order: string[] = [];
+    let active = 0;
+    let maxActive = 0;
+    const task = (label: string) => async (): Promise<void> => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      order.push(`start:${label}`);
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      order.push(`end:${label}`);
+      active -= 1;
+    };
+    await Promise.all([
+      locks.run("harness-a", task("a1")),
+      locks.run("harness-a", task("a2")),
+      locks.run("harness-b", task("b1")),
+    ]);
+    // One Harness never runs two sessions at once...
+    expect(order.indexOf("end:a1")).toBeLessThan(order.indexOf("start:a2"));
+    // ...while a different Harness is not blocked behind it.
+    expect(order.indexOf("start:b1")).toBeLessThan(order.indexOf("end:a1"));
+    expect(maxActive).toBeGreaterThanOrEqual(2);
+  });
+
+  it("releases the lock after a rejected run", async () => {
+    const locks = new HarnessLocks();
+    await expect(
+      locks.run("harness-a", async () => {
+        throw new Error("probe failed");
+      }),
+    ).rejects.toThrow("probe failed");
+    await expect(locks.run("harness-a", async () => "next")).resolves.toBe("next");
+  });
+});

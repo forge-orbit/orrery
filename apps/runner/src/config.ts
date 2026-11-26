@@ -6,6 +6,13 @@ export interface AcpHarnessConfig {
   args: string[];
 }
 
+/** Per-dispatch execution defaults from the CLI (issue #241). */
+export interface ExecutionDefaults {
+  harness: string | undefined;
+  model: string | undefined;
+  effort: string | undefined;
+}
+
 /** Timing and layout knobs for local dispatch supervision. */
 export interface SupervisionConfig {
   acp: AcpHarnessConfig;
@@ -16,6 +23,8 @@ export interface SupervisionConfig {
    * catalog entry (issue #240).
    */
   acpExplicit: boolean;
+  /** `--harness`, `--model` and `--effort`: defaults for dispatches without overrides. */
+  defaults: ExecutionDefaults;
   /** Renew the five-minute work-session lease this often. */
   leaseRenewMs: number;
   /** Grace period before escalating SIGTERM to SIGKILL on cancel. */
@@ -26,6 +35,9 @@ export interface SupervisionConfig {
 
 export interface SupervisionOverrides {
   acp?: Partial<AcpHarnessConfig> | undefined;
+  harness?: string | undefined;
+  model?: string | undefined;
+  effort?: string | undefined;
   leaseRenewMs?: number | undefined;
   cancelGraceMs?: number | undefined;
   worktreeRoot?: string | undefined;
@@ -69,6 +81,11 @@ export function loadSupervisionConfig(
       overrides.acp !== undefined ||
       env.ORRERY_ACP_COMMAND !== undefined ||
       env.ORRERY_ACP_ARGS !== undefined,
+    defaults: {
+      harness: overrides.harness,
+      model: overrides.model,
+      effort: overrides.effort,
+    },
     leaseRenewMs: positiveInt(
       overrides.leaseRenewMs ?? env.ORRERY_LEASE_RENEW_MS,
       "leaseRenewMs",

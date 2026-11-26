@@ -27,12 +27,21 @@ const probeSession = process.env.STUB_ACP_PROBE === "1";
 // advertises models without any config option, and `none` suppresses both
 // payloads; `per-model` scopes the effort option to one model only.
 const catalogAd = process.env.STUB_ACP_CATALOG ?? "all";
+// Dispatch option seams (issue #241): reject a model like a strict harness
+// would, or reject every effort config option to exercise the non-fatal path.
+const rejectModel = new Set(
+  (process.env.STUB_ACP_REJECT_MODEL ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value !== ""),
+);
+const rejectEffort = process.env.STUB_ACP_REJECT_EFFORT === "1";
 const stubInitializeModels = {
   availableModels: [
     { modelId: "stub-fast", name: "Stub Fast" },
     { modelId: "stub-deep", name: "Stub Deep" },
   ],
-  currentModel: "stub-fast",
+  currentModel: process.env.STUB_ACP_DEFAULT_MODEL ?? "stub-fast",
 };
 const effortChoices = [
   { value: "low", name: "Low" },
@@ -366,6 +375,41 @@ function handle(message: Record<string, unknown>): void {
     record({ event: "cancel" });
     if (mode === "hang" || mode === "ignore-term") {
       if (mode === "hang") process.exit(0);
+      return;
+    }
+    reply(id, {});
+    return;
+  }
+  if (method === "session/set_config_option") {
+    const fields = recordOf(message.params) ?? {};
+    const configId = typeof fields.configId === "string" ? fields.configId : "";
+    const value = typeof fields.value === "string" ? fields.value : "";
+    record({ event: "set_config_option", configId, value });
+    if (configId === "model" && (rejectModel.has("*") || rejectModel.has(value))) {
+      send({ jsonrpc: "2.0", id, error: { code: -32602, message: `unknown model ${value}` } });
+      return;
+    }
+    if (configId !== "model" && rejectEffort) {
+      send({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32601, message: `unknown config option ${configId}` },
+      });
+      return;
+    }
+    reply(id, {
+      configOptions: Array.isArray(recordOf(message.params)?.configOptions)
+        ? recordOf(message.params)?.configOptions
+        : [],
+    });
+    return;
+  }
+  if (method === "session/set_model") {
+    const fields = recordOf(message.params) ?? {};
+    const modelId = typeof fields.modelId === "string" ? fields.modelId : "";
+    record({ event: "set_model", modelId });
+    if (rejectModel.has("*") || rejectModel.has(modelId)) {
+      send({ jsonrpc: "2.0", id, error: { code: -32602, message: `unknown model ${modelId}` } });
       return;
     }
     reply(id, {});

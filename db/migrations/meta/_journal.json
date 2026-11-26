@@ -414,6 +414,13 @@
       "when": 1795671981334,
       "tag": "0058_typical_bruce_banner",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795677303239,
+      "tag": "0059_complete_young_avengers",
+      "breakpoints": true
     }
   ]
 }

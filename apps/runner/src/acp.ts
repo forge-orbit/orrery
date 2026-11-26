@@ -331,6 +331,43 @@ export class AcpStdioClient {
     });
   }
 
+  /**
+   * Apply the session model (issue #241). ACP v1 exposes model selection as the
+   * `model` config option; older adapters only implement the `session/set_model`
+   * extension, so that is the fallback. Throws when the Harness rejects both,
+   * which the supervisor reports as a typed `model_rejected` diagnostic.
+   */
+  async setModel(modelId: string): Promise<"config_option" | "set_model"> {
+    try {
+      await this.request("session/set_config_option", {
+        sessionId: this.sessionId,
+        configId: "model",
+        value: modelId,
+      });
+      return "config_option";
+    } catch {
+      await this.request("session/set_model", { sessionId: this.sessionId, modelId });
+      return "set_model";
+    }
+  }
+
+  /**
+   * Apply a reasoning-effort config option. Returns false instead of throwing:
+   * an unsupported effort is non-fatal and the dispatch continues without it.
+   */
+  async setEffort(configId: string, effort: string): Promise<boolean> {
+    try {
+      await this.request("session/set_config_option", {
+        sessionId: this.sessionId,
+        configId,
+        value: effort,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   sendCancel(): void {
     if (this.cancelSent || this.exitValue !== undefined) return;
     this.cancelSent = true;

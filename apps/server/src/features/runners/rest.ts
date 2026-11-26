@@ -570,6 +570,7 @@ const statusFor = {
   runner_forbidden: 403,
   runner_unavailable: 409,
   runner_not_for_issue: 409,
+  harness_unavailable: 409,
   insufficient_dispatch_access: 403,
   dispatch_not_found: 404,
   dispatch_not_pending: 409,

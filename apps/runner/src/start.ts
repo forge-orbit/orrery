@@ -7,6 +7,7 @@ import { readCatalogCache, startCatalogSync } from "./catalog.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
+import { HarnessLocks } from "./harnesses.ts";
 import { SlotPool, type SlotController } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
@@ -70,6 +71,9 @@ export async function start(options: StartOptions): Promise<void> {
     signal: controller.signal,
   });
   const supervision = options.supervision ?? loadSupervisionConfig();
+  // One lock instance for this process: probes and dispatches coordinate per
+  // Harness so a probe's temporary default-model switch never leaks (issue #241).
+  const locks = new HarnessLocks();
   // Seed registration with the cached Harness catalog so the Fleet shows
   // harnesses, models and effort levels before the background probe lands.
   const cachedCatalog = await readCatalogCache();
@@ -100,6 +104,7 @@ export async function start(options: StartOptions): Promise<void> {
     cwd: options.repoPath ?? process.cwd(),
     signal: controller.signal,
     write,
+    locks,
   });
   void catalog.done.catch(() => {});
 
@@ -227,6 +232,12 @@ export async function start(options: StartOptions): Promise<void> {
               pool,
               signal: controller.signal,
               write,
+              locks,
+              // Read live from the publisher: a probe that finishes after
+              // registration updates the cached default model used here.
+              defaultModelFor: (harnessId) =>
+                catalog.publisher.localCatalog.harnesses.find((entry) => entry.id === harnessId)
+                  ?.defaultModel ?? null,
               onController: options.onController,
             });
             pending.add(running);

@@ -139,6 +139,7 @@ export type RunnersErrorKind =
   | "runner_forbidden"
   | "runner_unavailable"
   | "runner_not_for_issue"
+  | "harness_unavailable"
   | "insufficient_dispatch_access"
   | "dispatch_not_found"
   | "dispatch_not_pending"
@@ -176,6 +177,7 @@ const messages: Record<RunnersErrorKind, string> = {
   runner_forbidden: "Only the human who owns this Runner host may dispatch to it.",
   runner_unavailable: "This Runner is offline or has no free slot.",
   runner_not_for_issue: "This Runner is not registered for the issue's project.",
+  harness_unavailable: "This Runner does not have the requested Harness.",
   insufficient_dispatch_access: "The Runner host owner needs Contribute access to dispatch here.",
   dispatch_not_found: "No such pending Dispatch exists for this Runner.",
   dispatch_not_pending: "This Dispatch was already accepted or ended.",
@@ -452,6 +454,9 @@ const dispatchBaseFields = {
   dispatchAttemptId: runnerDispatches.dispatchAttemptId,
   state: runnerDispatches.state,
   prompt: runnerDispatches.prompt,
+  harness: runnerDispatches.harness,
+  model: runnerDispatches.model,
+  effort: runnerDispatches.effort,
   runId: runnerDispatches.runId,
   workSessionId: runnerDispatches.workSessionId,
   lastUpSeq: runnerDispatches.lastUpSeq,
@@ -477,6 +482,9 @@ type DispatchRow = {
   dispatchAttemptId: string;
   state: Dispatch["state"];
   prompt: string | null;
+  harness: string | null;
+  model: string | null;
+  effort: string | null;
   runId: string | null;
   workSessionId: string | null;
   lastUpSeq: number;
@@ -500,6 +508,9 @@ const toDispatch = (row: DispatchRow): Dispatch => ({
   dispatchAttemptId: row.dispatchAttemptId,
   state: row.state,
   prompt: row.prompt,
+  harness: row.harness,
+  model: row.model,
+  effort: row.effort,
   runId: row.runId,
   workSessionId: row.workSessionId,
   lastUpSeq: row.lastUpSeq,
@@ -1585,6 +1596,9 @@ interface DispatchCreationInput {
   agentId: string;
   requestedByHumanId: string;
   prompt: string | undefined;
+  harness: string | undefined;
+  model: string | undefined;
+  effort: string | undefined;
 }
 
 /**
@@ -1681,6 +1695,9 @@ async function insertDispatchLocked(
       dispatchAttemptId: randomUUID(),
       state: "pending",
       prompt: input.prompt ?? null,
+      harness: input.harness ?? null,
+      model: input.model ?? null,
+      effort: input.effort ?? null,
       createdAt: sql`statement_timestamp()`,
     })
     .returning({ id: runnerDispatches.id });
@@ -1697,6 +1714,9 @@ async function insertDispatchLocked(
       workspaceId: input.workspaceId,
       agentId: input.agentId,
       ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
+      ...(input.harness === undefined ? {} : { harness: input.harness }),
+      ...(input.model === undefined ? {} : { model: input.model }),
+      ...(input.effort === undefined ? {} : { effort: input.effort }),
     },
   });
   return toDispatch(row);
@@ -2383,6 +2403,21 @@ export function createRunnersService(deps: RunnersDeps) {
         ) {
           throw new RunnersError("runner_unavailable");
         }
+        // The Runner is the authority on what its Harnesses can do, but an id
+        // it never published can never resolve locally: refuse it here while
+        // the caller still has the modal open (issue #241).
+        const publishedHarnesses = joined.runner.harnessCatalog?.harnesses ?? [];
+        if (
+          input.harness !== undefined &&
+          publishedHarnesses.length > 0 &&
+          !publishedHarnesses.some((entry) => entry.id === input.harness)
+        ) {
+          throw new RunnersError(
+            "harness_unavailable",
+            undefined,
+            `This Runner reports: ${publishedHarnesses.map((entry) => entry.id).join(", ")}.`,
+          );
+        }
 
         const agentId = input.agentId ?? joined.runner.agentId;
         // A prompt that is only whitespace is the same as no prompt; a kept
@@ -2447,6 +2482,9 @@ export function createRunnersService(deps: RunnersDeps) {
             dispatchAttemptId: randomUUID(),
             state: "pending",
             prompt: prompt ?? null,
+            harness: input.harness ?? null,
+            model: input.model ?? null,
+            effort: input.effort ?? null,
             createdAt: sql`statement_timestamp()`,
           })
           .returning({ id: runnerDispatches.id });
@@ -2463,6 +2501,9 @@ export function createRunnersService(deps: RunnersDeps) {
             workspaceId: issue.workspaceId,
             agentId,
             ...(prompt === undefined ? {} : { prompt }),
+            ...(input.harness === undefined ? {} : { harness: input.harness }),
+            ...(input.model === undefined ? {} : { model: input.model }),
+            ...(input.effort === undefined ? {} : { effort: input.effort }),
           },
         });
         return toDispatch(row);
@@ -2619,6 +2660,9 @@ export function createRunnersService(deps: RunnersDeps) {
               agentId: runner.agentId,
               requestedByHumanId: host.humanId,
               prompt: undefined,
+              harness: undefined,
+              model: undefined,
+              effort: undefined,
             });
             return { dispatch };
           } catch (error) {
@@ -2690,6 +2734,9 @@ export function createRunnersService(deps: RunnersDeps) {
           agentId: runner.agentId,
           requestedByHumanId: host.humanId,
           prompt,
+          harness: input.harness,
+          model: input.model,
+          effort: input.effort,
         });
       });
     },
@@ -2959,7 +3006,9 @@ export function createRunnersService(deps: RunnersDeps) {
             .limit(1);
           if (agent === undefined) throw new RunnersError("agent_not_found");
 
-          const harness = joined.runner.capabilities[0] ?? "opencode";
+          // The chosen Harness and model are recorded on the Run (issue #241);
+          // a Dispatch that left them to the Runner keeps the previous fallback.
+          const harness = dispatch.harness ?? joined.runner.capabilities[0] ?? "opencode";
           const runId = randomUUID();
           const [insertedRun] = await tx
             .insert(runs)
@@ -2968,6 +3017,7 @@ export function createRunnersService(deps: RunnersDeps) {
               agentId: agent.id,
               workspaceId: joined.runner.workspaceId,
               harness,
+              model: dispatch.model,
               nativeSessionId: dispatch.dispatchAttemptId,
               createdAt: sql`statement_timestamp()`,
               updatedAt: sql`statement_timestamp()`,

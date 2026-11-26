@@ -125,6 +125,29 @@ const isEffortOption = (id: string, name: string): boolean =>
 const isModelOption = (id: string, name: string): boolean => id === "model" || /model/i.test(name);
 
 /**
+ * Candidate config ids for applying a reasoning effort to one model, in
+ * preference order: the session's advertised effort option(s) scoped to that
+ * model, then any global effort option, then the two well-known ACP ids.
+ */
+export function effortConfigIds(sessionResult: unknown, modelId: string | undefined): string[] {
+  const ids: string[] = [];
+  for (const raw of list(recordOf(sessionResult)?.configOptions)) {
+    const option = recordOf(raw);
+    if (option === undefined) continue;
+    const id = stringOf(option.id) ?? stringOf(option.configId);
+    const name = stringOf(option.name) ?? stringOf(option.description) ?? "";
+    if (id === undefined || !isEffortOption(id, name)) continue;
+    const scoped = stringOf(option.modelId) ?? stringOf(recordOf(option.scope)?.modelId);
+    if (scoped !== undefined && scoped !== modelId) continue;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  for (const fallback of ["thought_level", "reasoning_effort"]) {
+    if (!ids.includes(fallback)) ids.push(fallback);
+  }
+  return ids;
+}
+
+/**
  * `configOptions` advertised on a `session/new` result: one option carries the
  * model list, one (per model or global) the effort levels. An effort option
  * carrying a `modelId` scopes to that model only; otherwise it applies to
