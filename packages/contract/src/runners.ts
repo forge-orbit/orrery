@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { Timestamp } from "./common.ts";
+import { Timestamp, WorkspaceKind } from "./common.ts";
+import { ProjectAccessLevel } from "./projects.ts";
 import { Run } from "./runs.ts";
 import { ReadyWorkFilter, WorkSession } from "./sessions.ts";
 
@@ -542,6 +543,54 @@ export const RunnerOfflineResponse = z
   })
   .meta({ id: "RunnerOfflineResponse" });
 export type RunnerOfflineResponse = z.infer<typeof RunnerOfflineResponse>;
+
+/**
+ * Host-authenticated target discovery (`GET /api/runners/targets`, #229): the
+ * enrolled host owner's bindable workspaces, non-trashed `Contribute+`
+ * projects and installation-wide agents, so the CLI can resolve human-readable
+ * `--workspace`, `--project` and `--agent` flags without weakening live RBAC.
+ */
+export const RunnerTargetProject = z
+  .object({
+    id: z.string().min(1).max(200),
+    key: z.string().min(1).max(200),
+    name: z.string().min(1),
+    accessLevel: ProjectAccessLevel,
+  })
+  .meta({ id: "RunnerTargetProject" });
+export type RunnerTargetProject = z.infer<typeof RunnerTargetProject>;
+
+export const RunnerTargetWorkspace = z
+  .object({
+    id: z.string().min(1).max(200),
+    name: z.string().min(1),
+    /** Derived exactly like `issue-resolve`; empty for non-ASCII names. */
+    slug: z.string().max(200),
+    kind: WorkspaceKind,
+    /** Empty when the host owner holds no `Contribute+` project here. */
+    projects: z.array(RunnerTargetProject).max(2000),
+  })
+  .meta({ id: "RunnerTargetWorkspace" });
+export type RunnerTargetWorkspace = z.infer<typeof RunnerTargetWorkspace>;
+
+export const RunnerTargetAgent = z
+  .object({
+    id: z.string().min(1).max(200),
+    name: z.string().min(1),
+  })
+  .meta({ id: "RunnerTargetAgent" });
+export type RunnerTargetAgent = z.infer<typeof RunnerTargetAgent>;
+
+export const RunnerTargetsResponse = z
+  .object({
+    workspaces: z.array(RunnerTargetWorkspace).max(200),
+    /** Top-level: agents are installation-wide, never nested per workspace. */
+    agents: z.array(RunnerTargetAgent).max(200),
+    /** First-created agent, sharing `registerRunner`'s deterministic ordering. */
+    defaultAgentId: z.string().min(1).max(200).nullable(),
+  })
+  .meta({ id: "RunnerTargetsResponse" });
+export type RunnerTargetsResponse = z.infer<typeof RunnerTargetsResponse>;
 
 /**
  * The `orr_dt_...` secret is returned exactly once. Only its SHA-256 digest is

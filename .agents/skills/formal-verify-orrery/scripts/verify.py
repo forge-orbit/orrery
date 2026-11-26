@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Orrery Formal Verification Model Checker (M1-M49).
+Orrery Formal Verification Model Checker (M1-M50).
 
 Extracts critical concurrency, locking, and state-transition guards directly from
 Orrery's server source and SQL migrations, then runs an exhaustive BFS finite-state
@@ -4074,6 +4074,60 @@ def extract_code_facts() -> dict[str, Any]:
         "acceptInTransaction(tx, row",
     )
 
+    # M50 (#265): host-authenticated target discovery. Every guard is read from
+    # the owning source slice, so deleting one flips the model to the unsafe
+    # transition relation.
+    targets_fn = slice_between(runners_src, "async listTargets(", "async markRunnerOffline(")
+    targets_route_fn = slice_between(
+        runners_rest_src, "const listTargets = createRoute(", "const markRunnerOffline"
+    )
+    targets_handler_fn = slice_between(
+        runners_rest_src, "app.openapi(listTargets", "app.openapi(markRunnerOffline"
+    )
+    host_auth_fn = slice_between(
+        runners_src, "async function readHostByCredential(", "async function canSeeWorkspace("
+    )
+
+    m50_host_only = (
+        "await readHostByCredential(tx, credential)" in targets_fn
+        and "requireAccount(" not in targets_fn
+        and "sessionReader" not in targets_fn
+    )
+    m50_host_prefix = "startsWith(HOST_CREDENTIAL_PREFIX)" in host_auth_fn
+    m50_host_active = "isNull(runnerHosts.revokedAt)" in host_auth_fn
+    m50_human_active = "deactivatedAt !== null" in host_auth_fn
+    m50_non_suspended = "isNull(workspaceMemberships.suspendedAt)" in targets_fn
+    m50_trash_filter = "isNull(projects.deletedAt)" in targets_fn
+    m50_contribute_ceiling = (
+        '"contribute"' in targets_fn and "deps.projectAccessCeiling(" in targets_fn
+    )
+    m50_owner_agents = "eq(agents.humanId, host.humanId)" in targets_fn
+    m50_register_order = "orderBy(agents.createdAt, agents.id)" in m42_register_fn
+    m50_targets_order = "orderBy(agents.createdAt, agents.id)" in targets_fn
+    m50_slug = "workspaceSlug(scope.name)" in targets_fn
+    m50_empty_retained = (
+        "projects: visible" in targets_fn and "if (visible.length" not in targets_fn
+    )
+    m50_bound_caps = (
+        "RUNNER_TARGETS_MAX_WORKSPACES" in targets_fn
+        and "RUNNER_TARGETS_MAX_PROJECTS" in targets_fn
+        and "RUNNER_TARGETS_MAX_AGENTS" in targets_fn
+        and 'throw new RunnersError("targets_too_large")' in targets_fn
+    )
+    m50_problem_409 = (
+        "targets_too_large: 409" in runners_rest_src and "...targetsErrors" in targets_route_fn
+    )
+    m50_no_store = '"Cache-Control": "no-store"' in targets_handler_fn
+    m50_route = (
+        'path: "/api/runners/targets"' in targets_route_fn
+        and "service.listTargets(" in targets_handler_fn
+        and "\n  listTargets," in runners_rest_src
+    )
+    m50_contract = (
+        "RunnerTargetsResponse" in runners_contract_src
+        and '"/api/runners/targets"' in runners_openapi_src
+    )
+
     return {
         "m1_serialized": m1_lock_in_service and m1_last_owner_check and m1_db_advisory_lock and m1_db_trigger,
         "m2a_supersedes_failed": m2a_supersedes_failed,
@@ -4684,6 +4738,25 @@ def extract_code_facts() -> dict[str, Any]:
         "m49_transfer_accept_project_row_lock": m49_transfer_accept_project_row_lock,
         "m49_transfer_accept_project_scope": m49_transfer_accept_project_scope,
         "m49_transfer_accept_lock_order": m49_transfer_accept_lock_order,
+
+        # M50 (#265): host-authenticated target discovery for the Runner CLI.
+        "m50_host_only": m50_host_only,
+        "m50_host_prefix": m50_host_prefix,
+        "m50_host_active": m50_host_active,
+        "m50_human_active": m50_human_active,
+        "m50_non_suspended": m50_non_suspended,
+        "m50_trash_filter": m50_trash_filter,
+        "m50_contribute_ceiling": m50_contribute_ceiling,
+        "m50_owner_agents": m50_owner_agents,
+        "m50_register_order": m50_register_order,
+        "m50_targets_order": m50_targets_order,
+        "m50_slug": m50_slug,
+        "m50_empty_retained": m50_empty_retained,
+        "m50_bound_caps": m50_bound_caps,
+        "m50_problem_409": m50_problem_409,
+        "m50_no_store": m50_no_store,
+        "m50_route": m50_route,
+        "m50_contract": m50_contract,
     }
 
 
@@ -11758,6 +11831,163 @@ def check_m49(facts: dict[str, Any]) -> CheckResult:
     )
 
 
+def check_m50(facts: dict[str, Any]) -> CheckResult:
+    """#265: host-authenticated Runner target discovery.
+
+    The explorer walks every target-discovery probe with each credential shape
+    (host credential, human cookie, Agent API key, Dispatch token, revoked host,
+    deactivated human) against every data condition (suspended memberships,
+    trashed projects, Read-only access, foreign agents, tied agent timestamps,
+    empty workspaces, over-cap collections). Each transition derives its outcome
+    from the guards extracted from the live runners sources, so a removed guard
+    yields a named counterexample. The verified baseline must break under each
+    single flip.
+    """
+    files = [
+        "apps/server/src/features/runners/service.ts",
+        "apps/server/src/features/runners/rest.ts",
+        "packages/contract/src/runners.ts",
+        "contract/openapi.json",
+    ]
+    g = {k: v for k, v in facts.items() if k.startswith("m50_")}
+
+    def violations_for(action: str) -> set[str]:
+        bad: set[str] = set()
+        if action == "wrong_credential":
+            if not g["m50_host_only"]:
+                bad.add("non_host_credential_accepted_for_targets")
+            if not g["m50_host_prefix"]:
+                bad.add("non_host_prefix_accepted_as_host")
+        elif action == "revoked_host":
+            if not g["m50_host_only"]:
+                bad.add("revoked_host_read_without_host_auth")
+            if not g["m50_host_active"]:
+                bad.add("revoked_host_listed_targets")
+        elif action == "deactivated_human":
+            if not g["m50_host_only"]:
+                bad.add("deactivated_human_read_without_host_auth")
+            if not g["m50_human_active"]:
+                bad.add("deactivated_human_listed_targets")
+        elif action == "suspended_membership":
+            if not g["m50_non_suspended"]:
+                bad.add("suspended_membership_workspace_listed")
+        elif action == "trashed_project":
+            if not g["m50_trash_filter"]:
+                bad.add("trashed_project_listed_as_bindable")
+        elif action == "read_only_project":
+            if not g["m50_trash_filter"]:
+                bad.add("trashed_project_counted_as_contribute")
+            if not g["m50_contribute_ceiling"]:
+                bad.add("read_only_project_listed_as_bindable")
+        elif action == "foreign_agent":
+            if not g["m50_owner_agents"]:
+                bad.add("foreign_human_agent_listed")
+        elif action == "default_order":
+            if not g["m50_register_order"]:
+                bad.add("registerRunner_default_agent_not_deterministic")
+            if not g["m50_targets_order"]:
+                bad.add("targets_default_agent_not_deterministic")
+        elif action == "workspace_shape":
+            if not g["m50_slug"]:
+                bad.add("workspace_slug_derived_differently_than_issue_resolve")
+            if not g["m50_empty_retained"]:
+                bad.add("workspace_without_contribute_projects_hidden_as_not_found")
+        elif action == "overflow":
+            if not g["m50_bound_caps"]:
+                bad.add("over_cap_collection_returned_unbounded")
+            if not g["m50_problem_409"]:
+                bad.add("over_cap_collection_not_reported_as_409")
+        elif action == "transport":
+            if not g["m50_no_store"]:
+                bad.add("targets_response_cacheable")
+            if not g["m50_route"]:
+                bad.add("targets_route_not_mounted_or_wired")
+            if not g["m50_contract"]:
+                bad.add("targets_contract_or_openapi_missing")
+        return bad
+
+    actions = (
+        "wrong_credential",
+        "revoked_host",
+        "deactivated_human",
+        "suspended_membership",
+        "trashed_project",
+        "read_only_project",
+        "foreign_agent",
+        "default_order",
+        "workspace_shape",
+        "overflow",
+        "transport",
+    )
+
+    def run(check_id: str) -> CheckResult:
+        init = (frozenset(), frozenset())
+
+        def next_states(state):
+            applied, _violations = state
+            for action in actions:
+                if action in applied:
+                    continue
+                found = violations_for(action)
+                yield f"{action} (after {sorted(applied)})", (applied | {action}, frozenset(found))
+
+        def invariant(state):
+            _applied, violations = state
+            if violations:
+                return False, f"target discovery invariant broken: {sorted(violations)[0]}"
+            return True, ""
+
+        return bfs_check(
+            check_id,
+            "Host-Authenticated Runner Target Discovery (#265)",
+            "Only a valid, non-revoked host credential of an active human lists targets; suspended memberships, trashed and Read-only projects, and foreign agents stay hidden; empty workspaces are retained with the shared issue-resolve slug; the default agent is deterministic across registration and discovery; over-cap collections are a 409; responses are never cached and the route is in the contract",
+            "safety",
+            init,
+            next_states,
+            invariant,
+            files,
+        )
+
+    result = run("M50")
+    if result.status == "verified":
+        for guard in sorted(g):
+            saved = g[guard]
+            g[guard] = not saved
+            try:
+                naive = run(f"M50-naive-{guard}")
+            finally:
+                g[guard] = saved
+            if naive.status == "verified":
+                return CheckResult(
+                    "M50",
+                    result.model,
+                    result.property_name,
+                    result.kind,
+                    "violated",
+                    result.states_explored,
+                    result.transitions_explored,
+                    f"model is not sensitive: flipping {guard} left the invariant intact",
+                    [f"flip {guard}"],
+                    files,
+                )
+    return CheckResult(
+        "M50",
+        result.model,
+        result.property_name,
+        result.kind,
+        result.status,
+        result.states_explored,
+        result.transitions_explored,
+        (
+            f"{result.summary}; all {len(g)} source guards proven sensitive by single-guard mutation"
+            if result.status == "verified"
+            else result.summary
+        ),
+        result.counterexample,
+        files,
+    )
+
+
 def main() -> None:
     facts = extract_code_facts()
     results = [
@@ -11811,6 +12041,7 @@ def main() -> None:
         check_m47(facts),
         check_m48(facts),
         check_m49(facts),
+        check_m50(facts),
     ]
 
     if "--json" in sys.argv:

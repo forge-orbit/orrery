@@ -29,9 +29,10 @@ import type {
   ResolveUncertainRequest,
   Runner,
   RunnerCommandsResponse,
+  RunnerDispatchRequest,
   RunnerHost,
   RunnerPresence,
-  RunnerDispatchRequest,
+  RunnerTargetsResponse,
   StreamBatchRequest,
   StreamBatchResponse,
   StreamResponse,
@@ -120,6 +121,11 @@ const MAX_FAILED_VERIFIER_ATTEMPTS = 5;
 /** A runner is offline once its last heartbeat is older than this in DB time. */
 export const RUNNER_ONLINE_WINDOW_SECONDS = 120;
 
+/** Bounded target discovery (#229): the CLI resolves UUIDs once past these. */
+export const RUNNER_TARGETS_MAX_WORKSPACES = 200;
+export const RUNNER_TARGETS_MAX_PROJECTS = 2000;
+export const RUNNER_TARGETS_MAX_AGENTS = 200;
+
 /** On-demand probes are short-lived and rate limited per runner/harness/model (#242). */
 export const PROBE_COOLDOWN_SECONDS = 30;
 export const PROBE_COMMAND_TTL_SECONDS = 30;
@@ -160,6 +166,7 @@ export type RunnersErrorKind =
   | "dispatch_not_uncertain"
   | "issue_not_claimable"
   | "issue_not_dispatchable"
+  | "targets_too_large"
   | "stream_unavailable"
   | "stream_attempt_mismatch"
   | "stream_batch_out_of_range"
@@ -200,6 +207,8 @@ const messages: Record<RunnersErrorKind, string> = {
   dispatch_not_uncertain: "Only an uncertain Dispatch can be resolved this way.",
   issue_not_claimable: "This issue is not claimable by the selected Agent.",
   issue_not_dispatchable: "The claim could not be made for this Dispatch.",
+  targets_too_large:
+    "Too many workspaces, projects or agents to list. Pass explicit workspace, project and agent UUIDs instead.",
   stream_unavailable: "Object storage is not configured for stream rollup.",
   stream_attempt_mismatch: "The stream batch does not belong to the active dispatch attempt.",
   stream_batch_out_of_range: "A chunk seq lies outside the declared fromSeq..toSeq window.",
@@ -2216,7 +2225,7 @@ export function createRunnersService(deps: RunnersDeps) {
             .select({ id: agents.id })
             .from(agents)
             .where(eq(agents.humanId, host.humanId))
-            .orderBy(agents.createdAt)
+            .orderBy(agents.createdAt, agents.id)
             .limit(1);
           if (defaultAgent === undefined) throw new RunnersError("no_default_agent");
           agentId = defaultAgent.id;
@@ -2968,6 +2977,96 @@ export function createRunnersService(deps: RunnersDeps) {
       request: IssueResolveRequest,
     ): Promise<IssueResolveResponse> {
       return db.transaction((tx) => resolveIssueForHost(deps, tx, credential, request));
+    },
+
+    /**
+     * Host-authenticated target discovery (#229). Authenticates exclusively
+     * with the enrolled host credential: human session cookies, Agent API
+     * keys (`orr_ak_...`) and Dispatch tokens (`orr_dt_...`) all fail
+     * `readHostByCredential` with 401. Returns the host owner's personal
+     * workspace and non-suspended shared memberships (keeping workspaces with
+     * zero `Contribute+` projects), only non-trashed projects at the live
+     * `Contribute` ceiling, and the owner's own installation-wide agents with
+     * `registerRunner`'s deterministic `(createdAt, id)` default.
+     */
+    async listTargets(credential: string | undefined): Promise<RunnerTargetsResponse> {
+      return db.transaction(async (tx) => {
+        const host = await readHostByCredential(tx, credential);
+        const personal = await tx
+          .select({ id: workspaces.id, name: workspaces.name, kind: workspaces.kind })
+          .from(workspaces)
+          .where(eq(workspaces.personalOwnerHumanId, host.humanId))
+          .orderBy(workspaces.id);
+        const shared = await tx
+          .select({ id: workspaces.id, name: workspaces.name, kind: workspaces.kind })
+          .from(workspaces)
+          .innerJoin(
+            workspaceMemberships,
+            and(
+              eq(workspaceMemberships.workspaceId, workspaces.id),
+              eq(workspaceMemberships.humanId, host.humanId),
+              isNull(workspaceMemberships.suspendedAt),
+            ),
+          )
+          .orderBy(workspaces.id);
+        const scopes = [...new Map([...personal, ...shared].map((row) => [row.id, row])).values()];
+        if (scopes.length > RUNNER_TARGETS_MAX_WORKSPACES) {
+          throw new RunnersError("targets_too_large");
+        }
+        const ownedAgents = await tx
+          .select({ id: agents.id, name: agents.name })
+          .from(agents)
+          .where(eq(agents.humanId, host.humanId))
+          .orderBy(agents.createdAt, agents.id);
+        if (ownedAgents.length > RUNNER_TARGETS_MAX_AGENTS) {
+          throw new RunnersError("targets_too_large");
+        }
+        const listed: RunnerTargetsResponse["workspaces"] = [];
+        let projectTotal = 0;
+        for (const scope of scopes) {
+          const candidateProjects = await tx
+            .select({ id: projects.id, key: projects.key, name: projects.name })
+            .from(projects)
+            .where(and(eq(projects.workspaceId, scope.id), isNull(projects.deletedAt)))
+            .orderBy(projects.id);
+          const ceiling =
+            candidateProjects.length === 0
+              ? new Map<string, ProjectAccessLevel | null>()
+              : await deps.projectAccessCeiling(
+                  tx,
+                  scope.id,
+                  host.humanId,
+                  candidateProjects.map((project) => project.id),
+                );
+          const visible = [];
+          for (const project of candidateProjects) {
+            const level = ceiling.get(project.id);
+            if (!hasAccess(level, "contribute", deps.projectAccessAtLeast)) continue;
+            visible.push({
+              id: project.id,
+              key: project.key,
+              name: project.name,
+              accessLevel: level!,
+            });
+          }
+          projectTotal += visible.length;
+          if (projectTotal > RUNNER_TARGETS_MAX_PROJECTS) {
+            throw new RunnersError("targets_too_large");
+          }
+          listed.push({
+            id: scope.id,
+            name: scope.name,
+            slug: workspaceSlug(scope.name),
+            kind: scope.kind,
+            projects: visible,
+          });
+        }
+        return {
+          workspaces: listed,
+          agents: ownedAgents,
+          defaultAgentId: ownedAgents[0]?.id ?? null,
+        };
+      });
     },
 
     /** Ephemeral one-shot teardown: revoke the Runner and its Dispatch tokens. */
