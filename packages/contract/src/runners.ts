@@ -72,6 +72,99 @@ export const RunnerHost = z
   .meta({ id: "RunnerHost" });
 export type RunnerHost = z.infer<typeof RunnerHost>;
 
+/**
+ * How much a Runner currently knows about one model's reasoning-effort
+ * options: `"known"` only when the Harness advertised them.
+ */
+export const HarnessEffortDiscovery = z
+  .enum(["known", "unknown"])
+  .meta({ id: "HarnessEffortDiscovery" });
+export type HarnessEffortDiscovery = z.infer<typeof HarnessEffortDiscovery>;
+
+/** One model a Runner's Harness advertised, with its reasoning-effort knowledge. */
+export const HarnessModelCatalog = z
+  .object({
+    id: z.string().trim().min(1).max(200),
+    label: z.string().trim().min(1).max(200).optional(),
+    reasoningDiscovery: HarnessEffortDiscovery.default("unknown"),
+    /** Supported effort levels in ascending order, e.g. `["low", "high"]`. */
+    effortLevels: z.array(z.string().trim().min(1).max(64)).max(32).default([]),
+    defaultEffort: z.string().trim().min(1).max(64).nullable().default(null),
+    /** When the Runner last probed this model; null when not probed yet. */
+    probedAt: Timestamp.nullable().default(null),
+  })
+  .meta({ id: "HarnessModelCatalog" });
+export type HarnessModelCatalog = z.infer<typeof HarnessModelCatalog>;
+
+/** Where a Runner found a Harness: a built-in preset, `--acp-command`, or `harnesses.json`. */
+export const HarnessSource = z
+  .enum(["preset", "override", "user"])
+  .meta({ id: "HarnessSource" });
+export type HarnessSource = z.infer<typeof HarnessSource>;
+
+/** One ACP-compatible Harness a Runner discovered on its machine. */
+export const HarnessCatalogEntry = z
+  .object({
+    id: z.string().trim().min(1).max(64),
+    displayName: z.string().trim().min(1).max(120),
+    source: HarnessSource.default("preset"),
+    defaultModel: z.string().trim().min(1).max(200).nullable().default(null),
+    models: z.array(HarnessModelCatalog).max(256).default([]),
+    /** When the Runner last probed this Harness; null when not probed yet. */
+    probedAt: Timestamp.nullable().default(null),
+  })
+  .meta({ id: "HarnessCatalogEntry" });
+export type HarnessCatalogEntry = z.infer<typeof HarnessCatalogEntry>;
+
+/** The live Harness catalog a Runner publishes to Orrery. */
+export const HarnessCatalog = z
+  .object({
+    harnesses: z.array(HarnessCatalogEntry).max(64),
+    updatedAt: Timestamp,
+  })
+  .meta({ id: "HarnessCatalog" });
+export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
+
+/**
+ * Merges a freshly discovered catalog into a stored one without regressing
+ * per-model reasoning-effort knowledge: a model entry whose effort levels are
+ * already `"known"` stays `"known"` even when a slower startup probe or a
+ * later refresh reports it `"unknown"` (issue #240). Harness entries the
+ * incoming catalog no longer reports are preserved so a failed probe never
+ * erases a previously discovered Harness.
+ */
+export function mergeHarnessCatalog(
+  stored: HarnessCatalog,
+  incoming: HarnessCatalog,
+): HarnessCatalog {
+  const merged = new Map<string, HarnessCatalogEntry>();
+  for (const harness of stored.harnesses) merged.set(harness.id, harness);
+  for (const harness of incoming.harnesses) {
+    const previous = merged.get(harness.id);
+    if (previous === undefined) {
+      merged.set(harness.id, harness);
+      continue;
+    }
+    const models = new Map(previous.models.map((model) => [model.id, model]));
+    for (const model of harness.models) {
+      const before = models.get(model.id);
+      models.set(
+        model.id,
+        before !== undefined &&
+          before.reasoningDiscovery === "known" &&
+          model.reasoningDiscovery !== "known"
+          ? before
+          : model,
+      );
+    }
+    merged.set(harness.id, { ...harness, models: [...models.values()] });
+  }
+  return {
+    harnesses: [...merged.values()],
+    updatedAt: incoming.updatedAt > stored.updatedAt ? incoming.updatedAt : stored.updatedAt,
+  };
+}
+
 export const Runner = z
   .object({
     id: RunnerId,
@@ -82,6 +175,8 @@ export const Runner = z
     displayName: RunnerHostDisplayName,
     repoFingerprint: Sha256Hex,
     capabilities: z.array(z.string().min(1).max(64)).max(64),
+    /** The live Harness catalog this Runner published, or null before discovery. */
+    harnessCatalog: HarnessCatalog.nullable(),
     maxConcurrency: z.int().min(1).max(64),
     activeSlotCount: z.int().min(0).max(64),
     lastSeenAt: Timestamp,
@@ -181,6 +276,8 @@ export const RegisterRunnerRequest = z
     maxConcurrency: z.int().min(1).max(64).default(1),
     /** One-shot `orrery-runner work` runners never reuse a persistent row. */
     ephemeral: z.boolean().default(false),
+    /** Optional initial Harness catalog, typically seeded from the local cache. */
+    harnessCatalog: HarnessCatalog.optional(),
   })
   .meta({ id: "RegisterRunnerRequest" });
 export type RegisterRunnerRequest = z.infer<typeof RegisterRunnerRequest>;

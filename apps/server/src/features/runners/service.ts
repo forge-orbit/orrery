@@ -14,7 +14,11 @@ import type {
   ReadyWorkFilter,
   FleetRunner,
   FleetRunnerHost,
+  HarnessCatalog,
   HeartbeatRequest,
+} from "@orrery/contract";
+import { mergeHarnessCatalog } from "@orrery/contract";
+import type {
   HostCredentialResponse,
   ProjectAccessLevel,
   ReconnectRequest,
@@ -280,6 +284,7 @@ const runnerFields = {
   displayName: runners.displayName,
   repoFingerprint: runners.repoFingerprint,
   capabilities: runners.capabilities,
+  harnessCatalog: runners.harnessCatalog,
   maxConcurrency: runners.maxConcurrency,
   activeSlotCount: runners.activeSlotCount,
   lastSeenAt: runners.lastSeenAt,
@@ -298,6 +303,7 @@ type RunnerRow = {
   displayName: string;
   repoFingerprint: string;
   capabilities: string[];
+  harnessCatalog: HarnessCatalog | null;
   maxConcurrency: number;
   activeSlotCount: number;
   lastSeenAt: Date;
@@ -316,6 +322,7 @@ const toRunnerResponse = (row: RunnerRow): Runner => ({
   displayName: row.displayName,
   repoFingerprint: row.repoFingerprint,
   capabilities: row.capabilities,
+  harnessCatalog: row.harnessCatalog,
   maxConcurrency: row.maxConcurrency,
   activeSlotCount: row.activeSlotCount,
   lastSeenAt: row.lastSeenAt.toISOString(),
@@ -342,6 +349,9 @@ const toHostResponse = (row: {
   revokedAt: row.revokedAt?.toISOString() ?? null,
   createdAt: row.createdAt.toISOString(),
 });
+
+/** An empty catalog is the merge identity for Runners without one yet. */
+const EMPTY_CATALOG: HarnessCatalog = { harnesses: [], updatedAt: "1970-01-01T00:00:00.000Z" };
 
 async function joinRunner(tx: DbTransaction, runnerId: string) {
   const [row] = await tx
@@ -2130,7 +2140,7 @@ export function createRunnersService(deps: RunnersDeps) {
         const [existing] = input.ephemeral
           ? []
           : await tx
-              .select({ id: runners.id })
+              .select({ id: runners.id, harnessCatalog: runners.harnessCatalog })
               .from(runners)
               .where(
                 and(
@@ -2152,6 +2162,15 @@ export function createRunnersService(deps: RunnersDeps) {
               activeSlotCount: 0,
               lastSeenAt: sql`statement_timestamp()`,
               disconnectedAt: null,
+              ...(input.harnessCatalog === undefined
+                ? {}
+                : {
+                    // Re-registration with a catalog merges, never regresses.
+                    harnessCatalog: mergeHarnessCatalog(
+                      existing.harnessCatalog ?? EMPTY_CATALOG,
+                      input.harnessCatalog,
+                    ),
+                  }),
             })
             .where(eq(runners.id, existing.id));
           const row = await joinRunner(tx, existing.id);
@@ -2172,9 +2191,30 @@ export function createRunnersService(deps: RunnersDeps) {
             capabilities: input.capabilities,
             maxConcurrency: input.maxConcurrency,
             activeSlotCount: 0,
+            ...(input.harnessCatalog === undefined ? {} : { harnessCatalog: input.harnessCatalog }),
           })
           .returning({ id: runners.id });
         const row = await joinRunner(tx, created!.id);
+        if (row === undefined) throw new RunnersError("runner_not_found");
+        return toRunnerResponse(row);
+      });
+    },
+
+    /**
+     * Publishes a Runner's live Harness catalog. The submitted catalog is
+     * merged with the stored one so a slower startup probe or later refresh
+     * never regresses a previously known model's effort levels (issue #240).
+     */
+    async updateRunnerCatalog(
+      credential: string | undefined,
+      runnerId: string,
+      input: HarnessCatalog,
+    ): Promise<Runner> {
+      return db.transaction(async (tx) => {
+        const { runner } = await authenticateHostRunnerForDeps(deps, tx, credential, runnerId);
+        const merged = mergeHarnessCatalog(runner.harnessCatalog ?? EMPTY_CATALOG, input);
+        await tx.update(runners).set({ harnessCatalog: merged }).where(eq(runners.id, runnerId));
+        const row = await joinRunner(tx, runnerId);
         if (row === undefined) throw new RunnersError("runner_not_found");
         return toRunnerResponse(row);
       });

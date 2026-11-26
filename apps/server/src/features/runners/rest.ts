@@ -18,6 +18,7 @@ import {
   IssueDispatchesResponse,
   IssueResolveRequest,
   IssueResolveResponse,
+  HarnessCatalog,
   RunnerDispatchRequest,
   RunnerOfflineResponse,
   HeartbeatRequest,
@@ -155,6 +156,25 @@ const registerRunner = createRoute({
   responses: {
     201: {
       description: "The registered Runner",
+      content: { "application/json": { schema: Runner } },
+    },
+    ...enrollErrors,
+  },
+});
+
+const updateRunnerCatalog = createRoute({
+  method: "put",
+  path: "/api/runners/{runnerId}/catalog",
+  summary: "Publish a Runner's live Harness catalog",
+  description:
+    "Runner host credential only. The submitted catalog is merged with the stored one so a slower startup probe or later refresh never regresses a previously known model's effort levels; heartbeats keep carrying only `activeSlotCount`.",
+  request: {
+    params: runnerParams,
+    body: { content: { "application/json": { schema: HarnessCatalog } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "The Runner with the merged Harness catalog",
       content: { "application/json": { schema: Runner } },
     },
     ...enrollErrors,
@@ -590,6 +610,7 @@ export const routes = [
   approveDeviceCode,
   exchangeDeviceCode,
   registerRunner,
+  updateRunnerCatalog,
   heartbeat,
   listWorkspaceRunners,
   revokeRunnerHost,
@@ -648,6 +669,18 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
   app.openapi(registerRunner, async (c) => {
     try {
       return c.json(await service.registerRunner(bearer(c), c.req.valid("json")), 201);
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(updateRunnerCatalog, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      return c.json(
+        await service.updateRunnerCatalog(bearer(c), runnerId, c.req.valid("json")),
+        200,
+      );
     } catch (error) {
       return failure(c, error);
     }

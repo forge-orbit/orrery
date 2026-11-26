@@ -136,6 +136,8 @@ export class TestOrrery {
   private readonly dispatchAttempts = new Map<string, string>();
   private readonly streamed: TestStreamChunk[] = [];
   reconnectCalls = 0;
+  /** Harness catalogs PUT by the runner's background sync (issue #240). */
+  catalogs: Array<Record<string, unknown>> = [];
   /** Number of heartbeats to answer with a transient 503 before recovering. */
   transientHeartbeatFailures = 0;
   reconnectAttempts: Array<{ dispatchAttemptId: string; lastSeq: number }> = [];
@@ -180,6 +182,7 @@ export class TestOrrery {
       displayName: "TestLaptop",
       repoFingerprint: "0".repeat(64),
       capabilities: [],
+      harnessCatalog: null,
       maxConcurrency: 1,
       activeSlotCount: 0,
       lastSeenAt: now(),
@@ -531,6 +534,13 @@ export class TestOrrery {
     }
     if (req.method === "POST" && path === "/api/runners/register") {
       sendJson(res, 201, this.runner());
+      return;
+    }
+    const catalogPut = path.match(/^\/api\/runners\/[^/]+\/catalog$/);
+    if (req.method === "PUT" && catalogPut !== null) {
+      const body = recordOf(await bodyOf(req)) ?? {};
+      this.catalogs.push(body);
+      sendJson(res, 200, { ...this.runner(), harnessCatalog: body });
       return;
     }
     if (req.method === "POST" && path.endsWith("/reconnect")) {
