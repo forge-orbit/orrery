@@ -44,19 +44,7 @@ import {
   type UpdateProjectLabelRequest,
   type UpdateProjectRequest,
 } from "@orrery/contract";
-import {
-  and,
-  asc,
-  eq,
-  gt,
-  inArray,
-  isNotNull,
-  isNull,
-  lte,
-  notInArray,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DbTransaction } from "../../platform/db.ts";
@@ -3120,26 +3108,40 @@ export function createProjectsService({
           .orderBy(projects.id)
           .for("update", { skipLocked: true });
         const expiredProjectIds = expiredProjects.map((row) => row.id);
-        const projectIssueRows =
-          expiredProjectIds.length === 0
-            ? []
-            : await tx
-                .select({ id: issues.id, purgedAt: issues.purgedAt })
-                .from(issues)
-                .where(inArray(issues.projectId, expiredProjectIds))
-                .orderBy(issues.id)
-                .for("update");
-        const projectIssueIds = projectIssueRows.map((row) => row.id);
-        const projectKnowledgeRows =
-          expiredProjectIds.length === 0
-            ? []
-            : await tx
-                .select({ id: knowledgeEntries.id, purgedAt: knowledgeEntries.purgedAt })
-                .from(knowledgeEntries)
-                .where(inArray(knowledgeEntries.projectId, expiredProjectIds))
-                .orderBy(knowledgeEntries.id)
-                .for("update");
-        const projectKnowledgeIds = projectKnowledgeRows.map((row) => row.id);
+        const expiredIssueClause = and(
+          isNotNull(issues.deletedAt),
+          isNull(issues.purgedAt),
+          sql`${issues.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+        );
+        const lockedIssues = await tx
+          .select({ id: issues.id, projectId: issues.projectId, purgedAt: issues.purgedAt })
+          .from(issues)
+          .where(
+            expiredProjectIds.length > 0
+              ? or(inArray(issues.projectId, expiredProjectIds), expiredIssueClause)
+              : expiredIssueClause,
+          )
+          .orderBy(issues.id)
+          .for("update", { skipLocked: true });
+        const expiredKnowledgeClause = and(
+          isNotNull(knowledgeEntries.deletedAt),
+          isNull(knowledgeEntries.purgedAt),
+          sql`${knowledgeEntries.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+        );
+        const lockedKnowledge = await tx
+          .select({
+            id: knowledgeEntries.id,
+            projectId: knowledgeEntries.projectId,
+            purgedAt: knowledgeEntries.purgedAt,
+          })
+          .from(knowledgeEntries)
+          .where(
+            expiredProjectIds.length > 0
+              ? or(inArray(knowledgeEntries.projectId, expiredProjectIds), expiredKnowledgeClause)
+              : expiredKnowledgeClause,
+          )
+          .orderBy(knowledgeEntries.id)
+          .for("update", { skipLocked: true });
 
         if (expiredProjectIds.length > 0) {
           await tx
@@ -3172,38 +3174,19 @@ export function createProjectsService({
             );
         }
 
-        const issueExpiryPredicates = [
-          isNotNull(issues.deletedAt),
-          isNull(issues.purgedAt),
-          sql`${issues.deletedAt} <= ${THIRTY_DAYS_AGO}`,
-        ];
-        if (expiredProjectIds.length > 0) {
-          issueExpiryPredicates.push(notInArray(issues.projectId, expiredProjectIds));
-        }
-        const expired = await tx
-          .select({ id: issues.id, purgedAt: issues.purgedAt })
-          .from(issues)
-          .where(and(...issueExpiryPredicates))
-          .orderBy(issues.id)
-          .for("update", { skipLocked: true });
-        const expiredIds = expired.map((row) => row.id);
-        const knowledgeExpiryPredicates = [
-          isNotNull(knowledgeEntries.deletedAt),
-          isNull(knowledgeEntries.purgedAt),
-          sql`${knowledgeEntries.deletedAt} <= ${THIRTY_DAYS_AGO}`,
-        ];
-        if (expiredProjectIds.length > 0) {
-          knowledgeExpiryPredicates.push(notInArray(knowledgeEntries.projectId, expiredProjectIds));
-        }
-        const expiredKnowledge = await tx
-          .select({ id: knowledgeEntries.id, purgedAt: knowledgeEntries.purgedAt })
-          .from(knowledgeEntries)
-          .where(and(...knowledgeExpiryPredicates))
-          .orderBy(knowledgeEntries.id)
-          .for("update", { skipLocked: true });
-        const expiredKnowledgeIds = expiredKnowledge.map((row) => row.id);
-        const issueIdsToScrub = [...new Set([...projectIssueIds, ...expiredIds])].toSorted();
-        const knowledgeIdsToScrub = [...new Set([...projectKnowledgeIds, ...expiredKnowledgeIds])];
+        const expiredProjectIdSet = new Set(expiredProjectIds);
+        const projectIssueRows = lockedIssues.filter((row) =>
+          expiredProjectIdSet.has(row.projectId),
+        );
+        const expired = lockedIssues.filter((row) => !expiredProjectIdSet.has(row.projectId));
+        const projectKnowledgeRows = lockedKnowledge.filter((row) =>
+          expiredProjectIdSet.has(row.projectId),
+        );
+        const expiredKnowledge = lockedKnowledge.filter(
+          (row) => !expiredProjectIdSet.has(row.projectId),
+        );
+        const issueIdsToScrub = lockedIssues.map((row) => row.id);
+        const knowledgeIdsToScrub = lockedKnowledge.map((row) => row.id);
         // Collect every holder across the whole batch before locking any
         // attachment row: a per-issue purge could lock B from issue 1 then A
         // from issue 2 (A < B) and AB-BA deadlock against a save. One batch call

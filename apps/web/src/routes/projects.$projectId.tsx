@@ -724,7 +724,7 @@ function ProjectDangerZone({ project }: { project: Project }) {
       toast({ body: `Moved "${project.name}" to Workspace Trash.` });
     } catch (cause) {
       setError(
-        cause instanceof ApiProblemError && cause.status === 409
+        cause instanceof ApiProblemError && cause.code === "project_active_work_exists"
           ? "Active Work sessions or non-ended Dispatches are still using this project. End or wait for that work to finish, then try again."
           : cause instanceof Error
             ? cause.message

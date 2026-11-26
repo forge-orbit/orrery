@@ -665,6 +665,7 @@ async function acceptInTransaction(
         eq(projects.workspaceId, destination.id),
         eq(projects.key, project.key),
         ne(projects.id, auth.projectId),
+        isNull(projects.purgedAt),
       ),
     )
     .limit(1);
@@ -683,6 +684,7 @@ async function acceptInTransaction(
           eq(projects.workspaceId, destination.id),
           eq(projects.key, newKey),
           ne(projects.id, auth.projectId),
+          isNull(projects.purgedAt),
         ),
       )
       .limit(1);

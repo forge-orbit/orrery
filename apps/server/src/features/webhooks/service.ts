@@ -16,7 +16,7 @@ import {
   type WebhooksResponse,
   type WebhookWithSecret,
 } from "@orrery/contract";
-import { and, asc, desc, eq, exists, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   agents,
@@ -1022,11 +1022,23 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
               throw new WebhooksError("invalid_webhook_scope");
             }
           }
+          const hiddenProjectIds = effectiveAllProjects
+            ? []
+            : (
+                await tx
+                  .select({ projectId: webhookProjects.projectId })
+                  .from(webhookProjects)
+                  .innerJoin(projects, eq(projects.id, webhookProjects.projectId))
+                  .where(
+                    and(eq(webhookProjects.webhookId, webhookId), isNotNull(projects.deletedAt)),
+                  )
+              ).map((row) => row.projectId);
+          const mergedProjectIds = [...new Set([...uniqueProjectIds, ...hiddenProjectIds])];
           await tx.delete(webhookProjects).where(eq(webhookProjects.webhookId, webhookId));
-          if (!effectiveAllProjects && uniqueProjectIds.length > 0) {
+          if (!effectiveAllProjects && mergedProjectIds.length > 0) {
             await tx
               .insert(webhookProjects)
-              .values(uniqueProjectIds.map((projectId) => ({ webhookId, projectId })));
+              .values(mergedProjectIds.map((projectId) => ({ webhookId, projectId })));
           }
         }
         return loadWebhook(tx, webhookId);

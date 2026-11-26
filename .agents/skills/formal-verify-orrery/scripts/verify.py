@@ -978,7 +978,7 @@ def extract_code_facts() -> dict[str, Any]:
         and "one_active_work_session_per_issue" in work_sessions_table
     )
     m17_issue_lock = (
-        '.for("update")' in lock_issue_fn
+        '.for("update", { of: issues })' in lock_issue_fn
         and "lockIssue(tx" in claim_fn
         and "lockIssue(tx" in live_fn
         and '.for("update")' in update_issue_fn
@@ -2585,15 +2585,15 @@ def extract_code_facts() -> dict[str, Any]:
     m48_project_transaction = "return db.transaction(async (tx)" in purge_project_fn
     m48_issue_child_lock = ordered(
         purge_project_fn,
-        "const projectIssueRows",
+        "const lockedIssues",
         ".orderBy(issues.id)",
-        '.for("update")',
+        '.for("update", { skipLocked: true })',
     )
     m48_knowledge_child_lock = ordered(
         purge_project_fn,
-        "const projectKnowledgeRows",
+        "const lockedKnowledge",
         ".orderBy(knowledgeEntries.id)",
-        '.for("update")',
+        '.for("update", { skipLocked: true })',
     )
     m48_issue_backfill = (
         "deletedAt: sql`coalesce(${issues.deletedAt}, ${projects.deletedAt})`" in purge_project_fn
@@ -2721,8 +2721,9 @@ def extract_code_facts() -> dict[str, Any]:
         and ".for(\"update\", { skipLocked: true })" in purge_project_fn
     )
     m48_project_children_excluded = (
-        "notInArray(issues.projectId, expiredProjectIds)" in purge_project_fn
-        and "notInArray(knowledgeEntries.projectId, expiredProjectIds)" in purge_project_fn
+        "const expiredProjectIdSet = new Set(expiredProjectIds);" in purge_project_fn
+        and "lockedIssues.filter((row) => !expiredProjectIdSet.has(row.projectId))" in purge_project_fn
+        and "lockedKnowledge.filter(\n          (row) => !expiredProjectIdSet.has(row.projectId)," in purge_project_fn
     )
 
     # M33 (#99): cross-workspace My work access boundaries.
