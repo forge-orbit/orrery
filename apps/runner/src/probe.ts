@@ -88,20 +88,32 @@ function parseInitializeModels(
   );
 }
 
-/** The choices of one session-config option, in any ACP dialect. */
-function parseOptionChoices(option: Record<string, unknown>): {
+interface ConfigEntry {
+  id: string | undefined;
+  name: string;
+  modelId: string | undefined;
   values: string[];
-  default: string | undefined;
-} {
+  /** The *selected* value; an advertised `default` is deliberately separate. */
+  currentValue: string | undefined;
+  defaultValue: string | undefined;
+}
+
+/**
+ * One tolerant read of an ACP `configOptions` entry, shared by discovery,
+ * effort-id selection and restore-value capture. A default is not a current
+ * value: treating it as one would report an unselected option as restored.
+ */
+function parseConfigEntry(raw: unknown): ConfigEntry {
+  const option = recordOf(raw) ?? {};
   const state = recordOf(option.state) ?? {};
-  const raw = [
+  const choices = [
     ...list(option.options),
     ...list(option.choices),
     ...list(state.options),
     ...list(state.choices),
   ];
   const values: string[] = [];
-  for (const choice of raw) {
+  for (const choice of choices) {
     const choiceRecord = recordOf(choice);
     const value =
       choiceRecord === undefined
@@ -113,20 +125,61 @@ function parseOptionChoices(option: Record<string, unknown>): {
           stringOf(choiceRecord.level));
     if (value !== undefined && !values.includes(value)) values.push(value);
   }
-  const defaultValue =
-    stringOf(state.currentValue) ??
-    stringOf(state.current) ??
-    stringOf(option.currentValue) ??
-    stringOf(option.current) ??
-    stringOf(option.default) ??
-    values[0];
-  return { values, default: defaultValue };
+  return {
+    id: stringOf(option.id) ?? stringOf(option.configId),
+    name: stringOf(option.name) ?? stringOf(option.description) ?? "",
+    modelId: stringOf(option.modelId) ?? stringOf(recordOf(option.scope)?.modelId),
+    values,
+    currentValue:
+      stringOf(state.currentValue) ??
+      stringOf(state.current) ??
+      stringOf(option.currentValue) ??
+      stringOf(option.current),
+    defaultValue: stringOf(option.default),
+  };
+}
+
+/** The choices of one session-config option, in any ACP dialect. */
+function parseOptionChoices(raw: unknown): {
+  values: string[];
+  default: string | undefined;
+} {
+  const { values, currentValue, defaultValue } = parseConfigEntry(raw);
+  return { values, default: currentValue ?? defaultValue ?? values[0] };
 }
 
 const isEffortOption = (id: string, name: string): boolean =>
   id === "thought_level" || id === "reasoning_effort" || /thought|reasoning|effort/i.test(name);
 
 const isModelOption = (id: string, name: string): boolean => id === "model" || /model/i.test(name);
+
+/** Whether a result advertised any config options at all (even without values). */
+export function hasConfigOptions(result: unknown): boolean {
+  return list(recordOf(result)?.configOptions).length > 0;
+}
+
+/** Whether one specific config id (e.g. `model`) was advertised in any dialect. */
+export function hasConfigOption(result: unknown, id: string): boolean {
+  return list(recordOf(result)?.configOptions).some((raw) => parseConfigEntry(raw).id === id);
+}
+
+/** Effort choices advertised for the active model, read with the shared parser. */
+export function activeModelEfforts(sessionResult: unknown): {
+  supportedEfforts: string[];
+  defaultEffort?: string;
+} {
+  const active = activeSessionModel(sessionResult);
+  for (const raw of list(recordOf(sessionResult)?.configOptions)) {
+    const { id, name, modelId, values, currentValue } = parseConfigEntry(raw);
+    if (id === undefined || !isEffortOption(id, name)) continue;
+    if (modelId !== undefined && modelId !== active) continue;
+    return {
+      supportedEfforts: [...new Set(values)],
+      ...(currentValue === undefined ? {} : { defaultEffort: currentValue }),
+    };
+  }
+  return { supportedEfforts: [] };
+}
 
 /** Active model id advertised by a `session/new` (or switch) result, in any ACP dialect. */
 export function activeSessionModel(sessionResult: unknown): string | undefined {
@@ -137,18 +190,9 @@ export function activeSessionModel(sessionResult: unknown): string | undefined {
     stringOf(models?.currentModelId) ?? stringOf(models?.currentModel) ?? stringOf(models?.current);
   if (direct !== undefined) return direct;
   for (const raw of list(session.configOptions)) {
-    const option = recordOf(raw);
-    if (option === undefined) continue;
-    const id = stringOf(option.id) ?? stringOf(option.configId);
-    const name = stringOf(option.name) ?? stringOf(option.description) ?? "";
+    const { id, name, currentValue } = parseConfigEntry(raw);
     if (id === undefined || !isModelOption(id, name)) continue;
-    const state = recordOf(option.state);
-    const value =
-      stringOf(state?.currentValue) ??
-      stringOf(state?.current) ??
-      stringOf(option.currentValue) ??
-      stringOf(option.current);
-    if (value !== undefined) return value;
+    if (currentValue !== undefined) return currentValue;
   }
   return undefined;
 }
@@ -172,12 +216,8 @@ export function effortConfigIds(
     primary.length > 0 ? primary : list(recordOf(fallbackSessionResult)?.configOptions);
   const ids: string[] = [];
   for (const raw of options) {
-    const option = recordOf(raw);
-    if (option === undefined) continue;
-    const id = stringOf(option.id) ?? stringOf(option.configId);
-    const name = stringOf(option.name) ?? stringOf(option.description) ?? "";
+    const { id, name, modelId: scoped } = parseConfigEntry(raw);
     if (id === undefined || !isEffortOption(id, name)) continue;
-    const scoped = stringOf(option.modelId) ?? stringOf(recordOf(option.scope)?.modelId);
     if (scoped !== undefined && scoped !== modelId) continue;
     if (!ids.includes(id)) ids.push(id);
   }
@@ -209,21 +249,17 @@ function parseConfigOptions(
   let globalEfforts: EffortChoice | undefined;
 
   for (const raw of options) {
-    const option = recordOf(raw);
-    if (option === undefined) continue;
-    const id = stringOf(option.id) ?? stringOf(option.configId) ?? "";
-    const name = stringOf(option.name) ?? stringOf(option.description) ?? "";
-    const modelId =
-      stringOf(option.modelId) ?? stringOf(recordOf(option.scope)?.modelId) ?? undefined;
+    const { id: rawId, name, modelId } = parseConfigEntry(raw);
+    const id = rawId ?? "";
     if (isModelOption(id, name)) {
-      const { values, default: current } = parseOptionChoices(option);
+      const { values, default: current } = parseOptionChoices(raw);
       for (const value of values) seedModel(models, { id: value }, probedAt);
       defaultModel = current ?? defaultModel;
       configActive = current ?? configActive;
       continue;
     }
     if (isEffortOption(id, name)) {
-      const parsed = parseOptionChoices(option);
+      const parsed = parseOptionChoices(raw);
       if (modelId !== undefined) scopedEfforts.set(modelId, parsed);
       else globalEfforts = parsed;
     }
@@ -254,16 +290,8 @@ function parseConfigOptions(
 export function currentConfigValues(result: unknown): Array<{ id: string; value: string }> {
   const values: Array<{ id: string; value: string }> = [];
   for (const raw of list(recordOf(result)?.configOptions)) {
-    const option = recordOf(raw);
-    if (option === undefined) continue;
-    const id = stringOf(option.id) ?? stringOf(option.configId);
-    const state = recordOf(option.state) ?? {};
-    const value =
-      stringOf(state.currentValue) ??
-      stringOf(state.current) ??
-      stringOf(option.currentValue) ??
-      stringOf(option.current);
-    if (id !== undefined && value !== undefined) values.push({ id, value });
+    const { id, currentValue } = parseConfigEntry(raw);
+    if (id !== undefined && currentValue !== undefined) values.push({ id, value: currentValue });
   }
   return values;
 }

@@ -515,7 +515,13 @@ function handle(message: Record<string, unknown>): void {
       send({
         jsonrpc: "2.0",
         id,
-        error: { code: -32602, message: `unknown model ${value ?? ""}` },
+        error: {
+          code: -32602,
+          message: `unknown model ${value ?? ""}`,
+          ...(mode === "error-oversized"
+            ? { data: { details: "x".repeat(3000) } }
+            : { data: { details: "model_switch_cancelled" } }),
+        },
       });
       return;
     }
