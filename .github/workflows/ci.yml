@@ -82,6 +82,12 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Newly created Docker veth interfaces run IPv6 Duplicate Address Detection (~1-1.5s)
+      # on the host after `docker compose restart orrery`, emitting RTM_NEWADDR when DAD
+      # completes and causing Chromium to abort in-flight asset fetches with
+      # net::ERR_NETWORK_CHANGED.
+      - name: Disable IPv6 DAD on new Docker veth interfaces
+        run: sudo sysctl -w net.ipv6.conf.default.accept_dad=0 net.ipv6.conf.default.disable_ipv6=1
       # The mail-test profile starts the Mailpit catcher the SMTP checks read from.
       - run: docker compose --profile mail-test up -d --build --wait
       - name: Install the browser for the Playwright specs
