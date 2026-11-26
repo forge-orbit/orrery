@@ -21,6 +21,29 @@ const mainPath = fileURLToPath(new URL("./main.ts", import.meta.url));
 const directories: string[] = [];
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
+/** Discovery payload matching the workspace-1/project-1/agent-1 ids used below. */
+const targetsPayload = {
+  workspaces: [
+    {
+      id: "workspace-1",
+      name: "Workspace One",
+      slug: "workspace-one",
+      kind: "shared",
+      projects: [{ id: "project-1", key: "P1", name: "Project One", accessLevel: "manage" }],
+    },
+  ],
+  agents: [{ id: "agent-1", name: "Agent One" }],
+  defaultAgentId: "agent-1",
+};
+
+function serveTargets(req: IncomingMessage, res: ServerResponse): boolean {
+  if (req.method === "GET" && req.url === "/api/runners/targets") {
+    json(res, 200, targetsPayload);
+    return true;
+  }
+  return false;
+}
+
 afterAll(async () => {
   await Promise.all(directories.map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -178,6 +201,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
     let registration: z.infer<typeof registrationBody> | undefined;
     let heartbeats = 0;
     const stub = await listen(async (req, res) => {
+      if (serveTargets(req, res)) return;
       if (req.method === "POST" && req.url === "/api/runners/register") {
         registration = registrationBody.parse(await bodyOf(req));
         json(res, 201, {
@@ -267,6 +291,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
     const dir = await makeDir();
     let heartbeats = 0;
     const stub = await listen(async (req, res) => {
+      if (serveTargets(req, res)) return;
       if (req.method === "POST" && req.url === "/api/runners/register") {
         json(res, 201, {
           id: "runner-2",
@@ -362,6 +387,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
     const acked: number[] = [];
     let pollCount = 0;
     const stub = await listen(async (req, res) => {
+      if (serveTargets(req, res)) return;
       if (req.method === "POST" && req.url === "/api/runners/register") {
         json(res, 201, {
           id: "runner-restart",

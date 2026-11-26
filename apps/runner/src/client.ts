@@ -12,6 +12,7 @@ import {
   Runner,
   RunnerCommandsResponse,
   RunnerOfflineResponse,
+  RunnerTargetsResponse,
   type AckCommandsRequest,
   type AutoClaimRequest,
   type CommandsQuery,
@@ -206,6 +207,11 @@ export class OrreryClient {
         body: JSON.stringify(input),
       }),
     );
+  }
+
+  /** Host-authenticated target discovery for human-readable flag resolution. */
+  async getTargets() {
+    return RunnerTargetsResponse.parse(await this.request("/api/runners/targets"));
   }
 
   async markRunnerOffline(runnerId: string) {
