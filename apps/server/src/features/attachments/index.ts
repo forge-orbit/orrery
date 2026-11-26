@@ -31,6 +31,7 @@ export interface AttachmentSeams {
   syncReferences: AttachmentsService["syncReferences"];
   listMetadata: AttachmentsService["listMetadata"];
   purgeHolders: AttachmentsService["purgeHolders"];
+  purgeProjectAttachments: AttachmentsService["purgeProjectAttachments"];
 }
 
 export interface AttachmentsFeature extends Feature {

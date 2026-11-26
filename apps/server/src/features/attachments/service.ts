@@ -105,6 +105,8 @@ export interface AttachmentsService {
   ): Promise<AttachmentMetadataByHolder>;
   /** Drop references for purged holders and reclaim attachments with no references left. */
   purgeHolders(tx: DbTransaction, holders: readonly AttachmentHolder[]): Promise<void>;
+  /** Delete every project attachment after its issues and knowledge have been purged. */
+  purgeProjectAttachments(tx: DbTransaction, projectIds: readonly string[]): Promise<void>;
   /** One guarded 24-hour grace sweep tick; returns the number of attachments reclaimed. */
   sweepUnreferenced(): Promise<number>;
 }
@@ -750,6 +752,28 @@ export function createAttachmentsService({
         .for("update", { of: attachments });
       await tx.delete(attachmentReferences).where(or(...conditions));
       await reclaimMany(tx, [...new Map(rows.map((row) => [row.id, row])).values()]);
+    },
+
+    async purgeProjectAttachments(tx, projectIds) {
+      if (projectIds.length === 0) return;
+      const rows = await tx
+        .select({ id: attachments.id, objectId: attachments.objectId })
+        .from(attachments)
+        .where(inArray(attachments.projectId, projectIds))
+        .orderBy(attachments.id)
+        .for("update");
+      if (rows.length === 0) return;
+      const attachmentIds = rows.map((row) => row.id);
+      await tx.delete(attachments).where(inArray(attachments.id, attachmentIds));
+      await tx
+        .update(storedObjects)
+        .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
+        .where(
+          and(
+            inArray(storedObjects.id, [...new Set(rows.map((row) => row.objectId))]),
+            eq(storedObjects.status, "active"),
+          ),
+        );
     },
 
     async sweepUnreferenced() {

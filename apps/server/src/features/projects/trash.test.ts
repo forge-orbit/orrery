@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import {
   IssuesResponse,
@@ -11,23 +11,38 @@ import type { AgentIdentity } from "@orrery/contract";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
+  agentApiKeyProjects,
   agentApiKeys,
   agents,
+  attachmentReferences,
+  attachments,
   browserSessions,
+  dispatchTokens,
   humans,
   issueComments,
   issueDependencies,
   issueLabels,
   issueLinks,
   issues,
+  knowledgeEntries,
+  notifications,
   projectAccessGrants,
+  projectAccessEvents,
+  projectActivity,
+  projectLabels,
   projectTransferAuthorizations,
   projects,
   runnerDispatches,
   runnerHosts,
   runners,
   runs,
+  storedObjects,
+  webhookProjects,
+  webhooks,
+  workspaceInvitationGrants,
+  workspaceInvitations,
   workspaceMemberships,
+  workspaceEvents,
   workspaces,
   workSessions,
 } from "../../db/schema.ts";
@@ -35,8 +50,11 @@ import { createDb, type Database, type DbTransaction } from "../../platform/db.t
 import { createApp } from "../../platform/http.ts";
 import { createLogger } from "../../platform/log.ts";
 import { migrate } from "../../platform/migrate.ts";
+import { sweepOrphanObjects } from "../../platform/object-sweep.ts";
+import type { ObjectMeta, ObjectStore, StoredObject } from "../../platform/storage.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import { createAccountsFeature } from "../accounts/index.ts";
+import { createAttachmentsFeature, type AttachmentSeams } from "../attachments/index.ts";
 import { InboxError, createInboxFeature } from "../inbox/index.ts";
 import { SessionsError, createSessionsFeature } from "../work-sessions/index.ts";
 import { createProjectsFeature } from "./index.ts";
@@ -48,6 +66,40 @@ import {
 } from "./service.ts";
 
 const silentLogger = createLogger("error");
+
+function objectMetadata(key: string, data: Uint8Array): ObjectMeta {
+  return {
+    key,
+    byteSize: data.byteLength,
+    sha256: createHash("sha256").update(data).digest("hex"),
+  };
+}
+
+function memoryObjectStore() {
+  const blobs = new Map<string, Buffer>();
+  const store: ObjectStore = {
+    async put(key, data) {
+      const bytes = Buffer.from(data);
+      blobs.set(key, bytes);
+      return objectMetadata(key, bytes);
+    },
+    async get(key): Promise<StoredObject | null> {
+      const data = blobs.get(key);
+      return data === undefined ? null : { data: Buffer.from(data) };
+    },
+    async head(key) {
+      const data = blobs.get(key);
+      return data === undefined ? null : objectMetadata(key, data);
+    },
+    async delete(key) {
+      return blobs.delete(key);
+    },
+    async checkHealth() {
+      return { ok: true };
+    },
+  };
+  return { blobs, store };
+}
 
 let pg: StartedPostgreSqlContainer;
 let database: Database;
@@ -66,24 +118,38 @@ afterAll(async () => {
 
 afterEach(async () => {
   await database.db.transaction(async (tx) => {
+    await tx.execute(sql`delete from notifications`);
+    await tx.execute(sql`delete from workspace_invitation_grants`);
+    await tx.execute(sql`delete from workspace_invitations`);
+    await tx.execute(sql`delete from agent_api_key_projects`);
+    await tx.execute(sql`delete from webhook_projects`);
+    await tx.execute(sql`delete from dispatch_tokens`);
     await tx.execute(sql`delete from project_activity`);
+    await tx.execute(sql`delete from project_access_events`);
     await tx.execute(sql`delete from work_session_activities`);
     await tx.execute(sql`delete from questions`);
     await tx.execute(sql`delete from runner_dispatches`);
     await tx.execute(sql`delete from project_transfer_authorizations`);
+    await tx.execute(sql`update work_sessions set stream_object_id = null`);
     await tx.execute(sql`delete from work_sessions`);
     await tx.execute(sql`delete from runs`);
     await tx.execute(sql`delete from runners`);
     await tx.execute(sql`delete from runner_hosts`);
     await tx.execute(sql`delete from agent_api_keys`);
     await tx.execute(sql`delete from agents`);
+    await tx.execute(sql`delete from attachment_references`);
+    await tx.execute(sql`delete from attachments`);
+    await tx.execute(sql`delete from stored_objects`);
     await tx.execute(sql`delete from issue_dependencies`);
     await tx.execute(sql`delete from issue_labels`);
     await tx.execute(sql`delete from issue_links`);
     await tx.execute(sql`delete from issue_comments`);
     await tx.execute(sql`delete from issues`);
+    await tx.execute(sql`delete from knowledge_entries`);
+    await tx.execute(sql`delete from project_labels`);
     await tx.execute(sql`delete from project_access_grants`);
     await tx.execute(sql`delete from workspace_events`);
+    await tx.execute(sql`delete from webhooks`);
     await tx.execute(sql`delete from projects`);
     await tx.execute(sql`delete from workspace_memberships`);
     await tx.execute(sql`delete from workspaces`);
@@ -199,6 +265,7 @@ async function liveSessionGate(tx: DbTransaction, issueId: string) {
 
 function makeService(
   gate: (tx: DbTransaction, issueId: string) => Promise<boolean> = liveSessionGate,
+  attachmentSeams?: AttachmentSeams,
 ) {
   return createProjectsFeature({
     db: database.db,
@@ -207,6 +274,7 @@ function makeService(
     sessionGate: async () => true,
 
     issueSessionGate: gate,
+    ...(attachmentSeams === undefined ? {} : { attachmentSeams }),
   }).service;
 }
 
@@ -522,6 +590,642 @@ describe("issue trash", () => {
     expect(activity.some((event) => event.issueId === old.id)).toBe(true);
     expect(await kindOf(service.restoreIssue(manager, old.id))).toBe("issue_purged");
     expect(await service.listTrash(manager, f.projectId)).toHaveLength(0);
+  });
+
+  it("purges an expired project and releases its attachments and session stream blobs", async () => {
+    const f = await seed();
+    const manager = humanActor(f.humanId);
+    const { blobs, store } = memoryObjectStore();
+    const attached = createAttachmentsFeature({
+      db: database.db,
+      store,
+      maxAttachmentBytes: 1024 * 1024,
+      sessionReader: async () => null,
+      authenticate: async () => null,
+      projectAccessCeiling: async () => new Map(),
+      projectAccessAtLeast,
+      agentProjectAccess: async () => null,
+      log: silentLogger,
+    });
+    const attachmentSeams: AttachmentSeams = {
+      syncReferences: (tx, input) => attached.service.syncReferences(tx, input),
+      listMetadata: (tx, holders) => attached.service.listMetadata(tx, holders),
+      purgeHolders: (tx, holders) => attached.service.purgeHolders(tx, holders),
+      purgeProjectAttachments: (tx, projectIds) =>
+        attached.service.purgeProjectAttachments(tx, projectIds),
+    };
+    const service = makeService(liveSessionGate, attachmentSeams);
+    const activeIssue = await createIssue(service, manager, f.projectId);
+    const blocker = await createIssue(service, manager, f.projectId);
+    const trashedIssue = await createIssue(service, manager, f.projectId);
+    const activeEntry = await service.createKnowledge(manager, f.projectId, {
+      title: "Current runbook",
+      body: "active knowledge secret",
+    });
+    const trashedEntry = await service.createKnowledge(manager, f.projectId, {
+      title: "Old runbook",
+      body: "trashed knowledge secret",
+    });
+    const comment = await service.createComment(manager, trashedIssue.id, {
+      body: "comment secret",
+    });
+    await service.addIssueLink(manager, activeIssue.id, {
+      url: "https://example.com/private",
+      title: "private link",
+      kind: "doc",
+    });
+    await service.addBlockedBy(manager, activeIssue.id, { blockedByIssueId: blocker.id });
+    await service.deleteIssue(manager, trashedIssue.id);
+    await service.deleteKnowledge(manager, trashedEntry.id);
+    await database.db.execute(
+      sql`update issues set deleted_at = statement_timestamp() - interval '45 days' where id = ${trashedIssue.id}`,
+    );
+    await database.db.execute(
+      sql`update knowledge_entries set deleted_at = statement_timestamp() - interval '45 days' where id = ${trashedEntry.id}`,
+    );
+
+    const labelId = randomUUID();
+    await database.db.insert(projectLabels).values({
+      id: labelId,
+      projectId: f.projectId,
+      name: "secret label",
+      color: "#123abc",
+      createdByHumanId: f.humanId,
+    });
+    await database.db.insert(issueLabels).values({ issueId: activeIssue.id, labelId });
+
+    const attachmentBlobs: { attachmentId: string; key: string; objectId: string }[] = [];
+    const addAttachment = async (holder?: {
+      holderType: "issue" | "comment" | "knowledge";
+      holderId: string;
+    }) => {
+      const objectId = randomUUID();
+      const key = `attachments/${f.projectId}/${objectId}.bin`;
+      const bytes = Buffer.from(`secret attachment ${objectId}`);
+      const blobMeta = await store.put(key, bytes, "application/octet-stream");
+      await database.db.insert(storedObjects).values({
+        id: objectId,
+        key,
+        status: "active",
+        contentType: "application/octet-stream",
+        byteSize: blobMeta.byteSize,
+        sha256: blobMeta.sha256,
+      });
+      const attachmentId = randomUUID();
+      await database.db.insert(attachments).values({
+        id: attachmentId,
+        projectId: f.projectId,
+        objectId,
+        filename: "private.bin",
+        contentType: "application/octet-stream",
+        byteSize: bytes.byteLength,
+        uploadedByHumanId: f.humanId,
+        unreferencedAt: null,
+      });
+      if (holder !== undefined) {
+        await database.db.insert(attachmentReferences).values({
+          id: randomUUID(),
+          attachmentId,
+          ...holder,
+        });
+      }
+      attachmentBlobs.push({ attachmentId, key, objectId });
+    };
+    await addAttachment({ holderType: "issue", holderId: activeIssue.id });
+    await addAttachment({ holderType: "comment", holderId: comment.id });
+    await addAttachment({ holderType: "issue", holderId: trashedIssue.id });
+    await addAttachment({ holderType: "knowledge", holderId: activeEntry.id });
+    await addAttachment({ holderType: "knowledge", holderId: trashedEntry.id });
+    await addAttachment();
+
+    const agentId = randomUUID();
+    await database.db.insert(agents).values({
+      id: agentId,
+      humanId: f.humanId,
+      name: "Purge test agent",
+    });
+    const apiKeyId = randomUUID();
+    await database.db.insert(agentApiKeys).values({
+      id: apiKeyId,
+      agentId,
+      workspaceId: f.workspaceId,
+      createdByHumanId: f.humanId,
+      validity: "never",
+      tokenHash: tokenHash(randomUUID()),
+    });
+    await database.db.insert(agentApiKeyProjects).values({
+      id: randomUUID(),
+      keyId: apiKeyId,
+      projectId: f.projectId,
+      level: ProjectAccessLevel.enum.manage,
+    });
+    await database.db.insert(projectAccessGrants).values({
+      id: randomUUID(),
+      projectId: f.projectId,
+      humanId: f.otherHumanId,
+      level: ProjectAccessLevel.enum.read,
+      grantedByHumanId: f.humanId,
+    });
+
+    const invitationId = randomUUID();
+    await database.db.insert(workspaceInvitations).values({
+      id: invitationId,
+      workspaceId: f.workspaceId,
+      email: `${randomUUID()}@example.com`,
+      status: "pending",
+      tokenHash: tokenHash(randomUUID()),
+      invitedByHumanId: f.humanId,
+      expiresAt: sql`statement_timestamp() + interval '1 day'`,
+    });
+    await database.db.insert(workspaceInvitationGrants).values({
+      id: randomUUID(),
+      invitationId,
+      projectId: f.projectId,
+      level: ProjectAccessLevel.enum.read,
+    });
+
+    const destinationWorkspaceId = randomUUID();
+    await database.db.transaction(async (tx) => {
+      await tx.insert(workspaces).values({
+        id: destinationWorkspaceId,
+        kind: WorkspaceKind.enum.shared,
+        name: "Destination",
+        personalOwnerHumanId: null,
+      });
+      await tx.insert(workspaceMemberships).values({
+        id: randomUUID(),
+        workspaceId: destinationWorkspaceId,
+        humanId: f.humanId,
+        isOwner: true,
+      });
+    });
+    await database.db.insert(projectTransferAuthorizations).values({
+      id: randomUUID(),
+      projectId: f.projectId,
+      sourceWorkspaceId: f.workspaceId,
+      destinationWorkspaceId,
+      authorizedByHumanId: f.humanId,
+      tokenHash: tokenHash(randomUUID()),
+      status: "pending",
+      expiresAt: sql`statement_timestamp() + interval '1 day'`,
+    });
+
+    const webhookId = randomUUID();
+    await database.db.insert(webhooks).values({
+      id: webhookId,
+      workspaceId: f.workspaceId,
+      url: "https://example.com/hook",
+      secretEncrypted: "test-secret",
+      allProjects: false,
+      allEvents: false,
+      events: ["issue_created"],
+      createdByHumanId: f.humanId,
+      updatedByHumanId: f.humanId,
+    });
+    await database.db.insert(webhookProjects).values({ webhookId, projectId: f.projectId });
+
+    const issueCreatedActivity = first(
+      await database.db
+        .select({ id: projectActivity.id })
+        .from(projectActivity)
+        .where(
+          and(
+            eq(projectActivity.issueId, activeIssue.id),
+            eq(projectActivity.type, "issue_created"),
+          ),
+        ),
+    );
+    await database.db.insert(notifications).values({
+      id: randomUUID(),
+      humanId: f.otherHumanId,
+      projectId: f.projectId,
+      issueId: activeIssue.id,
+      activityId: issueCreatedActivity.id,
+      kind: "issue_mentioned",
+      summary: "notification secret",
+    });
+    const accessEventId = randomUUID();
+    await database.db.insert(projectAccessEvents).values({
+      id: accessEventId,
+      projectId: f.projectId,
+      workspaceId: f.workspaceId,
+      actorHumanId: f.humanId,
+      subjectHumanId: f.otherHumanId,
+      type: "project_access_granted",
+      level: ProjectAccessLevel.enum.read,
+      previousLevel: null,
+    });
+
+    const runnerHostId = randomUUID();
+    await database.db.insert(runnerHosts).values({
+      id: runnerHostId,
+      humanId: f.humanId,
+      displayName: "Purge runner host",
+      platform: "linux",
+      credentialHash: tokenHash(randomUUID()),
+    });
+    const runnerId = randomUUID();
+    await database.db.insert(runners).values({
+      id: runnerId,
+      hostId: runnerHostId,
+      workspaceId: f.workspaceId,
+      projectId: f.projectId,
+      agentId,
+      displayName: "Purge runner",
+      repoFingerprint: tokenHash(randomUUID()),
+    });
+    const runId = randomUUID();
+    await database.db.insert(runs).values({
+      id: runId,
+      agentId,
+      workspaceId: f.workspaceId,
+      status: "ended",
+      endedAt: sql`statement_timestamp()`,
+    });
+    const streamObjectId = randomUUID();
+    const streamKey = `work-sessions/${randomUUID()}/stream.jsonl`;
+    const streamBytes = Buffer.from("private work session stream");
+    const streamMeta = await store.put(streamKey, streamBytes, "application/jsonl");
+    await database.db.insert(storedObjects).values({
+      id: streamObjectId,
+      key: streamKey,
+      status: "active",
+      contentType: "application/jsonl",
+      byteSize: streamMeta.byteSize,
+      sha256: streamMeta.sha256,
+    });
+    const workSessionId = randomUUID();
+    await database.db.insert(workSessions).values({
+      id: workSessionId,
+      agentId,
+      runId,
+      workspaceId: f.workspaceId,
+      issueId: activeIssue.id,
+      status: "expired",
+      leaseExpiresAt: sql`statement_timestamp() - interval '1 minute'`,
+      endedAt: sql`statement_timestamp()`,
+      streamObjectId,
+    });
+    const dispatchId = randomUUID();
+    await database.db.insert(runnerDispatches).values({
+      id: dispatchId,
+      runnerId,
+      workspaceId: f.workspaceId,
+      projectId: f.projectId,
+      issueId: activeIssue.id,
+      requestedByHumanId: f.humanId,
+      agentId,
+      dispatchAttemptId: randomUUID(),
+      state: "ended",
+      endedAt: sql`statement_timestamp()`,
+    });
+    await database.db.insert(dispatchTokens).values({
+      id: randomUUID(),
+      tokenHash: tokenHash(randomUUID()),
+      runnerHostId,
+      runnerId,
+      dispatchId,
+      dispatchAttemptId: randomUUID(),
+      agentId,
+      workspaceId: f.workspaceId,
+      projectId: f.projectId,
+      issueId: activeIssue.id,
+      runId,
+      workSessionId,
+    });
+
+    await service.deleteProject(manager, f.projectId);
+    await expect(
+      service.createProject(sessionAccount(f.humanId), f.workspaceId, {
+        name: "Conflicting key",
+        key: "TRH",
+      }),
+    ).rejects.toMatchObject({ kind: "project_key_taken" });
+    const auditActivityIds = (
+      await database.db
+        .select({ id: projectActivity.id })
+        .from(projectActivity)
+        .where(eq(projectActivity.projectId, f.projectId))
+    ).map((event) => event.id);
+    const workspaceAuditIds = (
+      await database.db
+        .select({ id: workspaceEvents.id })
+        .from(workspaceEvents)
+        .where(eq(workspaceEvents.workspaceId, f.workspaceId))
+    ).map((event) => event.id);
+    const originalTrashedIssue = first(
+      await database.db.select().from(issues).where(eq(issues.id, trashedIssue.id)),
+    );
+    const originalTrashedEntry = first(
+      await database.db
+        .select()
+        .from(knowledgeEntries)
+        .where(eq(knowledgeEntries.id, trashedEntry.id)),
+    );
+    await database.db.execute(
+      sql`update projects set deleted_at = statement_timestamp() - interval '31 days' where id = ${f.projectId}`,
+    );
+    expect(
+      [...attachmentBlobs.map((blob) => blob.key), streamKey].every((key) => blobs.has(key)),
+    ).toBe(true);
+
+    expect(await service.purgeExpiredTrash()).toBe(6);
+
+    const project = first(
+      await database.db.select().from(projects).where(eq(projects.id, f.projectId)),
+    );
+    expect(project).toMatchObject({ name: "[deleted]", description: "" });
+    expect(project.purgedAt).not.toBeNull();
+    const purgedIssues = await database.db
+      .select()
+      .from(issues)
+      .where(eq(issues.projectId, f.projectId));
+    expect(purgedIssues).toHaveLength(3);
+    for (const issue of purgedIssues) {
+      expect(issue).toMatchObject({
+        title: "[deleted]",
+        body: "",
+        parentIssueId: null,
+        assigneeType: null,
+        assigneeId: null,
+      });
+      expect(issue.purgedAt).not.toBeNull();
+      expect(issue.deletedAt).not.toBeNull();
+      expect(issue.deletedByHumanId).not.toBeNull();
+    }
+    const scrubbedTrashedIssue = first(
+      purgedIssues.filter((issue) => issue.id === trashedIssue.id),
+    );
+    expect(scrubbedTrashedIssue.deletedAt).toEqual(originalTrashedIssue.deletedAt);
+    expect(scrubbedTrashedIssue.deletedByHumanId).toBe(f.humanId);
+    const purgedEntries = await database.db
+      .select()
+      .from(knowledgeEntries)
+      .where(eq(knowledgeEntries.projectId, f.projectId));
+    expect(purgedEntries).toHaveLength(2);
+    expect(purgedEntries.find((entry) => entry.id === activeEntry.id)).toMatchObject({
+      title: "[deleted]",
+      body: "",
+      purgedAt: expect.any(Date),
+      deletedByHumanId: f.humanId,
+    });
+    expect(purgedEntries.find((entry) => entry.id === trashedEntry.id)).toMatchObject({
+      title: "[deleted]",
+      body: "",
+      purgedAt: expect.any(Date),
+      deletedByHumanId: f.humanId,
+    });
+    const scrubbedTrashedEntry = first(
+      await database.db
+        .select()
+        .from(knowledgeEntries)
+        .where(eq(knowledgeEntries.id, trashedEntry.id)),
+    );
+    expect(scrubbedTrashedEntry.deletedAt).toEqual(originalTrashedEntry.deletedAt);
+    expect(scrubbedTrashedEntry.deletedByHumanId).toBe(f.humanId);
+
+    expect(
+      await database.db
+        .select()
+        .from(issueComments)
+        .where(eq(issueComments.issueId, trashedIssue.id)),
+    ).toHaveLength(0);
+    expect(
+      await database.db.select().from(issueLinks).where(eq(issueLinks.issueId, activeIssue.id)),
+    ).toHaveLength(0);
+    expect(
+      await database.db.select().from(issueLabels).where(eq(issueLabels.issueId, activeIssue.id)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(issueDependencies)
+        .where(eq(issueDependencies.issueId, activeIssue.id)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(projectLabels)
+        .where(eq(projectLabels.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(projectAccessGrants)
+        .where(eq(projectAccessGrants.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(workspaceInvitationGrants)
+        .where(eq(workspaceInvitationGrants.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(agentApiKeyProjects)
+        .where(eq(agentApiKeyProjects.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(projectTransferAuthorizations)
+        .where(eq(projectTransferAuthorizations.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(webhookProjects)
+        .where(eq(webhookProjects.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db.select().from(runners).where(eq(runners.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(runnerDispatches)
+        .where(eq(runnerDispatches.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(dispatchTokens)
+        .where(eq(dispatchTokens.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.projectId, f.projectId)),
+    ).toHaveLength(0);
+    expect(
+      (
+        await database.db
+          .select({ id: projectActivity.id })
+          .from(projectActivity)
+          .where(eq(projectActivity.projectId, f.projectId))
+      ).map((event) => event.id),
+    ).toEqual(auditActivityIds);
+    expect(
+      (
+        await database.db
+          .select({ id: workspaceEvents.id })
+          .from(workspaceEvents)
+          .where(eq(workspaceEvents.workspaceId, f.workspaceId))
+      ).map((event) => event.id),
+    ).toEqual(workspaceAuditIds);
+    expect(
+      await database.db
+        .select()
+        .from(projectAccessEvents)
+        .where(eq(projectAccessEvents.id, accessEventId)),
+    ).toHaveLength(1);
+    expect(
+      await database.db
+        .select()
+        .from(attachmentReferences)
+        .where(eq(attachmentReferences.holderId, activeIssue.id)),
+    ).toHaveLength(0);
+    expect(
+      await database.db.select().from(attachments).where(eq(attachments.projectId, f.projectId)),
+    ).toHaveLength(0);
+    const streamSession = first(
+      await database.db
+        .select({ streamObjectId: workSessions.streamObjectId })
+        .from(workSessions)
+        .where(eq(workSessions.id, workSessionId)),
+    );
+    expect(streamSession.streamObjectId).toBeNull();
+    const releasedObjects = await database.db
+      .select({ id: storedObjects.id, status: storedObjects.status })
+      .from(storedObjects);
+    expect(releasedObjects).toHaveLength(attachmentBlobs.length + 1);
+    expect(releasedObjects.every((object) => object.status === "deleted")).toBe(true);
+    expect(await sweepOrphanObjects(database.db, store)).toBe(attachmentBlobs.length + 1);
+    expect(
+      [...attachmentBlobs.map((blob) => blob.key), streamKey].every((key) => !blobs.has(key)),
+    ).toBe(true);
+    expect(await database.db.select().from(storedObjects)).toHaveLength(0);
+
+    const replacement = await service.createProject(sessionAccount(f.humanId), f.workspaceId, {
+      name: "Replacement project",
+      key: "TRH",
+    });
+    expect(replacement.key).toBe("TRH");
+  });
+
+  it("keeps issue and knowledge purge timers independent from the project timer", async () => {
+    const f = await seed();
+    const service = makeService();
+    const manager = humanActor(f.humanId);
+    const oldIssue = await createIssue(service, manager, f.projectId);
+    const oldEntry = await service.createKnowledge(manager, f.projectId, {
+      title: "Old knowledge",
+      body: "old secret",
+    });
+    await service.deleteIssue(manager, oldIssue.id);
+    await service.deleteKnowledge(manager, oldEntry.id);
+    await database.db.execute(
+      sql`update issues set deleted_at = statement_timestamp() - interval '31 days' where id = ${oldIssue.id}`,
+    );
+    await database.db.execute(
+      sql`update knowledge_entries set deleted_at = statement_timestamp() - interval '31 days' where id = ${oldEntry.id}`,
+    );
+    await service.deleteProject(manager, f.projectId);
+    await database.db.execute(
+      sql`update projects set deleted_at = statement_timestamp() - interval '10 days' where id = ${f.projectId}`,
+    );
+
+    expect(await service.purgeExpiredTrash()).toBe(2);
+    const withinProjectWindow = first(
+      await database.db.select().from(projects).where(eq(projects.id, f.projectId)),
+    );
+    expect(withinProjectWindow.purgedAt).toBeNull();
+    expect(
+      first(await database.db.select().from(issues).where(eq(issues.id, oldIssue.id))).purgedAt,
+    ).not.toBeNull();
+    expect(
+      first(
+        await database.db
+          .select()
+          .from(knowledgeEntries)
+          .where(eq(knowledgeEntries.id, oldEntry.id)),
+      ).purgedAt,
+    ).not.toBeNull();
+    await expect(
+      service.createProject(sessionAccount(f.humanId), f.workspaceId, {
+        name: "Project still in Trash",
+        key: "TRH",
+      }),
+    ).rejects.toMatchObject({ kind: "project_key_taken" });
+
+    await database.db.execute(
+      sql`update projects set deleted_at = statement_timestamp() - interval '31 days' where id = ${f.projectId}`,
+    );
+    expect(await service.purgeExpiredTrash()).toBe(1);
+    expect(
+      first(await database.db.select().from(projects).where(eq(projects.id, f.projectId))).purgedAt,
+    ).not.toBeNull();
+  });
+
+  it("skips an expired project locked by another purge worker", async () => {
+    const f = await seed();
+    const otherProjectId = randomUUID();
+    await database.db.insert(projects).values({
+      id: otherProjectId,
+      workspaceId: f.workspaceId,
+      name: "Second project",
+      key: "SEC",
+      createdByHumanId: f.humanId,
+    });
+    const service = makeService();
+    const manager = humanActor(f.humanId);
+    await service.deleteProject(manager, f.projectId);
+    await service.deleteProject(manager, otherProjectId);
+    await database.db.execute(
+      sql`update projects set deleted_at = statement_timestamp() - interval '31 days' where id in (${f.projectId}, ${otherProjectId})`,
+    );
+    const ordered = await database.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(sql`${projects.id} in (${f.projectId}, ${otherProjectId})`)
+      .orderBy(projects.id);
+    const lockedProjectId = first(ordered).id;
+    const skippedProjectId = ordered[1]?.id;
+    if (skippedProjectId === undefined) throw new Error("the second project was not seeded");
+
+    let purgePromise: Promise<number> | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await database.db.transaction(async (tx) => {
+        await tx
+          .select({ id: projects.id })
+          .from(projects)
+          .where(eq(projects.id, lockedProjectId))
+          .for("update");
+        purgePromise = service.purgeExpiredTrash();
+        const result = await Promise.race([
+          purgePromise.then((count) => ({ kind: "finished" as const, count })),
+          new Promise<{ kind: "blocked" }>((resolve) => {
+            timeout = setTimeout(() => resolve({ kind: "blocked" }), 2_000);
+          }),
+        ]);
+        expect(result).toEqual({ kind: "finished", count: 1 });
+      });
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+      await purgePromise?.catch(() => {});
+    }
+
+    expect(
+      first(await database.db.select().from(projects).where(eq(projects.id, lockedProjectId)))
+        .purgedAt,
+    ).toBeNull();
+    expect(
+      first(await database.db.select().from(projects).where(eq(projects.id, skippedProjectId)))
+        .purgedAt,
+    ).not.toBeNull();
   });
 
   it("excludes trashed issues from the inbox, subtrees, and the trash window", async () => {

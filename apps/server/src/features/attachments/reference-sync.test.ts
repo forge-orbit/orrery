@@ -122,6 +122,10 @@ describe("#179 attachment reference sync, metadata, grace sweep and Trash cleanu
         if (real === undefined) throw new Error("purge not wired");
         return real.purgeHolders(tx, holders);
       },
+      purgeProjectAttachments: (tx, projectIds) => {
+        if (real === undefined) throw new Error("project purge not wired");
+        return real.purgeProjectAttachments(tx, projectIds);
+      },
     };
     const agentAuthenticator = async (request: Request): Promise<AgentIdentity | null> => {
       const token = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
@@ -169,6 +173,8 @@ describe("#179 attachment reference sync, metadata, grace sweep and Trash cleanu
       syncReferences: (tx, input) => attached.service.syncReferences(tx, input),
       listMetadata: (tx, holders) => attached.service.listMetadata(tx, holders),
       purgeHolders: (tx, holders) => attached.service.purgeHolders(tx, holders),
+      purgeProjectAttachments: (tx, projectIds) =>
+        attached.service.purgeProjectAttachments(tx, projectIds),
     };
     wired = real;
     app = createApp({

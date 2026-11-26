@@ -304,6 +304,7 @@ describe("knowledge trash", () => {
       purgeHolders: async (_tx, holders) => {
         purged.push(...holders);
       },
+      purgeProjectAttachments: async () => {},
     });
     const manager = humanActor(f.managerHumanId);
     const entry = await createEntry(service, manager, f);
