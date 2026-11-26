@@ -2568,7 +2568,7 @@ def extract_code_facts() -> dict[str, Any]:
     )
     attachment_src = read_text("apps/server/src/features/attachments/service.ts")
     attachment_project_purge_fn = slice_between(
-        attachment_src, "async purgeProjectAttachments(tx, projectIds)", "async sweepUnreferenced()"
+        attachment_src, "async purgeForTrash(tx, holders, projectIds)", "async sweepUnreferenced()"
     )
     object_sweep_src = read_text("apps/server/src/platform/object-sweep.ts")
     m48_project_due = ordered(
@@ -2642,27 +2642,57 @@ def extract_code_facts() -> dict[str, Any]:
         and "projects.deletedAt" not in purge_project_fn.split('name: "[deleted]"', 1)[-1]
     )
     m48_attachment_holders = (
-        "purgeHolders(tx, attachmentHolders)" in purge_project_fn
-        and "purgeProjectAttachments(tx, expiredProjectIds)" in purge_project_fn
+        "attachmentSeams.purgeForTrash(" in purge_project_fn
+        and "attachmentHolders" in purge_project_fn
+        and "expiredProjectIds" in purge_project_fn
+        and ordered(
+            purge_project_fn,
+            '.for("update", { of: workSessions })',
+            "streamObjectId: null",
+            "attachmentSeams.purgeForTrash(",
+        )
     )
     m48_attachment_rows = (
-        ".where(inArray(attachments.projectId, projectIds))" in attachment_project_purge_fn
+        "targetConditions.push(inArray(attachments.projectId, projectIds))"
+        in attachment_project_purge_fn
+        and "targetConditions.push(or(...conditions))" in attachment_project_purge_fn
+        and ".where(or(...targetConditions))" in attachment_project_purge_fn
+        and ".orderBy(attachments.id)" in attachment_project_purge_fn
+        and '.for("update", { of: attachments })' in attachment_project_purge_fn
+        and attachment_project_purge_fn.count('.for("update"') == 1
         and "tx.delete(attachments)" in attachment_project_purge_fn
     )
     m48_attachment_blob_status = (
-        'status: "deleted"' in attachment_project_purge_fn
-        and "storedObjects.status, \"active\"" in attachment_project_purge_fn
+        ".update(storedObjects)" in purge_project_fn
+        and 'status: "deleted"' in purge_project_fn
+        and "update(storedObjects)" not in attachment_project_purge_fn
+        and ordered(
+            purge_project_fn,
+            "attachmentSeams.purgeForTrash(",
+            ".orderBy(storedObjects.id)",
+            '.for("update")',
+            ".update(storedObjects)",
+        )
     )
     m48_stream_reference_release = (
         "inArray(issues.projectId, expiredProjectIds)" in purge_project_fn
         and ".orderBy(workSessions.id)" in purge_project_fn
         and '.for("update", { of: workSessions })' in purge_project_fn
         and "streamObjectId: null" in purge_project_fn
+        and ordered(
+            purge_project_fn,
+            '.for("update", { of: workSessions })',
+            "streamObjectId: null",
+            "attachmentSeams.purgeForTrash(",
+        )
     )
     m48_stream_object_status = (
-        "inArray(storedObjects.id, releasedIds)" in purge_project_fn
+        "inArray(storedObjects.id, releasedObjectIds)" in purge_project_fn
+        and "releasedStreamObjectIds" in purge_project_fn
+        and "releasedAttachmentObjectIds" in purge_project_fn
         and 'status: "deleted"' in purge_project_fn
         and "selectDistinct({ id: workSessions.streamObjectId })" in purge_project_fn
+        and ".orderBy(storedObjects.id)" in purge_project_fn
     )
     m48_object_sweeper = (
         'eq(storedObjects.status, "deleted")' in object_sweep_src
@@ -3014,7 +3044,7 @@ def extract_code_facts() -> dict[str, Any]:
         att_src, "async syncReferences(tx, input)", "async listMetadata(tx, holders)"
     )
     att_purge_fn = slice_between(
-        att_src, "async purgeHolders(tx, holders)", "async sweepUnreferenced()"
+        att_src, "async purgeForTrash(tx, holders, projectIds)", "async sweepUnreferenced()"
     )
     att_sweep_fn = att_src[att_src.index("async sweepUnreferenced()") :]
     att_reclaim_fn = slice_between(
@@ -3053,18 +3083,25 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m39_atomic_reclaim = (
         "reclaimMany(tx, rows)" in att_sweep_fn
-        and "await reclaimMany(tx," in att_purge_fn
-        and ".delete(attachments)" in att_reclaim_fn
-        and ".update(storedObjects)" in att_reclaim_fn
-        and 'status: "deleted"' in att_reclaim_fn
+        and "await tx.delete(attachments)" in att_purge_fn
+        and ".update(storedObjects)" in purge_fn
+        and '.orderBy(storedObjects.id)' in purge_fn
+        and 'status: "deleted"' in purge_fn
+        and ordered(
+            purge_fn,
+            "attachmentSeams.purgeForTrash(",
+            '.orderBy(storedObjects.id)',
+            '.for("update")',
+            ".update(storedObjects)",
+        )
     )
     m39_purge_issue_lock = '.for("update", { skipLocked: true })' in purge_fn
     m39_purge_holders = (
         '.for("update", { of: attachments })' in att_purge_fn
         and "await tx.delete(attachmentReferences)" in att_purge_fn
-        and "await reclaimMany(tx," in att_purge_fn
-        and "attachmentReferences.attachmentId" in att_reclaim_fn
-        and "attachmentSeams.purgeHolders(tx, attachmentHolders)" in purge_fn
+        and ".orderBy(attachments.id)" in att_purge_fn
+        and "attachmentReferences.attachmentId" in att_purge_fn
+        and "attachmentSeams.purgeForTrash(" in purge_fn
     )
     m39_sync_lock_union = (
         "[...new Set([...wanted, ...existingIds])].toSorted()" in att_sync_fn
@@ -3074,9 +3111,9 @@ def extract_code_facts() -> dict[str, Any]:
     m39_purge_single_batch = (
         "const attachmentHolders:" in purge_fn
         and "attachmentHolders.push(" in purge_fn
-        and purge_fn.count("attachmentSeams.purgeHolders(tx, attachmentHolders)") == 1
+        and purge_fn.count("attachmentSeams.purgeForTrash(") == 1
         and purge_fn.index("attachmentHolders.push(")
-        < purge_fn.index("attachmentSeams.purgeHolders(tx, attachmentHolders)")
+        < purge_fn.index("attachmentSeams.purgeForTrash(")
     )
     m39_knowledge_noop_metadata = (
         'unchanged.attachments = await metadataFor(tx, "knowledge", entryId);' in project_src
@@ -3088,9 +3125,9 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m39_holder_before_attachment = (
         project_src.count("await syncBody(tx, {") >= 5
-        and "attachmentSeams.purgeHolders(tx, attachmentHolders)" in purge_fn
+        and "attachmentSeams.purgeForTrash(" in purge_fn
         and purge_fn.index(".for(\"update\", { skipLocked: true })")
-        < purge_fn.index("attachmentSeams.purgeHolders(tx, attachmentHolders)")
+        < purge_fn.index("attachmentSeams.purgeForTrash(")
     )
     m39_metadata_rest_mcp = (
         "attachments: z.array(AttachmentMetadata)" in contract_project_src
@@ -10758,10 +10795,11 @@ def check_m47(facts: dict[str, Any]) -> CheckResult:
 def check_m48(facts: dict[str, Any]) -> CheckResult:
     """#252: project purge, independent child timers, and storage release.
 
-    Each purge transaction is atomic in this bounded model. The real-Postgres
-    trash tests exercise CHECK constraints, FK cleanup, and SKIP LOCKED; the
-    model explores the retention boundary, competing purge workers, and the
-    outcomes when one extracted source guard is absent.
+    Each purge transaction is atomic in this bounded model. Source guards pin
+    the documented projects -> holders -> work_sessions -> attachments ->
+    stored_objects order, with one sorted attachment pass and one final sorted
+    object pass. Real-Postgres tests exercise CHECK constraints, FK cleanup, and
+    SKIP LOCKED; the model explores retention, competing workers, and guard loss.
     """
     files = [
         "apps/server/src/features/projects/service.ts",
@@ -11083,7 +11121,7 @@ def check_m48(facts: dict[str, Any]) -> CheckResult:
         return bfs_check(
             check_id,
             "Automatic Project Trash Purge and Blob Release (#252)",
-            "Expired projects are purged once after 30 days; active children are CHECK-safe tombstones, previously trashed children keep their own timers, project keys and operational rows are released, storage references are dropped, and audit rows remain",
+            "Expired projects are purged once after 30 days; active children are CHECK-safe tombstones, previously trashed children keep their own timers, project keys and operational rows are released, session and attachment locks precede one final sorted stored_objects pass, and audit rows remain",
             "safety",
             initial,
             transitions,
