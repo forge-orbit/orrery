@@ -1101,12 +1101,23 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
           await requireOwner(tx, actor, workspaceId);
           await assertWebhookInWorkspace(tx, workspaceId, webhookId);
           const rows = await tx
-            .select()
+            .select({ delivery: webhookDeliveries })
             .from(webhookDeliveries)
-            .where(eq(webhookDeliveries.webhookId, webhookId))
+            .leftJoin(projectActivity, eq(projectActivity.id, webhookDeliveries.activityId))
+            .leftJoin(projects, eq(projects.id, projectActivity.projectId))
+            .where(
+              and(
+                eq(webhookDeliveries.webhookId, webhookId),
+                or(
+                  eq(webhookDeliveries.event, "webhook.test"),
+                  eq(webhookDeliveries.event, "project_deleted"),
+                  isNull(projects.deletedAt),
+                ),
+              ),
+            )
             .orderBy(desc(webhookDeliveries.createdAt), desc(webhookDeliveries.id))
             .limit(50);
-          return { items: rows.map(toDelivery) };
+          return { items: rows.map((row) => toDelivery(row.delivery)) };
         },
         { accessMode: "read only" },
       );

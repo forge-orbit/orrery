@@ -567,7 +567,7 @@ async function assertIssueDispatchable(
     .innerJoin(projects, eq(issues.projectId, projects.id))
     .where(and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)))
     .limit(1)
-    .for("update");
+    .for("update", { of: issues });
   if (issue === undefined) throw new RunnersError("issue_not_found");
   // Retire a lease that lapsed in database time before checking claimability,
   // mirroring the work-session service's lazy expiry.
@@ -1651,25 +1651,11 @@ async function assertIssueStillDispatchable(
   if (dispatch !== undefined) throw new RunnersError("issue_not_claimable");
 }
 
-/** Create a Dispatch when the caller already holds the issue's FOR UPDATE lock. */
+/** Create a Dispatch when the caller already holds the project and issue FOR UPDATE locks. */
 async function insertDispatchLocked(
   tx: DbTransaction,
   input: DispatchCreationInput,
 ): Promise<Dispatch> {
-  const [project] = await tx
-    .select({ id: projects.id })
-    .from(projects)
-    .where(
-      and(
-        eq(projects.id, input.projectId),
-        eq(projects.workspaceId, input.workspaceId),
-        isNull(projects.deletedAt),
-      ),
-    )
-    .for("update")
-    .limit(1);
-  if (project === undefined) throw new RunnersError("issue_not_found");
-
   const [uncertain] = await tx
     .select({ id: runnerDispatches.id })
     .from(runnerDispatches)
@@ -1807,7 +1793,7 @@ async function resolveIssueForHost(
     const projectsInScope = await tx
       .select({ id: projects.id, key: projects.key })
       .from(projects)
-      .where(eq(projects.workspaceId, scope.id));
+      .where(and(eq(projects.workspaceId, scope.id), isNull(projects.deletedAt)));
     if (projectsInScope.length === 0) continue;
     const ceiling = await deps.projectAccessCeiling(
       tx,
@@ -1839,6 +1825,7 @@ async function resolveIssueForHost(
         and(
           inArray(issues.projectId, projectIds),
           isNull(issues.deletedAt),
+          isNull(projects.deletedAt),
           parsed.kind === "id"
             ? eq(issues.id, parsed.id)
             : and(eq(projects.key, parsed.prefix), eq(issues.number, parsed.number)),
@@ -2394,14 +2381,9 @@ export function createRunnersService(deps: RunnersDeps) {
         if (!hasAccess(ceiling.get(issue.projectId), "contribute", projectAccessAtLeast)) {
           throw new RunnersError("insufficient_dispatch_access");
         }
-        // Lock the issue row first (global lock order) before checking uncertain
-        // dispatches so markDisconnected cannot race this check.
-        await tx
-          .select({ id: issues.id })
-          .from(issues)
-          .where(eq(issues.id, issueId))
-          .limit(1)
-          .for("update");
+        // Lock the project row first, then the issue row (global lock order:
+        // projects -> issues) before checking uncertain dispatches so
+        // markDisconnected and project Trash cannot race this check.
         const [activeProject] = await tx
           .select({ id: projects.id })
           .from(projects)
@@ -2415,6 +2397,13 @@ export function createRunnersService(deps: RunnersDeps) {
           .for("update")
           .limit(1);
         if (activeProject === undefined) throw new RunnersError("issue_not_found");
+        const [lockedIssue] = await tx
+          .select({ id: issues.id })
+          .from(issues)
+          .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
+          .limit(1)
+          .for("update");
+        if (lockedIssue === undefined) throw new RunnersError("issue_not_found");
         // A disconnected write may have happened but not been acknowledged.
         // Never start a second attempt on this issue until a human resolves it.
         const [uncertain] = await tx
@@ -2562,9 +2551,22 @@ export function createRunnersService(deps: RunnersDeps) {
           .limit(10);
         if (candidates.length === 0) return { dispatch: null };
 
-        // Lock every candidate issue in ONE ascending pass (global lock order:
-        // issues first). A concurrent claimant waits here, then sees the
-        // committed Dispatch during its own re-check and skips this issue.
+        // Lock the project first, then every candidate issue in ONE ascending
+        // pass (global lock order: projects -> issues -> runners).
+        const [activeProject] = await tx
+          .select({ id: projects.id })
+          .from(projects)
+          .where(
+            and(
+              eq(projects.id, scanned.runner.projectId),
+              eq(projects.workspaceId, scanned.runner.workspaceId),
+              isNull(projects.deletedAt),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (activeProject === undefined) return { dispatch: null };
+
         const locked = await tx
           .select({ id: issues.id })
           .from(issues)
@@ -2654,8 +2656,28 @@ export function createRunnersService(deps: RunnersDeps) {
       issueId: string,
     ): Promise<Dispatch> {
       return db.transaction(async (tx) => {
-        // Read-only live check, then lock the issue BEFORE the runner row.
-        await authenticateHostRunnerForDeps(deps, tx, credential, runnerId, false, "contribute");
+        // Read-only live check, then lock projects -> issues -> runners.
+        const scanned = await authenticateHostRunnerForDeps(
+          deps,
+          tx,
+          credential,
+          runnerId,
+          false,
+          "contribute",
+        );
+        const [project] = await tx
+          .select({ workspaceId: projects.workspaceId })
+          .from(projects)
+          .where(
+            and(
+              eq(projects.id, scanned.runner.projectId),
+              eq(projects.workspaceId, scanned.runner.workspaceId),
+              isNull(projects.deletedAt),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (project === undefined) throw new RunnersError("issue_not_found");
         const [issue] = await tx
           .select({
             projectId: issues.projectId,
@@ -2675,22 +2697,9 @@ export function createRunnersService(deps: RunnersDeps) {
           true,
           "contribute",
         );
-        const [project] = await tx
-          .select({ workspaceId: projects.workspaceId })
-          .from(projects)
-          .where(
-            and(
-              eq(projects.id, issue?.projectId ?? ""),
-              eq(projects.workspaceId, issue?.workspaceId ?? ""),
-              isNull(projects.deletedAt),
-            ),
-          )
-          .for("update")
-          .limit(1);
         if (
           issue === undefined ||
           issue.deletedAt !== null ||
-          project === undefined ||
           project.workspaceId !== runner.workspaceId ||
           issue.projectId !== runner.projectId
         ) {
@@ -2856,9 +2865,10 @@ export function createRunnersService(deps: RunnersDeps) {
             throw new RunnersError("runner_revoked");
           }
 
-          // Global lock order: issues -> runners -> runner_dispatches. Read the
-          // dispatch's issue without locking, then lock the issue row before the
-          // dispatch row so this path cannot AB-BA against requestStop/inbox/seq.
+          // Global lock order: projects -> issues -> runners -> runner_dispatches.
+          // Read the dispatch's issue without locking, then lock the project and
+          // issue rows before the dispatch row so this path cannot AB-BA against
+          // deleteProject/requestStop/inbox/seq.
           const [peek] = await tx
             .select({ issueId: runnerDispatches.issueId })
             .from(runnerDispatches)
@@ -2867,6 +2877,19 @@ export function createRunnersService(deps: RunnersDeps) {
             )
             .limit(1);
           if (peek === undefined) throw new RunnersError("dispatch_not_found");
+          const [activeProject] = await tx
+            .select({ id: projects.id })
+            .from(projects)
+            .where(
+              and(
+                eq(projects.id, joined.runner.projectId),
+                eq(projects.workspaceId, joined.runner.workspaceId),
+                isNull(projects.deletedAt),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (activeProject === undefined) throw new RunnersError("runner_revoked");
           await tx
             .select({ id: issues.id })
             .from(issues)

@@ -243,7 +243,7 @@ export async function projectAccessCeilingInTransaction(
       projectAccessGrants,
       and(eq(projectAccessGrants.projectId, projects.id), eq(projectAccessGrants.humanId, humanId)),
     )
-    .where(inArray(projects.id, uniqueProjectIds));
+    .where(and(inArray(projects.id, uniqueProjectIds), isNull(projects.deletedAt)));
 
   const rowsById = new Map(rows.map((row) => [row.id, row]));
   const workspaceKind = WorkspaceKind.parse(workspace.kind);

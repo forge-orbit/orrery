@@ -370,6 +370,13 @@ describe("Project Trash cross-feature hiding", () => {
         : undefined;
     if (typeof webhookId !== "string") throw new Error("the webhook id was not returned");
 
+    const commentBeforeTrash = await request(`/api/issues/${hiddenIssue.id}/comments`, {
+      method: "POST",
+      cookie: owner.cookie,
+      body: { body: "pre-trash comment for webhook delivery" },
+    });
+    expect(commentBeforeTrash.status).toBe(201);
+
     const invitationToken = randomBytes(32).toString("base64url");
     const invitationId = randomUUID();
     await database.db.insert(workspaceInvitations).values({
@@ -535,12 +542,56 @@ describe("Project Trash cross-feature hiding", () => {
       401,
       "runner_revoked",
     );
+    await expectProblem(
+      await request("/api/runners/issue-resolve", {
+        method: "POST",
+        bearer: runnerCredential,
+        body: { target: hiddenIssue.id },
+      }),
+      404,
+      "issue_not_found",
+    );
+    await expectProblem(
+      await request("/api/runners/issue-resolve", {
+        method: "POST",
+        bearer: runnerCredential,
+        body: { target: hiddenIssue.identifier },
+      }),
+      404,
+      "issue_not_found",
+    );
+    const autoClaimTrashed = await request(`/api/runners/${runnerId}/auto-claim`, {
+      method: "POST",
+      bearer: runnerCredential,
+      body: { filter: "all" },
+    });
+    expect(autoClaimTrashed.status).toBe(401);
 
     const keyList = await request("/api/agents/keys", { cookie: owner.cookie });
     expect(JSON.stringify(await keyList.json())).not.toContain(projectId);
     const identity = await request("/api/agents/me", { bearer: keySecret });
     expect(identity.status).toBe(200);
     expect(JSON.stringify(await identity.json())).not.toContain(projectId);
+    const createKeyTrashed = await request("/api/agents/keys", {
+      method: "POST",
+      cookie: owner.cookie,
+      body: {
+        agentId,
+        workspaceId,
+        validity: "never",
+        projects: [{ projectId, level: "contribute" }],
+      },
+    });
+    await expectProblem(createKeyTrashed, 400, "invalid_key_grant");
+    const rotateKeyTrashed = await request(`/api/agents/keys/${key.id}/rotate`, {
+      method: "POST",
+      cookie: owner.cookie,
+      body: {
+        validity: "never",
+        projects: [{ projectId, level: "contribute" }],
+      },
+    });
+    await expectProblem(rotateKeyTrashed, 400, "invalid_key_grant");
 
     const webhookList = await request(`/api/workspaces/${workspaceId}/webhooks`, {
       cookie: owner.cookie,
@@ -551,13 +602,38 @@ describe("Project Trash cross-feature hiding", () => {
       `/api/workspaces/${workspaceId}/webhooks/${webhookId}/deliveries`,
       { cookie: owner.cookie },
     );
-    expect(JSON.stringify(await deliveries.json())).toContain("project_deleted");
+    const deliveriesBody = JSON.stringify(await deliveries.json());
+    expect(deliveriesBody).toContain("project_deleted");
+    expect(deliveriesBody).not.toContain("issue_commented");
 
     const workspaceHistory = await request(`/api/workspaces/${workspaceId}/history`, {
       cookie: owner.cookie,
     });
     expect(workspaceHistory.status).toBe(200);
     expect(JSON.stringify(await workspaceHistory.json())).toContain("project_deleted");
+
+    const invitationList = await request(`/api/workspaces/${workspaceId}/invitations`, {
+      cookie: owner.cookie,
+    });
+    expect(invitationList.status).toBe(200);
+    expect(JSON.stringify(await invitationList.json())).not.toContain(projectId);
+    const invitationPreview = await request(
+      `/api/workspace-invitations/preview?token=${encodeURIComponent(invitationToken)}`,
+    );
+    expect(invitationPreview.status).toBe(200);
+    expect(JSON.stringify(await invitationPreview.json())).not.toContain(projectId);
+    await expectProblem(
+      await request(`/api/workspaces/${workspaceId}/invitations`, {
+        method: "POST",
+        cookie: owner.cookie,
+        body: {
+          email: `another-${randomUUID()}@example.test`,
+          projectGrants: [{ projectId, level: "read" }],
+        },
+      }),
+      409,
+      "invitation_scope_invalid",
+    );
 
     const invitationAccepted = await request("/api/workspace-invitations/acceptance", {
       method: "POST",
@@ -580,6 +656,11 @@ describe("Project Trash cross-feature hiding", () => {
       method: "POST",
       cookie: owner.cookie,
     }).then((response) => expect(response.status).toBe(200));
+    const deliveriesAfterRestore = await request(
+      `/api/workspaces/${workspaceId}/webhooks/${webhookId}/deliveries`,
+      { cookie: owner.cookie },
+    );
+    expect(JSON.stringify(await deliveriesAfterRestore.json())).toContain("issue_commented");
     expect(
       await database.db
         .select()
