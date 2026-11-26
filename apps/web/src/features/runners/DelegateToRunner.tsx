@@ -248,7 +248,6 @@ export function DelegateToRunner({
                     value={prompt}
                     onChange={setPrompt}
                     rows={5}
-                    maxLength={MAX_DISPATCH_PROMPT_LENGTH}
                     placeholder="Optional steering for how the Agent behaves on this Dispatch…"
                     description="Appended after the Runner's preamble; visible to everyone who can read this project."
                     {...(overLimit

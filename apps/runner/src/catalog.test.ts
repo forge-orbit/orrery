@@ -615,4 +615,113 @@ describe("catalog publication safety (#255 review)", () => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(size()).toBe(before);
   });
+
+  it("seeds CatalogPublisher from initial server catalog on cold cache so transient probe failure preserves harnesses", async () => {
+    const dir = makeDir();
+    const serverInitial: HarnessCatalog = {
+      probedAt: AT,
+      harnesses: [
+        { ...entryOf(knownModel, AT), id: "opencode", displayName: "OpenCode" },
+        { ...entryOf(knownModel, AT), id: "claude", displayName: "Claude Code" },
+      ],
+    };
+    const sent: HarnessCatalog[] = [];
+    const publisher = new CatalogPublisher({
+      client: {
+        putCatalog: async (_runnerId, value) => {
+          sent.push(value);
+          return { harnessCatalog: value };
+        },
+      },
+      runnerId: "runner-cold",
+      repoFingerprint: fingerprintA,
+      initial: serverInitial,
+      configDir: dir,
+    });
+    expect(publisher.current).toEqual(serverInitial);
+
+    await runStartupCatalogProbe({
+      definitions: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          source: "preset",
+          command: "opencode",
+          args: [],
+        },
+        { id: "claude", displayName: "Claude Code", source: "preset", command: "claude", args: [] },
+      ],
+      probe: async (definition) => {
+        if (definition.id === "claude") throw new Error("transient timeout");
+        return {
+          ...entryOf(knownModel, "2026-02-01T00:00:00.000Z"),
+          id: "opencode",
+          displayName: "OpenCode",
+        };
+      },
+      publish: (value) => publisher.publish(value),
+      previous: publisher.current,
+      now: () => "2026-02-01T00:00:00.000Z",
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.harnesses.map((h) => h.id)).toEqual(["opencode", "claude"]);
+  });
+
+  it("persists the server-merged catalog returned by putCatalog into the local cache", async () => {
+    const dir = makeDir();
+    const serverMerged = catalogOf("2026-02-01T00:00:00.000Z", entryOf(knownModel, AT));
+    const publisher = new CatalogPublisher({
+      client: {
+        putCatalog: async () => ({ harnessCatalog: serverMerged }),
+      },
+      runnerId: "runner-sync",
+      repoFingerprint: fingerprintA,
+      configDir: dir,
+    });
+
+    await publisher.publish(
+      catalogOf(
+        "2026-02-01T00:00:00.000Z",
+        entryOf(
+          {
+            id: knownModel.id,
+            reasoningDiscovery: "unknown",
+            probedAt: "2026-02-01T00:00:00.000Z",
+          },
+          "2026-02-01T00:00:00.000Z",
+        ),
+      ),
+    );
+
+    expect(publisher.current).toEqual(serverMerged);
+    expect(readCachedCatalog(fingerprintA, dir)).toEqual(serverMerged);
+  });
+
+  it("rejects pre-aborted signals in start() and startProbe() without spawning", async () => {
+    const dir = makeDir();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      AcpStdioClient.start({
+        command: "/nonexistent/binary",
+        args: [],
+        cwd: dir,
+        mcpServers: [],
+        worktreeReal: dir,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("aborted before the child was spawned");
+    await expect(
+      AcpStdioClient.startProbe({
+        command: "/nonexistent/binary",
+        args: [],
+        cwd: dir,
+        mcpServers: [],
+        worktreeReal: dir,
+        timeoutMs: 1000,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("aborted before the child was spawned");
+  });
 });

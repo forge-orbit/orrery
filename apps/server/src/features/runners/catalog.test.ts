@@ -1,4 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   DeviceCodeResponse,
   EMPTY_HARNESS_CATALOG,
@@ -524,5 +526,105 @@ describe("runner harness catalog API", () => {
     );
     expect(res.status).toBe(400);
     expect(res.headers.get("content-type")).toContain("application/problem+json");
+  });
+
+  it("migration 0060 normalizes legacy PR #255 non-null catalogs so Fleet, register and PUT succeed", async () => {
+    const { human, cookie } = await insertHuman();
+    const { workspace, project } = await insertWorkspaceAndProject(human.id);
+    const credential = await enrollHost(cookie);
+    const created = await register(credential, workspace.id, project.id);
+
+    // Simulate a legacy PR #255 catalog row written before PR #260 deployed.
+    const legacyRow = {
+      harnesses: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          source: "preset",
+          defaultModel: null,
+          models: [
+            {
+              id: "gpt-5",
+              reasoningDiscovery: "known",
+              effortLevels: ["low", "high"],
+              defaultEffort: null,
+              probedAt: null,
+            },
+          ],
+          probedAt: null,
+        },
+      ],
+      updatedAt: "2026-11-20T10:00:00.000Z",
+    };
+    await database.db.execute(
+      sql`UPDATE "runners" SET "harness_catalog" = ${JSON.stringify(legacyRow)}::jsonb WHERE "id" = ${created.id}`,
+    );
+
+    const migrationSql = readFileSync(
+      resolve(
+        import.meta.dirname,
+        "../../../../../db/migrations/0060_backfill_harness_catalog.sql",
+      ),
+      "utf8",
+    );
+    for (const statement of migrationSql.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim();
+      if (trimmed !== "") await database.db.execute(sql.raw(trimmed));
+    }
+
+    // 1. Fleet UI query parses cleanly under the new contract.
+    const fleet = await app.request(`/api/workspaces/${workspace.id}/runners`, {
+      headers: { cookie },
+    });
+    expect(fleet.status).toBe(200);
+    const parsedFleet = WorkspaceRunnersFleet.parse(await fleet.json());
+    expect(parsedFleet.hosts[0]!.runners[0]!.harnessCatalog).toMatchObject({
+      probedAt: "2026-11-20T10:00:00.000Z",
+      harnesses: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          defaultModel: "gpt-5",
+          probedAt: "2026-11-20T10:00:00.000Z",
+          models: [
+            {
+              id: "gpt-5",
+              reasoningDiscovery: "known",
+              supportedEfforts: ["low", "high"],
+            },
+          ],
+        },
+      ],
+    });
+
+    // 2. Upgraded runner re-registering without a local cache parses cleanly.
+    const reRegistered = await register(credential, workspace.id, project.id);
+    expect(reRegistered.harnessCatalog.harnesses[0]!.models[0]!.supportedEfforts).toEqual([
+      "low",
+      "high",
+    ]);
+
+    // 3. PUT /catalog with an unknown refresh preserves known efforts without HTTP 500.
+    const put = await request(
+      app,
+      "PUT",
+      `/api/runners/${created.id}/catalog`,
+      catalog(
+        "2026-11-26T12:00:00.000Z",
+        entry(
+          "opencode",
+          [{ id: "gpt-5", reasoningDiscovery: "unknown", probedAt: "2026-11-26T12:00:00.000Z" }],
+          "2026-11-26T12:00:00.000Z",
+        ),
+      ),
+      credential,
+    );
+    expect(put.status).toBe(200);
+    const merged = Runner.parse(await put.json()).harnessCatalog;
+    expect(merged.harnesses[0]!.models[0]).toMatchObject({
+      id: "gpt-5",
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+    });
   });
 });

@@ -185,6 +185,8 @@ export interface CatalogPublisherOptions {
   client: CatalogWriter;
   runnerId: string;
   repoFingerprint: string;
+  /** Server-stored catalog from registerRunner, used when local cache is missing/cold. */
+  initial?: HarnessCatalog | undefined;
   configDir?: string | undefined;
   configKey?: string | undefined;
   onUnauthorized?: ((message: string) => void) | undefined;
@@ -212,9 +214,11 @@ export class CatalogPublisher {
     this.configDir = options.configDir ?? configDirectory();
     this.configKey = options.configKey ?? "";
     this.onUnauthorized = options.onUnauthorized;
+    const cached = readCachedCatalog(this.repoFingerprint, this.configDir, this.configKey);
     this.latest =
-      readCachedCatalog(this.repoFingerprint, this.configDir, this.configKey) ??
-      EMPTY_HARNESS_CATALOG;
+      cached !== null && options.initial !== undefined
+        ? mergeHarnessCatalog(options.initial, cached)
+        : (cached ?? options.initial ?? EMPTY_HARNESS_CATALOG);
   }
 
   get current(): HarnessCatalog {
@@ -226,8 +230,9 @@ export class CatalogPublisher {
       // Validate the merged result before it can reach the cache or the server:
       // a single oversized probe entry must not disable discovery for good.
       const merged: HarnessCatalog = HarnessCatalog.parse(mergeHarnessCatalog(this.latest, next));
+      let response: unknown;
       try {
-        await this.client.putCatalog(this.runnerId, merged);
+        response = await this.client.putCatalog(this.runnerId, merged);
       } catch (error) {
         if (error instanceof RunnerRequestError && error.status === 401) {
           this.onUnauthorized?.(
@@ -243,8 +248,13 @@ export class CatalogPublisher {
         ).catch(() => {});
         throw error;
       }
-      await writeCachedCatalog(this.repoFingerprint, merged, this.configDir, this.configKey);
-      this.latest = merged;
+      const serverCatalog =
+        typeof response === "object" && response !== null && "harnessCatalog" in response
+          ? HarnessCatalog.safeParse(response.harnessCatalog)
+          : null;
+      const persisted = serverCatalog?.success ? serverCatalog.data : merged;
+      await writeCachedCatalog(this.repoFingerprint, persisted, this.configDir, this.configKey);
+      this.latest = persisted;
     });
     // A failed write must not wedge the queue: a later refresh can retry.
     this.chain = task.catch(() => {});

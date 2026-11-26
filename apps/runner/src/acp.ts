@@ -124,7 +124,12 @@ export class AcpStdioClient {
   }
 
   static async start(options: AcpStartOptions): Promise<AcpStdioClient> {
+    if (options.signal?.aborted === true) {
+      throw new Error("ACP start aborted before the child was spawned.");
+    }
     const client = AcpStdioClient.spawnClient(options);
+    const onAbort = (): void => client.signalGroup("SIGKILL");
+    options.signal?.addEventListener("abort", onAbort, { once: true });
     try {
       await client.initializeSession(options);
       return client;
@@ -132,6 +137,8 @@ export class AcpStdioClient {
       // Never leak a detached process group when the handshake fails.
       await client.forceExit(500);
       throw error;
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
     }
   }
 
@@ -159,11 +166,13 @@ export class AcpStdioClient {
   static async startProbe(
     options: AcpStartOptions & { timeoutMs: number; sessionMeta?: Record<string, unknown> },
   ): Promise<{ client: AcpStdioClient; session: unknown; deadline: number }> {
+    if (options.signal?.aborted === true) {
+      throw new Error("ACP probe aborted before the child was spawned.");
+    }
     const deadline = Date.now() + options.timeoutMs;
     const client = AcpStdioClient.spawnClient(options);
     const onAbort = (): void => client.signalGroup("SIGKILL");
     options.signal?.addEventListener("abort", onAbort, { once: true });
-    if (options.signal?.aborted === true) onAbort();
     try {
       // One total budget shared by both RPCs: a slow initialize cannot buy a
       // second full timeout for session/new.

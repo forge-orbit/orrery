@@ -41,7 +41,6 @@ export interface StartOptions {
   catalogProbeTimeoutMs?: number | undefined;
   /** Test seams: inject the harness list and observe each published catalog. */
   harnessDefinitions?: HarnessDefinition[] | undefined;
-  harnessCatalog?: HarnessCatalog | undefined;
   onCatalog?: ((catalog: HarnessCatalog) => void) | undefined;
 }
 
@@ -107,6 +106,7 @@ export async function start(options: StartOptions): Promise<void> {
     client,
     runnerId: runner.id,
     repoFingerprint: fingerprint,
+    initial: runner.harnessCatalog,
     configKey,
     onUnauthorized: () =>
       revoke("Catalog update rejected (401). Stopping local operation immediately."),
