@@ -260,7 +260,7 @@ export async function projectAccessCeilingInTransaction(
       projectAccessGrants,
       and(eq(projectAccessGrants.projectId, projects.id), eq(projectAccessGrants.humanId, humanId)),
     )
-    .where(inArray(projects.id, uniqueProjectIds));
+    .where(and(inArray(projects.id, uniqueProjectIds), isNull(projects.deletedAt)));
 
   const rowsById = new Map(rows.map((row) => [row.id, row]));
   const workspaceKind = WorkspaceKind.parse(workspace.kind);
@@ -493,6 +493,7 @@ const labelAgentCreator = alias(agents, "label_agent_creator");
 const dependencyHumanCreator = alias(humans, "dependency_human_creator");
 const dependencyAgentCreator = alias(agents, "dependency_agent_creator");
 const blockerIssue = alias(issues, "blocker_issue");
+const blockerProject = alias(projects, "blocker_project");
 
 const projectColumns = {
   id: projects.id,
@@ -1267,7 +1268,14 @@ async function loadBlockedByIdsForIssues(
     })
     .from(issueDependencies)
     .innerJoin(blockerIssue, eq(blockerIssue.id, issueDependencies.blockedByIssueId))
-    .where(and(inArray(issueDependencies.issueId, [...issueIds]), isNull(blockerIssue.deletedAt)))
+    .innerJoin(blockerProject, eq(blockerProject.id, blockerIssue.projectId))
+    .where(
+      and(
+        inArray(issueDependencies.issueId, [...issueIds]),
+        isNull(blockerIssue.deletedAt),
+        isNull(blockerProject.deletedAt),
+      ),
+    )
     .orderBy(issueDependencies.issueId, issueDependencies.blockedByIssueId);
   for (const row of rows) {
     const list = grouped.get(row.issueId) ?? [];
@@ -1699,23 +1707,27 @@ async function applyInvitationGrantsInTransaction(
   await lockWorkspaceOwnershipWrites(tx);
   const projectIds = [...new Set(offered.map((grant) => grant.projectId))];
   const currentProjects = await tx
-    .select({ id: projects.id, workspaceId: projects.workspaceId })
+    .select({ id: projects.id, workspaceId: projects.workspaceId, deletedAt: projects.deletedAt })
     .from(projects)
     .where(inArray(projects.id, projectIds));
-  const currentWorkspaceByProject = new Map(
-    currentProjects.map((project) => [project.id, project.workspaceId]),
-  );
+  const currentById = new Map(currentProjects.map((project) => [project.id, project]));
   const invalid = projectIds.filter(
-    (projectId) => currentWorkspaceByProject.get(projectId) !== workspaceId,
+    (projectId) => currentById.get(projectId)?.workspaceId !== workspaceId,
   );
   if (invalid.length > 0) return invalid;
+
+  const activeProjectIds = currentProjects
+    .filter((project) => project.deletedAt === null)
+    .map((project) => project.id);
+  if (activeProjectIds.length === 0) return [];
+  const activeProjectIdSet = new Set(activeProjectIds);
 
   const existing = await tx
     .select({ projectId: projectAccessGrants.projectId, level: projectAccessGrants.level })
     .from(projectAccessGrants)
     .where(
       and(
-        inArray(projectAccessGrants.projectId, projectIds),
+        inArray(projectAccessGrants.projectId, activeProjectIds),
         eq(projectAccessGrants.humanId, humanId),
       ),
     );
@@ -1729,6 +1741,7 @@ async function applyInvitationGrantsInTransaction(
     currentLevel: ProjectAccessLevel | null;
   }[] = [];
   for (const offer of offered) {
+    if (!activeProjectIdSet.has(offer.projectId)) continue;
     const currentLevel = levelByProject.get(offer.projectId) ?? null;
     const nextLevel =
       currentLevel === null || ACCESS_RANK[offer.level] > ACCESS_RANK[currentLevel]

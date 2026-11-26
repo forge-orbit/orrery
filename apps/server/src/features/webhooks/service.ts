@@ -16,7 +16,7 @@ import {
   type WebhooksResponse,
   type WebhookWithSecret,
 } from "@orrery/contract";
-import { and, asc, desc, eq, exists, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   agents,
@@ -353,7 +353,8 @@ async function loadWebhook(q: Queryable, webhookId: string): Promise<Webhook> {
   const projectRows = await q
     .select({ projectId: webhookProjects.projectId })
     .from(webhookProjects)
-    .where(eq(webhookProjects.webhookId, webhookId))
+    .innerJoin(projects, eq(webhookProjects.projectId, projects.id))
+    .where(and(eq(webhookProjects.webhookId, webhookId), isNull(projects.deletedAt)))
     .orderBy(asc(webhookProjects.projectId));
   return toWebhook(
     row,
@@ -617,6 +618,7 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
         key: projects.key,
         name: projects.name,
         workspaceId: projects.workspaceId,
+        deletedAt: projects.deletedAt,
       })
       .from(projects)
       .where(eq(projects.id, activity.projectId))
@@ -624,6 +626,7 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
     if (project === undefined) return;
 
     const event = WebhookEvent.parse(activity.type);
+    if (project.deletedAt !== null && event !== "project_deleted") return;
     const matching = await tx
       .select({ id: webhooks.id })
       .from(webhooks)
@@ -704,6 +707,8 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
         .select({
           projectId: projects.id,
           workspaceId: projects.workspaceId,
+          deletedAt: projects.deletedAt,
+          activityType: projectActivity.type,
         })
         .from(projectActivity)
         .innerJoin(projects, eq(projects.id, projectActivity.projectId))
@@ -713,6 +718,14 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
         return {
           ok: false,
           error: "project_transferred",
+          terminal: true,
+          skipCircuitBreaker: true,
+        };
+      }
+      if (target.deletedAt !== null && target.activityType !== "project_deleted") {
+        return {
+          ok: false,
+          error: "project_trashed",
           terminal: true,
           skipCircuitBreaker: true,
         };
@@ -867,10 +880,14 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
               projectId: webhookProjects.projectId,
             })
             .from(webhookProjects)
+            .innerJoin(projects, eq(webhookProjects.projectId, projects.id))
             .where(
-              inArray(
-                webhookProjects.webhookId,
-                rows.map((row) => row.id),
+              and(
+                inArray(
+                  webhookProjects.webhookId,
+                  rows.map((row) => row.id),
+                ),
+                isNull(projects.deletedAt),
               ),
             )
             .orderBy(asc(webhookProjects.projectId));
@@ -905,7 +922,11 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
             .select({ id: projects.id })
             .from(projects)
             .where(
-              and(eq(projects.workspaceId, workspaceId), inArray(projects.id, uniqueProjectIds)),
+              and(
+                eq(projects.workspaceId, workspaceId),
+                inArray(projects.id, uniqueProjectIds),
+                isNull(projects.deletedAt),
+              ),
             );
           if (inWorkspace.length !== uniqueProjectIds.length) {
             throw new WebhooksError("invalid_webhook_scope");
@@ -991,7 +1012,11 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
               .select({ id: projects.id })
               .from(projects)
               .where(
-                and(eq(projects.workspaceId, workspaceId), inArray(projects.id, uniqueProjectIds)),
+                and(
+                  eq(projects.workspaceId, workspaceId),
+                  inArray(projects.id, uniqueProjectIds),
+                  isNull(projects.deletedAt),
+                ),
               );
             if (inWorkspace.length !== uniqueProjectIds.length) {
               throw new WebhooksError("invalid_webhook_scope");
@@ -1076,12 +1101,23 @@ export function createWebhooksService(deps: WebhooksDeps): WebhooksService {
           await requireOwner(tx, actor, workspaceId);
           await assertWebhookInWorkspace(tx, workspaceId, webhookId);
           const rows = await tx
-            .select()
+            .select({ delivery: webhookDeliveries })
             .from(webhookDeliveries)
-            .where(eq(webhookDeliveries.webhookId, webhookId))
+            .leftJoin(projectActivity, eq(projectActivity.id, webhookDeliveries.activityId))
+            .leftJoin(projects, eq(projects.id, projectActivity.projectId))
+            .where(
+              and(
+                eq(webhookDeliveries.webhookId, webhookId),
+                or(
+                  eq(webhookDeliveries.event, "webhook.test"),
+                  eq(webhookDeliveries.event, "project_deleted"),
+                  isNull(projects.deletedAt),
+                ),
+              ),
+            )
             .orderBy(desc(webhookDeliveries.createdAt), desc(webhookDeliveries.id))
             .limit(50);
-          return { items: rows.map(toDelivery) };
+          return { items: rows.map((row) => toDelivery(row.delivery)) };
         },
         { accessMode: "read only" },
       );

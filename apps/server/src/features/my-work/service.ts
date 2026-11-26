@@ -107,7 +107,7 @@ export function createMyWorkService(deps: MyWorkDeps): MyWorkService {
               key: projects.key,
             })
             .from(projects)
-            .where(inArray(projects.workspaceId, workspaceIds));
+            .where(and(inArray(projects.workspaceId, workspaceIds), isNull(projects.deletedAt)));
           if (allProjects.length === 0) {
             return { assignedIssues: [], activeAgentSessions: [], needsInputQuestions: [] };
           }
