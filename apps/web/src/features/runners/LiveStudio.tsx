@@ -40,6 +40,7 @@ import { resolveUncertainDispatch } from "./commands.ts";
 import { NeedsInputComposer, PausedNeedsInput } from "./NeedsInput.tsx";
 import { ContextRail, DiagnosticBanners, LeaseCountdown, StreamCard } from "./StudioParts.tsx";
 import {
+  dispatchMetaQuery,
   issueDispatchesQuery,
   issueDispatchesQueryKey,
   streamQuery,
@@ -92,7 +93,15 @@ export function LiveStudio({
   const hasIssue = issueId !== "";
   const sessions = useQuery({ ...sessionsQuery(issueId, true), enabled: hasIssue });
   const dispatches = useQuery({ ...issueDispatchesQuery(issueId), enabled: hasIssue });
-  const dispatch = dispatches.data?.dispatches.find((entry) => entry.id === dispatchId);
+  const listed = dispatches.data?.dispatches.find((entry) => entry.id === dispatchId);
+  // Teammates with project Read access are not on the per-issue dispatch list
+  // (it only covers a human's own dispatches), so fetch this dispatch's
+  // metadata — including the custom prompt — directly. Non-members get 404.
+  const meta = useQuery({
+    ...dispatchMetaQuery(runnerId, dispatchId),
+    enabled: hasIssue && listed === undefined && dispatches.isSuccess,
+  });
+  const dispatch = listed ?? meta.data;
   const workspaceId = searchWorkspaceId ?? dispatch?.workspaceId ?? "";
   const session =
     sessions.data?.find((entry) => entry.id === dispatch?.workSessionId) ??
@@ -238,6 +247,7 @@ export function LiveStudio({
       childWorkers={run?.children ?? []}
       host={host}
       runner={runner}
+      prompt={dispatch?.prompt ?? undefined}
       selectedFile={selectedFile}
       onSelectFile={selectFile}
     />

@@ -25,6 +25,7 @@ import type {
   RunnerCommandsResponse,
   RunnerHost,
   RunnerPresence,
+  RunnerDispatchRequest,
   StreamBatchRequest,
   StreamBatchResponse,
   StreamResponse,
@@ -440,6 +441,7 @@ const dispatchBaseFields = {
   agentId: runnerDispatches.agentId,
   dispatchAttemptId: runnerDispatches.dispatchAttemptId,
   state: runnerDispatches.state,
+  prompt: runnerDispatches.prompt,
   runId: runnerDispatches.runId,
   workSessionId: runnerDispatches.workSessionId,
   lastUpSeq: runnerDispatches.lastUpSeq,
@@ -464,6 +466,7 @@ type DispatchRow = {
   agentId: string;
   dispatchAttemptId: string;
   state: Dispatch["state"];
+  prompt: string | null;
   runId: string | null;
   workSessionId: string | null;
   lastUpSeq: number;
@@ -486,6 +489,7 @@ const toDispatch = (row: DispatchRow): Dispatch => ({
   agentId: row.agentId,
   dispatchAttemptId: row.dispatchAttemptId,
   state: row.state,
+  prompt: row.prompt,
   runId: row.runId,
   workSessionId: row.workSessionId,
   lastUpSeq: row.lastUpSeq,
@@ -1570,6 +1574,7 @@ interface DispatchCreationInput {
   projectId: string;
   agentId: string;
   requestedByHumanId: string;
+  prompt: string | undefined;
 }
 
 /**
@@ -1665,6 +1670,7 @@ async function insertDispatchLocked(
       agentId: input.agentId,
       dispatchAttemptId: randomUUID(),
       state: "pending",
+      prompt: input.prompt ?? null,
       createdAt: sql`statement_timestamp()`,
     })
     .returning({ id: runnerDispatches.id });
@@ -1680,6 +1686,7 @@ async function insertDispatchLocked(
       projectId: input.projectId,
       workspaceId: input.workspaceId,
       agentId: input.agentId,
+      ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
     },
   });
   return toDispatch(row);
@@ -2338,6 +2345,10 @@ export function createRunnersService(deps: RunnersDeps) {
         }
 
         const agentId = input.agentId ?? joined.runner.agentId;
+        // A prompt that is only whitespace is the same as no prompt; a kept
+        // prompt is stored trimmed so Live Studio never shows padding.
+        const requestedPrompt = input.prompt ?? "";
+        const prompt = requestedPrompt.trim() === "" ? undefined : requestedPrompt.trim();
         const [agent] = await tx
           .select({ id: agents.id, name: agents.name })
           .from(agents)
@@ -2395,6 +2406,7 @@ export function createRunnersService(deps: RunnersDeps) {
             agentId,
             dispatchAttemptId: randomUUID(),
             state: "pending",
+            prompt: prompt ?? null,
             createdAt: sql`statement_timestamp()`,
           })
           .returning({ id: runnerDispatches.id });
@@ -2410,6 +2422,7 @@ export function createRunnersService(deps: RunnersDeps) {
             projectId: issue.projectId,
             workspaceId: issue.workspaceId,
             agentId,
+            ...(prompt === undefined ? {} : { prompt }),
           },
         });
         return toDispatch(row);
@@ -2565,6 +2578,7 @@ export function createRunnersService(deps: RunnersDeps) {
               projectId: runner.projectId,
               agentId: runner.agentId,
               requestedByHumanId: host.humanId,
+              prompt: undefined,
             });
             return { dispatch };
           } catch (error) {
@@ -2590,8 +2604,12 @@ export function createRunnersService(deps: RunnersDeps) {
     async createRunnerDispatch(
       credential: string | undefined,
       runnerId: string,
-      issueId: string,
+      input: RunnerDispatchRequest,
     ): Promise<Dispatch> {
+      const issueId = input.issueId;
+      const requestedPrompt = input.prompt ?? "";
+      // Same normalization as the manual path: trimmed, empty means omitted.
+      const prompt = requestedPrompt.trim() === "" ? undefined : requestedPrompt.trim();
       return db.transaction(async (tx) => {
         // Read-only live check, then lock the issue BEFORE the runner row.
         await authenticateHostRunnerForDeps(deps, tx, credential, runnerId, false, "contribute");
@@ -2631,6 +2649,7 @@ export function createRunnersService(deps: RunnersDeps) {
           projectId: issue.projectId,
           agentId: runner.agentId,
           requestedByHumanId: host.humanId,
+          prompt,
         });
       });
     },
@@ -2726,6 +2745,42 @@ export function createRunnersService(deps: RunnersDeps) {
             and(eq(runnerDispatches.issueId, issueId), eq(runnerHosts.humanId, human.humanId)),
           );
         return rows.map(toDispatch);
+      });
+    },
+
+    /**
+     * One Dispatch's metadata, including its prompt, for the Live Session
+     * Studio. Project readers may view it (issue #239); workspace members
+     * without project Read access keep receiving 404, never a 403 oracle.
+     */
+    async getDispatch(
+      credential: string | undefined,
+      account: SessionAccount | null,
+      dispatchId: string,
+    ): Promise<Dispatch> {
+      if (account === null) {
+        // Authenticate first: an anonymous or invalid host credential gets 401,
+        // never a 404 that would leak whether the dispatch id exists.
+        await db.transaction((tx) => readHostByCredential(tx, credential));
+      }
+      return db.transaction(async (tx) => {
+        const dispatch = await readDispatch(tx, dispatchId);
+        if (account !== null) {
+          if (!(await canSeeWorkspace(tx, dispatch.workspaceId, account.humanId))) {
+            throw new RunnersError("dispatch_not_found");
+          }
+          const ceiling = await projectAccessCeiling(tx, dispatch.workspaceId, account.humanId, [
+            dispatch.projectId,
+          ]);
+          if (!hasAccess(ceiling.get(dispatch.projectId), "read", projectAccessAtLeast)) {
+            throw new RunnersError("dispatch_not_found");
+          }
+          return toDispatch(dispatch);
+        }
+        // Runner host credential: the host owns every Runner it enrolled.
+        const host = await readHostByCredential(tx, credential);
+        if (dispatch.hostId !== host.host.id) throw new RunnersError("dispatch_not_found");
+        return toDispatch(dispatch);
       });
     },
 

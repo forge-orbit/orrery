@@ -206,6 +206,17 @@ export type DispatchId = z.infer<typeof DispatchId>;
 export const DispatchAttemptId = z.string().min(1).max(200).meta({ id: "DispatchAttemptId" });
 export type DispatchAttemptId = z.infer<typeof DispatchAttemptId>;
 
+/**
+ * Optional steering text the requester attaches to a Dispatch. The Runner
+ * appends it after its operational worktree/MCP preamble; every project reader
+ * may see it, so it must never carry secrets.
+ */
+export const DispatchPrompt = z
+  .string()
+  .max(16000, "Use at most 16,000 characters.")
+  .meta({ id: "DispatchPrompt" });
+export type DispatchPrompt = z.infer<typeof DispatchPrompt>;
+
 /** Database-backed reconciliation state of a Dispatch. */
 export const DispatchState = z
   .enum(["pending", "active", "uncertain", "ended"])
@@ -225,6 +236,7 @@ export const Dispatch = z
     agentId: z.string(),
     dispatchAttemptId: DispatchAttemptId,
     state: DispatchState,
+    prompt: DispatchPrompt.nullable(),
     runId: z.string().nullable(),
     workSessionId: z.string().nullable(),
     lastUpSeq: z.int().min(0),
@@ -242,6 +254,7 @@ export const CreateDispatchRequest = z
   .object({
     runnerId: RunnerId,
     agentId: z.string().min(1).max(200).optional(),
+    prompt: DispatchPrompt.optional(),
   })
   .meta({ id: "CreateDispatchRequest" });
 export type CreateDispatchRequest = z.infer<typeof CreateDispatchRequest>;
@@ -267,7 +280,10 @@ export type AutoClaimResponse = z.infer<typeof AutoClaimResponse>;
 
 /** A one-shot `orrery-runner work` dispatch targets one explicitly resolved issue. */
 export const RunnerDispatchRequest = z
-  .object({ issueId: z.string().min(1).max(200) })
+  .object({
+    issueId: z.string().min(1).max(200),
+    prompt: DispatchPrompt.optional(),
+  })
   .meta({ id: "RunnerDispatchRequest" });
 export type RunnerDispatchRequest = z.infer<typeof RunnerDispatchRequest>;
 
@@ -349,6 +365,7 @@ export const DispatchCommandPayload = z
     projectId: z.string(),
     workspaceId: z.string(),
     agentId: z.string(),
+    prompt: DispatchPrompt.optional(),
   })
   .meta({ id: "DispatchCommandPayload" });
 export type DispatchCommandPayload = z.infer<typeof DispatchCommandPayload>;

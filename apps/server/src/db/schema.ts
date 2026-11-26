@@ -1663,6 +1663,8 @@ export const runnerDispatches = pgTable(
       .notNull()
       .references(() => agents.id),
     dispatchAttemptId: text("dispatch_attempt_id").notNull(),
+    /** Optional requester steering text, appended by the Runner after its preamble. */
+    prompt: text("prompt"),
     state: text("state").$type<DispatchState>().notNull().default("pending"),
     runId: text("run_id").references(() => runs.id),
     workSessionId: text("work_session_id").references(() => workSessions.id),
@@ -1690,6 +1692,10 @@ export const runnerDispatches = pgTable(
       sql`${t.lastUpSeq} >= 0 and ${t.lastDownSeq} >= 0`,
     ),
     check("runner_dispatches_stream_batch_count_nonnegative", sql`${t.streamBatchCount} >= 0`),
+    check(
+      "runner_dispatches_prompt_bounded",
+      sql`${t.prompt} is null or char_length(${t.prompt}) <= 16000`,
+    ),
     check(
       "runner_dispatches_accepted_fields",
       sql`(${t.state} = 'pending' and ${t.acceptedAt} is null and ${t.runId} is null and ${t.workSessionId} is null)
