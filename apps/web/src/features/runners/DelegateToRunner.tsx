@@ -171,22 +171,26 @@ export function DelegateToRunner({
   const matchedMemoryHarness = memoryApplies
     ? harnessCatalog.find((entry) => entry.id === memory.harness)
     : undefined;
-  const harnessId =
+  const rawHarnessId =
     harnessOverride ??
     (memoryApplies ? (matchedMemoryHarness?.id ?? harnessCatalog[0]?.id ?? "") : "");
-  const selectedHarness = harnessCatalog.find((entry) => entry.id === harnessId);
+  const selectedHarness = harnessCatalog.find((entry) => entry.id === rawHarnessId);
+  // Validate manual harnessOverride against the live catalog so a background
+  // refetch that drops the chosen Harness never submits a vanished id.
+  const harnessId = selectedHarness?.id ?? "";
   // Only a remembered Harness that still exists may restore the remembered
   // model; a fallback Harness always starts on its own default model.
   const matchedMemoryModel =
     harnessOverride === undefined && matchedMemoryHarness !== undefined && memory !== undefined
       ? matchedMemoryHarness.models.find((entry) => entry.id === memory.model)
       : undefined;
-  const modelId =
+  const rawModelId =
     modelOverride ??
     (harnessOverride === undefined && memoryApplies
       ? (matchedMemoryModel?.id ?? defaultModelId(selectedHarness))
       : "");
-  const selectedModel = selectedHarness?.models.find((entry) => entry.id === modelId);
+  const selectedModel = selectedHarness?.models.find((entry) => entry.id === rawModelId);
+  const modelId = selectedModel?.id ?? "";
   const supportedEfforts = selectedModel?.supportedEfforts ?? [];
   // Effort is only restored when both the Harness and the Model matched;
   // a stale effort from a previous model is never sent with another.

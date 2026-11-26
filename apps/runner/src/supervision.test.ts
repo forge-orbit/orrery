@@ -752,4 +752,35 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
     expect(sets.find((item) => item.configId === "model")?.value).toBe("stub-deep");
     expect(sets.find((item) => item.configId === "thought_level")?.value).toBe("high");
   });
+
+  it("never bleeds CLI default model/effort onto a different Harness or model", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      defaults: { harness: "other-harness", model: "other-model", effort: "high" },
+    });
+    fixture.control.enqueueDispatch("TEST-241-NO-BLEED", undefined, { harness: "custom" });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const sets = (await events(fixture)).filter((item) => item.event === "set_config_option");
+    expect(sets.some((item) => item.value === "other-model")).toBe(false);
+    expect(sets.some((item) => item.value === "high")).toBe(false);
+  });
+
+  it("never inherits CLI default effort when the dispatch overrides the model", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      defaults: { harness: "custom", model: "stub-deep", effort: "high" },
+    });
+    fixture.control.enqueueDispatch("TEST-241-MODEL-OVERRIDE", undefined, {
+      harness: "custom",
+      model: "stub-fast",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const sets = (await events(fixture)).filter((item) => item.event === "set_config_option");
+    expect(sets.find((item) => item.configId === "model")?.value).toBe("stub-fast");
+    expect(sets.some((item) => item.configId === "thought_level")).toBe(false);
+  });
 });

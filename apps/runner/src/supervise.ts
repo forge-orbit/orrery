@@ -91,6 +91,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
   let cancelledReason = "";
   let revoked = false;
   let stopRenewal = false;
+  const dispatchAbort = new AbortController();
   // A deadline pause can arrive after a racing renewal 401 already cancelled
   // the slot. Remember it independently so a clean worktree is still preserved.
   let pausedByDeadline = false;
@@ -106,6 +107,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     // A cancel (deadline pause, teammate Stop or revocation) ends the claim:
     // no more lease renewals, even while a parked ACP process is winding down.
     stopRenewal = true;
+    dispatchAbort.abort(reason);
     pool.markDraining(slot);
     resolveCancelled?.(reason);
   };
@@ -288,11 +290,17 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       }
       harness = resolved;
     }
-    // A Dispatch that omits the model gets the cached Harness default passed
-    // explicitly, so a probe that briefly switched it cannot leak through.
-    const requestedModel =
-      command.model ?? config.defaults.model ?? options.defaultModelFor?.(harness.id) ?? undefined;
-    const requestedEffort = command.effort ?? config.defaults.effort;
+    // Only inherit CLI default model/effort when the dispatch stays on the
+    // default Harness (and, for effort, on the same model) so one Harness's
+    // CLI defaults never bleed into a dispatch targeting another Harness.
+    const harnessMatchesDefault =
+      command.harness === undefined || command.harness === config.defaults.harness;
+    const cliDefaultModel = harnessMatchesDefault ? config.defaults.model : undefined;
+    const modelMatchesDefault =
+      command.model === undefined || command.model === config.defaults.model;
+    const requestedEffort =
+      command.effort ??
+      (harnessMatchesDefault && modelMatchesDefault ? config.defaults.effort : undefined);
 
     // The claim is already active; start renewing before any local work begins.
     watchdog = setInterval(() => {
@@ -360,6 +368,11 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     const worktreePath = worktree.path;
     const worktreeReal = worktree.realPath;
     acp = await locks.run(harness.id, async () => {
+      if (cancelledAlready) throw new Error("dispatch cancelled before ACP start");
+      // Read the cached Harness default inside the per-Harness lock so a
+      // dispatch queued behind a startup probe sees the freshly probed default.
+      const requestedModel =
+        command.model ?? cliDefaultModel ?? options.defaultModelFor?.(harness.id) ?? undefined;
       const client = await AcpStdioClient.start({
         command: harness.command,
         args: harness.args,
@@ -367,7 +380,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
         env: Object.fromEntries(mcpConfig.env.map((item) => [item.name, item.value])),
         worktreeReal,
         mcpServers,
-        signal: options.signal,
+        signal: dispatchAbort.signal,
         onUpdate: (method, params) => spoolEvent(method, params),
         onStderr: (line) => {
           write(`acp stderr: ${line}`);
@@ -375,6 +388,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
         },
       });
       try {
+        if (cancelledAlready) throw new Error("dispatch cancelled during ACP start");
         let modelSwitchResult: unknown;
         if (requestedModel !== undefined) {
           try {
