@@ -7,6 +7,7 @@ import { readCredential } from "./credential.ts";
 import { defaultWorkDisplayName } from "./display-name.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
+import { commandOnPath, validateExplicitHarness } from "./harnesses.ts";
 import { resolveCredentialedOrigin } from "./origin.ts";
 import { validateCheckout } from "./checkout.ts";
 import { SlotPool, type SlotController, type SupervisionOutcome } from "./slots.ts";
@@ -43,6 +44,22 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
   });
   const repoPath = options.repoPath ?? process.cwd();
   validateCheckout(repoPath);
+  const supervision = options.supervision ?? loadSupervisionConfig();
+  // Eager startup validation (#266): fail fast before any network call when the
+  // explicit --harness is unknown/missing or the omitted-harness default is
+  // unavailable. One-shot work never warns-and-continues: it needs a runnable
+  // default immediately.
+  const explicitHarness = options.harness ?? supervision.defaults.harness;
+  if (explicitHarness !== undefined) {
+    validateExplicitHarness(
+      explicitHarness,
+      supervision.acpOverridden ? { acpOverride: supervision.acp } : {},
+    );
+  } else if (!supervision.acpOverridden && !commandOnPath("opencode")) {
+    throw new Error(
+      "Default Harness 'opencode' is not installed on PATH. Install it or pass --harness explicitly.",
+    );
+  }
   const client = new OrreryClient({
     server,
     credential: stored.credential,
@@ -111,7 +128,6 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     const acceptance = await client.acceptDispatch(runner.id, dispatch.id);
     write(`Accepted Dispatch ${dispatch.id}; work session ${acceptance.session.id} active.`);
 
-    const supervision = options.supervision ?? loadSupervisionConfig();
     const pool = new SlotPool(1);
     const slot = pool.acquire();
     if (slot === undefined) throw new Error("one-shot Runner has no free slot");

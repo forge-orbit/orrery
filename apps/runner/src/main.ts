@@ -5,6 +5,7 @@ import { readCredential } from "./credential.ts";
 import type { ReadyWorkFilter } from "@orrery/contract";
 import { loadSupervisionConfig } from "./config.ts";
 import { defaultHostDisplayName, validateDisplayName } from "./display-name.ts";
+import { shadowedPresetIds } from "./harnesses.ts";
 import { login } from "./login.ts";
 import { assertSecureOrigin, resolveLoginOrigin } from "./origin.ts";
 import { start } from "./start.ts";
@@ -228,6 +229,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         process.stdout.write(
           `Runner host '${stored.displayName}' (${stored.hostId}) enrolled with ${stored.server}.\n`,
         );
+        try {
+          for (const id of shadowedPresetIds()) {
+            process.stdout.write(`Harness preset '${id}' is shadowed by harnesses.json.\n`);
+          }
+        } catch (error) {
+          fail(error instanceof Error ? error.message : String(error));
+        }
         return;
       }
       default:

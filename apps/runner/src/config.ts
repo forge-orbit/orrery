@@ -43,6 +43,33 @@ export function loadSupervisionConfig(
   overrides: SupervisionOverrides = {},
   env: NodeJS.ProcessEnv = process.env,
 ): SupervisionConfig {
+  const harness = overrides.harness;
+  // `--harness <preset>` and an explicit ACP command/args override are mutually
+  // exclusive: silently ignoring one would dispatch the wrong Harness. The
+  // reserved `custom` id explicitly selects the override entry, so it is the
+  // only `--harness` value allowed alongside an override.
+  if (harness !== undefined && harness.toLowerCase() !== "custom") {
+    if (overrides.acp?.command !== undefined) {
+      throw new Error(
+        "Pass either --harness or --acp-command, not both: --harness selects a preset while --acp-command overrides it.",
+      );
+    }
+    if (overrides.acp?.args !== undefined) {
+      throw new Error(
+        "Pass either --harness or --acp-arg, not both: --harness selects a preset while --acp-arg overrides it.",
+      );
+    }
+    if (env.ORRERY_ACP_COMMAND !== undefined) {
+      throw new Error(
+        "Pass either --harness or ORRERY_ACP_COMMAND, not both: --harness selects a preset while ORRERY_ACP_COMMAND overrides it.",
+      );
+    }
+    if (env.ORRERY_ACP_ARGS !== undefined) {
+      throw new Error(
+        "Pass either --harness or ORRERY_ACP_ARGS, not both: --harness selects a preset while ORRERY_ACP_ARGS overrides it.",
+      );
+    }
+  }
   const acpOverridden =
     overrides.acp?.command !== undefined ||
     overrides.acp?.args !== undefined ||

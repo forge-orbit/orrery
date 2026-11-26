@@ -308,10 +308,18 @@ export function adapterForHarness(definition: HarnessDefinition): HarnessAdapter
   if (definition.source === "override" || definition.id.toLowerCase() === "custom") {
     return genericAcpAdapter;
   }
-  const id = definition.id.toLowerCase();
   const command = basename(definition.command.replace(/\\/g, "/"))
     .replace(/\.(exe|cmd|bat)$/i, "")
     .toLowerCase();
+  // A `source: "user"` entry reusing a preset ID with an unrelated command must
+  // not inherit that preset's dialect: match user entries by command only.
+  if (definition.source === "user") {
+    if (command === "hermes") return hermesAdapter;
+    if (command === "opencode") return openCodeAdapter;
+    if (command === "omp") return ompAdapter;
+    return genericAcpAdapter;
+  }
+  const id = definition.id.toLowerCase();
   if (id === "hermes" || command === "hermes") return hermesAdapter;
   if (id === "opencode" || command === "opencode") return openCodeAdapter;
   if (id === "omp" || command === "omp") return ompAdapter;

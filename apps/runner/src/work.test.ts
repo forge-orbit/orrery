@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DispatchCommandPayload } from "@orrery/contract";
 import { loadSupervisionConfig } from "./config.ts";
+import type * as credential from "./credential.ts";
+import type * as harnesses from "./harnesses.ts";
 import { work } from "./work.ts";
+
+const noOpencodeFlag = "orrery266NoOpencode";
 
 const captured = vi.hoisted(() => ({
   command: undefined as DispatchCommandPayload | undefined,
@@ -52,15 +56,37 @@ const dispatch = {
   endedAt: null,
 } as const;
 
-vi.mock("./credential.ts", () => ({
-  readCredential: async () => ({
-    server: "http://127.0.0.1:8080",
-    hostId: "host-1",
-    credential: "orr_rh_local-credential-1234567890",
-    displayName: "TestLaptop",
-    platform: "linux-x64",
-  }),
-}));
+vi.mock("./credential.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof credential>();
+  return {
+    ...actual,
+    readCredential: async () => ({
+      server: "http://127.0.0.1:8080",
+      hostId: "host-1",
+      credential: "orr_rh_local-credential-1234567890",
+      displayName: "TestLaptop",
+      platform: "linux-x64",
+    }),
+  };
+});
+
+vi.mock("./harnesses.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof harnesses>();
+  return {
+    ...actual,
+    validateExplicitHarness: () => ({
+      id: "node",
+      displayName: "Node",
+      source: "user" as const,
+      command: process.execPath,
+      args: [],
+    }),
+    commandOnPath: (...args: Parameters<typeof actual.commandOnPath>) => {
+      if ((globalThis as Record<string, unknown>)[noOpencodeFlag] === true) return false;
+      return actual.commandOnPath(...args);
+    },
+  };
+});
 
 vi.mock("./checkout.ts", () => ({
   validateCheckout: () => ({ repoRoot: "/tmp/repo", mainRoot: "/tmp/repo" }),
@@ -194,5 +220,20 @@ describe("one-shot work execution options (#241)", () => {
       model: "stub-deep",
       effort: "high",
     });
+  });
+
+  it("fails fast when the default opencode Harness is missing (#266)", async () => {
+    delete process.env.ORRERY_URL;
+    (globalThis as Record<string, unknown>)[noOpencodeFlag] = true;
+    try {
+      await expect(
+        work("KEY-1", {
+          server: "http://127.0.0.1:8080",
+          supervision: loadSupervisionConfig({}, {}),
+        }),
+      ).rejects.toThrow(/opencode.*not installed/);
+    } finally {
+      delete (globalThis as Record<string, unknown>)[noOpencodeFlag];
+    }
   });
 });

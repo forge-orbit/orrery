@@ -71,9 +71,13 @@ describe("built-in ACP harness detection", () => {
     const dir = makeDir();
     const bin = join(dir, "bin");
     mkdirSync(bin);
-    for (const command of ["opencode", "codex", "hermes"]) {
+    for (const command of ["opencode", "codex-acp", "hermes"]) {
       writeFileSync(join(bin, command), "#!/bin/sh\n", { mode: 0o755 });
     }
+    const customOpencode = join(dir, "custom-opencode");
+    writeFileSync(customOpencode, "#!/bin/sh\n", { mode: 0o755 });
+    const localAcp = join(dir, "local-acp");
+    writeFileSync(localAcp, "#!/bin/sh\n", { mode: 0o755 });
     const configDir = join(dir, "config");
     mkdirSync(configDir);
     writeFileSync(
@@ -83,10 +87,10 @@ describe("built-in ACP harness detection", () => {
           {
             id: "opencode",
             displayName: "My OpenCode",
-            command: "/custom/opencode",
+            command: customOpencode,
             args: ["acp"],
           },
-          { id: "local", displayName: "Local ACP", command: "/usr/local/bin/local-acp" },
+          { id: "local", displayName: "Local ACP", command: localAcp },
         ],
       }),
     );
@@ -100,7 +104,7 @@ describe("built-in ACP harness detection", () => {
     expect(ids).toEqual(expect.arrayContaining(["codex", "hermes", "custom", "local"]));
     expect(ids).toContain("opencode");
     expect(ids.filter((id) => id === "opencode")).toHaveLength(1);
-    expect(detected.find((item) => item.id === "opencode")?.command).toBe("/custom/opencode");
+    expect(detected.find((item) => item.id === "opencode")?.command).toBe(customOpencode);
     expect(detected.find((item) => item.id === "custom")).toMatchObject({
       command: process.execPath,
       args: ["--acp-arg", "stub"],

@@ -51,6 +51,8 @@ interface FixtureOptions {
   defaultModel?: string | undefined;
   /** Override detected local Harnesses (issue #242). */
   harnessDefinitions?: HarnessDefinition[] | undefined;
+  /** Write these user harnesses to harnesses.json before startup (#266). */
+  userHarnesses?: Array<{ id: string; displayName: string; args?: string[] }> | undefined;
   /** Simulated CLI default file used by targeted probe tests (#242). */
   defaultFile?: string | undefined;
   catalogProbeTimeoutMs?: number | undefined;
@@ -147,8 +149,29 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
   else delete process.env.STUB_ACP_REJECT_EFFORT;
   const stop = new AbortController();
   const lines: string[] = [];
+  if (options.userHarnesses !== undefined) {
+    await writeFile(
+      join(configDir, "harnesses.json"),
+      JSON.stringify({
+        harnesses: options.userHarnesses.map((item) => ({
+          id: item.id,
+          displayName: item.displayName,
+          command: process.execPath,
+          args: item.args ?? [stubPath],
+        })),
+      }),
+    );
+  }
+  // #266 mutual exclusion: an explicit --harness default cannot combine with a
+  // stub --acp-command override. Tests that need both a non-custom default and
+  // a stub spawn use harnesses.json entries (real filesystem) instead.
+  const needsOverride =
+    options.userHarnesses === undefined &&
+    (options.harnessDefinitions === undefined ||
+      options.defaults?.harness === undefined ||
+      options.defaults.harness.toLowerCase() === "custom");
   const config = loadSupervisionConfig({
-    acp: { command: process.execPath, args: [stubPath] },
+    ...(needsOverride ? { acp: { command: process.execPath, args: [stubPath] } } : {}),
     ...(options.leaseRenewMs === undefined ? {} : { leaseRenewMs: options.leaseRenewMs }),
     ...(options.cancelGraceMs === undefined ? {} : { cancelGraceMs: options.cancelGraceMs }),
     ...(options.defaults?.harness === undefined ? {} : { harness: options.defaults.harness }),
@@ -162,7 +185,7 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
       repoFingerprint(repo),
       options.cachedCatalog,
       configDir,
-      harnessConfigKey({ acpOverride: config.acp }),
+      harnessConfigKey(config.acpOverridden ? { acpOverride: config.acp } : {}),
     );
   }
   const done = start({
@@ -836,8 +859,12 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
     const fixture = await makeFixture({
       mode: "normal",
       defaults: { harness: "other-harness", model: "other-model", effort: "high" },
+      userHarnesses: [
+        { id: "other-harness", displayName: "Other" },
+        { id: "second-harness", displayName: "Second" },
+      ],
     });
-    fixture.control.enqueueDispatch("TEST-241-NO-BLEED", undefined, { harness: "custom" });
+    fixture.control.enqueueDispatch("TEST-241-NO-BLEED", undefined, { harness: "second-harness" });
     const session = await settledSession(fixture);
     expect(session.status).toBe("completed");
 
@@ -861,6 +888,44 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
     const sets = (await events(fixture)).filter((item) => item.event === "set_config_option");
     expect(sets.find((item) => item.configId === "model")?.value).toBe("stub-fast");
     expect(sets.some((item) => item.configId === "thought_level")).toBe(false);
+  });
+});
+
+describe("omitted-harness default resolution (#266)", { timeout: 30_000 }, () => {
+  it("uses the override entry when the dispatch omits harness with an ACP override", async () => {
+    const fixture = await makeFixture({ mode: "normal" });
+    fixture.control.enqueueDispatch("TEST-266-OMITTED-OVERRIDE");
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    expect((await events(fixture)).some((item) => item.event === "session/new")).toBe(true);
+  });
+
+  it("warns at startup and reports harness_unavailable when opencode is missing but another Harness exists", async () => {
+    const savedPath = process.env.PATH ?? "";
+    // Simulate a machine without any preset binary regardless of the
+    // developer's PATH: only system dirs remain, so bundled shims are hidden.
+    process.env.PATH = "/usr/bin:/bin";
+    try {
+      const fixture = await makeFixture({
+        mode: "normal",
+        userHarnesses: [{ id: "team-harness", displayName: "Team" }],
+      });
+      await until(() =>
+        fixture.lines.some((line) => line.includes("default Harness 'opencode' is not installed")),
+      );
+      fixture.control.enqueueDispatch("TEST-266-MISSING-DEFAULT");
+      const session = await settledSession(fixture);
+      expect(session.status).toBe("released");
+
+      await until(() => fixture.control.chunks().some((chunk) => chunk.kind === "diagnostic"));
+      const diagnostic = fixture.control
+        .chunks()
+        .find((chunk) => chunk.kind === "diagnostic")?.diagnostic;
+      expect(diagnostic).toMatchObject({ kind: "harness_unavailable", harness: "opencode" });
+      expect((await events(fixture)).some((item) => item.event === "session/new")).toBe(false);
+    } finally {
+      process.env.PATH = savedPath;
+    }
   });
 });
 
