@@ -1,6 +1,10 @@
 import type { HarnessCatalog, ReadyWorkFilter } from "@orrery/contract";
 import { adapterForHarness, type AdapterResolver } from "./adapter.ts";
-import { runnerFingerprint as checkoutRunnerFingerprint, validateCheckout } from "./checkout.ts";
+import {
+  bindingFingerprint,
+  runnerFingerprint as checkoutRunnerFingerprint,
+  validateCheckout,
+} from "./checkout.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import {
   CatalogPublisher,
@@ -26,14 +30,25 @@ import {
 } from "./harnesses.ts";
 import { acquireCheckoutLock } from "./lock.ts";
 import { resolveCredentialedOrigin } from "./origin.ts";
+import { findBinding, readReposFile, saveBinding } from "./repos.ts";
+import { mapRegistrationError, resolveTargets, type ChooseFn } from "./resolution.ts";
 import { SlotPool, type SlotController } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
 export interface StartOptions {
   server?: string | undefined;
-  workspaceId: string;
-  projectId: string;
+  /** Human-readable `--workspace` (ID, name or slug) or UUID. Omit when a saved binding applies. */
+  workspaceId?: string | undefined;
+  /** Human-readable `--project` (ID, key or name) or UUID. Omit when a saved binding applies. */
+  projectId?: string | undefined;
+  /** Agent UUID (server-validated) or human-readable name resolved via targets. */
   agentId?: string | undefined;
+  /** Re-resolve targets (picker/flags) and persist the binding after registration succeeds. */
+  reconfigure?: boolean | undefined;
+  /** Test seam: inject the interactive picker's choice function. */
+  choose?: ChooseFn | undefined;
+  /** Test seam: override TTY detection for the interactive picker. */
+  isTTY?: boolean | undefined;
   displayName?: string | undefined;
   capabilities?: string[] | undefined;
   maxConcurrency?: number | undefined;
@@ -83,6 +98,7 @@ export async function start(options: StartOptions): Promise<void> {
   const repoPath = options.repoPath ?? process.cwd();
   const checkout = validateCheckout(repoPath);
   const fingerprint = checkoutRunnerFingerprint(repoPath);
+  const checkoutBindingFingerprint = bindingFingerprint(repoPath);
   const displayName =
     options.displayName === undefined
       ? defaultStartDisplayName(stored.displayName, checkout)
@@ -174,17 +190,54 @@ export async function start(options: StartOptions): Promise<void> {
     // Only a cache hit seeds registration: omitting the field lets the server
     // keep a previously stored catalog when this Runner re-registers before probing.
     const cached = readCachedCatalog(fingerprint, undefined, configKey);
-    const runner = await client.registerRunner({
-      workspaceId: options.workspaceId,
-      projectId: options.projectId,
-      ...(options.agentId === undefined ? {} : { agentId: options.agentId }),
-      displayName,
-      repoFingerprint: fingerprint,
-      capabilities: options.capabilities ?? [],
-      maxConcurrency: options.maxConcurrency ?? 1,
-      ephemeral: false,
-      ...(cached === null ? {} : { harnessCatalog: cached }),
+    // Zero-flag start (#267): explicit flags > saved binding > interactive
+    // picker (TTY) > non-TTY fail-fast. The saved binding is only read here,
+    // after the lock, so lock contention still fails with zero HTTP.
+    const bindings = await readReposFile();
+    const binding = findBinding(bindings, server, checkoutBindingFingerprint);
+    const resolved = await resolveTargets({
+      client,
+      flags: {
+        ...(options.workspaceId === undefined ? {} : { workspace: options.workspaceId }),
+        ...(options.projectId === undefined ? {} : { project: options.projectId }),
+        ...(options.agentId === undefined ? {} : { agent: options.agentId }),
+      },
+      binding,
+      bindingFingerprint: checkoutBindingFingerprint,
+      storedHostId: stored.hostId,
+      write,
+      choose: options.choose,
+      isTTY: options.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY),
+      alwaysSave: options.reconfigure === true,
     });
+    let runner: Awaited<ReturnType<OrreryClient["registerRunner"]>>;
+    try {
+      runner = await client.registerRunner({
+        workspaceId: resolved.workspaceId,
+        projectId: resolved.projectId,
+        ...(resolved.agentId === undefined ? {} : { agentId: resolved.agentId }),
+        displayName,
+        repoFingerprint: fingerprint,
+        capabilities: options.capabilities ?? [],
+        maxConcurrency: options.maxConcurrency ?? 1,
+        ephemeral: false,
+        ...(cached === null ? {} : { harnessCatalog: cached }),
+      });
+    } catch (error) {
+      // A stale binding never auto-deletes `repos.json`: report the exact
+      // cause with its remediation and leave the file unchanged.
+      throw mapRegistrationError(error, {
+        workspaceId: resolved.workspaceId,
+        projectId: resolved.projectId,
+      });
+    }
+    // Persist the (possibly new) binding only after `registerRunner` succeeds,
+    // so a failed `--reconfigure` or first-time save never destroys a working
+    // binding.
+    if (resolved.bindingToSave !== null) {
+      const savedPath = await saveBinding(resolved.bindingToSave);
+      write(`Saved checkout binding in ${savedPath}.`);
+    }
     write(`Runner ${runner.id} registered (${runner.presence}).`);
 
     const publisher = new CatalogPublisher({

@@ -9,6 +9,7 @@ import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
 import { loadUserHarnesses, resolveDefaultHarness, validateExplicitHarness } from "./harnesses.ts";
 import { resolveCredentialedOrigin } from "./origin.ts";
+import { resolveWorkAgent } from "./resolution.ts";
 import { validateCheckout } from "./checkout.ts";
 import { SlotPool, type SlotController, type SupervisionOutcome } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
@@ -66,6 +67,10 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     credential: stored.credential,
     signal: options.signal,
   });
+  // A human-readable `--agent` name resolves against the host's top-level
+  // targets; UUID-shaped values pass through for server-side validation.
+  const agentId =
+    options.agentId === undefined ? undefined : await resolveWorkAgent(client, options.agentId);
   const resolved = await client.resolveIssue({
     target,
     ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
@@ -82,7 +87,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
   const runner = await client.registerRunner({
     workspaceId: resolved.workspaceId,
     projectId: resolved.projectId,
-    ...(options.agentId === undefined ? {} : { agentId: options.agentId }),
+    ...(agentId === undefined ? {} : { agentId }),
     displayName: defaultWorkDisplayName(stored.displayName),
     repoFingerprint: fingerprint,
     capabilities: [],

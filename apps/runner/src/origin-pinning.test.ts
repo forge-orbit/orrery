@@ -107,6 +107,31 @@ async function writeCredential(dir: string, server: string, displayName = "TestL
   );
 }
 
+/** Discovery payload matching the w/p ids used by the start tests below. */
+function targetsJson() {
+  return {
+    workspaces: [
+      {
+        id: "w",
+        name: "W",
+        slug: "w",
+        kind: "shared",
+        projects: [{ id: "p", key: "P", name: "P", accessLevel: "manage" }],
+      },
+    ],
+    agents: [{ id: "agent-1", name: "Agent One" }],
+    defaultAgentId: "agent-1",
+  };
+}
+
+function serveTargets(req: IncomingMessage, res: ServerResponse): boolean {
+  if (req.method === "GET" && req.url === "/api/runners/targets") {
+    json(res, 200, targetsJson());
+    return true;
+  }
+  return false;
+}
+
 function runnerJson(id: string, fingerprint = "a".repeat(64)) {
   const now = new Date().toISOString();
   return {
@@ -184,6 +209,7 @@ describe("origin pinning, transport hardening and offline status (#264)", () => 
     const dir = await makeDir();
     const repo = await makeRepo();
     const stub = await listen(async (req, res) => {
+      if (serveTargets(req, res)) return;
       if (req.method === "POST" && req.url === "/api/runners/register") {
         json(res, 201, runnerJson("r-1"));
         return;
@@ -242,6 +268,7 @@ describe("origin pinning, transport hardening and offline status (#264)", () => 
     const dir = await makeDir();
     const repo = await makeRepo();
     const stub = await listen(async (req, res) => {
+      if (serveTargets(req, res)) return;
       if (req.method === "POST" && req.url === "/api/runners/register") {
         res.writeHead(302, { location: "https://evil.test/" });
         res.end();
@@ -289,6 +316,7 @@ describe("origin pinning, transport hardening and offline status (#264)", () => 
     const dir = await makeDir();
     const repo = await makeRepo();
     const stub = await listen(async (req, res) => {
+      if (serveTargets(req, res)) return;
       if (req.method === "POST" && req.url === "/api/runners/register") {
         let body = "";
         req.on("data", (c) => (body += String(c)));
@@ -384,6 +412,7 @@ describe("origin pinning, transport hardening and offline status (#264)", () => 
     const link = join(repo, "..", "linked-ind");
     execFileSync("git", ["-C", repo, "worktree", "add", link, "-b", "linked-ind-branch"]);
     const stub = await listen(async (req, res) => {
+      if (serveTargets(req, res)) return;
       let body = "";
       req.on("data", (c) => (body += String(c)));
       req.on("end", () => {
@@ -423,6 +452,7 @@ describe("origin pinning, transport hardening and offline status (#264)", () => 
 
       // A failed registration must not leak the lockfile.
       const failing = await listen(async (req, res) => {
+        if (serveTargets(req, res)) return;
         if (req.method === "POST" && req.url === "/api/runners/register") {
           json(res, 500, { status: 500, code: "boom", title: "Boom" });
           return;

@@ -570,6 +570,29 @@ export class TestOrrery {
       sendJson(res, 201, this.runner());
       return;
     }
+    if (req.method === "GET" && path === "/api/runners/targets") {
+      sendJson(res, 200, {
+        workspaces: [
+          {
+            id: "workspace-1",
+            name: "Workspace One",
+            slug: "workspace-one",
+            kind: "shared",
+            projects: [
+              {
+                id: "project-1",
+                key: "P1",
+                name: "Project One",
+                accessLevel: "manage",
+              },
+            ],
+          },
+        ],
+        agents: [{ id: "agent-1", name: "Agent One" }],
+        defaultAgentId: "agent-1",
+      });
+      return;
+    }
     const catalogPut = path.match(/^\/api\/runners\/[^/]+\/catalog$/);
     if (req.method === "PUT" && catalogPut !== null) {
       const body = recordOf(await bodyOf(req)) ?? {};

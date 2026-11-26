@@ -12,6 +12,8 @@ const flags = vi.hoisted(() => ({ noOpencode: false }));
 
 const captured = vi.hoisted(() => ({
   command: undefined as DispatchCommandPayload | undefined,
+  getTargetsCalls: 0,
+  registeredAgentId: undefined as string | undefined,
 }));
 
 const runner = {
@@ -130,7 +132,16 @@ vi.mock("./client.ts", () => {
         title: "One-shot dispatch",
       };
     }
-    async registerRunner() {
+    async getTargets() {
+      captured.getTargetsCalls += 1;
+      return {
+        workspaces: [],
+        agents: [{ id: "agent-9", name: "Nina" }],
+        defaultAgentId: "agent-9",
+      };
+    }
+    async registerRunner(input: { agentId?: string }) {
+      captured.registeredAgentId = input.agentId;
       return runner;
     }
     async reconnect() {
@@ -270,5 +281,45 @@ describe("one-shot work execution options (#241)", () => {
         supervision: loadSupervisionConfig({}, {}),
       }),
     ).rejects.toThrow(/harnesses\.json/);
+  });
+
+  it("resolves a human-readable --agent name via targets (#267)", async () => {
+    captured.getTargetsCalls = 0;
+    captured.registeredAgentId = undefined;
+    const outcome = await work("KEY-1", {
+      server: "http://127.0.0.1:8080",
+      agentId: "Nina",
+      supervision: loadSupervisionConfig({}, {}),
+    });
+    expect(outcome).toBe("completed");
+    expect(captured.getTargetsCalls).toBe(1);
+    expect(captured.registeredAgentId).toBe("agent-9");
+  });
+
+  it("passes agent UUIDs through without a targets round-trip (#267)", async () => {
+    captured.getTargetsCalls = 0;
+    captured.registeredAgentId = undefined;
+    const uuid = "12345678-1234-1234-1234-1234567890ab";
+    const outcome = await work("KEY-1", {
+      server: "http://127.0.0.1:8080",
+      agentId: uuid,
+      supervision: loadSupervisionConfig({}, {}),
+    });
+    expect(outcome).toBe("completed");
+    expect(captured.getTargetsCalls).toBe(0);
+    expect(captured.registeredAgentId).toBe(uuid);
+  });
+
+  it("fails an unknown --agent name without registering (#267)", async () => {
+    captured.getTargetsCalls = 0;
+    captured.registeredAgentId = undefined;
+    await expect(
+      work("KEY-1", {
+        server: "http://127.0.0.1:8080",
+        agentId: "Zed",
+        supervision: loadSupervisionConfig({}, {}),
+      }),
+    ).rejects.toThrow(/No agent matches 'Zed'/);
+    expect(captured.registeredAgentId).toBeUndefined();
   });
 });
