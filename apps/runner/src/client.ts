@@ -5,6 +5,7 @@ import {
   DeviceCodeResponse,
   Dispatch,
   DispatchAcceptance,
+  type HarnessCatalog,
   HostCredentialResponse,
   IssueResolveResponse,
   ReconnectResponse,
@@ -123,6 +124,16 @@ export class OrreryClient {
       await this.request(`/api/runners/${encodeURIComponent(runnerId)}/heartbeat`, {
         method: "POST",
         body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  /** Publish discovered harnesses separately so heartbeats stay small. */
+  async putCatalog(runnerId: string, catalog: HarnessCatalog) {
+    return Runner.parse(
+      await this.request(`/api/runners/${encodeURIComponent(runnerId)}/catalog`, {
+        method: "PUT",
+        body: JSON.stringify(catalog),
       }),
     );
   }

@@ -5,6 +5,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { EMPTY_HARNESS_CATALOG } from "@orrery/contract";
 
 export interface TestSession {
   id: string;
@@ -181,6 +182,7 @@ export class TestOrrery {
       displayName: "TestLaptop",
       repoFingerprint: "0".repeat(64),
       capabilities: [],
+      harnessCatalog: EMPTY_HARNESS_CATALOG,
       maxConcurrency: 1,
       activeSlotCount: 0,
       lastSeenAt: now(),

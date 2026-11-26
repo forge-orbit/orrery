@@ -9,6 +9,7 @@ import type {
   Dispatch,
   DispatchAcceptance,
   ExchangeDeviceCodeRequest,
+  HarnessCatalog,
   IssueResolveRequest,
   IssueResolveResponse,
   ReadyWorkFilter,
@@ -31,7 +32,14 @@ import type {
   WorkSession,
   WorkspaceRunnersFleet,
 } from "@orrery/contract";
-import { RunnerCommand, SessionDiagnostic, StreamChunk, WorkSessionStatus } from "@orrery/contract";
+import {
+  EMPTY_HARNESS_CATALOG,
+  mergeHarnessCatalog,
+  RunnerCommand,
+  SessionDiagnostic,
+  StreamChunk,
+  WorkSessionStatus,
+} from "@orrery/contract";
 import {
   and,
   asc,
@@ -279,6 +287,7 @@ const runnerFields = {
   displayName: runners.displayName,
   repoFingerprint: runners.repoFingerprint,
   capabilities: runners.capabilities,
+  harnessCatalog: runners.harnessCatalog,
   maxConcurrency: runners.maxConcurrency,
   activeSlotCount: runners.activeSlotCount,
   lastSeenAt: runners.lastSeenAt,
@@ -297,6 +306,7 @@ type RunnerRow = {
   displayName: string;
   repoFingerprint: string;
   capabilities: string[];
+  harnessCatalog: HarnessCatalog;
   maxConcurrency: number;
   activeSlotCount: number;
   lastSeenAt: Date;
@@ -315,6 +325,7 @@ const toRunnerResponse = (row: RunnerRow): Runner => ({
   displayName: row.displayName,
   repoFingerprint: row.repoFingerprint,
   capabilities: row.capabilities,
+  harnessCatalog: row.harnessCatalog,
   maxConcurrency: row.maxConcurrency,
   activeSlotCount: row.activeSlotCount,
   lastSeenAt: row.lastSeenAt.toISOString(),
@@ -2136,8 +2147,9 @@ export function createRunnersService(deps: RunnersDeps) {
         const [existing] = input.ephemeral
           ? []
           : await tx
-              .select({ id: runners.id })
+              .select({ id: runners.id, harnessCatalog: runners.harnessCatalog })
               .from(runners)
+              .for("update")
               .where(
                 and(
                   eq(runners.hostId, host.host.id),
@@ -2154,6 +2166,13 @@ export function createRunnersService(deps: RunnersDeps) {
               agentId,
               displayName: input.displayName ?? host.host.displayName,
               capabilities: input.capabilities,
+              // A re-register before the startup probe finishes carries no (or
+              // an empty) catalog. Never wipe previously stored harnesses or
+              // their "known" effort levels (ADR-0011's DiscoveredLevelsNeverLost).
+              harnessCatalog:
+                input.harnessCatalog === undefined || input.harnessCatalog.harnesses.length === 0
+                  ? existing.harnessCatalog
+                  : mergeHarnessCatalog(existing.harnessCatalog, input.harnessCatalog),
               maxConcurrency: input.maxConcurrency,
               activeSlotCount: 0,
               lastSeenAt: sql`statement_timestamp()`,
@@ -2176,6 +2195,7 @@ export function createRunnersService(deps: RunnersDeps) {
             displayName: input.displayName ?? host.host.displayName,
             repoFingerprint: fingerprint,
             capabilities: input.capabilities,
+            harnessCatalog: input.harnessCatalog ?? EMPTY_HARNESS_CATALOG,
             maxConcurrency: input.maxConcurrency,
             activeSlotCount: 0,
           })
@@ -2217,6 +2237,26 @@ export function createRunnersService(deps: RunnersDeps) {
           .update(runnerHosts)
           .set({ lastSeenAt: sql`statement_timestamp()` })
           .where(eq(runnerHosts.id, host.host.id));
+        const row = await joinRunner(tx, runnerId);
+        if (row === undefined) throw new RunnersError("runner_not_found");
+        return toRunnerResponse(row);
+      });
+    },
+
+    /**
+     * Host-authenticated catalog publication. Heartbeats stay lean; a Runner
+     * pushes its discovered harnesses here instead. The existing row is read
+     * under FOR UPDATE so two concurrent refreshes cannot lose a known model.
+     */
+    async updateCatalog(
+      credential: string | undefined,
+      runnerId: string,
+      input: HarnessCatalog,
+    ): Promise<Runner> {
+      return db.transaction(async (tx) => {
+        const { runner } = await authenticateHostRunnerForDeps(deps, tx, credential, runnerId);
+        const merged = mergeHarnessCatalog(runner.harnessCatalog, input);
+        await tx.update(runners).set({ harnessCatalog: merged }).where(eq(runners.id, runnerId));
         const row = await joinRunner(tx, runnerId);
         if (row === undefined) throw new RunnersError("runner_not_found");
         return toRunnerResponse(row);

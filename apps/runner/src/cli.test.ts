@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { afterAll, describe, expect, it } from "vitest";
 import { TestOrrery } from "./test-orrery.ts";
+import { EMPTY_HARNESS_CATALOG } from "@orrery/contract";
 
 const deviceRequestBody = z.object({ verifierHash: z.string(), hostDisplayName: z.string() });
 const tokenRequestBody = z.object({ deviceCode: z.string(), verifier: z.string() });
@@ -191,6 +192,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           displayName: "TestLaptop",
           repoFingerprint: registration.repoFingerprint,
           capabilities: [],
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),
@@ -263,6 +265,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           displayName: "TestLaptop",
           repoFingerprint: sha256("checkout"),
           capabilities: [],
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),
@@ -285,6 +288,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
             displayName: "TestLaptop",
             repoFingerprint: sha256("checkout"),
             capabilities: [],
+            harnessCatalog: EMPTY_HARNESS_CATALOG,
             maxConcurrency: 1,
             activeSlotCount: 0,
             lastSeenAt: new Date().toISOString(),
@@ -355,6 +359,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           displayName: "TestLaptop",
           repoFingerprint: sha256("checkout"),
           capabilities: [],
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),
@@ -416,6 +421,7 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
           displayName: "TestLaptop",
           repoFingerprint: sha256("checkout"),
           capabilities: [],
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
           maxConcurrency: 1,
           activeSlotCount: 0,
           lastSeenAt: new Date().toISOString(),

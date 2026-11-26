@@ -400,6 +400,13 @@
       "when": 1795660041386,
       "tag": "0056_old_hedge_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795663039063,
+      "tag": "0057_swift_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }

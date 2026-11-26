@@ -9,6 +9,8 @@ export interface AcpHarnessConfig {
 /** Timing and layout knobs for local dispatch supervision. */
 export interface SupervisionConfig {
   acp: AcpHarnessConfig;
+  /** True only when a CLI flag or env var explicitly replaced the ACP command/args. */
+  acpOverridden: boolean;
   /** Renew the five-minute work-session lease this often. */
   leaseRenewMs: number;
   /** Grace period before escalating SIGTERM to SIGKILL on cancel. */
@@ -37,6 +39,11 @@ export function loadSupervisionConfig(
   overrides: SupervisionOverrides = {},
   env: NodeJS.ProcessEnv = process.env,
 ): SupervisionConfig {
+  const acpOverridden =
+    overrides.acp?.command !== undefined ||
+    overrides.acp?.args !== undefined ||
+    env.ORRERY_ACP_COMMAND !== undefined ||
+    env.ORRERY_ACP_ARGS !== undefined;
   const command = overrides.acp?.command ?? env.ORRERY_ACP_COMMAND ?? "opencode";
   let parsedArgs: string[] = ["acp"];
   if (env.ORRERY_ACP_ARGS !== undefined) {
@@ -58,6 +65,7 @@ export function loadSupervisionConfig(
   const root = overrides.worktreeRoot ?? env.ORRERY_WORKTREE_ROOT;
   return {
     acp: { command, args: [...args] },
+    acpOverridden,
     leaseRenewMs: positiveInt(
       overrides.leaseRenewMs ?? env.ORRERY_LEASE_RENEW_MS,
       "leaseRenewMs",

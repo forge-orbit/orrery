@@ -15,6 +15,7 @@ import {
   Dispatch,
   DispatchAcceptance,
   ExchangeDeviceCodeRequest,
+  HarnessCatalog,
   IssueDispatchesResponse,
   IssueResolveRequest,
   IssueResolveResponse,
@@ -174,6 +175,25 @@ const heartbeat = createRoute({
   responses: {
     200: {
       description: "The Runner with derived DB-time presence",
+      content: { "application/json": { schema: Runner } },
+    },
+    ...enrollErrors,
+  },
+});
+
+const updateRunnerCatalog = createRoute({
+  method: "put",
+  path: "/api/runners/{runnerId}/catalog",
+  summary: "Publish a Runner's discovered Harness catalog",
+  description:
+    "Host-credential authenticated and project-access checked. Previously known per-model effort levels are preserved; heartbeats never carry the catalog.",
+  request: {
+    params: runnerParams,
+    body: { content: { "application/json": { schema: HarnessCatalog } }, required: true },
+  },
+  responses: {
+    200: {
+      description: "The Runner with its merged Harness catalog",
       content: { "application/json": { schema: Runner } },
     },
     ...enrollErrors,
@@ -566,6 +586,7 @@ export const routes = [
   exchangeDeviceCode,
   registerRunner,
   heartbeat,
+  updateRunnerCatalog,
   listWorkspaceRunners,
   revokeRunnerHost,
   createDispatch,
@@ -631,6 +652,15 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
     try {
       const { runnerId } = c.req.valid("param");
       return c.json(await service.heartbeat(bearer(c), runnerId, c.req.valid("json")), 200);
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
+  app.openapi(updateRunnerCatalog, async (c) => {
+    try {
+      const { runnerId } = c.req.valid("param");
+      return c.json(await service.updateCatalog(bearer(c), runnerId, c.req.valid("json")), 200);
     } catch (error) {
       return failure(c, error);
     }
