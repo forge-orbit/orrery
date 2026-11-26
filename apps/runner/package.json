@@ -1,22 +1,49 @@
 {
-  "name": "@orrery/runner",
-  "private": true,
-  "license": "AGPL-3.0-only",
-  "bin": {
-    "orrery-runner": "./src/main.ts"
+  "name": "@forge-orbit/orrery-runner",
+  "version": "0.0.0-dev",
+  "description": "Local agent runner for Orrery: dispatch board issues to ACP coding agents in isolated git worktrees.",
+  "keywords": [
+    "acp",
+    "agent-runner",
+    "coding-agent",
+    "kanban",
+    "orrery"
+  ],
+  "homepage": "https://github.com/forge-orbit/orrery/tree/main/apps/runner#readme",
+  "bugs": {
+    "url": "https://github.com/forge-orbit/orrery/issues"
   },
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/forge-orbit/orrery.git",
+    "directory": "apps/runner"
+  },
+  "bin": {
+    "orrery-runner": "./dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs",
     "start": "node src/main.ts",
     "typecheck": "tsc -p .",
     "test": "vitest run --maxWorkers=1"
   },
-  "dependencies": {
+  "devDependencies": {
     "@orrery/contract": "workspace:*",
+    "@types/node": "26.6.6",
+    "esbuild": "0.28.2",
+    "vitest": "^5.1.0",
     "zod": "4.6.7"
   },
-  "devDependencies": {
-    "@types/node": "26.6.6",
-    "vitest": "^5.1.0"
+  "engines": {
+    "node": ">=26"
   }
 }
