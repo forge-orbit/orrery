@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import {
   validateCheckout,
 } from "./checkout.ts";
 import { defaultStartDisplayName } from "./display-name.ts";
+import { mainRepositoryRoot } from "./spool.ts";
 
 const dirs: string[] = [];
 afterAll(async () => {
@@ -24,8 +25,6 @@ async function initRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "orrery-checkout-"));
   dirs.push(dir);
   const repo = join(dir, "repo");
-  await mkdtemp(join(tmpdir(), "x"));
-  const { mkdir } = await import("node:fs/promises");
   await mkdir(repo, { recursive: true });
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.email", "t@example.com"]);
@@ -40,7 +39,6 @@ describe("shared git checkout validator and two-tier fingerprints (#264)", () =>
   it("resolves subdirectories to the repo root", async () => {
     const repo = await initRepo();
     const sub = join(repo, "a", "b");
-    const { mkdir } = await import("node:fs/promises");
     await mkdir(sub, { recursive: true });
     const checked = validateCheckout(sub);
     expect(checked.repoRoot).toBe(mainCheckoutRoot(repo));
@@ -56,11 +54,9 @@ describe("shared git checkout validator and two-tier fingerprints (#264)", () =>
     const linkFp = runnerFingerprint(link);
     expect(linkFp).not.toBe(mainFp);
     expect(bindingFingerprint(link)).toBe(bindingFingerprint(repo));
-    // Main vs worktree display names differ only when basenames differ.
-    const mainName = defaultStartDisplayName("host", repo);
-    const linkName = defaultStartDisplayName("host", link);
-    expect(mainName).toContain("host ·");
-    expect(linkName.length).toBeGreaterThan(0);
+    // Exact linked-worktree display format: `<host> · <repo-dir> (<worktree-dir>)`.
+    expect(defaultStartDisplayName("host", validateCheckout(repo))).toBe("host · repo");
+    expect(defaultStartDisplayName("host", validateCheckout(link))).toBe("host · repo (linked)");
   });
 
   it("resolves submodules to their own root (not the superproject)", async () => {
@@ -89,6 +85,7 @@ describe("shared git checkout validator and two-tier fingerprints (#264)", () =>
     expect(toplevel).toBe(subPath);
     expect(runnerFingerprint(subPath)).not.toBe(runnerFingerprint(superRepo));
     expect(mainCheckoutRoot(subPath)).toBe(subPath);
+    expect(mainRepositoryRoot(subPath)).toBe(subPath);
   });
 
   it("fails fast on missing dir, non-git dir and unborn repo", async () => {
@@ -99,7 +96,6 @@ describe("shared git checkout validator and two-tier fingerprints (#264)", () =>
     const unborn = await mkdtemp(join(tmpdir(), "orrery-unborn-"));
     dirs.push(unborn);
     const repo = join(unborn, "repo");
-    const { mkdir } = await import("node:fs/promises");
     await mkdir(repo, { recursive: true });
     git(repo, ["init", "-q"]);
     expect(() => validateCheckout(repo)).toThrow(/no HEAD/);

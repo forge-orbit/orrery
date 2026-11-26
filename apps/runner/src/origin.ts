@@ -71,10 +71,18 @@ export interface InsecureCheckOptions {
   env?: NodeJS.ProcessEnv | undefined;
 }
 
+/** Origins already warned about in this invocation (deduplicates warnings). */
+const warnedInsecureOrigins = new Set<string>();
+
+/** Test seam: reset the once-per-invocation insecure-origin warning set. */
+export function resetInsecureOriginWarnings(): void {
+  warnedInsecureOrigins.clear();
+}
+
 /**
  * Reject plain `http:` outside loopback unless
  * `ORRERY_RUNNER_ALLOW_INSECURE_HTTP=1` is set. The opt-in prints a
- * per-invocation warning naming the origin and never relaxes origin pinning.
+ * once-per-invocation warning naming the origin and never relaxes origin pinning.
  */
 export function assertSecureOrigin(canonical: string, options: InsecureCheckOptions = {}): void {
   const scheme = new URL(canonical).protocol.toLowerCase();
@@ -82,6 +90,8 @@ export function assertSecureOrigin(canonical: string, options: InsecureCheckOpti
   if (isLoopbackOrigin(canonical)) return;
   const env = options.env ?? process.env;
   if (env.ORRERY_RUNNER_ALLOW_INSECURE_HTTP === "1") {
+    if (warnedInsecureOrigins.has(canonical)) return;
+    warnedInsecureOrigins.add(canonical);
     const warn = options.warn ?? ((line: string) => process.stderr.write(`${line}\n`));
     warn(
       `Warning: using insecure plain-HTTP origin ${canonical} ` +
@@ -93,11 +103,6 @@ export function assertSecureOrigin(canonical: string, options: InsecureCheckOpti
     `Refusing plain-HTTP origin ${canonical} outside loopback. ` +
       `Use https:// or set ORRERY_RUNNER_ALLOW_INSECURE_HTTP=1 to opt in explicitly.`,
   );
-}
-
-/** Canonicalize and compare two origins without equating loopback aliases. */
-export function originsEqual(a: string, b: string): boolean {
-  return canonicalizeServerUrl(a) === canonicalizeServerUrl(b);
 }
 
 export interface CredentialedOriginOptions extends InsecureCheckOptions {

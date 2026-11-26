@@ -101,14 +101,16 @@ export async function acquireCheckoutLock(
     }
   };
 
-  if (await writeExclusive()) {
+  const idempotentRelease = (): (() => Promise<void>) => {
     let released = false;
     return async () => {
       if (released) return;
       released = true;
       await releaseOnce();
     };
-  }
+  };
+
+  if (await writeExclusive()) return idempotentRelease();
 
   // Contention: inspect the existing lockfile.
   let pid: number | undefined;
@@ -129,14 +131,7 @@ export async function acquireCheckoutLock(
   } catch {
     // Raced with another recovery: fall through to the retry.
   }
-  if (await writeExclusive()) {
-    let released = false;
-    return async () => {
-      if (released) return;
-      released = true;
-      await releaseOnce();
-    };
-  }
+  if (await writeExclusive()) return idempotentRelease();
   throw new Error(
     "Another orrery-runner start is already running in this checkout. Stop it before starting again.",
   );

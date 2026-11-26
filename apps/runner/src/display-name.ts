@@ -1,11 +1,6 @@
-import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { basename, resolve } from "node:path";
-import { RunnerHostDisplayName } from "@orrery/contract";
-import { mainCheckoutRoot } from "./checkout.ts";
-
-/** Shared 120-Unicode-code-point bound (matches Postgres `char_length`). */
-export const MAX_DISPLAY_NAME_CODE_POINTS = 120;
+import { basename } from "node:path";
+import { MAX_RUNNER_HOST_DISPLAY_NAME_LENGTH, RunnerHostDisplayName } from "@orrery/contract";
+import type { ValidatedCheckout } from "./checkout.ts";
 
 /** Length measured in Unicode code points, not UTF-16 code units. */
 export function codePointLength(value: string): number {
@@ -15,7 +10,7 @@ export function codePointLength(value: string): number {
 /** Truncate cleanly by code points without splitting surrogate pairs. */
 export function truncateCodePoints(
   value: string,
-  max: number = MAX_DISPLAY_NAME_CODE_POINTS,
+  max: number = MAX_RUNNER_HOST_DISPLAY_NAME_LENGTH,
 ): string {
   const points = Array.from(value);
   if (points.length <= max) return value;
@@ -33,43 +28,31 @@ export function validateDisplayName(value: string): string {
 
 /** Truncate the OS-hostname fallback for `login` to 120 code points. */
 export function defaultHostDisplayName(osHostname: string): string {
-  return truncateCodePoints(osHostname.trim() === "" ? osHostname : osHostname);
+  return truncateCodePoints(osHostname);
 }
 
 /**
  * Default `start` display name: `<host> · <repo-dir>` at the main checkout,
  * `<host> · <repo-dir> (<worktree-dir>)` in a linked worktree when the
  * worktree directory basename differs from the main checkout basename.
+ * Takes the already-validated checkout so no extra `git` call is needed.
  */
-export function defaultStartDisplayName(hostDisplayName: string, repoPath: string): string {
-  const cwd = repoPath === "" ? "." : repoPath;
-  try {
-    const toplevel = realpathSync(
-      resolve(
-        execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
-          encoding: "utf8",
-        }).trim(),
-      ),
-    );
-    const main = mainCheckoutRoot(cwd);
-    const toplevelBase = basename(toplevel);
-    const repoDir = basename(main);
-    if (toplevel !== main && toplevelBase !== repoDir && toplevelBase !== "") {
-      return truncateCodePoints(`${hostDisplayName} · ${repoDir} (${toplevelBase})`);
-    }
-    return truncateCodePoints(`${hostDisplayName} · ${repoDir}`);
-  } catch {
-    // Outside git (validation reports the actionable error later): fall back
-    // to the cwd basename so display-name construction never throws first.
-    const fallback = basename(cwd) === "" || cwd === "." ? "repo" : basename(cwd);
-    return truncateCodePoints(`${hostDisplayName} · ${fallback}`);
+export function defaultStartDisplayName(
+  hostDisplayName: string,
+  checkout: ValidatedCheckout,
+): string {
+  const repoDir = basename(checkout.mainRoot);
+  const worktreeDir = basename(checkout.repoRoot);
+  if (checkout.repoRoot !== checkout.mainRoot && worktreeDir !== repoDir && worktreeDir !== "") {
+    return truncateCodePoints(`${hostDisplayName} · ${repoDir} (${worktreeDir})`);
   }
+  return truncateCodePoints(`${hostDisplayName} · ${repoDir}`);
 }
 
 /** Default `work` display name: `<host> (one-shot)`, truncated by code points. */
 export function defaultWorkDisplayName(hostDisplayName: string): string {
   const suffix = " (one-shot)";
-  const maxHost = MAX_DISPLAY_NAME_CODE_POINTS - codePointLength(suffix);
+  const maxHost = MAX_RUNNER_HOST_DISPLAY_NAME_LENGTH - codePointLength(suffix);
   const truncatedHost = truncateCodePoints(hostDisplayName, Math.max(0, maxHost));
   return `${truncatedHost}${suffix}`;
 }

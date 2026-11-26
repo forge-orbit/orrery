@@ -4,13 +4,11 @@ import { parseArgs } from "node:util";
 import { readCredential } from "./credential.ts";
 import type { ReadyWorkFilter } from "@orrery/contract";
 import { loadSupervisionConfig } from "./config.ts";
-import { truncateCodePoints } from "./display-name.ts";
+import { defaultHostDisplayName, validateDisplayName } from "./display-name.ts";
 import { login } from "./login.ts";
-import { resolveLoginOrigin } from "./origin.ts";
+import { assertSecureOrigin, resolveLoginOrigin } from "./origin.ts";
 import { start } from "./start.ts";
 import { work } from "./work.ts";
-
-export const RUNNER_VERSION = process.env.ORRERY_RUNNER_VERSION ?? "0.0.0-dev";
 
 const fail = (message: string): never => {
   process.stderr.write(`${message}\n`);
@@ -64,7 +62,6 @@ Options:
   --cancel-grace-ms N       SIGTERM -> SIGKILL grace period (default: 2000)
   --worktree-root PATH      Parent directory for isolated git worktrees
   -h, --help                Show this help
-  -v, --version             Show the runner version
 `;
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
@@ -96,15 +93,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       "cancel-grace-ms": { type: "string" },
       "worktree-root": { type: "string" },
       help: { type: "boolean", short: "h" },
-      version: { type: "boolean", short: "v" },
     },
     allowPositionals: true,
   });
-
-  if (values.version === true) {
-    process.stdout.write(`${RUNNER_VERSION}\n`);
-    return;
-  }
 
   if (values.help === true || positionals.length === 0) {
     process.stdout.write(usage);
@@ -150,6 +141,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           ...(values.server === undefined ? {} : { serverFlag: values.server }),
           ...(process.env.ORRERY_URL === undefined ? {} : { envUrl: process.env.ORRERY_URL }),
         });
+        // Validate before warning so an invalid flag never prints a switch warning.
+        assertSecureOrigin(server);
+        const hostDisplayName =
+          values["host-name"] === undefined
+            ? defaultHostDisplayName(hostname())
+            : validateDisplayName(values["host-name"]);
         if (previous !== undefined && previous.server !== server) {
           process.stdout.write(
             `Warning: replacing enrollment for Runner host '${previous.displayName}' on ${previous.server} with ${server}. ` +
@@ -158,7 +155,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         }
         await login({
           server,
-          hostDisplayName: values["host-name"] ?? truncateCodePoints(hostname()),
+          hostDisplayName,
           ...(values.platform === undefined ? {} : { platform: values.platform }),
           ...(values["poll-ms"] === undefined ? {} : { pollIntervalMs: Number(values["poll-ms"]) }),
           signal: controller.signal,

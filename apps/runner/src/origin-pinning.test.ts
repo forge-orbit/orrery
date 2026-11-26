@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,7 +24,6 @@ async function makeRepo(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "orrery-pinrepo-"));
   dirs.push(root);
   const repo = join(root, "repo");
-  const { mkdir } = await import("node:fs/promises");
   await mkdir(repo, { recursive: true });
   execFileSync("git", ["init", "-q", repo]);
   execFileSync("git", ["-C", repo, "config", "user.email", "t@example.com"]);
@@ -333,11 +332,162 @@ describe("origin pinning, transport hardening and offline status (#264)", () => 
     }
   });
 
-  it("--version prints without credential", async () => {
+  it("login rejects an over-long explicit --host-name without network calls", async () => {
     const dir = await makeDir();
-    const result = await run(["--version"], { ORRERY_RUNNER_CONFIG_DIR: dir });
-    expect(result.code).toBe(0);
-    expect(result.stdout.trim()).not.toBe("");
+    const stub = await listen((req, res) => json(res, 500, {}));
+    try {
+      await writeCredential(dir, stub.url);
+      const result = await run(["login", "--server", stub.url, "--host-name", "😀".repeat(121)], {
+        ORRERY_RUNNER_CONFIG_DIR: dir,
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/120/);
+      expect(stub.requests).toEqual([]);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("work fails fast on origin mismatch (zero HTTP) and on unborn repos", async () => {
+    const dir = await makeDir();
+    const stub = await listen((req, res) => json(res, 500, {}));
+    try {
+      await writeCredential(dir, stub.url);
+      const mismatch = await run(["work", "KEY-1", "--server", "https://other.test/"], {
+        ORRERY_RUNNER_CONFIG_DIR: dir,
+      });
+      expect(mismatch.code).toBe(1);
+      expect(mismatch.stderr).toContain("does not match enrolled origin");
+      expect(stub.requests).toEqual([]);
+
+      const unbornRoot = await mkdtemp(join(tmpdir(), "orrery-unborn-work-"));
+      dirs.push(unbornRoot);
+      const unborn = join(unbornRoot, "repo");
+      await mkdir(unborn, { recursive: true });
+      execFileSync("git", ["init", "-q", unborn]);
+      const unbornRun = await run(["work", "KEY-1", "--repo", unborn], {
+        ORRERY_RUNNER_CONFIG_DIR: dir,
+      });
+      expect(unbornRun.code).toBe(1);
+      expect(unbornRun.stderr).toMatch(/no HEAD/);
+      expect(stub.requests).toEqual([]);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("main checkout and linked worktree start independently; failed registration releases the lock", async () => {
+    const { runnerFingerprint: fp } = await import("./checkout.ts");
+    const { lockPath } = await import("./lock.ts");
+    const dir = await makeDir();
+    const repo = await makeRepo();
+    const link = join(repo, "..", "linked-ind");
+    execFileSync("git", ["-C", repo, "worktree", "add", link, "-b", "linked-ind-branch"]);
+    const stub = await listen(async (req, res) => {
+      let body = "";
+      req.on("data", (c) => (body += String(c)));
+      req.on("end", () => {
+        if (req.method === "POST" && req.url === "/api/runners/register") {
+          const parsed: unknown = JSON.parse(body);
+          const fingerprint =
+            typeof parsed === "object" && parsed !== null && "repoFingerprint" in parsed
+              ? String(parsed.repoFingerprint).slice(0, 8)
+              : "x";
+          json(res, 201, { ...runnerJson(`runner-${fingerprint}`), id: `runner-${fingerprint}` });
+          return;
+        }
+        if (req.url?.includes("/heartbeat")) {
+          json(res, 401, { status: 401, code: "invalid_credential", title: "Revoked" });
+          return;
+        }
+        json(res, 404, { status: 404, code: "not_found", title: "x" });
+      });
+    });
+    try {
+      await writeCredential(dir, stub.url);
+      const [mainRun, linkRun] = await Promise.all([
+        run(
+          ["start", "--workspace", "w", "--project", "p", "--repo", repo, "--heartbeat-ms", "50"],
+          { ORRERY_RUNNER_CONFIG_DIR: dir },
+          repo,
+        ),
+        run(
+          ["start", "--workspace", "w", "--project", "p", "--repo", link, "--heartbeat-ms", "50"],
+          { ORRERY_RUNNER_CONFIG_DIR: dir },
+          link,
+        ),
+      ]);
+      expect(mainRun.code).toBe(0);
+      expect(linkRun.code).toBe(0);
+      expect(stub.requests.filter((r) => r.includes("/api/runners/register"))).toHaveLength(2);
+
+      // A failed registration must not leak the lockfile.
+      const failing = await listen(async (req, res) => {
+        if (req.method === "POST" && req.url === "/api/runners/register") {
+          json(res, 500, { status: 500, code: "boom", title: "Boom" });
+          return;
+        }
+        json(res, 404, { status: 404, code: "not_found", title: "x" });
+      });
+      try {
+        await writeCredential(dir, failing.url);
+        const failed = await run(
+          ["start", "--workspace", "w", "--project", "p", "--repo", repo],
+          { ORRERY_RUNNER_CONFIG_DIR: dir },
+          repo,
+        );
+        expect(failed.code).toBe(1);
+        const { existsSync } = await import("node:fs");
+        expect(existsSync(lockPath(fp(repo), dir))).toBe(false);
+      } finally {
+        await failing.close();
+      }
+    } finally {
+      await stub.close();
+      execFileSync("git", ["-C", repo, "worktree", "remove", "--force", link]);
+      execFileSync("git", ["-C", repo, "worktree", "prune"]);
+    }
+  });
+
+  it("credentialed spool and MCP clients refuse redirects", async () => {
+    const { createStreamSpool } = await import("./spool.ts");
+    const { RunnerMcpClient } = await import("./mcp-client.ts");
+    const dir = await makeDir();
+    const seenSpool: Array<RequestInit | undefined> = [];
+    const spoolFetch = (async (_url: unknown, init?: RequestInit) => {
+      seenSpool.push(init);
+      return new Response(JSON.stringify({ ackedSeq: 1 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    const spool = await createStreamSpool({
+      spoolDir: dir,
+      dispatchAttemptId: "attempt-redirect",
+      apiBaseUrl: "http://127.0.0.1:9",
+      runnerId: "runner-1",
+      dispatchId: "dispatch-1",
+      credential: "orr_rh_test",
+      fetch: spoolFetch,
+      sleep: async () => {},
+    });
+    await spool.append({ kind: "event", summary: "hi" });
+    await spool.flush();
+    expect(seenSpool[0]?.redirect).toBe("error");
+
+    const seenMcp: Array<RequestInit | undefined> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      seenMcp.push(init);
+      return new Response("redirect", { status: 302 });
+    };
+    try {
+      const mcp = new RunnerMcpClient({ server: "http://127.0.0.1:9", token: "orr_dt_test" });
+      await expect(mcp.callTool("get_issue", { issueId: "x" })).rejects.toThrow(/302/);
+      expect(seenMcp[0]?.redirect).toBe("error");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("login --server to a new origin warns with previous host and revocation reminder", async () => {

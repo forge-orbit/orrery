@@ -3,12 +3,14 @@ import {
   assertSecureOrigin,
   canonicalizeServerUrl,
   isLoopbackOrigin,
+  resetInsecureOriginWarnings,
   resolveCredentialedOrigin,
   resolveLoginOrigin,
 } from "./origin.ts";
 
 afterEach(() => {
   delete process.env.ORRERY_RUNNER_ALLOW_INSECURE_HTTP;
+  resetInsecureOriginWarnings();
   vi.restoreAllMocks();
 });
 
