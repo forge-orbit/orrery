@@ -600,7 +600,8 @@ export class TestOrrery {
         lastUpSeq: 0,
         lastDownSeq: 0,
         branchName: null,
-        ...(prompt === null ? {} : { prompt }),
+        // The published Dispatch contract keeps prompt required-nullable.
+        prompt,
         dirtyWorktree: false,
         createdAt: stamp,
         acceptedAt: null,

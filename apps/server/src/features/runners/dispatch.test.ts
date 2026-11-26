@@ -1168,7 +1168,8 @@ describe("custom dispatch prompt (#239)", () => {
     const created = await createDispatch(issue.id, runner.id, adminCookie, undefined, "   \n  ");
     expect(created.status).toBe(201);
     const dispatch = Dispatch.parse(await created.json());
-    expect(dispatch.prompt).toBeUndefined();
+    // The published API keeps prompt required-nullable: omitted becomes null.
+    expect(dispatch.prompt).toBeNull();
     const [row] = await database.db
       .select({ prompt: runnerDispatches.prompt })
       .from(runnerDispatches)

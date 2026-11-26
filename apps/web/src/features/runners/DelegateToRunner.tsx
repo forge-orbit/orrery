@@ -173,7 +173,6 @@ export function DelegateToRunner({
           variant="secondary"
           label="Delegate to Runner…"
           icon={<Icon icon={Send} />}
-          isDisabled={owned.length === 0}
           data-delegate-trigger=""
           onClick={openDialog}
         />
