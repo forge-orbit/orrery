@@ -16,6 +16,7 @@ import {
   ProjectActivityResponse,
   ProjectKey,
   ProjectsResponse,
+  TrashedProjectsResponse,
 } from "@orrery/contract";
 import { eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
@@ -30,6 +31,7 @@ import {
   knowledgeEntries,
   projectActivity,
   projects,
+  workspaceEvents,
   workspaceMemberships,
   workspaces,
 } from "../../db/schema.ts";
@@ -1410,5 +1412,149 @@ describe("projects", () => {
         ),
       ),
     ).toContain("issues_closed_at_matches_status");
+  });
+
+  it("moves a project to Workspace Trash and restores it over HTTP", async () => {
+    const { app, adminCookie, workspaceId } = await readyApp();
+    const project = await createProject(app, adminCookie, workspaceId, "Trash me");
+    const issue = await createIssue(app, adminCookie, project.id, {
+      title: "Already trashed issue",
+    });
+    const hiddenIssue = await createIssue(app, adminCookie, project.id, {
+      title: "Hidden with project",
+    });
+
+    const trashedIssue = await deleteRequest(app, `/api/issues/${issue.id}`, adminCookie);
+    expect(trashedIssue.status).toBe(204);
+
+    const removed = await deleteRequest(app, `/api/projects/${project.id}`, adminCookie);
+    expect(removed.status).toBe(204);
+
+    const visibleProjects = await getJson(
+      app,
+      `/api/workspaces/${workspaceId}/projects`,
+      adminCookie,
+    );
+    expect(ProjectsResponse.parse(await visibleProjects.json())).toEqual([]);
+    await expectProblem(
+      await getJson(app, `/api/projects/${project.id}`, adminCookie),
+      404,
+      "project_not_found",
+    );
+    await expectProblem(
+      await getJson(app, `/api/issues/${hiddenIssue.id}`, adminCookie),
+      404,
+      "issue_not_found",
+    );
+
+    const trashResponse = await getJson(
+      app,
+      `/api/workspaces/${workspaceId}/trash/projects`,
+      adminCookie,
+    );
+    expect(trashResponse.status).toBe(200);
+    const trashedProjects = TrashedProjectsResponse.parse(await trashResponse.json());
+    expect(trashedProjects).toHaveLength(1);
+    expect(trashedProjects[0]).toMatchObject({
+      id: project.id,
+      deletedByHumanId: await adminId(),
+    });
+
+    const restored = await postJson(app, `/api/projects/${project.id}/restore`, {}, adminCookie);
+    expect(restored.status).toBe(200);
+    expect(Project.parse(await restored.json()).id).toBe(project.id);
+    expect((await getJson(app, `/api/issues/${hiddenIssue.id}`, adminCookie)).status).toBe(200);
+    const activeIssues = await getJson(app, `/api/projects/${project.id}/issues`, adminCookie);
+    expect(IssuesResponse.parse(await activeIssues.json()).map((item) => item.id)).toEqual([
+      hiddenIssue.id,
+    ]);
+    const projectTrash = await getJson(app, `/api/projects/${project.id}/trash`, adminCookie);
+    expect(IssuesResponse.parse(await projectTrash.json()).map((item) => item.id)).toEqual([
+      issue.id,
+    ]);
+
+    const projectEvents = await activityFor(app, adminCookie, project.id);
+    expect(projectEvents.map((event) => event.type)).toContain("project_deleted");
+    expect(projectEvents.map((event) => event.type)).toContain("project_restored");
+    const auditEvents = await currentDatabase()
+      .db.select()
+      .from(workspaceEvents)
+      .where(eq(workspaceEvents.workspaceId, workspaceId));
+    const lifecycleEvents = auditEvents.filter((event) => event.type.startsWith("project_"));
+    expect(lifecycleEvents.map((event) => event.type).toSorted()).toEqual([
+      "project_deleted",
+      "project_restored",
+    ]);
+    const humanId = await adminId();
+    expect(
+      lifecycleEvents.every(
+        (event) => event.actorHumanId === humanId && event.subjectHumanId === humanId,
+      ),
+    ).toBe(true);
+  });
+
+  it("enforces project Trash constraints, recovery expiry, and key reuse after purge", async () => {
+    const { app, adminCookie, workspaceId } = await readyApp();
+    const created = await postJson(
+      app,
+      `/api/workspaces/${workspaceId}/projects`,
+      { name: "Reserved key", key: "RSV" },
+      adminCookie,
+    );
+    expect(created.status).toBe(201);
+    const project = Project.parse(await created.json());
+
+    expect(
+      await rejection(
+        currentDatabase().db.execute(
+          sql`update projects set deleted_at = statement_timestamp() where id = ${project.id}`,
+        ),
+      ),
+    ).toContain("projects_deleted_actor_matches");
+    expect(
+      await rejection(
+        currentDatabase().db.execute(
+          sql`update projects set purged_at = statement_timestamp() where id = ${project.id}`,
+        ),
+      ),
+    ).toContain("projects_purged_requires_deleted");
+
+    const removed = await deleteRequest(app, `/api/projects/${project.id}`, adminCookie);
+    expect(removed.status).toBe(204);
+    const duplicateKey = await postJson(
+      app,
+      `/api/workspaces/${workspaceId}/projects`,
+      { name: "Still reserved", key: project.key },
+      adminCookie,
+    );
+    await expectProblem(duplicateKey, 409, "project_key_taken");
+
+    await currentDatabase().db.execute(
+      sql`update projects set deleted_at = statement_timestamp() - interval '31 days' where id = ${project.id}`,
+    );
+    await expectProblem(
+      await postJson(app, `/api/projects/${project.id}/restore`, {}, adminCookie),
+      410,
+      "project_purged",
+    );
+    const trash = await getJson(app, `/api/workspaces/${workspaceId}/trash/projects`, adminCookie);
+    expect(TrashedProjectsResponse.parse(await trash.json())).toEqual([]);
+
+    await currentDatabase().db.execute(
+      sql`update projects set purged_at = statement_timestamp() where id = ${project.id}`,
+    );
+    await expectProblem(
+      await postJson(app, `/api/projects/${project.id}/restore`, {}, adminCookie),
+      410,
+      "project_purged",
+    );
+    const reusedKey = await postJson(
+      app,
+      `/api/workspaces/${workspaceId}/projects`,
+      { name: "Reused key", key: project.key },
+      adminCookie,
+    );
+    expect(reusedKey.status).toBe(201);
+    expect(Project.parse(await reusedKey.json()).key).toBe(project.key);
   });
 });

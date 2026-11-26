@@ -85,6 +85,8 @@ export const ProjectActivityType = z
     "project_created",
     "project_renamed",
     "project_fallback_policy_changed",
+    "project_deleted",
+    "project_restored",
     "issue_created",
     "issue_edited",
     "issue_commented",
@@ -198,6 +200,17 @@ export type Project = z.infer<typeof Project>;
 
 export const ProjectsResponse = z.array(Project).meta({ id: "ProjectsResponse" });
 export type ProjectsResponse = z.infer<typeof ProjectsResponse>;
+
+export const TrashedProject = Project.extend({
+  deletedAt: Timestamp,
+  deletedByHumanId: z.string(),
+}).meta({ id: "TrashedProject" });
+export type TrashedProject = z.infer<typeof TrashedProject>;
+
+export const TrashedProjectsResponse = z.array(TrashedProject).meta({
+  id: "TrashedProjectsResponse",
+});
+export type TrashedProjectsResponse = z.infer<typeof TrashedProjectsResponse>;
 
 export const CreateProjectRequest = z
   .object({

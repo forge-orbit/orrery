@@ -103,6 +103,7 @@ export class SessionsError extends Error {
 }
 
 const blockerIssue = alias(issues, "blocker_issue");
+const blockerProject = alias(projects, "blocker_project");
 
 export type SessionsProjectAccessCeiling = (
   tx: DbTransaction,
@@ -461,6 +462,22 @@ export async function releaseIssueWorkSessions(
 }
 
 async function lockIssue(tx: DbTransaction, issueId: string) {
+  const [issueProject] = await tx
+    .select({ projectId: issues.projectId })
+    .from(issues)
+    .innerJoin(projects, eq(issues.projectId, projects.id))
+    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)))
+    .limit(1);
+  if (issueProject === undefined) throw new SessionsError("issue_not_found");
+
+  const [project] = await tx
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.id, issueProject.projectId), isNull(projects.deletedAt)))
+    .for("no key update")
+    .limit(1);
+  if (project === undefined) throw new SessionsError("issue_not_found");
+
   const [row] = await tx
     .select({
       id: issues.id,
@@ -471,10 +488,10 @@ async function lockIssue(tx: DbTransaction, issueId: string) {
       assigneeId: issues.assigneeId,
     })
     .from(issues)
-
-    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
+    .innerJoin(projects, eq(issues.projectId, projects.id))
+    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)))
     .limit(1)
-    .for("update");
+    .for("update", { of: issues });
   if (row === undefined) throw new SessionsError("issue_not_found");
   return row;
 }
@@ -648,7 +665,7 @@ function requireAccessArgs(
     const [project] = await tx
       .select({ id: projects.id, workspaceId: projects.workspaceId })
       .from(projects)
-      .where(eq(projects.id, projectId))
+      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
       .limit(1);
     if (
       project === undefined ||
@@ -693,13 +710,14 @@ async function requireHumanStopAccess(
   const [issueRef] = await tx
     .select({ projectId: issues.projectId })
     .from(issues)
-    .where(eq(issues.id, issueId))
+    .innerJoin(projects, eq(issues.projectId, projects.id))
+    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)))
     .limit(1);
   if (issueRef === undefined) throw new SessionsError("issue_not_found");
   const [projectRef] = await tx
     .select({ workspaceId: projects.workspaceId })
     .from(projects)
-    .where(eq(projects.id, issueRef.projectId))
+    .where(and(eq(projects.id, issueRef.projectId), isNull(projects.deletedAt)))
     .limit(1);
   if (projectRef === undefined) throw new SessionsError("issue_not_found");
 
@@ -751,14 +769,14 @@ async function requireActivityReadAccess(
   const [issue] = await tx
     .select({ projectId: issues.projectId })
     .from(issues)
-
-    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
+    .innerJoin(projects, eq(issues.projectId, projects.id))
+    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)))
     .limit(1);
   if (issue === undefined) throw new SessionsError("issue_not_found");
   const [project] = await tx
     .select({ workspaceId: projects.workspaceId })
     .from(projects)
-    .where(eq(projects.id, issue.projectId))
+    .where(and(eq(projects.id, issue.projectId), isNull(projects.deletedAt)))
     .limit(1);
   if (project === undefined) throw new SessionsError("issue_not_found");
   if (actor.kind === "agent" && actor.identity.workspaceId !== project.workspaceId) {
@@ -1302,7 +1320,7 @@ export function createSessionsService({
             const rows = await tx
               .select({ id: projects.id })
               .from(projects)
-              .where(eq(projects.workspaceId, workspaceId));
+              .where(and(eq(projects.workspaceId, workspaceId), isNull(projects.deletedAt)));
             if (rows.length === 0) return [];
             const ceiling = await projectAccessCeiling(
               tx,
@@ -1326,12 +1344,14 @@ export function createSessionsService({
             .select({ ...sessionColumns, projectId: issues.projectId })
             .from(workSessions)
             .innerJoin(issues, eq(workSessions.issueId, issues.id))
+            .innerJoin(projects, eq(issues.projectId, projects.id))
             .where(
               and(
                 eq(workSessions.workspaceId, workspaceId),
                 eq(workSessions.status, WorkSessionStatus.enum.active),
                 liveLease,
                 inArray(issues.projectId, projectIds),
+                isNull(projects.deletedAt),
               ),
             )
             .orderBy(desc(workSessions.createdAt));
@@ -1595,10 +1615,12 @@ export function createSessionsService({
               .select({ id: issueDependencies.id })
               .from(issueDependencies)
               .innerJoin(blockerIssue, eq(issueDependencies.blockedByIssueId, blockerIssue.id))
+              .innerJoin(blockerProject, eq(blockerIssue.projectId, blockerProject.id))
               .where(
                 and(
                   eq(issueDependencies.issueId, issues.id),
                   isNull(blockerIssue.deletedAt),
+                  isNull(blockerProject.deletedAt),
                   notInArray(blockerIssue.status, ["done", "cancelled"]),
                 ),
               ),
@@ -1607,6 +1629,7 @@ export function createSessionsService({
           const conditions = [
             eq(issues.projectId, projectId),
             isNull(issues.deletedAt),
+            isNull(projects.deletedAt),
             eq(issues.status, "todo"),
             eq(issues.needsInput, false),
             isNull(workSessions.id),
@@ -1616,6 +1639,7 @@ export function createSessionsService({
           const rows = await tx
             .select({ id: issues.id })
             .from(issues)
+            .innerJoin(projects, eq(issues.projectId, projects.id))
             .leftJoin(workSessions, live)
             .where(and(...conditions))
             .orderBy(issues.number);
@@ -1656,11 +1680,13 @@ export function createSessionsService({
             .select({ issueId: workSessions.issueId })
             .from(workSessions)
             .innerJoin(issues, eq(workSessions.issueId, issues.id))
+            .innerJoin(projects, eq(issues.projectId, projects.id))
             .where(
               and(
                 eq(workSessions.status, WorkSessionStatus.enum.active),
                 lte(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
                 isNull(issues.deletedAt),
+                isNull(projects.deletedAt),
               ),
             )
             .orderBy(workSessions.issueId)

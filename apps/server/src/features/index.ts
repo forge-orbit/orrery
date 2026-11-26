@@ -148,9 +148,9 @@ export function createFeatures(
       if (wiredAttachmentSeams === undefined) throw new Error("attachment metadata is not wired");
       return wiredAttachmentSeams.listMetadata(tx, holders);
     },
-    purgeHolders: (tx, holders) => {
+    purgeForTrash: (tx, holders, projectIds) => {
       if (wiredAttachmentSeams === undefined) throw new Error("attachment purge is not wired");
-      return wiredAttachmentSeams.purgeHolders(tx, holders);
+      return wiredAttachmentSeams.purgeForTrash(tx, holders, projectIds);
     },
   };
   const projects = createProjectsFeature({
@@ -207,7 +207,8 @@ export function createFeatures(
   wiredAttachmentSeams = {
     syncReferences: (tx, input) => attachments.service.syncReferences(tx, input),
     listMetadata: (tx, holders) => attachments.service.listMetadata(tx, holders),
-    purgeHolders: (tx, holders) => attachments.service.purgeHolders(tx, holders),
+    purgeForTrash: (tx, holders, projectIds) =>
+      attachments.service.purgeForTrash(tx, holders, projectIds),
   };
 
   const notifications = createNotificationsFeature({

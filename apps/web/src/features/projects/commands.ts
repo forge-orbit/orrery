@@ -22,6 +22,16 @@ import {
 } from "@orrery/contract";
 import { deleteJson, deleteRequest, patchJson, post, postJson } from "../../lib/api.ts";
 
+export function deleteProject(projectId: string): Promise<void> {
+  return deleteRequest(`/api/projects/${encodeURIComponent(projectId)}`);
+}
+
+export function restoreProject(projectId: string): Promise<Project> {
+  return postJson(`/api/projects/${encodeURIComponent(projectId)}/restore`, {}, (value) =>
+    Project.parse(value),
+  );
+}
+
 export function createProject(workspaceId: string, input: CreateProjectRequest): Promise<Project> {
   return postJson(`/api/workspaces/${encodeURIComponent(workspaceId)}/projects`, input, (value) =>
     Project.parse(value),

@@ -418,15 +418,22 @@
     {
       "idx": 59,
       "version": "7",
-      "when": 1795683679247,
-      "tag": "0059_backfill_harness_catalog",
+      "when": 1795678276407,
+      "tag": "0059_fearless_skin",
       "breakpoints": true
     },
     {
       "idx": 60,
       "version": "7",
-      "when": 1795683680131,
-      "tag": "0060_consolidate_harness_catalog",
+      "when": 1795687242471,
+      "tag": "0060_backfill_harness_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795687266940,
+      "tag": "0061_consolidate_harness_catalog",
       "breakpoints": true
     }
   ]
