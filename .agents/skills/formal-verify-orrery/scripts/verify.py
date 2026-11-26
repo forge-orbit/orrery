@@ -2398,12 +2398,16 @@ def extract_code_facts() -> dict[str, Any]:
     require_project_human_fn = slice_between(
         proj_src, "function requireProjectHuman(", "function humanIdOf("
     )
+    project_workspace_facts_fn = slice_between(
+        proj_src, "async function readProjectWorkspaceFacts(", "async function requireProject("
+    )
     lock_project_fn = slice_between(
         proj_src, "async function lockProjectForMutation(", "async function lockIssueForMutation("
     )
     require_project_fn = slice_between(proj_src, "async function requireProject(", "async function requireIssue(")
     require_issue_fn = slice_between(proj_src, "async function requireIssue(", "async function loadLabelsForIssues(")
     require_knowledge_fn = slice_between(proj_src, "async function requireKnowledge(", "type RecordActivityInput =")
+    require_label_fn = slice_between(proj_src, "async function requireLabel(", "async function requireParent(")
     list_projects_fn = slice_between(
         proj_src, "async listProjects(actorArg, workspaceId)", "async getProject("
     )
@@ -2414,6 +2418,8 @@ def extract_code_facts() -> dict[str, Any]:
     delete_project_route = slice_between(project_rest, "const deleteProject = createRoute(", "const restoreProject = createRoute(")
     restore_project_route = slice_between(project_rest, "const restoreProject = createRoute(", "const listWorkspaceProjectTrash = createRoute(")
     project_trash_list_route = slice_between(project_rest, "const listWorkspaceProjectTrash = createRoute(", "const setProjectFallbackPolicy = createRoute(")
+    project_delete_kinds = slice_between(project_rest, "const projectDeleteKinds = [", "const projectRestoreKinds = [")
+    project_restore_kinds = slice_between(project_rest, "const projectRestoreKinds = [", "const workspaceProjectTrashKinds = [")
     project_status_map = slice_between(project_rest, "const statusFor = {", "} as const satisfies Record<ProjectsErrorKind, number>")
 
     transfer_lock_end = delete_project_fn.find("await lockWorkspaceOwnershipWrites(tx)")
@@ -2426,6 +2432,24 @@ def extract_code_facts() -> dict[str, Any]:
         and '"workspace_owner_required"' in delete_project_fn
         and '"workspace_owner_required"' in restore_project_fn
         and '"workspace_owner_required"' in project_trash_list_fn
+    )
+    m47_project_id_nonmember_mask = (
+        ordered(
+            delete_project_fn,
+            "readProjectWorkspaceFacts(",
+            "project.workspaceId",
+            "actor.account.humanId",
+        )
+        and ordered(
+            restore_project_fn,
+            "readProjectWorkspaceFacts(",
+            "project.workspaceId",
+            "actor.account.humanId",
+        )
+        and 'error.kind === "workspace_not_found"' in project_workspace_facts_fn
+        and 'throw new ProjectsError("project_not_found")' in project_workspace_facts_fn
+        and '"workspace_not_found"' not in project_delete_kinds
+        and '"workspace_not_found"' not in project_restore_kinds
     )
     m47_project_row_lock = (
         "lockProjectForMutation(tx, projectId)" in delete_project_fn
@@ -2495,6 +2519,7 @@ def extract_code_facts() -> dict[str, Any]:
         and "isNull(projects.deletedAt)" in require_issue_fn
         and "isNull(projects.deletedAt)" in require_knowledge_fn
     )
+    m47_label_visibility = "isNull(projects.deletedAt)" in require_label_fn
     m47_tombstone_constraints = (
         'deletedAt: timestamp("deleted_at"' in project_table
         and 'deletedByHumanId: text("deleted_by_human_id")' in project_table
@@ -4136,6 +4161,7 @@ def extract_code_facts() -> dict[str, Any]:
 
         # M47 (#250): owner-only project Trash lifecycle and REST surface.
         "m47_project_owner_gate": m47_project_owner_gate,
+        "m47_project_id_nonmember_mask": m47_project_id_nonmember_mask,
         "m47_project_row_lock": m47_project_row_lock,
         "m47_transfer_lock_order": m47_transfer_lock_order,
         "m47_live_session_guard": m47_live_session_guard,
@@ -4150,6 +4176,7 @@ def extract_code_facts() -> dict[str, Any]:
         "m47_restore_workspace_event": m47_restore_workspace_event,
         "m47_trash_list_window": m47_trash_list_window,
         "m47_active_project_hiding": m47_active_project_hiding,
+        "m47_label_visibility": m47_label_visibility,
         "m47_tombstone_constraints": m47_tombstone_constraints,
         "m47_project_key_lifecycle": m47_project_key_lifecycle,
         "m47_activity_contract": m47_activity_contract,
@@ -10448,6 +10475,7 @@ def check_m47(facts: dict[str, Any]) -> CheckResult:
     guard_violations = {
         "owner_gate": {
             "m47_project_owner_gate": "non_owner_or_agent_mutated_project_trash",
+            "m47_project_id_nonmember_mask": "project_id_endpoint_exposed_workspace_membership_state",
         },
         "project_row_lock": {
             "m47_project_row_lock": "delete_and_restore_mutations_were_not_row_serialized",
@@ -10478,6 +10506,7 @@ def check_m47(facts: dict[str, Any]) -> CheckResult:
         },
         "active_lookup": {
             "m47_active_project_hiding": "trashed_project_or_child_remained_in_core_project_reads",
+            "m47_label_visibility": "label_update_or_delete_reached_a_trashed_project",
         },
         "schema_invariants": {
             "m47_tombstone_constraints": "project_tombstone_actor_or_purge_constraint_missing",
@@ -10521,7 +10550,7 @@ def check_m47(facts: dict[str, Any]) -> CheckResult:
         return bfs_check(
             check_id,
             "Owner-only Project Trash Lifecycle (#250)",
-            "Project deletion and restoration are owner-only, row-serialized and bounded by live-work and retention guards; audit writes are atomic; Trash reads, active reads, tombstone constraints, key reuse and REST contracts preserve lifecycle rules",
+            "Project deletion and restoration are owner-only, row-serialized and bounded by live-work and retention guards; project-ID reads mask workspace membership; audit writes are atomic; Trash and active reads hide trashed projects and labels; tombstone constraints, key reuse and REST contracts preserve lifecycle rules",
             "safety",
             init,
             next_states,
