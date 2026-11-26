@@ -2706,8 +2706,13 @@ def extract_code_facts() -> dict[str, Any]:
         "async function applyInvitationGrantsInTransaction(",
         "async function lockWorkspaceOwnershipWrites",
     )
-    runner_dispatch_project_lock_fn = slice_between(
-        runner_dispatch_fn,
+    runner_auto_claim_project_lock_fn = slice_between(
+        runner_auto_claim_fn,
+        "const [activeProject] = await tx",
+        "if (activeProject === undefined)",
+    )
+    runner_create_dispatch_project_lock_fn = slice_between(
+        runner_create_dispatch_fn,
         "const [project] = await tx",
         "if (project === undefined)",
     )
@@ -2792,11 +2797,19 @@ def extract_code_facts() -> dict[str, Any]:
         and "project.deletedAt === null" in invitation_grants_fn
         and "if (!activeProjectIdSet.has(offer.projectId)) continue" in invitation_grants_fn
     )
-    m48_dispatch_project_active_filter = "isNull(projects.deletedAt)" in runner_dispatch_project_lock_fn
-    m48_dispatch_project_row_lock = '.for("update")' in runner_dispatch_project_lock_fn
+    m48_dispatch_project_active_filter = (
+        "isNull(projects.deletedAt)" in runner_auto_claim_project_lock_fn
+        and "isNull(projects.deletedAt)" in runner_create_dispatch_project_lock_fn
+    )
+    m48_dispatch_project_row_lock = (
+        '.for("update")' in runner_auto_claim_project_lock_fn
+        and '.for("update")' in runner_create_dispatch_project_lock_fn
+    )
     m48_dispatch_project_scope = (
-        "eq(projects.id, input.projectId)" in runner_dispatch_project_lock_fn
-        and "eq(projects.workspaceId, input.workspaceId)" in runner_dispatch_project_lock_fn
+        "eq(projects.id, scanned.runner.projectId)" in runner_auto_claim_project_lock_fn
+        and "eq(projects.workspaceId, scanned.runner.workspaceId)" in runner_auto_claim_project_lock_fn
+        and "eq(projects.id, scanned.runner.projectId)" in runner_create_dispatch_project_lock_fn
+        and "eq(projects.workspaceId, scanned.runner.workspaceId)" in runner_create_dispatch_project_lock_fn
     )
     m48_dispatch_shared_helper_calls = (
         "await insertDispatchLocked(tx" in runner_auto_claim_fn
