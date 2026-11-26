@@ -102,33 +102,36 @@ const sampleIssues: Issue[] = [
 const liveSessions = new Set(["i-1"]);
 
 describe("issue-filter", () => {
-  it("computes lifecycle scope counts", () => {
-    expect(countIssueScopes(sampleIssues, liveSessions)).toEqual({
+  it("computes status scope counts", () => {
+    expect(countIssueScopes(sampleIssues)).toEqual({
       all: 3,
-      open: 2,
-      active: 1,
-      closed: 1,
+      backlog: 0,
+      todo: 1,
+      in_progress: 1,
+      review: 0,
+      done: 1,
+      cancelled: 0,
     });
   });
 
-  it("filters by lifecycle scope", () => {
-    const open = filterAndSortIssues({
+  it("filters by status scope", () => {
+    const inProgress = filterAndSortIssues({
       issues: sampleIssues,
-      scope: "open",
+      scope: "in_progress",
       filters: [],
       sort: "priority",
       activeSessionIssueIds: liveSessions,
     });
-    expect(open.map((i) => i.id)).toEqual(["i-1", "i-2"]);
+    expect(inProgress.map((i) => i.id)).toEqual(["i-1"]);
 
-    const closed = filterAndSortIssues({
+    const done = filterAndSortIssues({
       issues: sampleIssues,
-      scope: "closed",
+      scope: "done",
       filters: [],
       sort: "priority",
       activeSessionIssueIds: liveSessions,
     });
-    expect(closed.map((i) => i.id)).toEqual(["i-3"]);
+    expect(done.map((i) => i.id)).toEqual(["i-3"]);
   });
 
   it("matches text search across identifier, title, and body", () => {

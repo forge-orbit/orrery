@@ -6,22 +6,21 @@ import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
-import type { Issue, ProjectLabel } from "@orrery/contract";
+import { IssueStatus, type Issue, type ProjectLabel } from "@orrery/contract";
 import { RotateCcw, Search } from "lucide-react";
 import { useMemo } from "react";
 import {
   buildIssueFilterConfig,
   ISSUE_SORT_OPTIONS,
-  type IssueLifecycleScope,
   type IssueScopeCounts,
   type IssueSortKey,
+  type IssueStatusScope,
 } from "./issue-filter.ts";
+import { issueStatusLabels } from "./issue-status.ts";
 
-const SCOPE_OPTIONS: readonly { readonly id: IssueLifecycleScope; readonly label: string }[] = [
+const SCOPE_OPTIONS: readonly { readonly id: IssueStatusScope; readonly label: string }[] = [
   { id: "all", label: "All" },
-  { id: "open", label: "Open" },
-  { id: "active", label: "Active" },
-  { id: "closed", label: "Closed" },
+  ...IssueStatus.options.map((status) => ({ id: status, label: issueStatusLabels[status] })),
 ];
 
 export function IssueFilterBar({
@@ -39,8 +38,8 @@ export function IssueFilterBar({
 }: {
   issues: readonly Issue[];
   labels: readonly ProjectLabel[];
-  scope: IssueLifecycleScope;
-  onScopeChange: (scope: IssueLifecycleScope) => void;
+  scope: IssueStatusScope;
+  onScopeChange: (scope: IssueStatusScope) => void;
   filters: readonly PowerSearchFilter[];
   onFiltersChange: (filters: PowerSearchFilter[]) => void;
   sort: IssueSortKey;
@@ -74,7 +73,7 @@ export function IssueFilterBar({
             vAlign="center"
             wrap="wrap"
             role="group"
-            aria-label="Filter issues by lifecycle"
+            aria-label="Filter issues by status"
           >
             {SCOPE_OPTIONS.map(({ id, label }) => {
               const count = counts[id];
