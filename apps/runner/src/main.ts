@@ -25,6 +25,15 @@ const positive = (raw: string | undefined, flag: string): number | undefined => 
 const isReadyWorkFilter = (value: string): value is ReadyWorkFilter =>
   value === "assignedToMe" || value === "unassigned" || value === "all";
 
+const bounded = (raw: string | undefined, flag: string, max: number): string | undefined => {
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed.length > max) {
+    fail(`${flag} must be 1-${max} characters`);
+  }
+  return trimmed;
+};
+
 const usage = `orrery-runner — local agent runner for Orrery
 
 Commands:
@@ -49,6 +58,9 @@ Options:
   --auto-claim-poll-ms N    Auto-claim poll interval (start; default: 1000)
   --workspace SLUG-OR-ID    Disambiguate an issue key (work)
   --prompt TEXT             Requester instructions for one Dispatch (work; max 16,000 chars)
+  --harness ID              Harness id default, resolved from the local registry (start/work)
+  --model ID                Model id default for dispatches without an override (start/work)
+  --effort LEVEL            Reasoning effort default for dispatches without an override (start/work)
   --acp-command NAME        ACP harness command (default: opencode; env: ORRERY_ACP_COMMAND)
   --acp-arg ARG             ACP harness argument, repeatable (default: acp)
   --lease-renew-ms N        Work-session lease renewal interval (default: 60000)
@@ -76,6 +88,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       "auto-claim-poll-ms": { type: "string" },
       repo: { type: "string" },
       prompt: { type: "string" },
+      harness: { type: "string" },
+      model: { type: "string" },
+      effort: { type: "string" },
       "heartbeat-ms": { type: "string" },
       "acp-command": { type: "string" },
       "acp-arg": { type: "string", multiple: true },
@@ -92,6 +107,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     return;
   }
 
+  const defaults = {
+    harness: bounded(values.harness, "--harness", 64),
+    model: bounded(values.model, "--model", 200),
+    effort: bounded(values.effort, "--effort", 64),
+  };
   const server = values.server ?? process.env.ORRERY_URL ?? "http://localhost:8080";
   const controller = new AbortController();
   const stop = () => controller.abort();
@@ -164,6 +184,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           autoClaim: values["auto-claim"] === true,
           ...(filter === undefined ? {} : { autoClaimFilter: filter }),
           ...(autoClaimPollMs === undefined ? {} : { autoClaimPollMs }),
+          defaults,
         });
         return;
       }
@@ -177,6 +198,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           ...(values.prompt === undefined ? {} : { prompt: values.prompt }),
           signal: controller.signal,
           supervision: supervision(),
+          defaults,
         });
         if (outcome !== "completed") {
           fail(`One-shot work ended with '${outcome}'.`);

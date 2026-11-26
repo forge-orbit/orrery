@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadSupervisionConfig } from "./config.ts";
+import type { HarnessCatalog } from "@orrery/contract";
+import type { HarnessDefinition } from "./harnesses.ts";
 import type { SlotController } from "./slots.ts";
 import { start } from "./start.ts";
 import { TestOrrery, type TestActivity, type TestSession } from "./test-orrery.ts";
@@ -33,6 +35,9 @@ interface FixtureOptions {
   leaseRenewMs?: number;
   cancelGraceMs?: number;
   sleepMs?: number;
+  harnessDefinitions?: HarnessDefinition[] | undefined;
+  harnessCatalog?: HarnessCatalog | undefined;
+  defaults?: { harness?: string; model?: string; effort?: string } | undefined;
   onController?: ((controller: SlotController) => void) | undefined;
 }
 
@@ -129,6 +134,11 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
     supervision: config,
     write: (line) => lines.push(line),
     onController: options.onController,
+    ...(options.harnessDefinitions === undefined
+      ? {}
+      : { harnessDefinitions: options.harnessDefinitions }),
+    ...(options.harnessCatalog === undefined ? {} : { harnessCatalog: options.harnessCatalog }),
+    ...(options.defaults === undefined ? {} : { defaults: options.defaults }),
   });
   const result: Fixture = { root, repo, worktrees, marker, control, stop, lines, done };
   fixtures.push(result);
@@ -580,6 +590,147 @@ describe("orrery-runner local ACP supervision", { timeout: 30_000 }, () => {
     }).stdout;
     expect(worktreeList).toContain(branch);
     expect(fixture.control.recordedStopCalls()).toEqual([]);
+  });
+
+  it("applies the requested model and effort, using the cached defaultModel when omitted", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      harnessDefinitions: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          command: process.execPath,
+          args: [stubPath],
+        },
+      ],
+      harnessCatalog: {
+        probedAt: "2026-01-01T00:00:00.000Z",
+        harnesses: [
+          {
+            id: "opencode",
+            displayName: "OpenCode",
+            defaultModel: "stub-model-1",
+            models: [
+              {
+                id: "stub-model-1",
+                reasoningDiscovery: "known",
+                supportedEfforts: ["low", "high"],
+                defaultEffort: "low",
+              },
+            ],
+            probedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+    fixture.control.enqueueDispatch("TEST-241-1", "attempt-241-1", undefined, {
+      harness: "opencode",
+      effort: "high",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    expect(session.stopOutcome).toBe("review");
+    const recorded = await events(fixture);
+    expect(recorded.find((item) => item.event === "set_model")).toMatchObject({
+      modelId: "stub-model-1",
+    });
+    expect(recorded.find((item) => item.event === "set_config_option")).toMatchObject({
+      optionId: "thought_level",
+      value: "high",
+    });
+  });
+
+  it("fails fast with a typed diagnostic and releases the session for a missing Harness", async () => {
+    const fixture = await makeFixture({ mode: "normal", harnessDefinitions: [] });
+    fixture.control.enqueueDispatch("TEST-241-2", "attempt-241-2", undefined, {
+      harness: "cursor",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("released");
+    expect(session.stopOutcome).toBe("released");
+    await until(() =>
+      fixture.control.chunks().some((chunk) => chunk.diagnostic?.kind === "acp_not_installed"),
+    );
+    expect(fixture.control.chunks().find((chunk) => chunk.diagnostic !== undefined)).toMatchObject({
+      diagnostic: { kind: "acp_not_installed", harness: "cursor" },
+    });
+    expect((await events(fixture)).some((item) => item.event === "prompt")).toBe(false);
+  });
+
+  it("fails fast with a typed diagnostic when the harness rejects the model", async () => {
+    const fixture = await makeFixture({
+      mode: "model-reject",
+      harnessDefinitions: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          command: process.execPath,
+          args: [stubPath],
+        },
+      ],
+    });
+    fixture.control.enqueueDispatch("TEST-241-3", "attempt-241-3", undefined, {
+      harness: "opencode",
+      model: "stub-model-2",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("released");
+    await until(() =>
+      fixture.control.chunks().some((chunk) => chunk.diagnostic?.kind === "acp_spawn_failed"),
+    );
+    expect((await events(fixture)).some((item) => item.event === "prompt")).toBe(false);
+  });
+
+  it("omits an unsupported effort with a non-fatal warning and still completes", async () => {
+    const fixture = await makeFixture({
+      mode: "effort-reject",
+      harnessDefinitions: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          command: process.execPath,
+          args: [stubPath],
+        },
+      ],
+    });
+    fixture.control.enqueueDispatch("TEST-241-4", "attempt-241-4", undefined, {
+      harness: "opencode",
+      model: "stub-model-1",
+      effort: "ultra",
+    });
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    expect(session.stopOutcome).toBe("review");
+    await until(() => fixture.control.chunks().some((chunk) => chunk.eventType === "warning"));
+    expect(
+      fixture.control.chunks().find((chunk) => chunk.eventType === "warning")?.summary,
+    ).toContain("ultra");
+    expect((await events(fixture)).some((item) => item.event === "prompt")).toBe(true);
+  });
+
+  it("applies start-time defaults when a Dispatch omits every execution option", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      harnessDefinitions: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          command: process.execPath,
+          args: [stubPath],
+        },
+      ],
+      defaults: { harness: "opencode", model: "stub-model-2", effort: "high" },
+    });
+    fixture.control.enqueueDispatch("TEST-241-5", "attempt-241-5");
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+    const recorded = await events(fixture);
+    expect(recorded.find((item) => item.event === "set_model")).toMatchObject({
+      modelId: "stub-model-2",
+    });
+    expect(recorded.find((item) => item.event === "set_config_option")).toMatchObject({
+      value: "high",
+    });
   });
 
   it("drains a disconnected slot before shutdown completes", async () => {

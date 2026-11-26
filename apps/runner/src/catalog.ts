@@ -13,9 +13,10 @@ import { AcpStdioClient } from "./acp.ts";
 import { RunnerRequestError } from "./client.ts";
 import { configDirectory } from "./credential.ts";
 import type { HarnessDefinition } from "./harnesses.ts";
+import { withHarnessLock } from "./harness-lock.ts";
 
 /** ACP config option ids that carry reasoning-effort choices for the active model. */
-const REASONING_OPTION_IDS = new Set([
+export const REASONING_OPTION_IDS = new Set([
   "thought_level",
   "reasoning_effort",
   "reasoningEffort",
@@ -97,23 +98,29 @@ export interface ProbeHarnessOptions {
   at?: string | undefined;
 }
 
-/** A bounded ACP discovery session; never leaves a probe process group behind. */
+/**
+ * A bounded ACP discovery session; never leaves a probe process group behind.
+ * The per-Harness lock keeps a probe from switching the Harness's default
+ * model while a Dispatch for that same Harness is starting (ADR-0011).
+ */
 export async function probeHarness(
   definition: HarnessDefinition,
   options: ProbeHarnessOptions,
 ): Promise<HarnessCatalogEntry> {
-  const session = await AcpStdioClient.probe({
-    command: definition.command,
-    args: definition.args,
-    cwd: options.cwd,
-    ...(options.env === undefined ? {} : { env: options.env }),
-    mcpServers: [],
-    // Lets a test stub tell a discovery session from a real dispatch session.
-    sessionMeta: { orreryProbe: true },
-    worktreeReal: options.cwd,
-    timeoutMs: options.timeoutMs,
+  return await withHarnessLock(definition.id, async () => {
+    const session = await AcpStdioClient.probe({
+      command: definition.command,
+      args: definition.args,
+      cwd: options.cwd,
+      ...(options.env === undefined ? {} : { env: options.env }),
+      mcpServers: [],
+      // Lets a test stub tell a discovery session from a real dispatch session.
+      sessionMeta: { orreryProbe: true },
+      worktreeReal: options.cwd,
+      timeoutMs: options.timeoutMs,
+    });
+    return catalogEntryFromSession(definition, session, options.at ?? new Date().toISOString());
   });
-  return catalogEntryFromSession(definition, session, options.at ?? new Date().toISOString());
 }
 
 /**

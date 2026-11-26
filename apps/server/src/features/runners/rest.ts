@@ -545,6 +545,7 @@ const statusFor = {
   runner_forbidden: 403,
   runner_unavailable: 409,
   runner_not_for_issue: 409,
+  unknown_harness: 400,
   insufficient_dispatch_access: 403,
   dispatch_not_found: 404,
   dispatch_not_pending: 409,
@@ -766,8 +767,15 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
   app.openapi(createRunnerDispatch, async (c) => {
     try {
       const { runnerId } = c.req.valid("param");
-      const { issueId, prompt } = c.req.valid("json");
-      return c.json(await service.createRunnerDispatch(bearer(c), runnerId, issueId, prompt), 201);
+      const { issueId, prompt, harness, model, effort } = c.req.valid("json");
+      return c.json(
+        await service.createRunnerDispatch(bearer(c), runnerId, issueId, prompt, {
+          ...(harness === undefined ? {} : { harness }),
+          ...(model === undefined ? {} : { model }),
+          ...(effort === undefined ? {} : { effort }),
+        }),
+        201,
+      );
     } catch (error) {
       return failure(c, error);
     }

@@ -543,4 +543,92 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
       await control.close();
     }
   });
+
+  it("work --harness --model --effort resolve locally and reach the Dispatch and ACP", async () => {
+    const dir = await makeDir();
+    const repo = join(dir, "repo");
+    const worktrees = join(dir, "worktrees");
+    const marker = join(dir, "acp.jsonl");
+    await mkdir(repo, { recursive: true });
+    const git = (args: string[]) => {
+      const result = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+    };
+    git(["init", "-q"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "Test"]);
+    await writeFile(join(repo, "README.md"), "initial\n");
+    git(["add", "."]);
+    git(["commit", "-qm", "initial"]);
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: "http://orrery.test",
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
+    // A harness can only be selected if the local registry advertises it; a
+    // server-supplied id alone must never be executed (#241).
+    await writeFile(
+      join(dir, "harnesses.json"),
+      JSON.stringify([
+        { id: "stub", displayName: "Stub", command: process.execPath, args: [stubPath] },
+      ]),
+    );
+
+    const control = await TestOrrery.start();
+    try {
+      const result = await run(
+        [
+          "work",
+          "TEST-1",
+          "--server",
+          control.url,
+          "--repo",
+          repo,
+          "--worktree-root",
+          worktrees,
+          "--harness",
+          "stub",
+          "--model",
+          "stub-model-2",
+          "--effort",
+          "high",
+        ],
+        {
+          ORRERY_RUNNER_CONFIG_DIR: dir,
+          STUB_ACP_MODE: "normal",
+          STUB_ACP_MARKER: marker,
+        },
+      );
+      expect(result.code).toBe(0);
+      expect(control.recordedExecutions()).toEqual([
+        { dispatchId: expect.any(String), harness: "stub", model: "stub-model-2", effort: "high" },
+      ]);
+      const recorded = (await readFile(marker, "utf8"))
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line): Record<string, unknown> => JSON.parse(line));
+      expect(recorded.find((item) => item.event === "set_model")).toMatchObject({
+        modelId: "stub-model-2",
+      });
+      expect(recorded.find((item) => item.event === "set_config_option")).toMatchObject({
+        value: "high",
+      });
+    } finally {
+      await control.close();
+    }
+  });
+
+  it("advertises --harness, --model and --effort for both start and work", async () => {
+    const result = await run(["--help"], {});
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("--harness ID");
+    expect(result.stdout).toContain("--model ID");
+    expect(result.stdout).toContain("--effort LEVEL");
+  });
 });

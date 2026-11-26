@@ -6,6 +6,7 @@ import {
   DeviceCodeResponse,
   Dispatch,
   DispatchAcceptance,
+  type HarnessCatalog,
   HostCredentialResponse,
   Issue,
   KnowledgeEntry,
@@ -170,10 +171,20 @@ async function enrollHost(cookie: string, name = "dispatch-laptop") {
   return HostCredentialResponse.parse(await exchanged.json());
 }
 
-async function registerRunner(credential: string, agent = defaultAgentId) {
+async function registerRunner(
+  credential: string,
+  agent = defaultAgentId,
+  harnessCatalog?: HarnessCatalog,
+) {
   const res = await request("/api/runners/register", {
     method: "POST",
-    body: { workspaceId, projectId, agentId: agent, repoFingerprint: fingerprint },
+    body: {
+      workspaceId,
+      projectId,
+      agentId: agent,
+      repoFingerprint: fingerprint,
+      ...(harnessCatalog === undefined ? {} : { harnessCatalog }),
+    },
     token: credential,
   });
   expect(res.status).toBe(201);
@@ -207,6 +218,44 @@ function createDispatch(
     cookie,
   });
 }
+
+function createDispatchWithOptions(
+  issueId: string,
+  runnerId: string,
+  cookie: string,
+  options: { harness?: string; model?: string; effort?: string } = {},
+) {
+  return request(`/api/issues/${issueId}/dispatches`, {
+    method: "POST",
+    body: {
+      runnerId,
+      ...(options.harness === undefined ? {} : { harness: options.harness }),
+      ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.effort === undefined ? {} : { effort: options.effort }),
+    },
+    cookie,
+  });
+}
+
+const testCatalog: HarnessCatalog = {
+  probedAt: "2026-01-01T00:00:00.000Z",
+  harnesses: [
+    {
+      id: "opencode",
+      displayName: "OpenCode",
+      defaultModel: "stub-model-1",
+      models: [
+        {
+          id: "stub-model-1",
+          reasoningDiscovery: "known",
+          supportedEfforts: ["low", "high"],
+          defaultEffort: "low",
+        },
+      ],
+      probedAt: "2026-01-01T00:00:00.000Z",
+    },
+  ],
+};
 
 async function acceptedFixture() {
   const host = await enrollHost(adminCookie);
@@ -1048,6 +1097,159 @@ describe("custom dispatch prompt (#239)", () => {
       expect.arrayContaining([expect.objectContaining({ pointer: "/prompt" })]),
     );
     expect(await dispatchRowsCount(runner.id)).toBe(0);
+  });
+});
+
+describe("per-dispatch harness, model and effort (#241)", () => {
+  it("trims, persists and exposes the options to readers and the outbox", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("dispatch options issue");
+
+    const created = await createDispatchWithOptions(issue.id, runner.id, adminCookie, {
+      harness: "  opencode  ",
+      model: "  stub-model-1  ",
+      effort: "  high  ",
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch).toMatchObject({ harness: "opencode", model: "stub-model-1", effort: "high" });
+
+    const [row] = await database.db
+      .select()
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.id, dispatch.id));
+    expect(row).toMatchObject({ harness: "opencode", model: "stub-model-1", effort: "high" });
+
+    const [command] = await database.db
+      .select({ payload: runnerCommands.payload })
+      .from(runnerCommands)
+      .where(eq(runnerCommands.runnerId, runner.id));
+    expect(command?.payload).toMatchObject({
+      dispatchId: dispatch.id,
+      harness: "opencode",
+      model: "stub-model-1",
+      effort: "high",
+    });
+
+    const reader = await insertHuman(`reader-${randomUUID()}@example.com`);
+    await database.db.insert(workspaceMemberships).values({
+      id: randomUUID(),
+      workspaceId,
+      humanId: reader.id,
+      isOwner: false,
+    });
+    await database.db.insert(projectAccessGrants).values({
+      id: randomUUID(),
+      projectId,
+      humanId: reader.id,
+      level: "read",
+      grantedByHumanId: adminHumanId,
+    });
+    const list = await request(`/api/issues/${issue.id}/dispatches`, {
+      cookie: await browserCookie(reader.id),
+    });
+    expect(list.status).toBe(200);
+    expect(one(Dispatch.array().parse(field(await list.json(), "dispatches")))).toMatchObject({
+      harness: "opencode",
+      model: "stub-model-1",
+      effort: "high",
+    });
+  });
+
+  it("treats blank options as omitted", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("blank options issue");
+
+    const created = await createDispatchWithOptions(issue.id, runner.id, adminCookie, {
+      harness: "  ",
+      model: "\n",
+      effort: "",
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch.harness).toBeUndefined();
+    expect(dispatch.model).toBeUndefined();
+    expect(dispatch.effort).toBeUndefined();
+    const [row] = await database.db
+      .select()
+      .from(runnerDispatches)
+      .where(eq(runnerDispatches.id, dispatch.id));
+    expect(row?.harness).toBeNull();
+    expect(row?.model).toBeNull();
+    expect(row?.effort).toBeNull();
+  });
+
+  it("rejects a harness absent from a non-empty published catalog", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential, defaultAgentId, testCatalog);
+    const issue = await createIssue("unknown harness issue");
+
+    await expectProblem(
+      await createDispatchWithOptions(issue.id, runner.id, adminCookie, { harness: "cursor" }),
+      400,
+      "unknown_harness",
+    );
+    expect(await dispatchRowsCount(runner.id)).toBe(0);
+
+    const accepted = await createDispatchWithOptions(issue.id, runner.id, adminCookie, {
+      harness: "opencode",
+    });
+    expect(accepted.status).toBe(201);
+  });
+
+  it("allows any harness while the published catalog is empty", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("uncatalogued harness issue");
+
+    const created = await createDispatchWithOptions(issue.id, runner.id, adminCookie, {
+      harness: "a-future-harness",
+    });
+    expect(created.status).toBe(201);
+    expect(Dispatch.parse(await created.json()).harness).toBe("a-future-harness");
+  });
+
+  it("records the chosen harness and model on the Run, falling back when omitted", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const chosenIssue = await createIssue("chosen run issue");
+    const created = await createDispatchWithOptions(chosenIssue.id, runner.id, adminCookie, {
+      harness: "codex",
+      model: "stub-model-2",
+      effort: "high",
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    const accepted = await request(`/api/runners/${runner.id}/dispatches/${dispatch.id}/accept`, {
+      method: "POST",
+      token: host.credential,
+    });
+    expect(accepted.status).toBe(200);
+    const acceptance = DispatchAcceptance.parse(await accepted.json());
+    expect(acceptance.run).toMatchObject({ harness: "codex", model: "stub-model-2" });
+    const [runRow] = await database.db.select().from(runs).where(eq(runs.id, acceptance.run.id));
+    expect(runRow).toMatchObject({ harness: "codex", model: "stub-model-2" });
+
+    const fallbackIssue = await createIssue("fallback run issue");
+    const fallbackCreated = await createDispatchWithOptions(
+      fallbackIssue.id,
+      runner.id,
+      adminCookie,
+      {},
+    );
+    expect(fallbackCreated.status).toBe(201);
+    const fallbackDispatch = Dispatch.parse(await fallbackCreated.json());
+    const fallbackAccepted = await request(
+      `/api/runners/${runner.id}/dispatches/${fallbackDispatch.id}/accept`,
+      { method: "POST", token: host.credential },
+    );
+    expect(fallbackAccepted.status).toBe(200);
+    expect(DispatchAcceptance.parse(await fallbackAccepted.json()).run).toMatchObject({
+      harness: "opencode",
+      model: null,
+    });
   });
 });
 
