@@ -2996,6 +2996,7 @@ def extract_code_facts() -> dict[str, Any]:
     dispatch_migration = read_text("db/migrations/0051_nebulous_warbound.sql")
     create_dispatch_fn = slice_between(runners_src, "async createDispatch(", "async listIssueDispatches(")
     list_dispatch_fn = slice_between(runners_src, "async listIssueDispatches(", "async acceptDispatch(")
+    get_dispatch_fn = slice_between(runners_src, "async getDispatch(", "async acceptDispatch(")
     accept_dispatch_fn = slice_between(runners_src, "async acceptDispatch(", "async revokeRunnerHost(")
     dispatchable_fn = slice_between(
         runners_src, "async function assertIssueDispatchable(", "async function revokeDispatchTokensForRunners("
@@ -3032,6 +3033,14 @@ def extract_code_facts() -> dict[str, Any]:
     m43_list_read_access = (
         'hasAccess(ceiling.get(issue.projectId), "read", projectAccessAtLeast)'
         in list_dispatch_fn
+    )
+    m43_host_dispatch_acl = (
+        "dispatch.hostId !== host.host.id" in get_dispatch_fn
+        and "runner.revokedAt !== null" in get_dispatch_fn
+        and "canSeeWorkspace(tx, dispatch.workspaceId, host.humanId)" in get_dispatch_fn
+        and 'hasAccess(ceiling.get(dispatch.projectId), "read", deps.projectAccessAtLeast)'
+        in get_dispatch_fn
+        and 'throw new RunnersError("dispatch_not_found")' in get_dispatch_fn
     )
     m43_owner_only = (
         'if (joined.hostHumanId !== human.humanId) throw new RunnersError("runner_forbidden")'
@@ -3139,6 +3148,17 @@ def extract_code_facts() -> dict[str, Any]:
     m44_poll_fn = slice_between(runners_src, "async pollCommands(", "async ackCommands(")
     m44_ack_fn = slice_between(runners_src, "async ackCommands(", "async close(")
     m44_stop_fn = slice_between(sess_src, "async requestStop(", "async activeSessions(")
+    m44_probe_fn = slice_between(runners_src, "async probeCatalog(", "async listWorkspaceRunners(")
+    # The probe-id CHECK lives in the latest migration that defines it; find it
+    # by content so the model survives migration renumbering (#242/#240 merges).
+    m44_probe_migration_path = ""
+    m44_probe_migration = ""
+    for migration_path in sorted((REPO_ROOT / "db/migrations").glob("*.sql"), reverse=True):
+        migration_text = migration_path.read_text()
+        if "runner_commands_dispatch_ids" in migration_text:
+            m44_probe_migration = migration_text
+            m44_probe_migration_path = str(migration_path.relative_to(REPO_ROOT))
+            break
 
     m44_seq_lock = (
         '.for("update")' in m44_alloc_fn
@@ -3214,6 +3234,44 @@ def extract_code_facts() -> dict[str, Any]:
     m44_lease_fence = (
         "gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`)" in m44_accept_fn
         and 'new RunnersError("issue_not_dispatchable")' in m44_accept_fn
+    )
+    m44_probe_owner_only = (
+        'if (joined.hostHumanId !== human.humanId) throw new RunnersError("runner_forbidden")'
+        in m44_probe_fn
+        and 'throw new RunnersError("workspace_not_found")' in m44_probe_fn
+        and 'throw new RunnersError("project_not_found")' in m44_probe_fn
+    )
+    m44_probe_live_access = (
+        "canSeeWorkspace(tx, joined.runner.workspaceId, human.humanId)" in m44_probe_fn
+        and 'hasAccess(callerCeiling.get(joined.runner.projectId), "read", projectAccessAtLeast)'
+        in m44_probe_fn
+        and "hostCeiling" in m44_probe_fn
+    )
+    m44_probe_cooldown_lock = (
+        m44_probe_fn.index("allocateCommandSeqs(tx, [runnerId])")
+        < m44_probe_fn.index("runnerCommands.createdAt")
+        and "make_interval(secs => ${PROBE_COOLDOWN_SECONDS})" in m44_probe_fn
+        and 'new RunnersError("probe_rate_limited"' in m44_probe_fn
+    )
+    m44_probe_ttl = (
+        "PROBE_COMMAND_TTL_SECONDS = 30" in runners_src
+        and "ttlSeconds: PROBE_COMMAND_TTL_SECONDS" in m44_probe_fn
+    )
+    m44_probe_outbox = (
+        "insertRunnerCommand(tx, {" in m44_probe_fn
+        and "seq: seqs.next(runnerId)" in m44_probe_fn
+        and "payload," in m44_probe_fn
+    )
+    m44_probe_ids_check = (
+        "runner_commands_dispatch_ids" in outbox_schema_src
+        and "runner_commands_dispatch_ids" in m44_probe_migration
+        and "('dispatch', 'cancel', 'input_resolved')" in outbox_schema_src
+        and "('probe_model', 'probe_catalog')" in outbox_schema_src
+    )
+    m44_probe_contract = (
+        '"/api/runners/{runnerId}/catalog/probe"' in runners_openapi_src
+        and "CatalogProbeRequest" in runners_contract_src
+        and "CatalogProbeResponse" in runners_contract_src
     )
     m44_contract_surface = (
         '"/api/runners/{runnerId}/commands"' in runners_openapi_src
@@ -3913,6 +3971,7 @@ def extract_code_facts() -> dict[str, Any]:
         "m43_create_read_access": m43_create_read_access,
         "m43_list_non_enum": m43_list_non_enum,
         "m43_list_read_access": m43_list_read_access,
+        "m43_host_dispatch_acl": m43_host_dispatch_acl,
         "m43_owner_only": m43_owner_only,
         "m43_assignee_compatible": m43_assignee_compatible,
         "m43_atomic_accept": m43_atomic_accept,
@@ -3942,6 +4001,13 @@ def extract_code_facts() -> dict[str, Any]:
         "m44_revoked_cancel_only": m44_revoked_cancel_only,
         "m44_lock_order": m44_lock_order,
         "m44_lease_fence": m44_lease_fence,
+        "m44_probe_owner_only": m44_probe_owner_only,
+        "m44_probe_live_access": m44_probe_live_access,
+        "m44_probe_cooldown_lock": m44_probe_cooldown_lock,
+        "m44_probe_ttl": m44_probe_ttl,
+        "m44_probe_outbox": m44_probe_outbox,
+        "m44_probe_ids_check": m44_probe_ids_check,
+        "m44_probe_contract": m44_probe_contract,
         "m44_contract_surface": m44_contract_surface,
         "m44_sse": m44_sse,
 
@@ -9682,6 +9748,7 @@ def check_m43(facts: dict[str, Any]) -> CheckResult:
         "teammate_create",
         "owner_create",
         "list_no_access",
+        "host_read",
         "accept",
         "mcp_denied",
         "rest_denied",
@@ -9691,6 +9758,7 @@ def check_m43(facts: dict[str, Any]) -> CheckResult:
     )
     prerequisites = {
         "list_no_access": "owner_create",
+        "host_read": "owner_create",
         "mcp_denied": "accept",
         "rest_denied": "accept",
         "in_tx_access": "accept",
@@ -9715,6 +9783,9 @@ def check_m43(facts: dict[str, Any]) -> CheckResult:
                 bad.add("dispatch_list_leaked_to_non_member")
             if not g["m43_list_read_access"]:
                 bad.add("dispatch_list_leaked_without_read_access")
+        elif action == "host_read":
+            if not g["m43_host_dispatch_acl"]:
+                bad.add("host_metadata_read_skipped_live_acl")
         elif action == "accept":
             if not g["m43_atomic_accept"]:
                 bad.add("torn_dispatch_acceptance")
@@ -9770,7 +9841,7 @@ def check_m43(facts: dict[str, Any]) -> CheckResult:
         return bfs_check(
             check_id,
             "Manual Issue Dispatch, Atomic Claim & Fenced Dispatch Token Auth (#196)",
-            "Only the Runner host owner can dispatch; non-members and readers without project access get 404; accept atomically registers the Run, claims the Work session and mints a hashed Dispatch token; both authentication paths live-check DB-time liveness; REST/MCP allowlists fence every call to one issue",
+            "Only the Runner host owner can dispatch; non-members and readers without project access get 404; accept atomically registers the Run, claims the Work session and mints a hashed Dispatch token; both authentication paths live-check DB-time liveness; host metadata reads recheck live runner, workspace and project access with non-enumerating 404s; REST/MCP allowlists fence every call to one issue",
             "safety",
             init,
             next_states,
@@ -9839,6 +9910,13 @@ def check_m44(facts: dict[str, Any]) -> CheckResult:
         "contract/openapi.json",
         "db/migrations/0052_kind_chamber.sql",
     ]
+    m44_probe_migration_path = ""
+    for migration_path in sorted((REPO_ROOT / "db/migrations").glob("*.sql"), reverse=True):
+        if "runner_commands_dispatch_ids" in migration_path.read_text():
+            m44_probe_migration_path = str(migration_path.relative_to(REPO_ROOT))
+            break
+    if m44_probe_migration_path != "":
+        files.append(m44_probe_migration_path)
     g = {k: v for k, v in facts.items() if k.startswith("m44_")}
 
     actions = (
@@ -9852,10 +9930,12 @@ def check_m44(facts: dict[str, Any]) -> CheckResult:
         "revoked_poll",
         "accept_redelivery",
         "lock_order",
+        "probe_enqueue",
+        "probe_cooldown",
         "contract",
         "sse",
     )
-    prerequisites = {"revoked_poll": "poll_query"}
+    prerequisites = {"revoked_poll": "poll_query", "probe_cooldown": "probe_enqueue"}
 
     def violations_for(action: str, _applied: frozenset[str]) -> set[str]:
         bad: set[str] = set()
@@ -9894,6 +9974,22 @@ def check_m44(facts: dict[str, Any]) -> CheckResult:
         elif action == "accept_redelivery":
             if not g["m44_lease_fence"]:
                 bad.add("expired_session_reused_on_redelivery")
+        elif action == "probe_enqueue":
+            if not g["m44_probe_owner_only"]:
+                bad.add("probe_allowed_for_non_owner")
+            if not g["m44_probe_live_access"]:
+                bad.add("probe_skipped_live_access")
+            if not g["m44_probe_ttl"]:
+                bad.add("probe_command_ttl_missing")
+            if not g["m44_probe_outbox"]:
+                bad.add("probe_bypassed_outbox")
+            if not g["m44_probe_ids_check"]:
+                bad.add("probe_command_ids_not_constrained")
+            if not g["m44_probe_contract"]:
+                bad.add("probe_route_missing_from_contract")
+        elif action == "probe_cooldown":
+            if not g["m44_probe_cooldown_lock"]:
+                bad.add("concurrent_probes_bypassed_cooldown")
         elif action == "lock_order":
             if not g["m44_lock_order"]:
                 bad.add("ab_ba_deadlock_between_accept_and_cancel")
@@ -9927,8 +10023,8 @@ def check_m44(facts: dict[str, Any]) -> CheckResult:
 
         return bfs_check(
             check_id,
-            "Transactional Command Outbox, Long-Poll/SSE & Teammate Stop Cancel (#197)",
-            "Domain writes enqueue ordered, ID-notified commands in one transaction; delivery queries Postgres before waiting, acks by cursor, drains only cancels when revoked, and teammate stop and offboarding cascades never duplicate a cancel",
+            "Transactional Command Outbox, Long-Poll/SSE, Teammate Stop & Catalog Probes (#197 + #242)",
+            "Domain writes enqueue ordered, ID-notified commands in one transaction; delivery queries Postgres before waiting, acks by cursor, drains only cancels when revoked, and teammate stop and offboarding cascades never duplicate a cancel; owner-only catalog probes reuse the same outbox with null dispatch ids under the probe-id CHECK, a 30s TTL and a lock-serialized 30s cooldown",
             "safety",
             init,
             next_states,
