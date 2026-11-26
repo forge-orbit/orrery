@@ -158,14 +158,12 @@ export function LiveStudio({
     ...projectQuery(dispatch?.projectId ?? ""),
     enabled: dispatch?.projectId !== undefined,
   });
-  // Matches resolveUncertain's server authorization: the requester/host owner
-  // or a project manager may settle an uncertain attempt. Ordinary project
-  // readers can see the banner but are not offered actions that would 403.
+  // Matches resolveUncertain's server authorization: the Runner host owner
+  // (also the requester on every manual dispatch) or a project manager may
+  // settle an uncertain attempt. The fleet grants `canRevoke` only to the
+  // signed-in host owner, so readers get the banner but no actions that 403.
   const canResolveUncertain =
-    dispatch?.state === "uncertain" &&
-    (isOwner ||
-      dispatch.requestedByHumanId === host?.humanId ||
-      project.data?.accessLevel === "manage");
+    dispatch?.state === "uncertain" && (isOwner || project.data?.accessLevel === "manage");
 
   // A bare bookmark URL has no issue metadata, so read the stream directly by ids.
   const bareUrl = !hasIssue;

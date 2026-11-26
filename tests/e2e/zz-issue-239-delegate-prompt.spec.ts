@@ -26,6 +26,7 @@ interface Fixture {
   secondIssueId: string;
   runnerId: string;
   runnerDisplayName: string;
+  hostCredential: string;
   agentId: string;
   agentName: string;
   teammateEmail: string;
@@ -230,6 +231,7 @@ async function seedFixture(): Promise<Fixture> {
     secondIssueId,
     runnerId,
     runnerDisplayName,
+    hostCredential: credential,
     agentId,
     agentName,
     teammateEmail,
@@ -324,5 +326,72 @@ test("a project reader can expand the custom prompt in Live Session Studio", asy
     await expect(promptSection.getByText(PROMPT)).toBeVisible();
   } finally {
     await context.close();
+  }
+});
+
+test("a mismatched issue binding never shows another issue's dispatch prompt", async ({
+  browser,
+}) => {
+  const created = await admin.post(`/api/issues/${fixture.issueId}/dispatches`, {
+    data: { runnerId: fixture.runnerId, prompt: PROMPT },
+  });
+  expect(created.status()).toBe(201);
+  const dispatchId = text(field(await created.json(), "id"), "dispatch id");
+
+  const context = await browser.newContext({ baseURL: baseUrl });
+  const page = await context.newPage();
+  try {
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await page.goto(
+      `/live/${fixture.runnerId}/${dispatchId}?issueId=${fixture.secondIssueId}&workspaceId=${fixture.workspaceId}`,
+    );
+    await expect(page.locator("[data-studio-branch]")).toContainText("branch unknown");
+    await expect(page.locator("[data-dispatch-prompt]")).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
+test("an uncertain dispatch is visible to a reader but only resolvable by its owner", async ({
+  browser,
+}) => {
+  const created = await admin.post(`/api/runners/${fixture.runnerId}/dispatches`, {
+    headers: { authorization: `Bearer ${fixture.hostCredential}` },
+    data: { issueId: fixture.secondIssueId },
+  });
+  expect(created.status()).toBe(201);
+  const dispatchId = text(field(await created.json(), "id"), "dispatch id");
+  const accepted = await admin.post(
+    `/api/runners/${fixture.runnerId}/dispatches/${dispatchId}/accept`,
+    { headers: { authorization: `Bearer ${fixture.hostCredential}` }, data: {} },
+  );
+  expect(accepted.status()).toBe(200);
+  const reconnected = await admin.post(`/api/runners/${fixture.runnerId}/reconnect`, {
+    headers: { authorization: `Bearer ${fixture.hostCredential}` },
+    data: { activeAttempts: [] },
+  });
+  expect(reconnected.status()).toBe(200);
+
+  const studio = `/live/${fixture.runnerId}/${dispatchId}?issueId=${fixture.secondIssueId}&workspaceId=${fixture.workspaceId}`;
+  const readerContext = await browser.newContext({ baseURL: baseUrl });
+  try {
+    const readerPage = await readerContext.newPage();
+    await signIn(readerPage, fixture.teammateEmail, TEAMMATE_PASSWORD);
+    await readerPage.goto(studio);
+    await expect(readerPage.locator("[data-uncertain-dispatch]")).toBeVisible();
+    await expect(readerPage.locator("[data-resolve-dispatch]")).toHaveCount(0);
+  } finally {
+    await readerContext.close();
+  }
+
+  const ownerContext = await browser.newContext({ baseURL: baseUrl });
+  try {
+    const ownerPage = await ownerContext.newPage();
+    await signIn(ownerPage, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await ownerPage.goto(studio);
+    await expect(ownerPage.locator("[data-uncertain-dispatch]")).toBeVisible();
+    await expect(ownerPage.locator("[data-resolve-dispatch]")).toHaveCount(2);
+  } finally {
+    await ownerContext.close();
   }
 });
