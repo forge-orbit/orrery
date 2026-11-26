@@ -302,6 +302,14 @@ export async function probeModel(
 ): Promise<ProbeModelResult> {
   const locks = options.locks ?? new HarnessLocks();
   return await locks.run(harnessLockKey(definition), async () => {
+    if (options.signal?.aborted === true) {
+      return {
+        status: "restored_after_failure",
+        restored: true,
+        recovery: false,
+        error: "ACP probe aborted before the child was spawned.",
+      };
+    }
     const deadline = Date.now() + options.timeoutMs;
     let client: AcpStdioClient | undefined;
     let previous: PreviousDefaults | undefined;

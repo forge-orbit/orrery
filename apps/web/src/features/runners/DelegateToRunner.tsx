@@ -221,6 +221,7 @@ export function DelegateToRunner({
     selectedModel.reasoningDiscovery === "known" &&
     supportedEfforts.length === 0;
   const probingKeyForModel = `${runnerId}\u0000${harnessId}\u0000${modelId}`;
+  const probingKeyForCatalog = `catalog\u0000${runnerId}`;
   // The catalog the Runner publishes advances `probedAt`; derive the end of a
   // probe from that live query data instead of clearing on the enqueue reply.
   const catalogProbedAt = selectedRunner?.harnessCatalog?.probedAt;
@@ -231,10 +232,13 @@ export function DelegateToRunner({
       Date.parse(catalogProbedAt) > Date.parse(probeState.baselineProbedAt));
   const probeActive = probeState !== undefined && !probeExpired && !probeFailed && !catalogUpdated;
   const probingEffort = probeActive && probeState.key === probingKeyForModel;
-  const probingCatalog = probeActive && probeState.key === "catalog";
+  const probingCatalog = probeActive && probeState.key === probingKeyForCatalog;
+  const probeMatchesSelection =
+    probeState !== undefined &&
+    (probeState.key === probingKeyForCatalog || probeState.key === probingKeyForModel);
   const probeMessage =
-    probeState !== undefined && !catalogUpdated && (probeFailed || probeExpired)
-      ? probeState.key === "catalog"
+    probeMatchesSelection && !catalogUpdated && (probeFailed || probeExpired)
+      ? probeState.key === probingKeyForCatalog
         ? "Catalog refresh did not finish; you can still delegate."
         : "Reasoning levels could not be discovered; you can still delegate."
       : undefined;
@@ -267,6 +271,7 @@ export function DelegateToRunner({
   function clearProbe() {
     if (probeTimer.current !== undefined) clearTimeout(probeTimer.current);
     probeTimer.current = undefined;
+    probeGeneration.current += 1;
     setProbeState(undefined);
     setProbeExpired(false);
     setProbeFailed(false);
@@ -312,6 +317,7 @@ export function DelegateToRunner({
 
   function chooseRunner(value: string | null) {
     const id = value ?? "";
+    clearProbe();
     setRunnerOverride(id);
     const next = owned.find((runner) => runner.id === id)?.harnessCatalog?.harnesses[0];
     setHarnessOverride(next?.id ?? "");
@@ -321,6 +327,7 @@ export function DelegateToRunner({
 
   function chooseHarness(value: string | null) {
     const id = value ?? "";
+    clearProbe();
     setHarnessOverride(id);
     setModelOverride(defaultModelId(harnessCatalog.find((entry) => entry.id === id)));
     setEffortOverride("");
@@ -328,6 +335,7 @@ export function DelegateToRunner({
 
   function chooseModel(value: string | null) {
     const next = value ?? "";
+    clearProbe();
     setModelOverride(next);
     // Never carry the previous model's effort onto this one.
     setEffortOverride("");
@@ -383,7 +391,7 @@ export function DelegateToRunner({
       toast({
         body: `Delegated to ${owned.find((runner) => runner.id === dispatch.runnerId)?.displayName ?? "Runner"}.`,
       });
-      setIsOpen(false);
+      closeDialog();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issueDispatchesQuery(issueId).queryKey }),
         queryClient.invalidateQueries({ queryKey: workspaceRunnersQueryKey(workspaceId) }),
@@ -486,7 +494,7 @@ export function DelegateToRunner({
                         isLoading={probingCatalog}
                         isDisabled={probingCatalog}
                         data-delegate-refresh-catalog=""
-                        onClick={() => startProbe({ kind: "catalog" }, "catalog")}
+                        onClick={() => startProbe({ kind: "catalog" }, probingKeyForCatalog)}
                       />
                     </Stack>
                   )}

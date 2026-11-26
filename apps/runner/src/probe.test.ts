@@ -154,6 +154,20 @@ describe("probe_model: switch, discover, restore (#242)", () => {
     expect(result.restored).toBe(false);
     expect(result.status).toBe("restore_failed");
   });
+
+  it("never spawns a recovery process when already aborted before startProbe", async () => {
+    const test = await fixture("model-aware");
+    const aborted = new AbortController();
+    aborted.abort();
+    const result = await probeModel(definition, "stub-model-2", {
+      ...test.options,
+      signal: aborted.signal,
+      fallbackModel: "stub-model-1",
+    });
+    expect(result.recovery).toBe(false);
+    expect(result.restored).toBe(true);
+    expect(await test.events()).toHaveLength(0);
+  });
 });
 
 describe("catalog merge for discovered efforts (#242)", () => {
