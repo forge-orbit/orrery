@@ -30,7 +30,7 @@ export type AttachmentsFeatureDeps = AttachmentsDeps & {
 export interface AttachmentSeams {
   syncReferences: AttachmentsService["syncReferences"];
   listMetadata: AttachmentsService["listMetadata"];
-  purgeHolders: AttachmentsService["purgeHolders"];
+  purgeForTrash: AttachmentsService["purgeForTrash"];
 }
 
 export interface AttachmentsFeature extends Feature {

@@ -1,5 +1,5 @@
 {
-  "id": "2a524a4c-84b0-41e9-92ea-b910ae030f86",
+  "id": "1d4cc184-7cb2-441b-9e15-77e500bf9be4",
   "prevId": "d665ec06-90bf-4efb-ac21-77a359b474d0",
   "version": "7",
   "dialect": "postgresql",
@@ -3295,11 +3295,11 @@
         },
         "project_activity_type": {
           "name": "project_activity_type",
-          "value": "\"project_activity\".\"type\" in ('project_created', 'project_renamed', 'project_fallback_policy_changed', 'issue_created', 'issue_edited', 'issue_commented', 'issue_review_handoff', 'issue_closed', 'issue_reopened', 'issue_dependency_added', 'issue_dependency_removed', 'issue_link_added', 'issue_link_removed', 'issue_question_asked', 'issue_question_answered', 'issue_question_paused', 'issue_question_fallback_used', 'issue_question_follow_up', 'issue_fallback_policy_override_changed', 'issue_stop_requested', 'issue_session_expired', 'project_label_created', 'project_label_edited', 'project_label_deleted', 'issue_label_added', 'issue_label_removed', 'issue_parent_changed', 'issue_deleted', 'issue_restored', 'knowledge_created', 'knowledge_edited', 'knowledge_deleted', 'knowledge_restored')"
+          "value": "\"project_activity\".\"type\" in ('project_created', 'project_renamed', 'project_fallback_policy_changed', 'project_deleted', 'project_restored', 'issue_created', 'issue_edited', 'issue_commented', 'issue_review_handoff', 'issue_closed', 'issue_reopened', 'issue_dependency_added', 'issue_dependency_removed', 'issue_link_added', 'issue_link_removed', 'issue_question_asked', 'issue_question_answered', 'issue_question_paused', 'issue_question_fallback_used', 'issue_question_follow_up', 'issue_fallback_policy_override_changed', 'issue_stop_requested', 'issue_session_expired', 'project_label_created', 'project_label_edited', 'project_label_deleted', 'issue_label_added', 'issue_label_removed', 'issue_parent_changed', 'issue_deleted', 'issue_restored', 'knowledge_created', 'knowledge_edited', 'knowledge_deleted', 'knowledge_restored')"
         },
         "project_activity_target_matches_type": {
           "name": "project_activity_target_matches_type",
-          "value": "(\n        (\"project_activity\".\"type\" in ('project_created', 'project_renamed', 'project_fallback_policy_changed', 'project_label_created', 'project_label_edited', 'project_label_deleted') and \"project_activity\".\"issue_id\" is null and \"project_activity\".\"knowledge_entry_id\" is null)\n        or (\"project_activity\".\"type\" in ('issue_created', 'issue_edited', 'issue_commented', 'issue_review_handoff', 'issue_closed', 'issue_reopened', 'issue_dependency_added', 'issue_dependency_removed', 'issue_link_added', 'issue_link_removed', 'issue_question_asked', 'issue_question_answered', 'issue_question_paused', 'issue_question_fallback_used', 'issue_question_follow_up', 'issue_fallback_policy_override_changed', 'issue_stop_requested', 'issue_session_expired', 'issue_label_added', 'issue_label_removed', 'issue_parent_changed', 'issue_deleted', 'issue_restored') and \"project_activity\".\"issue_id\" is not null and \"project_activity\".\"knowledge_entry_id\" is null)\n        or (\"project_activity\".\"type\" in ('knowledge_created', 'knowledge_edited', 'knowledge_deleted', 'knowledge_restored') and \"project_activity\".\"issue_id\" is null and \"project_activity\".\"knowledge_entry_id\" is not null)\n      )"
+          "value": "(\n        (\"project_activity\".\"type\" in ('project_created', 'project_renamed', 'project_fallback_policy_changed', 'project_deleted', 'project_restored', 'project_label_created', 'project_label_edited', 'project_label_deleted') and \"project_activity\".\"issue_id\" is null and \"project_activity\".\"knowledge_entry_id\" is null)\n        or (\"project_activity\".\"type\" in ('issue_created', 'issue_edited', 'issue_commented', 'issue_review_handoff', 'issue_closed', 'issue_reopened', 'issue_dependency_added', 'issue_dependency_removed', 'issue_link_added', 'issue_link_removed', 'issue_question_asked', 'issue_question_answered', 'issue_question_paused', 'issue_question_fallback_used', 'issue_question_follow_up', 'issue_fallback_policy_override_changed', 'issue_stop_requested', 'issue_session_expired', 'issue_label_added', 'issue_label_removed', 'issue_parent_changed', 'issue_deleted', 'issue_restored') and \"project_activity\".\"issue_id\" is not null and \"project_activity\".\"knowledge_entry_id\" is null)\n        or (\"project_activity\".\"type\" in ('knowledge_created', 'knowledge_edited', 'knowledge_deleted', 'knowledge_restored') and \"project_activity\".\"issue_id\" is null and \"project_activity\".\"knowledge_entry_id\" is not null)\n      )"
         }
       },
       "isRLSEnabled": false
@@ -3654,6 +3654,24 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'require_human'"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by_human_id": {
+          "name": "deleted_by_human_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "purged_at": {
+          "name": "purged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -3674,6 +3692,7 @@
             }
           ],
           "isUnique": true,
+          "where": "\"projects\".\"purged_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3718,6 +3737,15 @@
           "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "projects_deleted_by_human_id_humans_id_fk": {
+          "name": "projects_deleted_by_human_id_humans_id_fk",
+          "tableFrom": "projects",
+          "tableTo": "humans",
+          "columnsFrom": ["deleted_by_human_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3739,6 +3767,14 @@
         "projects_fallback_policy": {
           "name": "projects_fallback_policy",
           "value": "\"projects\".\"fallback_policy\" in ('require_human', 'fallback_allowed')"
+        },
+        "projects_deleted_actor_matches": {
+          "name": "projects_deleted_actor_matches",
+          "value": "(\"projects\".\"deleted_at\" is null) = (\"projects\".\"deleted_by_human_id\" is null)"
+        },
+        "projects_purged_requires_deleted": {
+          "name": "projects_purged_requires_deleted",
+          "value": "\"projects\".\"purged_at\" is null or \"projects\".\"deleted_at\" is not null"
         }
       },
       "isRLSEnabled": false
@@ -4675,24 +4711,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "harness": {
-          "name": "harness",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "effort": {
-          "name": "effort",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "state": {
           "name": "state",
           "type": "text",
@@ -4953,10 +4971,6 @@
         "runner_dispatches_prompt_bounded": {
           "name": "runner_dispatches_prompt_bounded",
           "value": "\"runner_dispatches\".\"prompt\" is null or char_length(\"runner_dispatches\".\"prompt\") <= 16000"
-        },
-        "runner_dispatches_options_bounded": {
-          "name": "runner_dispatches_options_bounded",
-          "value": "(\"runner_dispatches\".\"harness\" is null or char_length(\"runner_dispatches\".\"harness\") between 1 and 64)\n          and (\"runner_dispatches\".\"model\" is null or char_length(\"runner_dispatches\".\"model\") between 1 and 200)\n          and (\"runner_dispatches\".\"effort\" is null or char_length(\"runner_dispatches\".\"effort\") between 1 and 64)"
         },
         "runner_dispatches_accepted_fields": {
           "name": "runner_dispatches_accepted_fields",
@@ -5839,7 +5853,7 @@
       "checkConstraints": {
         "webhook_deliveries_event": {
           "name": "webhook_deliveries_event",
-          "value": "\"webhook_deliveries\".\"event\" in ('project_created', 'project_renamed', 'project_fallback_policy_changed', 'issue_created', 'issue_edited', 'issue_commented', 'issue_review_handoff', 'issue_closed', 'issue_reopened', 'issue_dependency_added', 'issue_dependency_removed', 'issue_link_added', 'issue_link_removed', 'issue_question_asked', 'issue_question_answered', 'issue_question_paused', 'issue_question_fallback_used', 'issue_question_follow_up', 'issue_fallback_policy_override_changed', 'issue_stop_requested', 'issue_session_expired', 'project_label_created', 'project_label_edited', 'project_label_deleted', 'issue_label_added', 'issue_label_removed', 'issue_parent_changed', 'issue_deleted', 'issue_restored', 'knowledge_created', 'knowledge_edited', 'knowledge_deleted', 'knowledge_restored', 'webhook.test')"
+          "value": "\"webhook_deliveries\".\"event\" in ('project_created', 'project_renamed', 'project_fallback_policy_changed', 'project_deleted', 'project_restored', 'issue_created', 'issue_edited', 'issue_commented', 'issue_review_handoff', 'issue_closed', 'issue_reopened', 'issue_dependency_added', 'issue_dependency_removed', 'issue_link_added', 'issue_link_removed', 'issue_question_asked', 'issue_question_answered', 'issue_question_paused', 'issue_question_fallback_used', 'issue_question_follow_up', 'issue_fallback_policy_override_changed', 'issue_stop_requested', 'issue_session_expired', 'project_label_created', 'project_label_edited', 'project_label_deleted', 'issue_label_added', 'issue_label_removed', 'issue_parent_changed', 'issue_deleted', 'issue_restored', 'knowledge_created', 'knowledge_edited', 'knowledge_deleted', 'knowledge_restored', 'webhook.test')"
         },
         "webhook_deliveries_test_activity": {
           "name": "webhook_deliveries_test_activity",
@@ -6108,7 +6122,7 @@
         },
         "webhooks_events_valid": {
           "name": "webhooks_events_valid",
-          "value": "\"webhooks\".\"events\" <@ array['project_created', 'project_renamed', 'project_fallback_policy_changed', 'issue_created', 'issue_edited', 'issue_commented', 'issue_review_handoff', 'issue_closed', 'issue_reopened', 'issue_dependency_added', 'issue_dependency_removed', 'issue_link_added', 'issue_link_removed', 'issue_question_asked', 'issue_question_answered', 'issue_question_paused', 'issue_question_fallback_used', 'issue_question_follow_up', 'issue_fallback_policy_override_changed', 'issue_stop_requested', 'issue_session_expired', 'project_label_created', 'project_label_edited', 'project_label_deleted', 'issue_label_added', 'issue_label_removed', 'issue_parent_changed', 'issue_deleted', 'issue_restored', 'knowledge_created', 'knowledge_edited', 'knowledge_deleted', 'knowledge_restored']::text[]"
+          "value": "\"webhooks\".\"events\" <@ array['project_created', 'project_renamed', 'project_fallback_policy_changed', 'project_deleted', 'project_restored', 'issue_created', 'issue_edited', 'issue_commented', 'issue_review_handoff', 'issue_closed', 'issue_reopened', 'issue_dependency_added', 'issue_dependency_removed', 'issue_link_added', 'issue_link_removed', 'issue_question_asked', 'issue_question_answered', 'issue_question_paused', 'issue_question_fallback_used', 'issue_question_follow_up', 'issue_fallback_policy_override_changed', 'issue_stop_requested', 'issue_session_expired', 'project_label_created', 'project_label_edited', 'project_label_deleted', 'issue_label_added', 'issue_label_removed', 'issue_parent_changed', 'issue_deleted', 'issue_restored', 'knowledge_created', 'knowledge_edited', 'knowledge_deleted', 'knowledge_restored']::text[]"
         },
         "webhooks_disabled_fields": {
           "name": "webhooks_disabled_fields",
@@ -6685,7 +6699,7 @@
       "checkConstraints": {
         "workspace_event_type": {
           "name": "workspace_event_type",
-          "value": "\"workspace_events\".\"type\" in ('workspace_created', 'member_joined', 'owner_appointed', 'member_removed', 'owner_removed', 'member_left', 'owner_left', 'create_projects_granted', 'create_projects_revoked', 'invite_members_granted', 'invite_members_revoked', 'remove_members_granted', 'remove_members_revoked', 'manage_member_permissions_granted', 'manage_member_permissions_revoked', 'project_transfer_authorized', 'project_transfer_received', 'project_transferred_out', 'workspace_ownership_recovered')"
+          "value": "\"workspace_events\".\"type\" in ('workspace_created', 'member_joined', 'owner_appointed', 'member_removed', 'owner_removed', 'member_left', 'owner_left', 'create_projects_granted', 'create_projects_revoked', 'invite_members_granted', 'invite_members_revoked', 'remove_members_granted', 'remove_members_revoked', 'manage_member_permissions_granted', 'manage_member_permissions_revoked', 'project_transfer_authorized', 'project_transfer_received', 'project_transferred_out', 'project_deleted', 'project_restored', 'workspace_ownership_recovered')"
         }
       },
       "isRLSEnabled": false

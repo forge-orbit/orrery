@@ -301,8 +301,9 @@ describe("knowledge trash", () => {
     const service = makeService({
       syncReferences: async () => {},
       listMetadata: async () => new Map(),
-      purgeHolders: async (_tx, holders) => {
+      purgeForTrash: async (_tx, holders) => {
         purged.push(...holders);
+        return [];
       },
     });
     const manager = humanActor(f.managerHumanId);

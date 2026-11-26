@@ -182,10 +182,10 @@ async function lockIssue(tx: DbTransaction, issueId: string) {
       status: issues.status,
     })
     .from(issues)
-
-    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
+    .innerJoin(projects, eq(projects.id, issues.projectId))
+    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)))
     .limit(1)
-    .for("update");
+    .for("update", { of: issues });
   if (row === undefined) throw new InboxError("issue_not_found");
   return row;
 }
@@ -201,7 +201,7 @@ async function effectiveFallbackPolicy(
     })
     .from(issues)
     .innerJoin(projects, eq(projects.id, issues.projectId))
-    .where(eq(issues.id, issueId))
+    .where(and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)))
     .limit(1);
   return policy?.override ?? policy?.projectPolicy ?? FallbackPolicy.enum.require_human;
 }
@@ -307,7 +307,7 @@ async function requireAccess(
   const [project] = await tx
     .select({ id: projects.id, workspaceId: projects.workspaceId, key: projects.key })
     .from(projects)
-    .where(eq(projects.id, projectId))
+    .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
     .limit(1);
   if (
     project === undefined ||
@@ -841,7 +841,14 @@ export function createInboxService(deps: InboxDeps): InboxService {
             .selectDistinct({ workspaceId: questions.workspaceId, projectId: questions.projectId })
             .from(questions)
             .innerJoin(issues, eq(issues.id, questions.issueId))
-            .where(and(inArray(questions.workspaceId, workspaceIds), isNull(issues.deletedAt)));
+            .innerJoin(projects, eq(projects.id, questions.projectId))
+            .where(
+              and(
+                inArray(questions.workspaceId, workspaceIds),
+                isNull(issues.deletedAt),
+                isNull(projects.deletedAt),
+              ),
+            );
           const candidateProjects = new Map<string, string[]>();
           for (const row of candidates) {
             const projectIds = candidateProjects.get(row.workspaceId) ?? [];
@@ -879,6 +886,7 @@ export function createInboxService(deps: InboxDeps): InboxService {
                 inArray(questions.projectId, readable),
                 eq(questions.workspaceId, projects.workspaceId),
                 isNull(issues.deletedAt),
+                isNull(projects.deletedAt),
               ),
             )
             .orderBy(desc(questions.createdAt))
@@ -903,7 +911,10 @@ export function createInboxService(deps: InboxDeps): InboxService {
           const [issue] = await tx
             .select({ projectId: issues.projectId, number: issues.number, title: issues.title })
             .from(issues)
-            .where(and(eq(issues.id, issueId), isNull(issues.deletedAt)))
+            .innerJoin(projects, eq(projects.id, issues.projectId))
+            .where(
+              and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)),
+            )
             .limit(1);
           if (issue === undefined) throw new InboxError("issue_not_found");
           const access = await requireAccess(
@@ -922,7 +933,13 @@ export function createInboxService(deps: InboxDeps): InboxService {
             .from(questions)
             .innerJoin(issues, eq(issues.id, questions.issueId))
             .innerJoin(projects, eq(projects.id, questions.projectId))
-            .where(eq(questions.issueId, issueId))
+            .where(
+              and(
+                eq(questions.issueId, issueId),
+                isNull(issues.deletedAt),
+                isNull(projects.deletedAt),
+              ),
+            )
             .orderBy(desc(questions.createdAt));
           return rows.map((row) =>
             toQuestion(row, {
@@ -948,11 +965,13 @@ export function createInboxService(deps: InboxDeps): InboxService {
             .select({ issueId: questions.issueId })
             .from(questions)
             .innerJoin(issues, eq(questions.issueId, issues.id))
+            .innerJoin(projects, eq(projects.id, questions.projectId))
             .where(
               and(
                 eq(questions.status, QuestionStatus.enum.open),
                 lte(questions.responseDeadlineAt, sql`statement_timestamp()`),
                 isNull(issues.deletedAt),
+                isNull(projects.deletedAt),
               ),
             )
             .orderBy(questions.issueId)

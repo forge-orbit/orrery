@@ -2,6 +2,7 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -38,6 +39,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import {
   countIssueScopes,
+  deleteProject,
   filterAndSortIssues,
   IssueFilterBar,
   IssuePriorityControls,
@@ -61,15 +63,19 @@ import {
   setProjectAccess,
   setProjectFallbackPolicy,
   updateProject,
+  workspaceTrashProjectsQuery,
 } from "../features/projects/index.ts";
+import { workspaceHistoryQuery } from "../features/history/index.ts";
 import { workspaceRunsQuery } from "../features/runs/index.ts";
 import { activeSessionsQuery } from "../features/work-sessions/index.ts";
+import { ApiProblemError } from "../lib/api.ts";
 import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextAreaField, TextField } from "../lib/fields.tsx";
 import { AgentAvatar } from "../lib/harness.tsx";
 import { Link } from "../lib/Link.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
 import { formatFullDateTime, relativeTime } from "../lib/time.ts";
+import { workspacesQuery } from "../features/workspaces/index.ts";
 
 export const Route = createFileRoute("/projects/$projectId")({
   loader: async ({ context, params }) => {
@@ -79,6 +85,7 @@ export const Route = createFileRoute("/projects/$projectId")({
       context.queryClient.ensureQueryData(projectLabelsQuery(project.id)),
       context.queryClient.ensureQueryData(knowledgeEntriesQuery(project.id)),
       context.queryClient.ensureQueryData(projectActivityQuery(project.id)),
+      context.queryClient.ensureQueryData(workspacesQuery),
       ...(project.accessLevel === "manage" && project.workspaceKind === "shared"
         ? [
             context.queryClient.ensureQueryData(projectAccessQuery(project.id)),
@@ -111,6 +118,8 @@ const activityLabels: Record<ProjectActivityType, string> = {
   project_created: "created the project",
   project_renamed: "renamed the project",
   project_fallback_policy_changed: "changed the project fallback policy",
+  project_deleted: "moved the project to Trash",
+  project_restored: "restored the project from Trash",
   issue_created: "opened issue",
   issue_edited: "edited issue",
   issue_commented: "commented on issue",
@@ -160,6 +169,7 @@ function isProjectTab(value: string): value is ProjectTab {
 function ProjectPage() {
   const { projectId } = Route.useParams();
   const { data: project } = useSuspenseQuery(projectQuery(projectId));
+  const { data: workspaces } = useSuspenseQuery(workspacesQuery);
   const { data: issues } = useSuspenseQuery(issuesQuery(project.id));
   const { data: labels } = useSuspenseQuery(projectLabelsQuery(project.id));
   const { data: knowledge } = useSuspenseQuery(knowledgeEntriesQuery(project.id));
@@ -173,6 +183,9 @@ function ProjectPage() {
   const runsById = new Map(runs.map((run) => [run.id, run]));
   const canContribute = project.accessLevel !== "read";
   const canManage = project.accessLevel === "manage";
+  const isWorkspaceOwner = workspaces.some(
+    (workspace) => workspace.id === project.workspaceId && workspace.isOwner,
+  );
   const navigate = useNavigate();
   const search = Route.useSearch();
   const [tab, setTab] = useState<ProjectTab>(search.tab ?? "issues");
@@ -659,7 +672,143 @@ function ProjectPage() {
           </Stack>
         </section>
       )}
+
+      {isWorkspaceOwner && <ProjectDangerZone project={project} />}
     </Stack>
+  );
+}
+
+function ProjectDangerZone({ project }: { project: Project }) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [isOpen, setIsOpen] = useState(false);
+  const [typedName, setTypedName] = useState("");
+  const [error, setError] = useState<string>();
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  function setDialogOpen(open: boolean) {
+    setIsOpen(open);
+    if (!open) {
+      setTypedName("");
+      setError(undefined);
+    }
+  }
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isDeleting || typedName !== project.name) return;
+
+    setIsDeleting(true);
+    setError(undefined);
+    try {
+      await deleteProject(project.id);
+      setDialogOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: projectsQuery(project.workspaceId).queryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: workspaceTrashProjectsQuery(project.workspaceId).queryKey,
+        }),
+        queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey }),
+        queryClient.invalidateQueries({
+          queryKey: workspaceHistoryQuery(project.workspaceId).queryKey,
+        }),
+      ]);
+      await navigate({
+        to: "/workspaces/$workspaceId",
+        params: { workspaceId: project.workspaceId },
+      });
+      queryClient.removeQueries({ queryKey: projectQuery(project.id).queryKey });
+      toast({ body: `Moved "${project.name}" to Workspace Trash.` });
+    } catch (cause) {
+      setError(
+        cause instanceof ApiProblemError && cause.code === "project_active_work_exists"
+          ? "Active Work sessions or non-ended Dispatches are still using this project. End or wait for that work to finish, then try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not move this project to Trash.",
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    <>
+      <Section padding={4}>
+        <Stack gap={3}>
+          <Heading level={2} color="inherit">
+            Danger Zone
+          </Heading>
+          <Text as="p" color="secondary">
+            Move this project and its contents to Workspace Trash. You can restore it for 30 days.
+          </Text>
+          <Stack direction="horizontal" hAlign="start">
+            <Button
+              type="button"
+              label="Move to Trash"
+              icon={<Icon icon={Trash2} />}
+              variant="destructive"
+              onClick={() => setDialogOpen(true)}
+            />
+          </Stack>
+        </Stack>
+      </Section>
+
+      <Dialog isOpen={isOpen} onOpenChange={setDialogOpen} purpose="form" width="30rem" padding={4}>
+        <Stack gap={4}>
+          <DialogHeader
+            title={`Move "${project.name}" to Trash?`}
+            subtitle="The project stays recoverable for 30 days."
+            onOpenChange={setDialogOpen}
+          />
+          <Text as="p" color="secondary">
+            This moves the project, its issues, and its knowledge to Trash. Type the exact project
+            name to confirm.
+          </Text>
+          <form onSubmit={(event) => void onSubmit(event)}>
+            <Stack gap={3}>
+              <TextField
+                label="Type the project name to confirm"
+                id="project-trash-confirmation"
+                value={typedName}
+                onChange={setTypedName}
+                autoComplete="off"
+                required
+                width="100%"
+              />
+              {error !== undefined && (
+                <Banner
+                  status="error"
+                  role="alert"
+                  title="Could not move project to Trash"
+                  description={error}
+                  collapsible={false}
+                />
+              )}
+              <Stack direction="horizontal" hAlign="end" gap={2} wrap="wrap">
+                <Button
+                  type="button"
+                  label="Cancel"
+                  variant="secondary"
+                  isDisabled={isDeleting}
+                  onClick={() => setDialogOpen(false)}
+                />
+                <Button
+                  type="submit"
+                  label="Move to Trash"
+                  variant="destructive"
+                  isLoading={isDeleting}
+                  isDisabled={isDeleting || typedName !== project.name}
+                />
+              </Stack>
+            </Stack>
+          </form>
+        </Stack>
+      </Dialog>
+    </>
   );
 }
 

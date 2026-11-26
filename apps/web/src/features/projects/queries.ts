@@ -13,6 +13,7 @@ import {
   ProjectLabelsResponse,
   ProjectsResponse,
   ReadyWorkResponse,
+  TrashedProjectsResponse,
   type ReadyWorkFilter,
 } from "@orrery/contract";
 import { queryOptions } from "@tanstack/react-query";
@@ -25,6 +26,18 @@ export const projectsQuery = (workspaceId: string) =>
       getJson(`/api/workspaces/${encodeURIComponent(workspaceId)}/projects`, (value) =>
         ProjectsResponse.parse(value),
       ),
+  });
+
+export const workspaceTrashProjectsQuery = (workspaceId: string) =>
+  queryOptions({
+    queryKey: ["workspaces", workspaceId, "trash", "projects"],
+    queryFn: async () => {
+      const projects = await getJson(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/trash/projects`,
+        (value) => TrashedProjectsResponse.parse(value),
+      );
+      return { projects, fetchedAt: Date.now() };
+    },
   });
 
 export const projectQuery = (projectId: string) =>

@@ -3,6 +3,7 @@ import {
   AgentKeyEventType,
   AgentKeyValidity,
   ProjectAccessLevel,
+  WorkspaceKind,
   type Agent,
   type AgentIdentity,
   type AgentKey,
@@ -25,6 +26,7 @@ import {
   agents,
   dispatchTokens,
   humans,
+  projectAccessGrants,
   projects,
   runnerDispatches,
   runnerHosts,
@@ -307,7 +309,7 @@ async function loadKeyProjects(
     })
     .from(agentApiKeyProjects)
     .innerJoin(projects, eq(projects.id, agentApiKeyProjects.projectId))
-    .where(inArray(agentApiKeyProjects.keyId, [...keyIds]));
+    .where(and(inArray(agentApiKeyProjects.keyId, [...keyIds]), isNull(projects.deletedAt)));
   for (const row of rows) {
     const list = byKey.get(row.keyId) ?? [];
     list.push({
@@ -409,6 +411,7 @@ const dispatchLive = sql<boolean>`${dispatchTokens.revokedAt} is null
   and ${workSessions.leaseExpiresAt} > statement_timestamp()
   and ${runnerHosts.revokedAt} is null
   and ${runners.revokedAt} is null
+  and ${projects.deletedAt} is null
   and ${humans.deactivatedAt} is null`;
 
 async function resolveDispatchTokenInTransaction(
@@ -807,11 +810,34 @@ export function createAgentsService({
           throw new AgentsError("workspace_not_found");
         }
 
-        const preserved = (await loadKeyProjects(tx, [keyId])).get(keyId) ?? [];
-        const requested: AgentKeyGrant[] =
-          input.projects ??
-          preserved.map((grant) => ({ projectId: grant.projectId, level: grant.level }));
         const explicit = input.projects !== undefined;
+        let requested: AgentKeyGrant[];
+        let preservedTrashed: AgentKeyGrant[] = [];
+        if (explicit) {
+          requested = input.projects ?? [];
+        } else {
+          const sourceGrants = await tx
+            .select({
+              projectId: agentApiKeyProjects.projectId,
+              level: agentApiKeyProjects.level,
+              deletedAt: projects.deletedAt,
+            })
+            .from(agentApiKeyProjects)
+            .innerJoin(projects, eq(projects.id, agentApiKeyProjects.projectId))
+            .where(eq(agentApiKeyProjects.keyId, keyId));
+          requested = sourceGrants
+            .filter((grant) => grant.deletedAt === null)
+            .map((grant) => ({
+              projectId: grant.projectId,
+              level: ProjectAccessLevel.parse(grant.level),
+            }));
+          preservedTrashed = sourceGrants
+            .filter((grant) => grant.deletedAt !== null)
+            .map((grant) => ({
+              projectId: grant.projectId,
+              level: ProjectAccessLevel.parse(grant.level),
+            }));
+        }
         const ceiling = await projectAccessCeiling(
           tx,
           source.key.workspaceId,
@@ -830,6 +856,62 @@ export function createAgentsService({
             grants.push({ projectId: grant.projectId, level: humanLevel });
           } else {
             grants.push(grant);
+          }
+        }
+        if (preservedTrashed.length > 0) {
+          const [ws] = await tx
+            .select({
+              kind: workspaces.kind,
+              personalOwnerHumanId: workspaces.personalOwnerHumanId,
+              isOwner: workspaceMemberships.isOwner,
+              suspendedAt: workspaceMemberships.suspendedAt,
+            })
+            .from(workspaces)
+            .leftJoin(
+              workspaceMemberships,
+              and(
+                eq(workspaceMemberships.workspaceId, workspaces.id),
+                eq(workspaceMemberships.humanId, actor.humanId),
+              ),
+            )
+            .where(eq(workspaces.id, source.key.workspaceId))
+            .limit(1);
+          const isWorkspaceOwner =
+            ws !== undefined &&
+            ((ws.kind === WorkspaceKind.enum.personal &&
+              ws.personalOwnerHumanId === actor.humanId) ||
+              (ws.kind === WorkspaceKind.enum.shared &&
+                ws.isOwner === true &&
+                ws.suspendedAt === null));
+          const grantRows = isWorkspaceOwner
+            ? []
+            : await tx
+                .select({
+                  projectId: projectAccessGrants.projectId,
+                  level: projectAccessGrants.level,
+                })
+                .from(projectAccessGrants)
+                .where(
+                  and(
+                    eq(projectAccessGrants.humanId, actor.humanId),
+                    inArray(
+                      projectAccessGrants.projectId,
+                      preservedTrashed.map((g) => g.projectId),
+                    ),
+                  ),
+                );
+          const directLevelByProject = new Map(
+            grantRows.map((row) => [row.projectId, ProjectAccessLevel.parse(row.level)]),
+          );
+          for (const grant of preservedTrashed) {
+            const humanLevel = isWorkspaceOwner
+              ? ProjectAccessLevel.enum.manage
+              : directLevelByProject.get(grant.projectId);
+            if (humanLevel === undefined) continue;
+            grants.push({
+              projectId: grant.projectId,
+              level: projectAccessAtLeast(humanLevel, grant.level) ? grant.level : humanLevel,
+            });
           }
         }
 

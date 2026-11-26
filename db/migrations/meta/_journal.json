@@ -418,8 +418,15 @@
     {
       "idx": 59,
       "version": "7",
-      "when": 1795677303239,
-      "tag": "0059_complete_young_avengers",
+      "when": 1795678276407,
+      "tag": "0059_fearless_skin",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795684132863,
+      "tag": "0060_aberrant_wong",
       "breakpoints": true
     }
   ]
