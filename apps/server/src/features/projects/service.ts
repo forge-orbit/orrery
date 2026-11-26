@@ -3258,14 +3258,7 @@ export function createProjectsService({
             })
             .where(inArray(knowledgeEntries.id, knowledgeIdsToScrub));
         }
-        if (attachmentSeams !== undefined && attachmentHolders.length > 0) {
-          await attachmentSeams.purgeHolders(tx, attachmentHolders);
-        }
-
-        if (expiredProjectIds.length > 0 && attachmentSeams !== undefined) {
-          await attachmentSeams.purgeProjectAttachments(tx, expiredProjectIds);
-        }
-
+        let releasedStreamObjectIds: string[] = [];
         if (expiredProjectIds.length > 0) {
           const projectSessions = await tx
             .select({ id: workSessions.id, streamObjectId: workSessions.streamObjectId })
@@ -3297,17 +3290,36 @@ export function createProjectsService({
             const retainedIds = new Set(
               stillReferenced.flatMap((row) => (row.id === null ? [] : [row.id])),
             );
-            const releasedIds = streamObjectIds.filter((id) => !retainedIds.has(id));
-            if (releasedIds.length > 0) {
-              await tx
-                .update(storedObjects)
-                .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
-                .where(
-                  and(inArray(storedObjects.id, releasedIds), eq(storedObjects.status, "active")),
-                );
-            }
+            releasedStreamObjectIds = streamObjectIds.filter((id) => !retainedIds.has(id));
           }
+        }
 
+        // Sessions are locked and detached before the attachment seam takes its
+        // one ascending-id lock pass. Only after both families are complete do
+        // we lock and mark their released stored_objects together.
+        const releasedAttachmentObjectIds =
+          attachmentSeams === undefined
+            ? []
+            : await attachmentSeams.purgeForTrash(tx, attachmentHolders, expiredProjectIds);
+        const releasedObjectIds = [
+          ...new Set([...releasedStreamObjectIds, ...releasedAttachmentObjectIds]),
+        ].toSorted();
+        if (releasedObjectIds.length > 0) {
+          await tx
+            .select({ id: storedObjects.id })
+            .from(storedObjects)
+            .where(inArray(storedObjects.id, releasedObjectIds))
+            .orderBy(storedObjects.id)
+            .for("update");
+          await tx
+            .update(storedObjects)
+            .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
+            .where(
+              and(inArray(storedObjects.id, releasedObjectIds), eq(storedObjects.status, "active")),
+            );
+        }
+
+        if (expiredProjectIds.length > 0) {
           await tx
             .delete(projectAccessGrants)
             .where(inArray(projectAccessGrants.projectId, expiredProjectIds));

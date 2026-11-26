@@ -610,9 +610,8 @@ describe("issue trash", () => {
     const attachmentSeams: AttachmentSeams = {
       syncReferences: (tx, input) => attached.service.syncReferences(tx, input),
       listMetadata: (tx, holders) => attached.service.listMetadata(tx, holders),
-      purgeHolders: (tx, holders) => attached.service.purgeHolders(tx, holders),
-      purgeProjectAttachments: (tx, projectIds) =>
-        attached.service.purgeProjectAttachments(tx, projectIds),
+      purgeForTrash: (tx, holders, projectIds) =>
+        attached.service.purgeForTrash(tx, holders, projectIds),
     };
     const service = makeService(liveSessionGate, attachmentSeams);
     const activeIssue = await createIssue(service, manager, f.projectId);

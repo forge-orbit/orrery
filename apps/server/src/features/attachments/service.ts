@@ -103,10 +103,12 @@ export interface AttachmentsService {
     tx: DbTransaction,
     holders: readonly AttachmentHolder[],
   ): Promise<AttachmentMetadataByHolder>;
-  /** Drop references for purged holders and reclaim attachments with no references left. */
-  purgeHolders(tx: DbTransaction, holders: readonly AttachmentHolder[]): Promise<void>;
-  /** Delete every project attachment after its issues and knowledge have been purged. */
-  purgeProjectAttachments(tx: DbTransaction, projectIds: readonly string[]): Promise<void>;
+  /** Lock and delete trash attachments in one ordered pass; return blobs for the caller's final object pass. */
+  purgeForTrash(
+    tx: DbTransaction,
+    holders: readonly AttachmentHolder[],
+    projectIds: readonly string[],
+  ): Promise<string[]>;
   /** One guarded 24-hour grace sweep tick; returns the number of attachments reclaimed. */
   sweepUnreferenced(): Promise<number>;
 }
@@ -738,42 +740,60 @@ export function createAttachmentsService({
       return grouped;
     },
 
-    async purgeHolders(tx, holders) {
+    async purgeForTrash(tx, holders, projectIds) {
       const conditions = holderConditions(holders);
-      if (conditions.length === 0) return;
-      // Callers lock the issue rows first; candidates are then locked in id order
-      // before references are removed and zero-reference rows are reclaimed.
+      const targetConditions = [];
+      if (projectIds.length > 0) {
+        targetConditions.push(inArray(attachments.projectId, projectIds));
+      }
+      if (conditions.length > 0) targetConditions.push(or(...conditions));
+      if (targetConditions.length === 0) return [];
+
+      // The caller locks projects, their holders and work sessions first. Lock
+      // holder and project attachments together here, before any stored_objects
+      // row is touched by the caller.
       const rows = await tx
-        .select({ id: attachments.id, objectId: attachments.objectId })
-        .from(attachmentReferences)
-        .innerJoin(attachments, eq(attachments.id, attachmentReferences.attachmentId))
-        .where(or(...conditions))
+        .select({
+          id: attachments.id,
+          objectId: attachments.objectId,
+          projectId: attachments.projectId,
+        })
+        .from(attachments)
+        .leftJoin(attachmentReferences, eq(attachments.id, attachmentReferences.attachmentId))
+        .where(or(...targetConditions))
         .orderBy(attachments.id)
         .for("update", { of: attachments });
-      await tx.delete(attachmentReferences).where(or(...conditions));
-      await reclaimMany(tx, [...new Map(rows.map((row) => [row.id, row])).values()]);
-    },
+      const uniqueRows = [...new Map(rows.map((row) => [row.id, row])).values()];
+      if (conditions.length > 0) {
+        await tx.delete(attachmentReferences).where(or(...conditions));
+      }
 
-    async purgeProjectAttachments(tx, projectIds) {
-      if (projectIds.length === 0) return;
-      const rows = await tx
-        .select({ id: attachments.id, objectId: attachments.objectId })
-        .from(attachments)
-        .where(inArray(attachments.projectId, projectIds))
-        .orderBy(attachments.id)
-        .for("update");
-      if (rows.length === 0) return;
-      const attachmentIds = rows.map((row) => row.id);
-      await tx.delete(attachments).where(inArray(attachments.id, attachmentIds));
-      await tx
-        .update(storedObjects)
-        .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
-        .where(
-          and(
-            inArray(storedObjects.id, [...new Set(rows.map((row) => row.objectId))]),
-            eq(storedObjects.status, "active"),
-          ),
-        );
+      const projectIdSet = new Set(projectIds);
+      const projectRows = uniqueRows.filter((row) => projectIdSet.has(row.projectId));
+      const holderRows = uniqueRows.filter((row) => !projectIdSet.has(row.projectId));
+      const remaining =
+        holderRows.length === 0
+          ? []
+          : await tx
+              .selectDistinct({ id: attachmentReferences.attachmentId })
+              .from(attachmentReferences)
+              .where(
+                inArray(
+                  attachmentReferences.attachmentId,
+                  holderRows.map((row) => row.id),
+                ),
+              );
+      const referencedIds = new Set(remaining.map((row) => row.id));
+      const reclaimableHolderRows = holderRows.filter((row) => !referencedIds.has(row.id));
+      const rowsToDelete = [...projectRows, ...reclaimableHolderRows];
+      const attachmentIds = [...new Set(rowsToDelete.map((row) => row.id))].toSorted();
+      if (attachmentIds.length > 0) {
+        await tx.delete(attachments).where(inArray(attachments.id, attachmentIds));
+      }
+
+      // The project service combines these with released session stream objects
+      // and locks/updates all stored_objects in one final ordered pass.
+      return [...new Set(rowsToDelete.map((row) => row.objectId))].toSorted();
     },
 
     async sweepUnreferenced() {

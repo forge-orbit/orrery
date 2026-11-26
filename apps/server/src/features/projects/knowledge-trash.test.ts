@@ -301,10 +301,10 @@ describe("knowledge trash", () => {
     const service = makeService({
       syncReferences: async () => {},
       listMetadata: async () => new Map(),
-      purgeHolders: async (_tx, holders) => {
+      purgeForTrash: async (_tx, holders) => {
         purged.push(...holders);
+        return [];
       },
-      purgeProjectAttachments: async () => {},
     });
     const manager = humanActor(f.managerHumanId);
     const entry = await createEntry(service, manager, f);
