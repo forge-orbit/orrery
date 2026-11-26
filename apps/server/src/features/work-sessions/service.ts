@@ -474,7 +474,7 @@ async function lockIssue(tx: DbTransaction, issueId: string) {
     .select({ id: projects.id })
     .from(projects)
     .where(and(eq(projects.id, issueProject.projectId), isNull(projects.deletedAt)))
-    .for("update")
+    .for("no key update")
     .limit(1);
   if (project === undefined) throw new SessionsError("issue_not_found");
 

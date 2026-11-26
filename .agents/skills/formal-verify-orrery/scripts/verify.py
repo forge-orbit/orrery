@@ -4003,13 +4003,13 @@ def extract_code_facts() -> dict[str, Any]:
         and "isNull(projects.deletedAt)" in project_access_history_fn
     )
     m49_sessions_project_active_filter = "isNull(projects.deletedAt)" in sessions_project_lock_fn
-    m49_sessions_project_row_lock = '.for("update")' in sessions_project_lock_fn
+    m49_sessions_project_row_lock = '.for("no key update")' in sessions_project_lock_fn
     m49_sessions_issue_active_filter = "isNull(projects.deletedAt)" in sessions_locked_issue_fn
     m49_sessions_lock_order = (
         ordered(
             sessions_lock_issue_fn,
             "const [project]",
-            '.for("update")',
+            '.for("no key update")',
             "const [row]",
             '.for("update", { of: issues })',
         )
@@ -4040,8 +4040,8 @@ def extract_code_facts() -> dict[str, Any]:
         and "isNull(projects.deletedAt)" in runner_create_dispatch_project_lock_fn
     )
     m49_dispatch_project_row_lock = (
-        '.for("update")' in runner_auto_claim_project_lock_fn
-        and '.for("update")' in runner_create_dispatch_project_lock_fn
+        '.for("no key update")' in runner_auto_claim_project_lock_fn
+        and '.for("no key update")' in runner_create_dispatch_project_lock_fn
     )
     m49_dispatch_project_scope = (
         "eq(projects.id, scanned.runner.projectId)" in runner_auto_claim_project_lock_fn
@@ -4054,7 +4054,7 @@ def extract_code_facts() -> dict[str, Any]:
         and "await insertDispatchLocked(tx" in runner_create_dispatch_fn
     )
     m49_manual_dispatch_project_active_filter = "isNull(projects.deletedAt)" in runner_manual_project_lock_fn
-    m49_manual_dispatch_project_row_lock = '.for("update")' in runner_manual_project_lock_fn
+    m49_manual_dispatch_project_row_lock = '.for("no key update")' in runner_manual_project_lock_fn
     m49_manual_dispatch_project_scope = (
         "eq(projects.id, issue.projectId)" in runner_manual_project_lock_fn
         and "eq(projects.workspaceId, issue.workspaceId)" in runner_manual_project_lock_fn

@@ -2445,7 +2445,7 @@ export function createRunnersService(deps: RunnersDeps) {
               isNull(projects.deletedAt),
             ),
           )
-          .for("update")
+          .for("no key update")
           .limit(1);
         if (activeProject === undefined) throw new RunnersError("issue_not_found");
         const [lockedIssue] = await tx
@@ -2616,7 +2616,7 @@ export function createRunnersService(deps: RunnersDeps) {
               isNull(projects.deletedAt),
             ),
           )
-          .for("update")
+          .for("no key update")
           .limit(1);
         if (activeProject === undefined) return { dispatch: null };
 
@@ -2733,7 +2733,7 @@ export function createRunnersService(deps: RunnersDeps) {
               isNull(projects.deletedAt),
             ),
           )
-          .for("update")
+          .for("no key update")
           .limit(1);
         if (project === undefined) throw new RunnersError("issue_not_found");
         const [issue] = await tx
@@ -2982,7 +2982,7 @@ export function createRunnersService(deps: RunnersDeps) {
                 isNull(projects.deletedAt),
               ),
             )
-            .for("update")
+            .for("no key update")
             .limit(1);
           if (activeProject === undefined) throw new RunnersError("runner_revoked");
           await tx

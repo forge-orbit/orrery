@@ -826,13 +826,13 @@ describe("Project Trash cross-feature hiding", () => {
         bearer: keySecret,
         body: { runId },
       });
-      await waitForLockWait('%from "projects"%for update%', 2);
+      await waitForLockWait('%from "projects"%for %update%', 2);
       dispatchResponse = request(`/api/issues/${issue.id}/dispatches`, {
         method: "POST",
         cookie: owner.cookie,
         body: { runnerId, agentId },
       });
-      await waitForLockWait('%from "projects"%for update%', 3);
+      await waitForLockWait('%from "projects"%for %update%', 3);
       transferResponse = request("/api/transfers/accept", {
         method: "POST",
         cookie: owner.cookie,
