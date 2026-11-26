@@ -117,7 +117,7 @@ test("browser approval binds a Runner host, then the fleet shows live presence a
 
     await page.getByRole("button", { name: "Revoke this laptop" }).first().click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Revoke this laptop" }).click();
-    await expect(page.getByText("No Runners here yet")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No Runners here yet" })).toBeVisible();
   } finally {
     await context.close();
   }
