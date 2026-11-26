@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { basename } from "node:path";
 import type {
   DispatchAcceptance,
   DispatchCommandPayload,
@@ -14,6 +13,7 @@ import { ephemeralMcpConfig } from "./config.ts";
 import {
   harnessLockKey,
   HarnessLocks,
+  resolveDefaultHarness,
   resolveHarness,
   type HarnessDefinition,
 } from "./harnesses.ts";
@@ -272,16 +272,19 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     const requestedHarness = command.harness ?? config.defaults.harness;
     let harness: HarnessDefinition;
     if (requestedHarness === undefined) {
-      // No override: keep the configured ACP command as the Runner default.
-      // Explicit --acp-command overrides are published under id "custom" (PR #260).
-      const id = config.acpOverridden ? "custom" : basename(config.acp.command);
-      harness = {
-        id,
-        displayName: basename(config.acp.command) || id,
-        source: "override",
-        command: config.acp.command,
-        args: [...config.acp.args],
-      };
+      // Omitted harness resolves through the shared local-registry default so
+      // the dispatch uses the same definition (and adapter) as catalog probing.
+      const def = resolveDefaultHarness(config.acpOverridden ? { acpOverride: config.acp } : {});
+      if (def === undefined) {
+        throw new DispatchOptionError({
+          kind: "harness_unavailable",
+          version: 1,
+          message:
+            "Default Harness 'opencode' is not installed on this Runner. Install it or pass --harness explicitly.",
+          harness: "opencode",
+        });
+      }
+      harness = def;
     } else {
       const resolved = await resolveHarness(
         requestedHarness,

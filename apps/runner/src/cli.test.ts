@@ -219,6 +219,14 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
       }),
       { mode: 0o600 },
     );
+    // #266: explicit --harness must resolve locally; define a user "node"
+    // harness pointing at an executable so startup validation passes.
+    await writeFile(
+      join(dir, "harnesses.json"),
+      JSON.stringify({
+        harnesses: [{ id: "node", displayName: "Node", command: process.execPath, args: [] }],
+      }),
+    );
 
     try {
       const started = Date.now();
@@ -596,6 +604,12 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
       }),
       { mode: 0o600 },
     );
+    await writeFile(
+      join(dir, "harnesses.json"),
+      JSON.stringify({
+        harnesses: [{ id: "node", displayName: "Node", command: process.execPath, args: [] }],
+      }),
+    );
 
     try {
       const result = await run(
@@ -624,5 +638,31 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
     } finally {
       await stub.close();
     }
+  });
+
+  it("status stays offline and reports harnesses.json entries shadowing presets", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: "http://127.0.0.1:1",
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      join(dir, "harnesses.json"),
+      JSON.stringify({
+        harnesses: [{ id: "codex", displayName: "Shadow", command: "/opt/shadow" }],
+      }),
+    );
+    const result = await run(["status"], { ORRERY_RUNNER_CONFIG_DIR: dir });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("TestLaptop");
+    expect(result.stdout).toContain("codex");
+    expect(result.stdout.toLowerCase()).toContain("shadow");
   });
 });

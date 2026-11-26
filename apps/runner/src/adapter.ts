@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { HarnessDefinition } from "./harnesses.ts";
+import { isReservedHarnessId, type HarnessDefinition } from "./harnesses.ts";
 import {
   activeSessionModel,
   effortConfigIds,
@@ -305,13 +305,21 @@ export const ompAdapter: HarnessAdapter = new OmpAdapter();
 export function adapterForHarness(definition: HarnessDefinition): HarnessAdapter {
   // An explicit --acp-command override may point at any binary named "hermes";
   // without a safe default it could silently skip CLI-default restore.
-  if (definition.source === "override" || definition.id.toLowerCase() === "custom") {
+  if (definition.source === "override" || isReservedHarnessId(definition.id)) {
     return genericAcpAdapter;
   }
-  const id = definition.id.toLowerCase();
   const command = basename(definition.command.replace(/\\/g, "/"))
     .replace(/\.(exe|cmd|bat)$/i, "")
     .toLowerCase();
+  // A `source: "user"` entry reusing a preset ID with an unrelated command must
+  // not inherit that preset's dialect: match user entries by command only.
+  if (definition.source === "user") {
+    if (command === "hermes") return hermesAdapter;
+    if (command === "opencode") return openCodeAdapter;
+    if (command === "omp") return ompAdapter;
+    return genericAcpAdapter;
+  }
+  const id = definition.id.toLowerCase();
   if (id === "hermes" || command === "hermes") return hermesAdapter;
   if (id === "opencode" || command === "opencode") return openCodeAdapter;
   if (id === "omp" || command === "omp") return ompAdapter;

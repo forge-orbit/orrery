@@ -5,6 +5,7 @@ import { readCredential } from "./credential.ts";
 import type { ReadyWorkFilter } from "@orrery/contract";
 import { loadSupervisionConfig } from "./config.ts";
 import { defaultHostDisplayName, validateDisplayName } from "./display-name.ts";
+import { shadowedPresetIds } from "./harnesses.ts";
 import { login } from "./login.ts";
 import { assertSecureOrigin, resolveLoginOrigin } from "./origin.ts";
 import { start } from "./start.ts";
@@ -224,10 +225,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       }
       case "status": {
         // Strictly offline: ignore --server and ORRERY_URL, make zero network calls.
+        // Read the shadowed presets before writing anything so a malformed
+        // harnesses.json fails cleanly without partial stdout.
         const stored = await readCredential();
+        const shadowed = shadowedPresetIds();
         process.stdout.write(
           `Runner host '${stored.displayName}' (${stored.hostId}) enrolled with ${stored.server}.\n`,
         );
+        for (const id of shadowed) {
+          process.stdout.write(`Harness preset '${id}' is shadowed by harnesses.json.\n`);
+        }
         return;
       }
       default:
