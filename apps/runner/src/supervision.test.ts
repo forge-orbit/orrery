@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HarnessCatalog } from "@orrery/contract";
-import { GenericAcpAdapter, type AdapterResolver, type HarnessAdapter } from "./adapter.ts";
+import {
+  adapterForHarness,
+  GenericAcpAdapter,
+  openCodeAdapter,
+  type AdapterResolver,
+  type HarnessAdapter,
+} from "./adapter.ts";
 import { harnessConfigKey, writeCachedCatalog } from "./catalog.ts";
 import { loadSupervisionConfig } from "./config.ts";
 import type { HarnessDefinition } from "./harnesses.ts";
@@ -23,6 +29,8 @@ interface Fixture {
   stop: AbortController;
   lines: string[];
   done: Promise<void>;
+  /** Fail-fast tests expect start() to reject: afterEach skips awaiting `done`. */
+  allowStartRejection?: boolean | undefined;
   controller?: SlotController | undefined;
 }
 
@@ -53,6 +61,12 @@ interface FixtureOptions {
   harnessDefinitions?: HarnessDefinition[] | undefined;
   /** Write these user harnesses to harnesses.json before startup (#266). */
   userHarnesses?: Array<{ id: string; displayName: string; args?: string[] }> | undefined;
+  /** Write this verbatim text to harnesses.json before startup (#266). */
+  rawHarnessesJson?: string | undefined;
+  /** Opt in to autonomous ready-work pickup, passed through to start(). */
+  autoClaim?: boolean | undefined;
+  /** Expect start() to reject (fail-fast validation): skip awaiting `done`. */
+  allowStartRejection?: boolean | undefined;
   /** Simulated CLI default file used by targeted probe tests (#242). */
   defaultFile?: string | undefined;
   catalogProbeTimeoutMs?: number | undefined;
@@ -94,7 +108,12 @@ afterEach(async () => {
   await Promise.all(
     fixtures.splice(0).map(async (fixture) => {
       fixture.stop.abort();
-      await Promise.race([fixture.done, new Promise<void>((resolve) => setTimeout(resolve, 5000))]);
+      if (fixture.allowStartRejection !== true) {
+        await Promise.race([
+          fixture.done,
+          new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+        ]);
+      }
       await fixture.control.close();
       await rm(fixture.root, { recursive: true, force: true });
     }),
@@ -149,7 +168,9 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
   else delete process.env.STUB_ACP_REJECT_EFFORT;
   const stop = new AbortController();
   const lines: string[] = [];
-  if (options.userHarnesses !== undefined) {
+  if (options.rawHarnessesJson !== undefined) {
+    await writeFile(join(configDir, "harnesses.json"), options.rawHarnessesJson);
+  } else if (options.userHarnesses !== undefined) {
     await writeFile(
       join(configDir, "harnesses.json"),
       JSON.stringify({
@@ -167,6 +188,7 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
   // a stub spawn use harnesses.json entries (real filesystem) instead.
   const needsOverride =
     options.userHarnesses === undefined &&
+    options.rawHarnessesJson === undefined &&
     (options.harnessDefinitions === undefined ||
       options.defaults?.harness === undefined ||
       options.defaults.harness.toLowerCase() === "custom");
@@ -199,6 +221,7 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
     signal: stop.signal,
     supervision: config,
     write: (line) => lines.push(line),
+    ...(options.autoClaim === undefined ? {} : { autoClaim: options.autoClaim }),
     ...(options.harnessDefinitions === undefined
       ? {}
       : { harnessDefinitions: options.harnessDefinitions }),
@@ -208,6 +231,9 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
     ...(options.adapterFor === undefined ? {} : { adapterFor: options.adapterFor }),
     onController: options.onController,
   });
+  // Fail-fast tests expect `done` to reject: silence the unhandled rejection
+  // here (the test itself asserts on it) and skip awaiting it in afterEach.
+  if (options.allowStartRejection === true) done.catch(() => {});
   const result: Fixture = {
     root,
     repo,
@@ -218,6 +244,7 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
     stop,
     lines,
     done,
+    allowStartRejection: options.allowStartRejection,
   };
   fixtures.push(result);
   return result;
@@ -925,6 +952,81 @@ describe("omitted-harness default resolution (#266)", { timeout: 30_000 }, () =>
       expect((await events(fixture)).some((item) => item.event === "session/new")).toBe(false);
     } finally {
       process.env.PATH = savedPath;
+    }
+  });
+
+  it("fails fast on start --auto-claim when the default opencode Harness is missing", async () => {
+    const savedPath = process.env.PATH ?? "";
+    process.env.PATH = "/usr/bin:/bin";
+    try {
+      const fixture = await makeFixture({
+        mode: "normal",
+        userHarnesses: [],
+        autoClaim: true,
+        allowStartRejection: true,
+      });
+      await expect(fixture.done).rejects.toThrow(/opencode.*not installed/);
+    } finally {
+      process.env.PATH = savedPath;
+    }
+  });
+
+  it("fails fast on start when zero Harnesses are installed", async () => {
+    const savedPath = process.env.PATH ?? "";
+    process.env.PATH = "/usr/bin:/bin";
+    try {
+      const fixture = await makeFixture({
+        mode: "normal",
+        userHarnesses: [],
+        allowStartRejection: true,
+      });
+      await expect(fixture.done).rejects.toThrow(/No Harnesses are installed/);
+    } finally {
+      process.env.PATH = savedPath;
+    }
+  });
+
+  it("fails fast on start with a malformed harnesses.json even when --harness is omitted", async () => {
+    const fixture = await makeFixture({
+      mode: "normal",
+      rawHarnessesJson: "{not json",
+      allowStartRejection: true,
+    });
+    await expect(fixture.done).rejects.toThrow(/harnesses\.json/);
+  });
+
+  it("selects OpenCodeAdapter on an omitted-harness dispatch through the real preset", async () => {
+    const savedPath = process.env.PATH ?? "";
+    // A fake `opencode` on PATH that execs the stub ACP server: the omitted
+    // default resolves through detectHarnesses and must dispatch with the
+    // OpenCode adapter, not the generic override adapter.
+    const bin = await mkdtemp(join(tmpdir(), "orrery-266-opencode-"));
+    await writeFile(
+      join(bin, "opencode"),
+      `#!/bin/sh\nexec "${process.execPath}" "${stubPath}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}:/usr/bin:/bin`;
+    try {
+      const seen: HarnessDefinition[] = [];
+      const fixture = await makeFixture({
+        mode: "normal",
+        userHarnesses: [{ id: "team-harness", displayName: "Team" }],
+        adapterFor: (definition) => {
+          seen.push(definition);
+          return adapterForHarness(definition);
+        },
+      });
+      fixture.control.enqueueDispatch("TEST-266-OPENCODE-ADAPTER");
+      const session = await settledSession(fixture);
+      expect(session.status).toBe("completed");
+      expect((await events(fixture)).some((item) => item.event === "session/new")).toBe(true);
+      const dispatched = seen.find((item) => item.id === "opencode");
+      expect(dispatched).toMatchObject({ source: "preset", command: "opencode" });
+      expect(adapterForHarness(dispatched!)).toBe(openCodeAdapter);
+    } finally {
+      process.env.PATH = savedPath;
+      await rm(bin, { recursive: true, force: true });
     }
   });
 });

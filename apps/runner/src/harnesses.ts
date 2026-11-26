@@ -52,10 +52,10 @@ export const BUILTIN_ACP_HARNESSES: readonly HarnessDefinition[] = [
 /** Concise install hints shown when a known preset binary is missing from PATH. */
 export const PRESET_INSTALL_HINTS: Readonly<Record<string, string>> = {
   opencode: "Install OpenCode: npm install -g opencode-ai (https://opencode.ai)",
-  codex: "Install Muse: npm install -g @openai/codex",
-  claude: "Install Claude Agent ACP: npm install -g @anthropic-ai/claude-agent-acp",
+  codex: "Install Codex ACP: npm install -g @agentclientprotocol/codex-acp",
+  claude: "Install Claude Agent ACP: npm install -g @agentclientprotocol/claude-agent-acp",
   omp: "Install Oh My Pi: npm install -g omp",
-  grok: "Install the Grok CLI: see https://docs.x.ai",
+  grok: "Install the Grok CLI: npm install -g @xai-official/grok (https://docs.x.ai)",
   hermes: "Install Hermes: cargo install hermes-acp",
   cursor: "Install Cursor Agent: see https://cursor.com",
 };
@@ -151,7 +151,7 @@ export function loadUserHarnesses(configDir = configDirectory()): HarnessDefinit
 
 export interface HarnessDetectionOptions {
   /** The effective `--acp-command` / `--acp-arg` supervision override. */
-  acpOverride?: { command: string; args: string[] } | undefined;
+  acpOverride?: { command: string; args: readonly string[] } | undefined;
   pathEnv?: string | undefined;
   configDir?: string | undefined;
 }
@@ -209,16 +209,14 @@ export function shadowedPresetIds(configDir = configDirectory()): string[] {
 }
 
 /**
- * The omitted-harness default: the real `opencode` preset definition
- * (`source: "preset"`) when its binary is on PATH, otherwise undefined.
- * Dispatch supervision and the catalog cache key share this helper so probing
- * and dispatch agree on the default adapter.
+ * The omitted-harness default: the `opencode` entry of the local registry
+ * (`source: "preset"`, or a user `harnesses.json` entry shadowing it) when
+ * its command is executable on PATH, otherwise undefined. Dispatch
+ * supervision, startup validation, and the catalog cache key share this helper
+ * so probing, `--harness opencode`, and omitted-harness dispatch all agree.
  */
 export function resolveDefaultHarness(
-  options: {
-    pathEnv?: string | undefined;
-    acpOverride?: HarnessDetectionOptions["acpOverride"];
-  } = {},
+  options: HarnessDetectionOptions = {},
 ): HarnessDefinition | undefined {
   if (options.acpOverride !== undefined) {
     return {
@@ -229,12 +227,7 @@ export function resolveDefaultHarness(
       args: [...options.acpOverride.args],
     };
   }
-  const pathEnv = options.pathEnv ?? process.env.PATH ?? "";
-  const preset = BUILTIN_ACP_HARNESSES.find((item) => item.id === "opencode");
-  if (preset !== undefined && commandOnPath(preset.command, pathEnv)) {
-    return { ...preset, args: [...preset.args] };
-  }
-  return undefined;
+  return detectHarnesses(options).find((item) => item.id === "opencode");
 }
 
 /**
@@ -257,20 +250,21 @@ export function validateExplicitHarness(
       `--harness "${harnessId}" requires --acp-command (or ORRERY_ACP_COMMAND): "custom" is reserved for explicit ACP overrides.`,
     );
   }
-  const preset = BUILTIN_ACP_HARNESSES.find((item) => item.id === harnessId);
-  if (preset !== undefined) {
-    throw new Error(
-      `Harness '${harnessId}' is not installed (missing '${preset.command}' on PATH). ${installHintForPreset(harnessId)}`,
-    );
-  }
   // A user harness may be configured but filtered out of the advertised
-  // catalog because its command is not executable: name the command.
+  // catalog because its command is not executable: name the user's command
+  // before falling back to the preset binary's install hint.
   for (const user of loadUserHarnesses(options.configDir ?? configDirectory())) {
     if (user.id === harnessId) {
       throw new Error(
         `Harness '${harnessId}' is configured in ${harnessesJsonPath(options.configDir ?? configDirectory())} but command '${user.command}' was not found on PATH.`,
       );
     }
+  }
+  const preset = BUILTIN_ACP_HARNESSES.find((item) => item.id === harnessId);
+  if (preset !== undefined) {
+    throw new Error(
+      `Harness '${harnessId}' is not installed (missing '${preset.command}' on PATH). ${installHintForPreset(harnessId)}`,
+    );
   }
   const available = detected.map((item) => item.id);
   throw new Error(

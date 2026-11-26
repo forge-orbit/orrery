@@ -18,8 +18,9 @@ import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
 import {
   detectHarnesses,
-  commandOnPath,
   HarnessLocks,
+  loadUserHarnesses,
+  resolveDefaultHarness,
   validateExplicitHarness,
   type HarnessDefinition,
 } from "./harnesses.ts";
@@ -124,33 +125,35 @@ export async function start(options: StartOptions): Promise<void> {
     // One lock instance for this process: probes and dispatches coordinate per
     // Harness so a probe's temporary default-model switch never leaks (issue #241).
     const locks = new HarnessLocks();
-    // Eager startup validation (#266): malformed harnesses.json, an unknown or
-    // missing explicit --harness, and a missing omitted-harness default all fail
-    // fast before registration. The injected harnessDefinitions seam bypasses
-    // PATH probing in tests.
+    // Eager startup validation (#266): a malformed harnesses.json, an unknown
+    // or missing explicit --harness, and a missing omitted-harness default all
+    // fail fast before registration. The injected harnessDefinitions seam
+    // bypasses PATH probing in tests (but never harnesses.json validation).
+    loadUserHarnesses();
     const explicitHarness = supervision.defaults.harness;
+    const detectionOptions = supervision.acpOverridden ? { acpOverride: supervision.acp } : {};
+    const resolvedDefault =
+      options.harnessDefinitions === undefined
+        ? resolveDefaultHarness(detectionOptions)
+        : undefined;
     if (options.harnessDefinitions === undefined) {
-      const detectionOptions = supervision.acpOverridden ? { acpOverride: supervision.acp } : {};
       if (explicitHarness !== undefined) {
         validateExplicitHarness(explicitHarness, detectionOptions);
-      } else if (!supervision.acpOverridden) {
-        const opencodeInstalled = commandOnPath("opencode");
-        if (!opencodeInstalled) {
-          if (options.autoClaim === true) {
-            throw new Error(
-              "Default Harness 'opencode' is not installed on PATH. Install it or pass --harness explicitly.",
-            );
-          }
-          const installed = detectHarnesses(detectionOptions);
-          if (installed.length === 0) {
-            throw new Error(
-              "No Harnesses are installed on PATH. Install one (for example OpenCode) or configure ~/.config/orrery/harnesses.json.",
-            );
-          }
-          write(
-            `Warning: default Harness 'opencode' is not installed; continuing with ${installed.length} other Harness(es). Dispatches without a harness will report harness_unavailable.`,
+      } else if (!supervision.acpOverridden && resolvedDefault === undefined) {
+        if (options.autoClaim === true) {
+          throw new Error(
+            "Default Harness 'opencode' is not installed on PATH. Install it or pass --harness explicitly.",
           );
         }
+        const installed = detectHarnesses(detectionOptions);
+        if (installed.length === 0) {
+          throw new Error(
+            "No Harnesses are installed on PATH. Install one (for example OpenCode) or configure ~/.config/orrery/harnesses.json.",
+          );
+        }
+        write(
+          `Warning: default Harness 'opencode' is not installed; continuing with ${installed.length} other Harness(es). Dispatches without a harness will report harness_unavailable.`,
+        );
       }
     } else if (explicitHarness !== undefined) {
       const known = options.harnessDefinitions.some((item) => item.id === explicitHarness);
@@ -164,7 +167,9 @@ export async function start(options: StartOptions): Promise<void> {
       }
     }
     const configKey = harnessConfigKey(
-      supervision.acpOverridden ? { acpOverride: supervision.acp } : {},
+      supervision.acpOverridden
+        ? { acpOverride: supervision.acp, defaultHarness: resolvedDefault }
+        : { defaultHarness: resolvedDefault },
     );
     // Only a cache hit seeds registration: omitting the field lets the server
     // keep a previously stored catalog when this Runner re-registers before probing.

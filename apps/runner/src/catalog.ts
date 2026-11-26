@@ -24,6 +24,7 @@ import {
   harnessLockKey,
   HarnessLocks,
   harnessesJsonPath,
+  resolveDefaultHarness,
   type HarnessDefinition,
 } from "./harnesses.ts";
 import { activeModelEfforts, activeSessionModel, currentConfigValues } from "./probe.ts";
@@ -531,12 +532,11 @@ export function harnessConfigKey(
   const resolvedDefault =
     options.defaultHarness !== undefined
       ? options.defaultHarness
-      : (() => {
-          const opencode = BUILTIN_ACP_HARNESSES.find((item) => item.id === "opencode");
-          return opencode !== undefined && commandOnPath(opencode.command, pathEnv)
-            ? { id: opencode.id, command: opencode.command, args: [...opencode.args] }
-            : null;
-        })();
+      : (resolveDefaultHarness({
+          ...(options.acpOverride === undefined ? {} : { acpOverride: options.acpOverride }),
+          configDir,
+          pathEnv,
+        }) ?? null);
   return createHash("sha256")
     .update(
       JSON.stringify([

@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import type { DispatchOptions } from "@orrery/contract";
+import { isReservedHarnessId } from "./harnesses.ts";
 import { canonicalizeServerUrl } from "./origin.ts";
 
 /** The local ACP harness the Runner supervises over stdio. */
@@ -48,7 +49,7 @@ export function loadSupervisionConfig(
   // exclusive: silently ignoring one would dispatch the wrong Harness. The
   // reserved `custom` id explicitly selects the override entry, so it is the
   // only `--harness` value allowed alongside an override.
-  if (harness !== undefined && harness.toLowerCase() !== "custom") {
+  if (harness !== undefined && !isReservedHarnessId(harness)) {
     if (overrides.acp?.command !== undefined) {
       throw new Error(
         "Pass either --harness or --acp-command, not both: --harness selects a preset while --acp-command overrides it.",

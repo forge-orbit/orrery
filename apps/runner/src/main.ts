@@ -225,16 +225,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       }
       case "status": {
         // Strictly offline: ignore --server and ORRERY_URL, make zero network calls.
+        // Read the shadowed presets before writing anything so a malformed
+        // harnesses.json fails cleanly without partial stdout.
         const stored = await readCredential();
+        const shadowed = shadowedPresetIds();
         process.stdout.write(
           `Runner host '${stored.displayName}' (${stored.hostId}) enrolled with ${stored.server}.\n`,
         );
-        try {
-          for (const id of shadowedPresetIds()) {
-            process.stdout.write(`Harness preset '${id}' is shadowed by harnesses.json.\n`);
-          }
-        } catch (error) {
-          fail(error instanceof Error ? error.message : String(error));
+        for (const id of shadowed) {
+          process.stdout.write(`Harness preset '${id}' is shadowed by harnesses.json.\n`);
         }
         return;
       }

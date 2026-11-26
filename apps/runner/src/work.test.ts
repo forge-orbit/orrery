@@ -1,11 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DispatchCommandPayload } from "@orrery/contract";
 import { loadSupervisionConfig } from "./config.ts";
 import type * as credential from "./credential.ts";
 import type * as harnesses from "./harnesses.ts";
 import { work } from "./work.ts";
 
-const noOpencodeFlag = "orrery266NoOpencode";
+const flags = vi.hoisted(() => ({ noOpencode: false }));
 
 const captured = vi.hoisted(() => ({
   command: undefined as DispatchCommandPayload | undefined,
@@ -82,8 +85,12 @@ vi.mock("./harnesses.ts", async (importOriginal) => {
       args: [],
     }),
     commandOnPath: (...args: Parameters<typeof actual.commandOnPath>) => {
-      if ((globalThis as Record<string, unknown>)[noOpencodeFlag] === true) return false;
+      if (flags.noOpencode) return false;
       return actual.commandOnPath(...args);
+    },
+    resolveDefaultHarness: (...args: Parameters<typeof actual.resolveDefaultHarness>) => {
+      if (flags.noOpencode) return undefined;
+      return actual.resolveDefaultHarness(...args);
     },
   };
 });
@@ -204,8 +211,27 @@ vi.mock("./supervise.ts", () => ({
 }));
 
 describe("one-shot work execution options (#241)", () => {
-  it("forwards harness, model and effort without populated supervision defaults", async () => {
+  let configDir = "";
+  let savedConfigDir: string | undefined;
+  let savedUrl: string | undefined;
+
+  beforeEach(() => {
+    savedConfigDir = process.env.ORRERY_RUNNER_CONFIG_DIR;
+    savedUrl = process.env.ORRERY_URL;
     delete process.env.ORRERY_URL;
+    // work() eagerly validates the real harnesses.json: isolate it per test.
+    configDir = mkdtempSync(join(tmpdir(), "orrery-work-"));
+    process.env.ORRERY_RUNNER_CONFIG_DIR = configDir;
+  });
+
+  afterEach(() => {
+    if (savedConfigDir === undefined) delete process.env.ORRERY_RUNNER_CONFIG_DIR;
+    else process.env.ORRERY_RUNNER_CONFIG_DIR = savedConfigDir;
+    if (savedUrl === undefined) delete process.env.ORRERY_URL;
+    else process.env.ORRERY_URL = savedUrl;
+    rmSync(configDir, { recursive: true, force: true });
+  });
+  it("forwards harness, model and effort without populated supervision defaults", async () => {
     const outcome = await work("KEY-1", {
       server: "http://127.0.0.1:8080",
       harness: "node",
@@ -223,8 +249,7 @@ describe("one-shot work execution options (#241)", () => {
   });
 
   it("fails fast when the default opencode Harness is missing (#266)", async () => {
-    delete process.env.ORRERY_URL;
-    (globalThis as Record<string, unknown>)[noOpencodeFlag] = true;
+    flags.noOpencode = true;
     try {
       await expect(
         work("KEY-1", {
@@ -233,7 +258,17 @@ describe("one-shot work execution options (#241)", () => {
         }),
       ).rejects.toThrow(/opencode.*not installed/);
     } finally {
-      delete (globalThis as Record<string, unknown>)[noOpencodeFlag];
+      flags.noOpencode = false;
     }
+  });
+
+  it("fails fast on a malformed harnesses.json before any network call (#266)", async () => {
+    writeFileSync(join(configDir, "harnesses.json"), "{not json");
+    await expect(
+      work("KEY-1", {
+        server: "http://127.0.0.1:8080",
+        supervision: loadSupervisionConfig({}, {}),
+      }),
+    ).rejects.toThrow(/harnesses\.json/);
   });
 });

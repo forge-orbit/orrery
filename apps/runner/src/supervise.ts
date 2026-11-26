@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { basename } from "node:path";
 import type {
   DispatchAcceptance,
   DispatchCommandPayload,
@@ -12,10 +11,9 @@ import { OrreryClient, RunnerRequestError } from "./client.ts";
 import type { SupervisionConfig } from "./config.ts";
 import { ephemeralMcpConfig } from "./config.ts";
 import {
-  BUILTIN_ACP_HARNESSES,
-  commandOnPath,
   harnessLockKey,
   HarnessLocks,
+  resolveDefaultHarness,
   resolveHarness,
   type HarnessDefinition,
 } from "./harnesses.ts";
@@ -274,30 +272,19 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     const requestedHarness = command.harness ?? config.defaults.harness;
     let harness: HarnessDefinition;
     if (requestedHarness === undefined) {
-      if (config.acpOverridden) {
-        // Explicit --acp-command overrides are published under id "custom" (PR #260).
-        harness = {
-          id: "custom",
-          displayName: basename(config.acp.command) || "custom",
-          source: "override",
-          command: config.acp.command,
-          args: [...config.acp.args],
-        };
-      } else {
-        // Omitted harness resolves through the real `opencode` preset so the
-        // dispatch uses OpenCodeAdapter consistently with catalog probing.
-        const preset = BUILTIN_ACP_HARNESSES.find((item) => item.id === "opencode");
-        if (preset === undefined || !commandOnPath(preset.command)) {
-          throw new DispatchOptionError({
-            kind: "harness_unavailable",
-            version: 1,
-            message:
-              "Default Harness 'opencode' is not installed on this Runner. Install it or pass --harness explicitly.",
-            harness: "opencode",
-          });
-        }
-        harness = { ...preset, args: [...preset.args] };
+      // Omitted harness resolves through the shared local-registry default so
+      // the dispatch uses the same definition (and adapter) as catalog probing.
+      const def = resolveDefaultHarness(config.acpOverridden ? { acpOverride: config.acp } : {});
+      if (def === undefined) {
+        throw new DispatchOptionError({
+          kind: "harness_unavailable",
+          version: 1,
+          message:
+            "Default Harness 'opencode' is not installed on this Runner. Install it or pass --harness explicitly.",
+          harness: "opencode",
+        });
       }
+      harness = def;
     } else {
       const resolved = await resolveHarness(
         requestedHarness,

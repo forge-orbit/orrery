@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { HarnessDefinition } from "./harnesses.ts";
+import { isReservedHarnessId, type HarnessDefinition } from "./harnesses.ts";
 import {
   activeSessionModel,
   effortConfigIds,
@@ -305,7 +305,7 @@ export const ompAdapter: HarnessAdapter = new OmpAdapter();
 export function adapterForHarness(definition: HarnessDefinition): HarnessAdapter {
   // An explicit --acp-command override may point at any binary named "hermes";
   // without a safe default it could silently skip CLI-default restore.
-  if (definition.source === "override" || definition.id.toLowerCase() === "custom") {
+  if (definition.source === "override" || isReservedHarnessId(definition.id)) {
     return genericAcpAdapter;
   }
   const command = basename(definition.command.replace(/\\/g, "/"))

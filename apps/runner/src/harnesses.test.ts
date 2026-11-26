@@ -157,7 +157,7 @@ describe("explicit --harness startup validation (#266)", () => {
 
   it("reports the install hint for a known preset missing from PATH", () => {
     expect(() => validateExplicitHarness("codex", { pathEnv: "", configDir: makeDir() })).toThrow(
-      /codex-acp.*@openai\/codex/,
+      /codex-acp.*@agentclientprotocol\/codex-acp/,
     );
   });
 
@@ -171,6 +171,21 @@ describe("explicit --harness startup validation (#266)", () => {
     );
     expect(() => validateExplicitHarness("team", { pathEnv: "", configDir: dir })).toThrow(
       /\/nonexistent\/team-acp/,
+    );
+  });
+
+  it("prefers the user shadow's command when a preset ID is shadowed but not executable", () => {
+    const dir = makeDir();
+    writeFileSync(
+      join(dir, "harnesses.json"),
+      JSON.stringify({
+        harnesses: [{ id: "codex", displayName: "Shadow", command: "/nonexistent/shadow-acp" }],
+      }),
+    );
+    // The user entry shadows the preset ID, so the error names the configured
+    // command rather than the preset binary's install hint.
+    expect(() => validateExplicitHarness("codex", { pathEnv: "", configDir: dir })).toThrow(
+      /\/nonexistent\/shadow-acp/,
     );
   });
 
@@ -197,8 +212,22 @@ describe("omitted-harness default resolution (#266)", () => {
     const bin = join(dir, "bin");
     mkdirSync(bin);
     writeFileSync(join(bin, "opencode"), "#!/bin/sh\n", { mode: 0o755 });
-    const resolved = resolveDefaultHarness({ pathEnv: bin });
+    const resolved = resolveDefaultHarness({ pathEnv: bin, configDir: dir });
     expect(resolved).toMatchObject({ id: "opencode", source: "preset", command: "opencode" });
+  });
+
+  it("resolves a user harnesses.json entry shadowing opencode", () => {
+    const dir = makeDir();
+    const shadow = join(dir, "shadow-opencode");
+    writeFileSync(shadow, "#!/bin/sh\n", { mode: 0o755 });
+    writeFileSync(
+      join(dir, "harnesses.json"),
+      JSON.stringify({
+        harnesses: [{ id: "opencode", displayName: "Shadow", command: shadow }],
+      }),
+    );
+    const resolved = resolveDefaultHarness({ pathEnv: "", configDir: dir });
+    expect(resolved).toMatchObject({ id: "opencode", source: "user", command: shadow });
   });
 
   it("returns undefined when opencode is missing and no override is given", () => {
