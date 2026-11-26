@@ -186,6 +186,7 @@ function ProjectPage() {
   const isWorkspaceOwner = workspaces.some(
     (workspace) => workspace.id === project.workspaceId && workspace.isOwner,
   );
+  const canSeeSettings = canManage || isWorkspaceOwner;
   const navigate = useNavigate();
   const search = Route.useSearch();
   const [tab, setTab] = useState<ProjectTab>(search.tab ?? "issues");
@@ -193,7 +194,7 @@ function ProjectPage() {
   const [issueFilters, setIssueFilters] = useState<PowerSearchFilter[]>([]);
   const [issueSort, setIssueSort] = useState<IssueSortKey>("priority");
   const [knowledgeFilter, setKnowledgeFilter] = useState("");
-  const activeTab: ProjectTab = tab === "settings" && !canManage ? "issues" : tab;
+  const activeTab: ProjectTab = tab === "settings" && !canSeeSettings ? "issues" : tab;
   const activeSessionIssueIds = new Set(sessionsByIssue.keys());
   const issueScopeCounts = countIssueScopes(issues);
   const visibleIssues = filterAndSortIssues({
@@ -353,7 +354,7 @@ function ProjectPage() {
           endContent={<Badge label={labels.length} />}
         />
         <Tab value="activity" label="Activity" panelId="panel-activity" />
-        {canManage && <Tab value="settings" label="Settings" panelId="panel-settings" />}
+        {canSeeSettings && <Tab value="settings" label="Settings" panelId="panel-settings" />}
       </TabList>
 
       {activeTab === "issues" && (
@@ -661,19 +662,22 @@ function ProjectPage() {
         </section>
       )}
 
-      {activeTab === "settings" && canManage && (
+      {activeTab === "settings" && canSeeSettings && (
         <section id="panel-settings" role="tabpanel">
           <Stack gap={3}>
-            <ProjectSettings
-              key={`${project.name}:${project.description}:${project.fallbackPolicy}`}
-              project={project}
-            />
-            {project.workspaceKind === "shared" && <ProjectAccess projectId={project.id} />}
+            {canManage && (
+              <ProjectSettings
+                key={`${project.name}:${project.description}:${project.fallbackPolicy}`}
+                project={project}
+              />
+            )}
+            {canManage && project.workspaceKind === "shared" && (
+              <ProjectAccess projectId={project.id} />
+            )}
+            {isWorkspaceOwner && <ProjectDangerZone project={project} />}
           </Stack>
         </section>
       )}
-
-      {isWorkspaceOwner && <ProjectDangerZone project={project} />}
     </Stack>
   );
 }
