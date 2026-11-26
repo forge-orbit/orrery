@@ -1,0 +1,5 @@
+ALTER TABLE "runner_commands" DROP CONSTRAINT "runner_commands_kind";--> statement-breakpoint
+ALTER TABLE "runner_commands" ALTER COLUMN "dispatch_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "runner_commands" ALTER COLUMN "dispatch_attempt_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "runner_commands" ADD CONSTRAINT "runner_commands_dispatch_ids" CHECK (("runner_commands"."kind" in ('dispatch', 'cancel', 'input_resolved') and "runner_commands"."dispatch_id" is not null and "runner_commands"."dispatch_attempt_id" is not null) or ("runner_commands"."kind" in ('probe_model', 'probe_catalog') and "runner_commands"."dispatch_id" is null and "runner_commands"."dispatch_attempt_id" is null));--> statement-breakpoint
+ALTER TABLE "runner_commands" ADD CONSTRAINT "runner_commands_kind" CHECK ("runner_commands"."kind" in ('dispatch', 'cancel', 'input_resolved', 'probe_model', 'probe_catalog'));

@@ -1794,10 +1794,13 @@ export const runnerCommands = pgTable(
     runnerId: text("runner_id")
       .notNull()
       .references(() => runners.id, { onDelete: "cascade" }),
-    dispatchId: text("dispatch_id")
-      .notNull()
-      .references(() => runnerDispatches.id, { onDelete: "cascade" }),
-    dispatchAttemptId: text("dispatch_attempt_id").notNull(),
+    // Runner-level probe commands (#242) belong to no Dispatch attempt; the
+    // CHECK below requires both ids for dispatch/cancel/input_resolved and
+    // forbids them on probe commands.
+    dispatchId: text("dispatch_id").references(() => runnerDispatches.id, {
+      onDelete: "cascade",
+    }),
+    dispatchAttemptId: text("dispatch_attempt_id"),
     seq: integer("seq").notNull(),
     kind: text("kind").$type<RunnerCommandKind>().notNull(),
     payload: jsonb("payload").$type<RunnerCommandPayload>().notNull(),
@@ -1811,6 +1814,10 @@ export const runnerCommands = pgTable(
     check(
       "runner_commands_kind",
       sql`${t.kind} in (${sql.raw(sqlLiteralList(RunnerCommandKind))})`,
+    ),
+    check(
+      "runner_commands_dispatch_ids",
+      sql`(${t.kind} in ('dispatch', 'cancel', 'input_resolved') and ${t.dispatchId} is not null and ${t.dispatchAttemptId} is not null) or (${t.kind} in ('probe_model', 'probe_catalog') and ${t.dispatchId} is null and ${t.dispatchAttemptId} is null)`,
     ),
     check("runner_commands_expires_after_created", sql`${t.expiresAt} > ${t.createdAt}`),
     index("runner_commands_runner_unacked")

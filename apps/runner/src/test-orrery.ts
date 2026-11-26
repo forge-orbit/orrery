@@ -5,7 +5,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { EMPTY_HARNESS_CATALOG } from "@orrery/contract";
+import { EMPTY_HARNESS_CATALOG, HarnessCatalog } from "@orrery/contract";
 
 export interface TestSession {
   id: string;
@@ -44,11 +44,11 @@ export interface TestCommand {
   commandId: string;
   runnerId: string;
   seq: number;
-  dispatchId: string;
-  dispatchAttemptId: string;
+  dispatchId: string | null;
+  dispatchAttemptId: string | null;
   createdAt: string;
   expiresAt: string;
-  kind: "dispatch" | "cancel" | "input_resolved";
+  kind: "dispatch" | "cancel" | "input_resolved" | "probe_model" | "probe_catalog";
   payload: Record<string, unknown>;
 }
 
@@ -139,6 +139,7 @@ export class TestOrrery {
   private readonly createdPrompts: Array<string | null> = [];
   private readonly createdExecutions: Array<Record<string, unknown>> = [];
   private readonly streamed: TestStreamChunk[] = [];
+  private readonly catalogs: HarnessCatalog[] = [];
   reconnectCalls = 0;
   /** Number of heartbeats to answer with a transient 503 before recovering. */
   transientHeartbeatFailures = 0;
@@ -198,9 +199,10 @@ export class TestOrrery {
 
   private enqueue(
     kind: TestCommand["kind"],
-    dispatchId: string,
-    dispatchAttemptId: string,
+    dispatchId: string | null,
+    dispatchAttemptId: string | null,
     payload: Record<string, unknown>,
+    ttlMs = 600_000,
   ): TestCommand {
     this.seq += 1;
     const command: TestCommand = {
@@ -210,7 +212,7 @@ export class TestOrrery {
       dispatchId,
       dispatchAttemptId,
       createdAt: now(),
-      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      expiresAt: new Date(Date.now() + ttlMs).toISOString(),
       kind,
       payload,
     };
@@ -240,6 +242,15 @@ export class TestOrrery {
       ...(execution.model === undefined ? {} : { model: execution.model }),
       ...(execution.effort === undefined ? {} : { effort: execution.effort }),
     });
+  }
+
+  /** Runner-level catalog probe (#242): no dispatch id, short TTL. */
+  enqueueProbe(
+    kind: "probe_model" | "probe_catalog",
+    payload: Record<string, unknown> = {},
+    ttlMs = 30_000,
+  ): TestCommand {
+    return this.enqueue(kind, null, null, payload, ttlMs);
   }
 
   enqueueCancel(dispatchAttemptId: string, reason = "human stop"): TestCommand {
@@ -312,6 +323,11 @@ export class TestOrrery {
     return this.createdExecutions;
   }
 
+  /** Catalogs published by the Runner's serialized CatalogPublisher (#242). */
+  publishedCatalogs(): readonly HarnessCatalog[] {
+    return [...this.catalogs];
+  }
+
   private attemptIdFor(dispatchId: string): string {
     return this.dispatchAttempts.get(dispatchId) ?? `attempt-${dispatchId}`;
   }
@@ -334,6 +350,7 @@ export class TestOrrery {
         }),
       ),
       ackedSeq: this.ackedSeq,
+      catalogs: this.publishedCatalogs(),
       commands: this.commands.map((command) =>
         Object.assign({}, command, { payload: Object.assign({}, command.payload) }),
       ),
@@ -615,6 +632,13 @@ export class TestOrrery {
     }
     if (req.method === "POST" && path === "/api/runners/register") {
       sendJson(res, 201, this.runner());
+      return;
+    }
+    if (req.method === "PUT" && path.endsWith("/catalog")) {
+      const body = recordOf(await bodyOf(req)) ?? {};
+      const parsed = HarnessCatalog.safeParse(body);
+      if (parsed.success) this.catalogs.push(parsed.data);
+      sendJson(res, 200, this.runner());
       return;
     }
     if (req.method === "POST" && path.endsWith("/reconnect")) {

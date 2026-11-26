@@ -270,10 +270,22 @@ test("switching Model immediately clears stale Effort and hides it for unprobed 
     await dialog.getByRole("combobox", { name: /^Effort/ }).click();
     await dialog.getByRole("option", { name: /high/ }).click();
 
-    // A model without selectable reasoning levels hides Effort entirely.
+    // An unprobed model clears Effort and asks the Runner to discover it, but
+    // Effort stays visible and the Delegate button stays clickable (#242).
+    const probe = page.waitForRequest(
+      (req) =>
+        req.method() === "POST" &&
+        req.url().includes(`/api/runners/${fixture.runnerId}/catalog/probe`),
+    );
     await dialog.getByRole("combobox", { name: /^Model/ }).click();
     await dialog.getByRole("option", { name: /Stub Model 2/ }).click();
-    await expect(dialog.locator("[data-delegate-effort]")).toHaveCount(0);
+    expect((await probe).postDataJSON()).toMatchObject({
+      kind: "model",
+      harness: "opencode",
+      model: "stub-model-2",
+    });
+    await expect(dialog.locator("[data-delegate-effort]")).toBeVisible();
+    await expect(dialog.locator("[data-delegate-dispatch]")).toBeEnabled();
 
     // Switching back must not resurrect the previously chosen effort.
     await dialog.getByRole("combobox", { name: /^Model/ }).click();

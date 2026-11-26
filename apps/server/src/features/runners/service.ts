@@ -3,6 +3,8 @@ import type {
   AckCommandsResponse,
   AgentIdentity,
   AutoClaimResponse,
+  CatalogProbeRequest,
+  CatalogProbeResponse,
   CreateDeviceCodeRequest,
   CreateDispatchRequest,
   DeviceCodeResponse,
@@ -93,7 +95,12 @@ import { newDispatchToken } from "../agents/index.ts";
 import { toRun } from "../runs/index.ts";
 import { releaseIssueWorkSessions, SessionsError, toSession } from "../work-sessions/index.ts";
 import { createCommandNotifier } from "./notifier.ts";
-import { cancelDispatchesForRunners, enqueueRunnerCommand } from "./outbox.ts";
+import {
+  allocateCommandSeqs,
+  cancelDispatchesForRunners,
+  enqueueRunnerCommand,
+  insertRunnerCommand,
+} from "./outbox.ts";
 import {
   computeAckedSeq,
   DISPATCH_UNCERTAIN_AFTER_SECONDS,
@@ -117,6 +124,10 @@ const MAX_FAILED_VERIFIER_ATTEMPTS = 5;
 
 /** A runner is offline once its last heartbeat is older than this in DB time. */
 export const RUNNER_ONLINE_WINDOW_SECONDS = 120;
+
+/** On-demand probes are short-lived and rate limited per runner/harness/model (#242). */
+export const PROBE_COOLDOWN_SECONDS = 30;
+export const PROBE_COMMAND_TTL_SECONDS = 30;
 
 /** Alias for the blocker side of `issue_dependencies` in readiness queries. */
 const blockerIssue = alias(issues, "blocker_issue");
@@ -157,7 +168,8 @@ export type RunnersErrorKind =
   | "stream_batch_out_of_range"
   | "stream_batch_too_large"
   | "stream_rate_limited"
-  | "stream_rollup_failed";
+  | "stream_rollup_failed"
+  | "probe_rate_limited";
 
 const messages: Record<RunnersErrorKind, string> = {
   not_signed_in: "Sign in to approve a Runner host.",
@@ -196,6 +208,8 @@ const messages: Record<RunnersErrorKind, string> = {
   stream_batch_too_large: "The stream batch contains too many sequences.",
   stream_rate_limited: "Too many stream batches; retry after the indicated interval.",
   stream_rollup_failed: "The stream rollup expired before its blob could be activated.",
+  probe_rate_limited:
+    "This catalog probe was requested too recently; retry after the indicated interval.",
 };
 
 export class RunnersError extends Error {
@@ -2305,6 +2319,120 @@ export function createRunnersService(deps: RunnersDeps) {
         const row = await joinRunner(tx, runnerId);
         if (row === undefined) throw new RunnersError("runner_not_found");
         return toRunnerResponse(row);
+      });
+    },
+
+    /**
+     * Owner-only on-demand discovery (#242). The runner row is locked before the
+     * cooldown read, so two concurrent requests for the same runner serialize
+     * and the second sees the first committed command under READ COMMITTED.
+     */
+    async probeCatalog(
+      account: SessionAccount | null,
+      runnerId: string,
+      input: CatalogProbeRequest,
+    ): Promise<CatalogProbeResponse> {
+      const human = requireAccount(account);
+      return db.transaction(async (tx) => {
+        const [joined] = await tx
+          .select({
+            runner: runnerFields,
+            hostHumanId: runnerHosts.humanId,
+            hostRevokedAt: runnerHosts.revokedAt,
+            deactivatedAt: humans.deactivatedAt,
+          })
+          .from(runners)
+          .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
+          .innerJoin(humans, eq(runnerHosts.humanId, humans.id))
+          .where(eq(runners.id, runnerId))
+          .limit(1);
+        if (joined === undefined) throw new RunnersError("runner_not_found");
+
+        // Live workspace/project access for the human deciding to probe: a
+        // non-member gets 404, a teammate who is not the owner gets 403.
+        if (!(await canSeeWorkspace(tx, joined.runner.workspaceId, human.humanId))) {
+          throw new RunnersError("workspace_not_found");
+        }
+        const callerCeiling = await projectAccessCeiling(
+          tx,
+          joined.runner.workspaceId,
+          human.humanId,
+          [joined.runner.projectId],
+        );
+        if (!hasAccess(callerCeiling.get(joined.runner.projectId), "read", projectAccessAtLeast)) {
+          throw new RunnersError("project_not_found");
+        }
+        if (joined.hostHumanId !== human.humanId) throw new RunnersError("runner_forbidden");
+        if (
+          joined.hostRevokedAt !== null ||
+          joined.runner.revokedAt !== null ||
+          joined.deactivatedAt !== null ||
+          joined.runner.presence === "offline"
+        ) {
+          throw new RunnersError("runner_unavailable");
+        }
+        const hostCeiling = await projectAccessCeiling(
+          tx,
+          joined.runner.workspaceId,
+          joined.hostHumanId,
+          [joined.runner.projectId],
+        );
+        if (!hasAccess(hostCeiling.get(joined.runner.projectId), "read", projectAccessAtLeast)) {
+          throw new RunnersError("runner_unavailable");
+        }
+
+        const kind = input.kind === "model" ? "probe_model" : "probe_catalog";
+        let payload: { harness: string; model: string } | Record<string, never>;
+        if (input.kind === "model") {
+          const catalog = joined.runner.harnessCatalog;
+          const entry = catalog.harnesses.find((item) => item.id === input.harness);
+          if (catalog.harnesses.length > 0 && entry === undefined) {
+            throw new RunnersError("unknown_harness", undefined, input.harness);
+          }
+          if (entry !== undefined && !entry.models.some((model) => model.id === input.model)) {
+            throw new RunnersError("unknown_harness", undefined, input.model);
+          }
+          payload = { harness: input.harness, model: input.model };
+        } else {
+          payload = {};
+        }
+
+        // allocateCommandSeqs locks the runner row in ascending id order; every
+        // outbox writer follows that order, so the cooldown check cannot race.
+        const seqs = await allocateCommandSeqs(tx, [runnerId]);
+        const filters = [
+          eq(runnerCommands.runnerId, runnerId),
+          eq(runnerCommands.kind, kind),
+          gt(
+            runnerCommands.createdAt,
+            sql`statement_timestamp() - make_interval(secs => ${PROBE_COOLDOWN_SECONDS})`,
+          ),
+        ];
+        if (input.kind === "model") {
+          filters.push(sql`${runnerCommands.payload} @> ${JSON.stringify(payload)}::jsonb`);
+        }
+        const [recent] = await tx
+          .select({ id: runnerCommands.id })
+          .from(runnerCommands)
+          .where(and(...filters))
+          .limit(1);
+        if (recent !== undefined) {
+          throw new RunnersError("probe_rate_limited", PROBE_COOLDOWN_SECONDS);
+        }
+
+        const command = await insertRunnerCommand(tx, {
+          runnerId,
+          kind,
+          payload,
+          seq: seqs.next(runnerId),
+          ttlSeconds: PROBE_COMMAND_TTL_SECONDS,
+        });
+        if (command === undefined) throw new RunnersError("runner_not_found");
+        return {
+          commandId: command.id,
+          kind,
+          cooldownSeconds: PROBE_COOLDOWN_SECONDS,
+        };
       });
     },
 

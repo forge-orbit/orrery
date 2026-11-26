@@ -17,7 +17,21 @@ if (process.env.STUB_ACP_MODE_FILE !== undefined) {
   }
 }
 const marker = process.env.STUB_ACP_MARKER ?? "";
+const defaultFile = process.env.STUB_ACP_DEFAULT_FILE ?? "";
 const sleepMs = Number(process.env.STUB_ACP_SLEEP_MS ?? "0");
+
+/** Simulates the CLI's persisted default model across probe/recovery processes. */
+const readDefaultModel = (): string => {
+  if (defaultFile === "") return "stub-model-1";
+  try {
+    return readFileSync(defaultFile, "utf8").trim() || "stub-model-1";
+  } catch {
+    return "stub-model-1";
+  }
+};
+const writeDefaultModel = (modelId: string): void => {
+  if (defaultFile !== "") writeFileSync(defaultFile, modelId);
+};
 
 const record = (event: Record<string, unknown>): void => {
   if (marker !== "") appendFileSync(marker, `${JSON.stringify({ at: Date.now(), ...event })}\n`);
@@ -38,6 +52,7 @@ const recordOf = (value: unknown): Record<string, unknown> | undefined =>
     : undefined;
 
 let cancelled = false;
+let isRecovery = false;
 let sessionId = "stub-session-1";
 let promptId: unknown;
 let promptCount = 0;
@@ -271,7 +286,7 @@ function handle(message: Record<string, unknown>): void {
   const method = typeof message.method === "string" ? message.method : "";
   if (method === "initialize") {
     record({ event: "initialize" });
-    if (mode === "probe-init-hang") return;
+    if (mode === "probe-init-hang" && !isRecovery) return;
     reply(id, {
       protocolVersion: 1,
       agentInfo: { name: "stub-acp", version: "1" },
@@ -289,7 +304,8 @@ function handle(message: Record<string, unknown>): void {
     });
     const value = params?.sessionId;
     if (typeof value === "string") sessionId = value;
-    if (mode === "probe-hang") {
+    isRecovery = params?.orreryRecovery === true;
+    if (mode === "probe-hang" && !isRecovery) {
       // Never reply: the runner must bound the wait and kill the whole group,
       // including this detached grandchild that keeps writing a heartbeat.
       const aliveFile = process.env.STUB_ACP_ALIVE_FILE;
@@ -307,6 +323,15 @@ function handle(message: Record<string, unknown>): void {
       }
       return;
     }
+    const currentModelId = readDefaultModel();
+    record({
+      event: "session-model",
+      currentModelId,
+      ...(typeof params?.orreryProbeModel === "string"
+        ? { requestedModel: params.orreryProbeModel }
+        : {}),
+      ...(params?.orreryRecovery === true ? { recovery: true } : {}),
+    });
     reply(id, {
       sessionId,
       models: {
@@ -314,7 +339,7 @@ function handle(message: Record<string, unknown>): void {
           { modelId: "stub-model-1", name: "Stub Model 1" },
           { modelId: "stub-model-2", name: "Stub Model 2" },
         ],
-        currentModelId: "stub-model-1",
+        currentModelId,
       },
       configOptions: [
         {
@@ -336,6 +361,40 @@ function handle(message: Record<string, unknown>): void {
     const modelId = params.modelId;
     const rejected = mode === "model-reject";
     record({ event: "set_model", ...(typeof modelId === "string" ? { modelId } : {}), rejected });
+    if (typeof modelId === "string" && mode !== "model-reject") writeDefaultModel(modelId);
+    if (mode === "probe-kill" && modelId === "stub-model-2" && !isRecovery) {
+      // The probe process disappears after changing the CLI default; only a
+      // fresh one-shot recovery session can put it back.
+      process.exit(0);
+    }
+    if (mode === "probe-timeout" && modelId === "stub-model-2") {
+      // A timed-out probe killed before it could confirm the switch: the
+      // persisted default is already changed, so recovery must put it back.
+      return;
+    }
+    if (mode === "model-aware" && modelId === "stub-model-2") {
+      // ACP only reports configOptions for the active model; the switched
+      // model exposes a different option id and different effort levels.
+      reply(id, {
+        configOptions: [
+          {
+            id: "reasoning_effort",
+            options: [
+              { value: "balanced", name: "Balanced" },
+              { value: "fast", name: "Fast" },
+            ],
+            currentValue: "balanced",
+          },
+        ],
+      });
+      return;
+    }
+    if (mode === "model-no-effort" && modelId === "stub-model-2") {
+      // A model that genuinely exposes no reasoning options still answers the
+      // switch with an empty configOptions list.
+      reply(id, { configOptions: [] });
+      return;
+    }
     if (rejected || mode === "model-unsupported") {
       send({
         jsonrpc: "2.0",

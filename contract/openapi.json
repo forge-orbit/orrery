@@ -6081,6 +6081,70 @@
           }
         }
       },
+      "CatalogProbeResponse": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "probe_model",
+              "probe_catalog"
+            ]
+          },
+          "cooldownSeconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "commandId",
+          "kind",
+          "cooldownSeconds"
+        ]
+      },
+      "CatalogProbeRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "model"
+                ]
+              },
+              "harness": {
+                "$ref": "#/components/schemas/DispatchHarness"
+              },
+              "model": {
+                "$ref": "#/components/schemas/DispatchModel"
+              }
+            },
+            "required": [
+              "kind",
+              "harness",
+              "model"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "catalog"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
       "WorkspaceRunnersFleet": {
         "type": "object",
         "properties": {
@@ -6633,6 +6697,12 @@
           },
           {
             "$ref": "#/components/schemas/InputResolvedRunnerCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ProbeModelRunnerCommand"
+          },
+          {
+            "$ref": "#/components/schemas/ProbeCatalogRunnerCommand"
           }
         ],
         "discriminator": {
@@ -6640,7 +6710,9 @@
           "mapping": {
             "dispatch": "#/components/schemas/DispatchRunnerCommand",
             "cancel": "#/components/schemas/CancelRunnerCommand",
-            "input_resolved": "#/components/schemas/InputResolvedRunnerCommand"
+            "input_resolved": "#/components/schemas/InputResolvedRunnerCommand",
+            "probe_model": "#/components/schemas/ProbeModelRunnerCommand",
+            "probe_catalog": "#/components/schemas/ProbeCatalogRunnerCommand"
           }
         }
       },
@@ -6658,17 +6730,17 @@
             "type": "integer",
             "exclusiveMinimum": 0
           },
-          "dispatchId": {
-            "$ref": "#/components/schemas/DispatchId"
-          },
-          "dispatchAttemptId": {
-            "$ref": "#/components/schemas/DispatchAttemptId"
-          },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
           },
           "expiresAt": {
             "$ref": "#/components/schemas/Timestamp"
+          },
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
           },
           "kind": {
             "type": "string",
@@ -6684,10 +6756,10 @@
           "commandId",
           "runnerId",
           "seq",
-          "dispatchId",
-          "dispatchAttemptId",
           "createdAt",
           "expiresAt",
+          "dispatchId",
+          "dispatchAttemptId",
           "kind",
           "payload"
         ]
@@ -6749,17 +6821,17 @@
             "type": "integer",
             "exclusiveMinimum": 0
           },
-          "dispatchId": {
-            "$ref": "#/components/schemas/DispatchId"
-          },
-          "dispatchAttemptId": {
-            "$ref": "#/components/schemas/DispatchAttemptId"
-          },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
           },
           "expiresAt": {
             "$ref": "#/components/schemas/Timestamp"
+          },
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
           },
           "kind": {
             "type": "string",
@@ -6775,10 +6847,10 @@
           "commandId",
           "runnerId",
           "seq",
-          "dispatchId",
-          "dispatchAttemptId",
           "createdAt",
           "expiresAt",
+          "dispatchId",
+          "dispatchAttemptId",
           "kind",
           "payload"
         ]
@@ -6820,17 +6892,17 @@
             "type": "integer",
             "exclusiveMinimum": 0
           },
-          "dispatchId": {
-            "$ref": "#/components/schemas/DispatchId"
-          },
-          "dispatchAttemptId": {
-            "$ref": "#/components/schemas/DispatchAttemptId"
-          },
           "createdAt": {
             "$ref": "#/components/schemas/Timestamp"
           },
           "expiresAt": {
             "$ref": "#/components/schemas/Timestamp"
+          },
+          "dispatchId": {
+            "$ref": "#/components/schemas/DispatchId"
+          },
+          "dispatchAttemptId": {
+            "$ref": "#/components/schemas/DispatchAttemptId"
           },
           "kind": {
             "type": "string",
@@ -6846,10 +6918,10 @@
           "commandId",
           "runnerId",
           "seq",
-          "dispatchId",
-          "dispatchAttemptId",
           "createdAt",
           "expiresAt",
+          "dispatchId",
+          "dispatchAttemptId",
           "kind",
           "payload"
         ]
@@ -6888,6 +6960,121 @@
           "resolution",
           "answer"
         ]
+      },
+      "ProbeModelRunnerCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runnerId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "seq": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "dispatchId": {
+            "type": "null"
+          },
+          "dispatchAttemptId": {
+            "type": "null"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "probe_model"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ProbeModelCommandPayload"
+          }
+        },
+        "required": [
+          "commandId",
+          "runnerId",
+          "seq",
+          "createdAt",
+          "expiresAt",
+          "dispatchId",
+          "dispatchAttemptId",
+          "kind",
+          "payload"
+        ]
+      },
+      "ProbeModelCommandPayload": {
+        "type": "object",
+        "properties": {
+          "harness": {
+            "$ref": "#/components/schemas/DispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/DispatchModel"
+          }
+        },
+        "required": [
+          "harness",
+          "model"
+        ]
+      },
+      "ProbeCatalogRunnerCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runnerId": {
+            "$ref": "#/components/schemas/RunnerId"
+          },
+          "seq": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "dispatchId": {
+            "type": "null"
+          },
+          "dispatchAttemptId": {
+            "type": "null"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "probe_catalog"
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ProbeCatalogCommandPayload"
+          }
+        },
+        "required": [
+          "commandId",
+          "runnerId",
+          "seq",
+          "createdAt",
+          "expiresAt",
+          "dispatchId",
+          "dispatchAttemptId",
+          "kind",
+          "payload"
+        ]
+      },
+      "ProbeCatalogCommandPayload": {
+        "type": "object",
+        "properties": {}
       },
       "AckCommandsResponse": {
         "type": "object",
@@ -17732,6 +17919,112 @@
           },
           "429": {
             "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/{runnerId}/catalog/probe": {
+      "post": {
+        "summary": "Request an on-demand Harness catalog probe",
+        "description": "Owner-only. Enqueues a short-lived probe_model or probe_catalog command on the Runner's durable outbox and rings the pg_notify doorbell; a per-runner/harness/model cooldown applies.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/RunnerId"
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogProbeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The enqueued probe command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProbeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The catalog probe request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the human who owns this Runner host may probe its catalog",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Runner is accessible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Runner is offline or unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "This catalog probe was requested too recently",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "required": true
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {

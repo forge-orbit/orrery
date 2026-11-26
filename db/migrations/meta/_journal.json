@@ -414,6 +414,13 @@
       "when": 1795668316601,
       "tag": "0058_ordinary_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795676313823,
+      "tag": "0059_clean_spitfire",
+      "breakpoints": true
     }
   ]
 }
