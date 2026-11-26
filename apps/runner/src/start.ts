@@ -5,8 +5,10 @@ import type { HarnessCatalog, ReadyWorkFilter } from "@orrery/contract";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import {
   CatalogPublisher,
+  catalogWithProbedModel,
   harnessConfigKey,
   probeHarness,
+  probeModel,
   readCachedCatalog,
   runStartupCatalogProbe,
   verifiedDefaultModel,
@@ -116,13 +118,15 @@ export async function start(options: StartOptions): Promise<void> {
       revoke("Catalog update rejected (401). Stopping local operation immediately."),
   });
 
-  /** One bounded startup discovery pass, shared by the Runner's single probe. */
+  const localDefinitions = (): HarnessDefinition[] =>
+    options.harnessDefinitions ??
+    detectHarnesses(supervision.acpOverridden ? { acpOverride: supervision.acp } : {});
+
+  /** One bounded discovery pass, shared by startup and manual `probe_catalog`. */
   const probeCatalogOnce = async (): Promise<void> => {
     try {
       await runStartupCatalogProbe({
-        definitions:
-          options.harnessDefinitions ??
-          detectHarnesses(supervision.acpOverridden ? { acpOverride: supervision.acp } : {}),
+        definitions: localDefinitions(),
         probe: (definition) =>
           probeHarness(definition, {
             cwd: options.repoPath ?? process.cwd(),
@@ -218,6 +222,9 @@ export async function start(options: StartOptions): Promise<void> {
     // Commands applied above the pinned cursor are replayed by the outbox but
     // must not be applied twice while a dispatch waits for a free slot.
     const replayed = new Set<number>();
+    // A replayed probe command must never run a second ACP session while the
+    // first one is still switching the Harness's CLI default (#242).
+    const activeProbes = new Set<string>();
     while (!controller.signal.aborted) {
       let batch: Awaited<ReturnType<OrreryClient["pollCommands"]>>;
       try {
@@ -244,6 +251,57 @@ export async function start(options: StartOptions): Promise<void> {
         if (command.seq <= afterSeq || replayed.has(command.seq)) continue;
         if (Date.parse(command.expiresAt) <= Date.now()) {
           replayed.add(command.seq);
+          continue;
+        }
+        if (command.kind === "probe_model" || command.kind === "probe_catalog") {
+          // Probes never acquire a work slot: a full pool or a queued dispatch
+          // must not head-of-line block catalog discovery (#242).
+          const key =
+            command.kind === "probe_model"
+              ? `model\u0000${command.payload.harness}\u0000${command.payload.model}`
+              : "catalog";
+          if (activeProbes.has(key)) {
+            replayed.add(command.seq);
+            continue;
+          }
+          activeProbes.add(key);
+          replayed.add(command.seq);
+          const task = (async () => {
+            try {
+              if (command.kind === "probe_catalog") {
+                await probeCatalogOnce();
+                return;
+              }
+              const { harness, model } = command.payload;
+              const definition = localDefinitions().find((item) => item.id === harness);
+              if (definition === undefined) {
+                write(`Probe rejected: Harness ${harness} is not in the local registry.`);
+                return;
+              }
+              const result = await probeModel(definition, model, {
+                cwd: options.repoPath ?? process.cwd(),
+                timeoutMs: options.catalogProbeTimeoutMs ?? 5000,
+                signal: controller.signal,
+                locks,
+                fallbackModel: verifiedDefaultModel(publisher.current, harness) ?? undefined,
+              });
+              write(
+                `Probe ${harness}/${model}: ${result.status}; restored=${String(result.restored)}${result.recovery ? " via recovery" : ""}.`,
+              );
+              if (result.model !== undefined && result.restored) {
+                await publisher.publish(
+                  catalogWithProbedModel(publisher.current, definition, result.model),
+                );
+                options.onCatalog?.(publisher.current);
+              }
+            } catch (error) {
+              if (!controller.signal.aborted) write(`Catalog probe failed: ${String(error)}`);
+            } finally {
+              activeProbes.delete(key);
+            }
+          })();
+          pending.add(task);
+          void task.finally(() => pending.delete(task));
           continue;
         }
         if (command.kind === "dispatch") {

@@ -4,7 +4,7 @@
  * the same black-box fetch/MCP client it uses against Orrery itself.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { EMPTY_HARNESS_CATALOG } from "@orrery/contract";
+import { EMPTY_HARNESS_CATALOG, HarnessCatalog } from "@orrery/contract";
 import { randomUUID } from "node:crypto";
 
 export interface TestSession {
@@ -44,11 +44,11 @@ export interface TestCommand {
   commandId: string;
   runnerId: string;
   seq: number;
-  dispatchId: string;
-  dispatchAttemptId: string;
+  dispatchId: string | null;
+  dispatchAttemptId: string | null;
   createdAt: string;
   expiresAt: string;
-  kind: "dispatch" | "cancel" | "input_resolved";
+  kind: "dispatch" | "cancel" | "input_resolved" | "probe_model" | "probe_catalog";
   payload: Record<string, unknown>;
 }
 
@@ -201,9 +201,10 @@ export class TestOrrery {
 
   private enqueue(
     kind: TestCommand["kind"],
-    dispatchId: string,
-    dispatchAttemptId: string,
+    dispatchId: string | null,
+    dispatchAttemptId: string | null,
     payload: Record<string, unknown>,
+    ttlMs = 600_000,
   ): TestCommand {
     this.seq += 1;
     const command: TestCommand = {
@@ -213,13 +214,22 @@ export class TestOrrery {
       dispatchId,
       dispatchAttemptId,
       createdAt: now(),
-      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      expiresAt: new Date(Date.now() + ttlMs).toISOString(),
       kind,
       payload,
     };
     this.commands.push(command);
     for (const wake of this.wake.splice(0)) wake();
     return command;
+  }
+
+  /** Runner-level catalog probe (#242): no dispatch id, short TTL. */
+  enqueueProbe(
+    kind: "probe_model" | "probe_catalog",
+    payload: Record<string, unknown> = {},
+    ttlMs = 30_000,
+  ): TestCommand {
+    return this.enqueue(kind, null, null, payload, ttlMs);
   }
 
   enqueueDispatch(
@@ -315,6 +325,16 @@ export class TestOrrery {
   /** Chunks flushed by the runner's StreamSpool (test seam for #202). */
   chunks(): readonly TestStreamChunk[] {
     return this.streamed;
+  }
+
+  /** Catalogs published by the Runner's serialized CatalogPublisher (#242). */
+  publishedCatalogs(): readonly HarnessCatalog[] {
+    const out: HarnessCatalog[] = [];
+    for (const raw of this.catalogs) {
+      const parsed = HarnessCatalog.safeParse(raw);
+      if (parsed.success) out.push(parsed.data);
+    }
+    return out;
   }
 
   state() {

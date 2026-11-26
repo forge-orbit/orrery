@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { HarnessCatalog } from "@orrery/contract";
 import { harnessConfigKey, writeCachedCatalog } from "./catalog.ts";
 import { loadSupervisionConfig } from "./config.ts";
+import type { HarnessDefinition } from "./harnesses.ts";
 import type { SlotController } from "./slots.ts";
 import { repoFingerprint, start } from "./start.ts";
 import { TestOrrery, type TestActivity, type TestSession } from "./test-orrery.ts";
@@ -16,6 +17,7 @@ interface Fixture {
   repo: string;
   worktrees: string;
   marker: string;
+  defaultFile: string;
   control: TestOrrery;
   stop: AbortController;
   lines: string[];
@@ -46,6 +48,11 @@ interface FixtureOptions {
   rejectEffort?: boolean | undefined;
   /** Stub seam: the Harness's advertised current/default model. */
   defaultModel?: string | undefined;
+  /** Override detected local Harnesses (issue #242). */
+  harnessDefinitions?: HarnessDefinition[] | undefined;
+  /** Simulated CLI default file used by targeted probe tests (#242). */
+  defaultFile?: string | undefined;
+  catalogProbeTimeoutMs?: number | undefined;
 }
 
 const stubPath = fileURLToPath(new URL("./stub-acp.ts", import.meta.url));
@@ -54,6 +61,7 @@ const savedEnv = {
   STUB_ACP_MODE: process.env.STUB_ACP_MODE,
   STUB_ACP_MARKER: process.env.STUB_ACP_MARKER,
   STUB_ACP_SLEEP_MS: process.env.STUB_ACP_SLEEP_MS,
+  STUB_ACP_DEFAULT_FILE: process.env.STUB_ACP_DEFAULT_FILE,
   STUB_ACP_DEFAULT_MODEL: process.env.STUB_ACP_DEFAULT_MODEL,
   STUB_ACP_REJECT_MODEL: process.env.STUB_ACP_REJECT_MODEL,
   STUB_ACP_REJECT_EFFORT: process.env.STUB_ACP_REJECT_EFFORT,
@@ -99,6 +107,8 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
   const worktrees = join(root, "worktrees");
   const configDir = join(root, "config");
   const marker = join(root, "acp.jsonl");
+  const defaultFile = join(root, "cli-default.txt");
+  await writeFile(defaultFile, "stub-model-1");
   await mkdir(repo, { recursive: true });
   await mkdir(configDir, { recursive: true });
   git(repo, ["init", "-q"]);
@@ -123,6 +133,7 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
   process.env.ORRERY_RUNNER_CONFIG_DIR = configDir;
   process.env.STUB_ACP_MODE = options.mode;
   process.env.STUB_ACP_MARKER = marker;
+  process.env.STUB_ACP_DEFAULT_FILE = options.defaultFile ?? defaultFile;
   process.env.STUB_ACP_SLEEP_MS = String(options.sleepMs ?? 0);
   if (options.defaultModel === undefined) delete process.env.STUB_ACP_DEFAULT_MODEL;
   else process.env.STUB_ACP_DEFAULT_MODEL = options.defaultModel;
@@ -161,9 +172,25 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
     signal: stop.signal,
     supervision: config,
     write: (line) => lines.push(line),
+    ...(options.harnessDefinitions === undefined
+      ? {}
+      : { harnessDefinitions: options.harnessDefinitions }),
+    ...(options.catalogProbeTimeoutMs === undefined
+      ? {}
+      : { catalogProbeTimeoutMs: options.catalogProbeTimeoutMs }),
     onController: options.onController,
   });
-  const result: Fixture = { root, repo, worktrees, marker, control, stop, lines, done };
+  const result: Fixture = {
+    root,
+    repo,
+    worktrees,
+    marker,
+    defaultFile,
+    control,
+    stop,
+    lines,
+    done,
+  };
   fixtures.push(result);
   return result;
 }
@@ -782,5 +809,111 @@ describe("per-dispatch harness, model and effort (#241)", { timeout: 30_000 }, (
     const sets = (await events(fixture)).filter((item) => item.event === "set_config_option");
     expect(sets.find((item) => item.configId === "model")?.value).toBe("stub-fast");
     expect(sets.some((item) => item.configId === "thought_level")).toBe(false);
+  });
+});
+
+describe("on-demand catalog probes (#242)", { timeout: 30_000 }, () => {
+  it("runs probe_catalog with every work slot busy and publishes the refresh", async () => {
+    const fixture = await makeFixture({
+      mode: "hang",
+      concurrency: 1,
+      harnessDefinitions: [
+        {
+          id: "custom",
+          displayName: "Custom",
+          source: "override",
+          command: process.execPath,
+          args: [stubPath],
+        },
+      ],
+    });
+    await until(() => fixture.control.publishedCatalogs().length >= 1);
+    fixture.control.enqueueDispatch("PROBE-BUSY", "attempt-probe-busy");
+    await until(() => sessions(fixture).length === 1);
+    expect(sessions(fixture)[0]?.status).toBe("active");
+
+    fixture.control.enqueueProbe("probe_catalog");
+    await until(() => fixture.control.publishedCatalogs().length >= 2);
+
+    // A busy work slot never head-of-line blocks the runner-level command.
+    expect(sessions(fixture)[0]?.status).toBe("active");
+    expect(fixture.control.publishedCatalogs().length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shares one lock with an alias dispatch and publishes discovered efforts", async () => {
+    const stub = { command: process.execPath, args: [stubPath] };
+    const definitions: HarnessDefinition[] = [
+      { id: "alias-a", displayName: "Alias A", source: "override", ...stub, args: [...stub.args] },
+      { id: "alias-b", displayName: "Alias B", source: "override", ...stub, args: [...stub.args] },
+    ];
+    const fixture = await makeFixture({
+      mode: "model-aware",
+      concurrency: 1,
+      harnessDefinitions: definitions,
+      catalogProbeTimeoutMs: 1200,
+    });
+    await until(() => fixture.control.publishedCatalogs().length >= 1);
+
+    fixture.control.enqueueProbe("probe_model", {
+      harness: "alias-b",
+      model: "stub-model-2",
+    });
+    fixture.control.enqueueDispatch("PROBE-LOCK", "attempt-probe-lock");
+    const session = await settledSession(fixture);
+    expect(session.status).toBe("completed");
+
+    const recorded = await events(fixture);
+    const indices = (predicate: (item: MarkerEvent) => boolean) =>
+      recorded.flatMap((item, index) => (predicate(item) ? [index] : []));
+    const switchIndex =
+      indices((item) => item.event === "set_model" && item.modelId === "stub-model-2")[0] ?? -1;
+    expect(switchIndex).toBeGreaterThanOrEqual(0);
+    const restoreIndex = recorded.findIndex(
+      (item, index) => index > switchIndex && item.event === "set_model",
+    );
+    expect(restoreIndex).toBeGreaterThan(switchIndex);
+    expect(recorded[restoreIndex]).toMatchObject({ modelId: "stub-model-1" });
+    // One CLI default backs both aliases: no dispatch ACP session may start
+    // between the probe's switch and its confirmed restore.
+    expect(
+      recorded.slice(switchIndex + 1, restoreIndex).filter((item) => item.event === "session/new"),
+    ).toHaveLength(0);
+
+    const published = fixture.control.publishedCatalogs().at(-1);
+    expect(published?.harnesses.find((item) => item.id === "alias-b")?.models).toContainEqual(
+      expect.objectContaining({
+        id: "stub-model-2",
+        reasoningDiscovery: "known",
+        supportedEfforts: ["balanced", "fast"],
+      }),
+    );
+    expect(await readFile(fixture.defaultFile, "utf8")).toBe("stub-model-1");
+  });
+
+  it("does not run a replayed probe twice while the first is active", async () => {
+    const fixture = await makeFixture({
+      mode: "probe-timeout",
+      concurrency: 1,
+      catalogProbeTimeoutMs: 300,
+    });
+    fixture.control.enqueueProbe("probe_model", {
+      harness: "custom",
+      model: "stub-model-2",
+    });
+    // The same command replayed with a new seq (as a missed ack would deliver).
+    fixture.control.enqueueProbe("probe_model", {
+      harness: "custom",
+      model: "stub-model-2",
+    });
+    await until(async () =>
+      (await events(fixture)).some(
+        (item) => item.event === "set_model" && item.modelId === "stub-model-2",
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const switchEvents = (await events(fixture)).filter(
+      (item) => item.event === "set_model" && item.modelId === "stub-model-2",
+    );
+    expect(switchEvents).toHaveLength(1);
   });
 });

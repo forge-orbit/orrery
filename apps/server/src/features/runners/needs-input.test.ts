@@ -437,7 +437,10 @@ describe(
 
       const commands = await database.db.select().from(runnerCommands);
       const resolved = commands.find(
-        (row) => row.kind === "input_resolved" && row.payload.issueId === issueId,
+        (row) =>
+          row.kind === "input_resolved" &&
+          "issueId" in row.payload &&
+          row.payload.issueId === issueId,
       );
       expect(resolved?.payload).toMatchObject({
         issueId,
@@ -483,7 +486,10 @@ describe(
       expect(str(field(settled, "status"))).toBe("completed");
       const commands = await database.db.select().from(runnerCommands);
       const resolved = commands.find(
-        (row) => row.kind === "input_resolved" && row.payload.issueId === issueId,
+        (row) =>
+          row.kind === "input_resolved" &&
+          "issueId" in row.payload &&
+          row.payload.issueId === issueId,
       );
       expect(resolved?.payload).toMatchObject({
         questionId,
@@ -533,7 +539,8 @@ describe(
 
       const commands = await database.db.select().from(runnerCommands);
       const cancel = commands.find(
-        (row) => row.kind === "cancel" && row.payload.issueId === issueId,
+        (row) =>
+          row.kind === "cancel" && "issueId" in row.payload && row.payload.issueId === issueId,
       );
       expect(cancel?.payload).toMatchObject({ reason: "question_paused" });
       const preserved = await until(async () =>

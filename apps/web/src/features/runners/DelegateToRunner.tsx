@@ -11,17 +11,18 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { useToast } from "@astryxdesign/core/Toast";
 import {
   MAX_DISPATCH_PROMPT_LENGTH,
+  type CatalogProbeRequest,
   type Dispatch,
   type HarnessCatalogEntry,
 } from "@orrery/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Send } from "lucide-react";
-import { useState } from "react";
+import { RefreshCw, Send } from "lucide-react";
+import { useRef, useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
 import { HarnessBadge, HarnessLogo, resolveHarnessKind } from "../../lib/harness.tsx";
 import { Link } from "../../lib/Link.tsx";
 import { formatCompactDateTime } from "../../lib/time.ts";
-import { createDispatch } from "./commands.ts";
+import { createDispatch, probeRunnerCatalog } from "./commands.ts";
 import { harnessDisplayName } from "./dispatchOptions.ts";
 import {
   issueDispatchesQuery,
@@ -39,6 +40,20 @@ const stateLabels: Record<Dispatch["state"], string> = {
   active: "Running",
   uncertain: "Reconnecting",
   ended: "Ended",
+};
+
+/**
+ * The enqueue response is not the probe result: keep the pending UI up until
+ * the Runner publishes a catalog (picked up by the 4s fleet poll) or this cap.
+ */
+const PROBE_GRACE_MS = 8_000;
+
+type ProbeInput = {
+  runnerId: string;
+  request: CatalogProbeRequest;
+  key: string;
+  baselineProbedAt: string;
+  generation: number;
 };
 
 /**
@@ -127,13 +142,15 @@ export function DelegateToRunner({
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const [isOpen, setIsOpen] = useState(false);
   // Project readers see Recent dispatches but never the owner-only fleet.
+  // While the dialog is open Query keeps the fleet fresh (4s poll), so a
+  // catalog the Runner publishes after a probe appears without a React effect.
   const { data: fleet } = useQuery({
-    ...workspaceRunnersQuery(workspaceId),
+    ...workspaceRunnersQuery(workspaceId, isOpen),
     enabled: canDelegate,
   });
   const { data: dispatchList } = useQuery(issueDispatchesQuery(issueId));
-  const [isOpen, setIsOpen] = useState(false);
   // Explicit user overrides. Undefined means "no choice yet", so a cold open
   // never clears a remembered choice while the fleet query is still loading.
   const [runnerOverride, setRunnerOverride] = useState<string | undefined>(undefined);
@@ -143,6 +160,11 @@ export function DelegateToRunner({
   const [agentOverride, setAgentOverride] = useState<string | undefined>(undefined);
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string>();
+  const [probeState, setProbeState] = useState<Omit<ProbeInput, "runnerId" | "request">>();
+  const [probeExpired, setProbeExpired] = useState(false);
+  const [probeFailed, setProbeFailed] = useState(false);
+  const probeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const probeGeneration = useRef(0);
 
   const allRunners = (fleet?.hosts ?? []).flatMap((host) => host.runners);
   const owned = (fleet?.hosts ?? [])
@@ -192,6 +214,35 @@ export function DelegateToRunner({
   const selectedModel = selectedHarness?.models.find((entry) => entry.id === rawModelId);
   const modelId = selectedModel?.id ?? "";
   const supportedEfforts = selectedModel?.supportedEfforts ?? [];
+  // A model with no reasoning options is published as `known` + empty efforts,
+  // so the Effort control is hidden and selecting it does not re-probe forever.
+  const knownWithoutEfforts =
+    selectedModel !== undefined &&
+    selectedModel.reasoningDiscovery === "known" &&
+    supportedEfforts.length === 0;
+  const probingKeyForModel = `${runnerId}\u0000${harnessId}\u0000${modelId}`;
+  // The catalog the Runner publishes advances `probedAt`; derive the end of a
+  // probe from that live query data instead of clearing on the enqueue reply.
+  const catalogProbedAt = selectedRunner?.harnessCatalog?.probedAt;
+  const catalogUpdated =
+    probeState !== undefined &&
+    catalogProbedAt !== undefined &&
+    (probeState.baselineProbedAt === "" ||
+      Date.parse(catalogProbedAt) > Date.parse(probeState.baselineProbedAt));
+  const probeActive = probeState !== undefined && !probeExpired && !probeFailed && !catalogUpdated;
+  const probingEffort = probeActive && probeState.key === probingKeyForModel;
+  const probingCatalog = probeActive && probeState.key === "catalog";
+  const probeMessage =
+    probeState !== undefined && !catalogUpdated && (probeFailed || probeExpired)
+      ? probeState.key === "catalog"
+        ? "Catalog refresh did not finish; you can still delegate."
+        : "Reasoning levels could not be discovered; you can still delegate."
+      : undefined;
+  const effortDescription = probingEffort
+    ? "Discovering reasoning levels…"
+    : supportedEfforts.length === 0
+      ? "Reasoning levels not discovered yet"
+      : undefined;
   // Effort is only restored when both the Harness and the Model matched;
   // a stale effort from a previous model is never sent with another.
   const rememberedEffort =
@@ -213,6 +264,52 @@ export function DelegateToRunner({
       ? memory.agentId
       : "");
 
+  function clearProbe() {
+    if (probeTimer.current !== undefined) clearTimeout(probeTimer.current);
+    probeTimer.current = undefined;
+    setProbeState(undefined);
+    setProbeExpired(false);
+    setProbeFailed(false);
+  }
+
+  // Probing is deliberately independent of the dispatch mutation: the Delegate
+  // button stays clickable while the Runner discovers a model's effort levels.
+  const probeMutation = useMutation({
+    mutationFn: (input: ProbeInput) => probeRunnerCatalog(input.runnerId, input.request),
+    onMutate: (input) => {
+      if (probeTimer.current !== undefined) clearTimeout(probeTimer.current);
+      probeTimer.current = undefined;
+      probeGeneration.current = input.generation;
+      setProbeState({
+        key: input.key,
+        baselineProbedAt: input.baselineProbedAt,
+        generation: input.generation,
+      });
+      setProbeExpired(false);
+      setProbeFailed(false);
+    },
+    onSettled: async (_data, _error, input) => {
+      // An older enqueue settling must not cap a newer probe's indicator.
+      if (input.generation !== probeGeneration.current) return;
+      probeTimer.current = setTimeout(() => setProbeExpired(true), PROBE_GRACE_MS);
+      await queryClient.invalidateQueries({ queryKey: workspaceRunnersQueryKey(workspaceId) });
+    },
+    onError: (_error, input) => {
+      if (input.generation === probeGeneration.current) setProbeFailed(true);
+    },
+  });
+
+  function startProbe(request: CatalogProbeRequest, key: string) {
+    probeGeneration.current += 1;
+    probeMutation.mutate({
+      runnerId,
+      request,
+      key,
+      baselineProbedAt: selectedRunner?.harnessCatalog?.probedAt ?? "",
+      generation: probeGeneration.current,
+    });
+  }
+
   function chooseRunner(value: string | null) {
     const id = value ?? "";
     setRunnerOverride(id);
@@ -230,9 +327,24 @@ export function DelegateToRunner({
   }
 
   function chooseModel(value: string | null) {
-    setModelOverride(value ?? "");
+    const next = value ?? "";
+    setModelOverride(next);
     // Never carry the previous model's effort onto this one.
     setEffortOverride("");
+    const candidate = selectedHarness?.models.find((entry) => entry.id === next);
+    if (candidate?.reasoningDiscovery === "unknown" && runnerId !== "" && harnessId !== "") {
+      startProbe(
+        { kind: "model", harness: harnessId, model: next },
+        `${runnerId}\u0000${harnessId}\u0000${next}`,
+      );
+    }
+  }
+
+  function closeDialog() {
+    setIsOpen(false);
+    setPrompt("");
+    setError(undefined);
+    clearProbe();
   }
 
   function openDialog() {
@@ -245,6 +357,7 @@ export function DelegateToRunner({
     setAgentOverride(undefined);
     setPrompt("");
     setError(undefined);
+    clearProbe();
     setIsOpen(true);
   }
 
@@ -322,7 +435,7 @@ export function DelegateToRunner({
         <Dialog
           isOpen={isOpen}
           onOpenChange={(open) => {
-            if (!open) setIsOpen(false);
+            if (!open) closeDialog();
           }}
           width={480}
           purpose="form"
@@ -332,7 +445,9 @@ export function DelegateToRunner({
               <DialogHeader
                 title="Delegate to Runner"
                 subtitle="Choose a Runner, an optional Agent and optional instructions for the Dispatch."
-                onOpenChange={(open) => setIsOpen(open)}
+                onOpenChange={(open) => {
+                  if (!open) closeDialog();
+                }}
               />
             }
             content={
@@ -357,6 +472,24 @@ export function DelegateToRunner({
                     onChange={chooseRunner}
                     isDisabled={owned.length === 0 || mutation.isPending}
                   />
+                  {/* A Runner with an empty, never-probed catalog is exactly the
+                      case that needs a manual refresh, so this action never sits
+                      behind the harness list. */}
+                  {runnerId !== "" && (
+                    <Stack direction="horizontal" gap={2} justify="end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        label="Refresh catalog"
+                        icon={<Icon icon={RefreshCw} />}
+                        isLoading={probingCatalog}
+                        isDisabled={probingCatalog}
+                        data-delegate-refresh-catalog=""
+                        onClick={() => startProbe({ kind: "catalog" }, "catalog")}
+                      />
+                    </Stack>
+                  )}
                   <Selector
                     label="Agent"
                     isOptional
@@ -408,7 +541,7 @@ export function DelegateToRunner({
                     isDisabled={selectedHarness === undefined || mutation.isPending}
                     data-delegate-model=""
                   />
-                  {supportedEfforts.length > 0 && (
+                  {modelId !== "" && !knownWithoutEfforts && (
                     <Selector
                       label="Effort"
                       isOptional
@@ -420,9 +553,18 @@ export function DelegateToRunner({
                       value={effectiveEffort}
                       onChange={(value) => setEffortOverride(value ?? "")}
                       hasClear
+                      {...(effortDescription === undefined
+                        ? {}
+                        : { description: effortDescription })}
+                      isLoading={probingEffort}
                       isDisabled={mutation.isPending}
                       data-delegate-effort=""
                     />
+                  )}
+                  {probeMessage !== undefined && (
+                    <Text type="supporting" color="secondary">
+                      {probeMessage}
+                    </Text>
                   )}
                   <TextArea
                     label="Prompt / Instructions"
@@ -448,7 +590,7 @@ export function DelegateToRunner({
                     variant="secondary"
                     label="Cancel"
                     isDisabled={mutation.isPending}
-                    onClick={() => setIsOpen(false)}
+                    onClick={closeDialog}
                   />
                   <Button
                     type="button"

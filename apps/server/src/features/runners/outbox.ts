@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type {
   CancelCommandPayload,
+  DispatchCommandPayload,
   InputResolvedCommandPayload,
-  RunnerCommandKind,
-  RunnerCommandPayload,
+  ProbeCatalogCommandPayload,
+  ProbeModelCommandPayload,
 } from "@orrery/contract";
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { runnerCommands, runnerDispatches, runners } from "../../db/schema.ts";
@@ -28,13 +29,31 @@ export type IssueCommandInput =
       answer: string | null;
     };
 
-export type EnqueueRunnerCommandInput = {
+type EnqueueCommon = {
   runnerId: string;
-  dispatch: DispatchSeed;
-  kind: RunnerCommandKind;
-  payload: RunnerCommandPayload;
   ttlSeconds?: number | undefined;
+  /** Set by callers that already hold the dispatch row lock. */
+  dispatchLocked?: boolean | undefined;
 };
+
+/**
+ * Dispatch commands are bound to an attempt; runner-level probes (#242) carry
+ * no dispatch ids and never touch a dispatch's down cursor. The union keeps the
+ * two shapes distinct at every call site.
+ */
+export type EnqueueRunnerCommandInput = EnqueueCommon &
+  (
+    | {
+        dispatch: DispatchSeed;
+        kind: "dispatch" | "cancel" | "input_resolved";
+        payload: DispatchCommandPayload | CancelCommandPayload | InputResolvedCommandPayload;
+      }
+    | {
+        dispatch?: undefined;
+        kind: "probe_model" | "probe_catalog";
+        payload: ProbeModelCommandPayload | ProbeCatalogCommandPayload;
+      }
+  );
 
 export type SeqAllocator = { next: (runnerId: string) => number };
 
@@ -94,17 +113,20 @@ export async function allocateCommandSeqs(
 /** Insert one command, advance the dispatch's down cursor, and ring the doorbell. */
 export async function insertRunnerCommand(
   tx: DbTransaction,
-  input: EnqueueRunnerCommandInput & { seq: number; dispatchLocked?: boolean },
+  input: EnqueueRunnerCommandInput & { seq: number; dispatchLocked?: boolean | undefined },
 ) {
-  if (input.dispatchLocked !== true) await lockDispatchRows(tx, [input.dispatch.id]);
+  const dispatch = input.dispatch;
   const ttl = input.ttlSeconds ?? RUNNER_COMMAND_TTL_SECONDS;
+  if (dispatch !== undefined && input.dispatchLocked !== true) {
+    await lockDispatchRows(tx, [dispatch.id]);
+  }
   const [row] = await tx
     .insert(runnerCommands)
     .values({
       id: randomUUID(),
       runnerId: input.runnerId,
-      dispatchId: input.dispatch.id,
-      dispatchAttemptId: input.dispatch.dispatchAttemptId,
+      dispatchId: dispatch?.id ?? null,
+      dispatchAttemptId: dispatch?.dispatchAttemptId ?? null,
       seq: input.seq,
       kind: input.kind,
       payload: input.payload,
@@ -112,10 +134,12 @@ export async function insertRunnerCommand(
       expiresAt: sql`statement_timestamp() + make_interval(secs => ${ttl})`,
     })
     .returning();
-  await tx
-    .update(runnerDispatches)
-    .set({ lastDownSeq: sql`greatest(${runnerDispatches.lastDownSeq}, ${input.seq})` })
-    .where(eq(runnerDispatches.id, input.dispatch.id));
+  if (dispatch !== undefined) {
+    await tx
+      .update(runnerDispatches)
+      .set({ lastDownSeq: sql`greatest(${runnerDispatches.lastDownSeq}, ${input.seq})` })
+      .where(eq(runnerDispatches.id, dispatch.id));
+  }
   // ID-only doorbell: JSON payloads stay in the durable outbox, well below the
   // 8 KB pg_notify limit. NOTIFY is delivered on COMMIT with this transaction.
   await tx.execute(sql`select pg_notify('runner_commands', ${input.runnerId})`);
