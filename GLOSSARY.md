@@ -127,3 +127,15 @@ _Avoid_: Capabilities, provider list, model registry
 **Dispatch token**:
 A short-lived credential minted when a runner accepts a dispatch, scoped strictly to one work session and invalidated when that session ends or the runner host is revoked.
 _Avoid_: Session key, temporary API key
+
+**Plugin**:
+An external integration registered on an installation by a system administrator that can receive project activity events and act on authorized workspaces as its own actor.
+_Avoid_: App, extension, addon
+
+**Plugin grant**:
+A workspace owner's explicit authorization enabling a registered plugin for a workspace with approved capabilities and project scope.
+_Avoid_: App installation, plugin instance, installation
+
+**Plugin token**:
+A short-lived credential issued to a plugin for one active plugin grant, bounded by that grant's live capabilities and project scope.
+_Avoid_: API key, static token, plugin secret
