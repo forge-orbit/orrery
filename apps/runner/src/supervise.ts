@@ -12,7 +12,7 @@ import { OrreryClient, RunnerRequestError } from "./client.ts";
 import type { SupervisionConfig } from "./config.ts";
 import { ephemeralMcpConfig } from "./config.ts";
 import { DispatchOptionFailure, resolveExecutionChoice } from "./dispatch-options.ts";
-import { withHarnessLock } from "./harness-lock.ts";
+import { harnessLockKey, withHarnessLock } from "./harness-lock.ts";
 import type { HarnessDefinition } from "./harnesses.ts";
 import { McpAuthError, RunnerMcpClient } from "./mcp-client.ts";
 import {
@@ -342,7 +342,7 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     // Hold the per-Harness lock across session startup and option application
     // so a concurrent probe cannot temporarily switch the default model under
     // a Dispatch that omitted `model` (ADR-0011).
-    acp = await withHarnessLock(harnessId, async () => {
+    acp = await withHarnessLock(harnessLockKey(commandSpec), async () => {
       let started: AcpStdioClient | undefined;
       try {
         started = await AcpStdioClient.start({

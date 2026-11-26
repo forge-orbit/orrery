@@ -332,7 +332,13 @@ test("a project reader can expand the custom prompt in Live Session Studio", asy
 test("a mismatched issue binding never shows another issue's dispatch prompt", async ({
   browser,
 }) => {
-  const created = await admin.post(`/api/issues/${fixture.issueId}/dispatches`, {
+  // A fresh issue keeps this binding check independent of earlier dispatches.
+  const bound = await admin.post(`/api/projects/${fixture.projectId}/issues`, {
+    data: { title: "Bound dispatch issue" },
+  });
+  expect(bound.status()).toBe(201);
+  const boundIssueId = text(field(await bound.json(), "id"), "bound issue id");
+  const created = await admin.post(`/api/issues/${boundIssueId}/dispatches`, {
     data: { runnerId: fixture.runnerId, prompt: PROMPT },
   });
   expect(created.status()).toBe(201);
@@ -393,5 +399,43 @@ test("an uncertain dispatch is visible to a reader but only resolvable by its ow
     await expect(ownerPage.locator("[data-resolve-dispatch]")).toHaveCount(2);
   } finally {
     await ownerContext.close();
+  }
+});
+
+test("a project reader sees Recent dispatches with execution metadata on the issue page", async ({
+  browser,
+}) => {
+  const createdIssue = await admin.post(`/api/projects/${fixture.projectId}/issues`, {
+    data: { title: "Reader visibility fixture" },
+  });
+  expect(createdIssue.status()).toBe(201);
+  const issueId = text(field(await createdIssue.json(), "id"), "issue id");
+  const created = await admin.post(`/api/issues/${issueId}/dispatches`, {
+    data: {
+      runnerId: fixture.runnerId,
+      prompt: "Reader-visible issue instructions.",
+      harness: "opencode",
+      model: "stub-model-2",
+      effort: "high",
+    },
+  });
+  expect(created.status()).toBe(201);
+
+  const context = await browser.newContext({ baseURL: baseUrl });
+  const page = await context.newPage();
+  try {
+    await signIn(page, fixture.teammateEmail, TEAMMATE_PASSWORD);
+    await page.goto(`/issues/${issueId}`);
+    await expect(page.getByText("Recent dispatches", { exact: true })).toBeVisible();
+    await expect(page.getByText("Waiting for the Runner")).toBeVisible();
+    const options = page.locator("[data-dispatch-options]").first();
+    await expect(options).toContainText("opencode");
+    await expect(options).toContainText("stub-model-2");
+    await expect(options).toContainText("high");
+    // Reader visibility must not expose owner-only delegation controls.
+    await expect(page.locator("[data-delegate-trigger]")).toHaveCount(0);
+    await expect(page.locator("[data-delegate-dialog]")).toHaveCount(0);
+  } finally {
+    await context.close();
   }
 });

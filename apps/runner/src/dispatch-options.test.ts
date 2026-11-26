@@ -1,6 +1,6 @@
 import type { HarnessCatalog } from "@orrery/contract";
 import { describe, expect, it } from "vitest";
-import { withHarnessLock } from "./harness-lock.ts";
+import { harnessLockKey, withHarnessLock } from "./harness-lock.ts";
 import { resolveExecutionChoice } from "./dispatch-options.ts";
 import type { HarnessDefinition } from "./harnesses.ts";
 
@@ -156,33 +156,52 @@ describe("default Harness identity for probe/spawn locking (#241)", () => {
     });
   });
 
-  it("shares one queue for the registry id while a path alias is a different queue", async () => {
+  it("serializes different registry ids that share the same executable and args", async () => {
+    // A preset and a user entry with a different id but an identical CLI
+    // mutate the same on-disk defaults: they must share one lock queue (#241).
+    const preset: HarnessDefinition = {
+      id: "opencode",
+      displayName: "OpenCode",
+      command: "/opt/acp/harness",
+      args: ["acp", "--flag"],
+    };
+    const alias: HarnessDefinition = {
+      id: "custom-alias",
+      displayName: "Custom alias",
+      command: preset.command,
+      args: [...preset.args],
+    };
+    const unrelated: HarnessDefinition = {
+      id: "different-harness",
+      displayName: "Different harness",
+      command: "/opt/acp/other",
+      args: ["acp"],
+    };
+    expect(harnessLockKey(preset)).toBe(harnessLockKey(alias));
+    expect(harnessLockKey(unrelated)).not.toBe(harnessLockKey(preset));
+
     const order: string[] = [];
     let releaseProbe: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => {
       releaseProbe = resolve;
     });
-    const task = (key: string, name: string, wait = 0): Promise<void> =>
-      withHarnessLock(key, async () => {
+    const task = (definition: HarnessDefinition, name: string, wait = 0): Promise<void> =>
+      withHarnessLock(harnessLockKey(definition), async () => {
         order.push(`${name}:start`);
         await (wait === 0 ? gate : new Promise<void>((resolve) => setTimeout(resolve, wait)));
         order.push(`${name}:end`);
       });
-    const probe = task("custom", "probe");
-    const spawn = task("custom", "spawn");
-    // The executable path is a different key: it must not wait behind the
-    // probe, which is exactly why spawn uses the registry id from resolution.
-    const pathAlias = task(override.command, "path-alias", 1);
+    const probe = task(preset, "preset-probe");
+    const spawn = task(alias, "alias-spawn");
+    const other = task(unrelated, "unrelated", 1);
     const deadline = Date.now() + 2000;
-    while (!order.includes("path-alias:start") && Date.now() < deadline) {
+    while (!order.includes("unrelated:start") && Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 5));
     }
     releaseProbe?.();
-    await Promise.all([probe, spawn, pathAlias]);
-    expect(order).toContain("path-alias:start");
-    expect(order.indexOf("path-alias:end")).toBeLessThan(order.indexOf("probe:end"));
-    expect(order.indexOf("spawn:start")).toBeGreaterThan(order.indexOf("probe:end"));
-    expect(order.indexOf("spawn:end")).toBeGreaterThan(order.indexOf("spawn:start"));
+    await Promise.all([probe, spawn, other]);
+    expect(order.indexOf("alias-spawn:start")).toBeGreaterThan(order.indexOf("preset-probe:end"));
+    expect(order.indexOf("unrelated:end")).toBeLessThan(order.indexOf("preset-probe:end"));
   });
 });
 

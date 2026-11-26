@@ -602,6 +602,69 @@ describe("custom dispatch prompt (#239)", () => {
       "dispatch_not_found",
     );
   });
+
+  it("rechecks the host owner's live project and workspace access on every host read", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("host bearer live ACL");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: "Read only while access is live." },
+      cookie: adminCookie,
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    const path = `/api/runners/dispatches/${dispatch.id}`;
+
+    // The host credential stays valid; it reads only its own Dispatch.
+    const live = await request(path, { token: host.credential });
+    expect(live.status).toBe(200);
+    expect(Dispatch.parse(await live.json()).prompt).toBe("Read only while access is live.");
+    const otherHost = await enrollHost(adminCookie, "unrelated-host");
+    await expectProblem(
+      await request(path, { token: otherHost.credential }),
+      404,
+      "dispatch_not_found",
+    );
+    await expectProblem(
+      await request(`/api/runners/dispatches/${randomUUID()}`, { token: host.credential }),
+      404,
+      "dispatch_not_found",
+    );
+    await expectProblem(await request(path), 401, "invalid_credential");
+
+    // The credential is never revoked here: only the owner's live access
+    // changes. Another owner keeps the shared workspace valid while dropping
+    // the host owner's implicit Manage ceiling leaves the project private.
+    const anotherOwner = await insertHuman(`another-owner-${randomUUID()}@example.com`);
+    await database.db.insert(workspaceMemberships).values({
+      id: randomUUID(),
+      workspaceId,
+      humanId: anotherOwner.id,
+      isOwner: true,
+    });
+    await database.db
+      .update(workspaceMemberships)
+      .set({ isOwner: false })
+      .where(
+        and(
+          eq(workspaceMemberships.workspaceId, workspaceId),
+          eq(workspaceMemberships.humanId, adminHumanId),
+        ),
+      );
+    await expectProblem(await request(path, { token: host.credential }), 404, "dispatch_not_found");
+
+    // Losing workspace membership entirely is equally non-enumerating.
+    await database.db
+      .delete(workspaceMemberships)
+      .where(
+        and(
+          eq(workspaceMemberships.workspaceId, workspaceId),
+          eq(workspaceMemberships.humanId, adminHumanId),
+        ),
+      );
+    await expectProblem(await request(path, { token: host.credential }), 404, "dispatch_not_found");
+  });
 });
 
 describe("atomic acceptance and fenced token", () => {

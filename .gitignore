@@ -23,6 +23,9 @@ pnpm-debug.log*
 # --- Local Docker data (docker compose volumes bound to the repo) ---
 /data/
 
+# Local Runner object-store data written by server tests; never ship it.
+apps/server/data/
+
 # --- Editors and OS ---
 .idea/
 .vscode/*

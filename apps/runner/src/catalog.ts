@@ -13,7 +13,7 @@ import { AcpStdioClient } from "./acp.ts";
 import { RunnerRequestError } from "./client.ts";
 import { configDirectory } from "./credential.ts";
 import type { HarnessDefinition } from "./harnesses.ts";
-import { withHarnessLock } from "./harness-lock.ts";
+import { harnessLockKey, withHarnessLock } from "./harness-lock.ts";
 
 /** ACP config option ids that carry reasoning-effort choices for the active model. */
 export const REASONING_OPTION_IDS = new Set([
@@ -107,7 +107,7 @@ export async function probeHarness(
   definition: HarnessDefinition,
   options: ProbeHarnessOptions,
 ): Promise<HarnessCatalogEntry> {
-  return await withHarnessLock(definition.id, async () => {
+  return await withHarnessLock(harnessLockKey(definition), async () => {
     const session = await AcpStdioClient.probe({
       command: definition.command,
       args: definition.args,

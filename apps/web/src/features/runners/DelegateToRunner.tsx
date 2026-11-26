@@ -43,23 +43,29 @@ const stateLabels: Record<Dispatch["state"], string> = {
 };
 
 /**
- * Owner-only issue dispatch from the issue detail page. A compact trigger keeps
- * the Recent dispatches list visible and opens a focused form dialog (#239).
+ * Issue dispatch from the issue detail page. Owners get a compact trigger and
+ * a focused form dialog; project readers see only the Recent dispatches list
+ * (including its execution metadata) and never query the owner-only fleet.
  */
 export function DelegateToRunner({
   issueId,
   workspaceId,
   projectId,
   agents,
+  canDelegate = true,
 }: {
   issueId: string;
   workspaceId: string;
   projectId: string;
   agents: readonly DelegatableAgent[];
+  canDelegate?: boolean;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { data: fleet } = useQuery(workspaceRunnersQuery(workspaceId));
+  const { data: fleet } = useQuery({
+    ...workspaceRunnersQuery(workspaceId),
+    enabled: canDelegate,
+  });
   const { data: dispatchList } = useQuery(issueDispatchesQuery(issueId));
   const [isOpen, setIsOpen] = useState(false);
   const [preference, setPreference] = useState<DelegatePreference>({ runnerId: "", agentId: "" });
@@ -163,24 +169,28 @@ export function DelegateToRunner({
 
   return (
     <Stack gap={2}>
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <Heading level={3} color="inherit">
-          Delegate to Runner
-        </Heading>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          label="Delegate to Runner…"
-          icon={<Icon icon={Send} />}
-          data-delegate-trigger=""
-          onClick={openDialog}
-        />
-      </HStack>
-      <Text type="supporting">
-        Send this issue to one of your online Runners for this project. The issue assignee is not
-        changed.
-      </Text>
+      {canDelegate && (
+        <>
+          <HStack gap={2} vAlign="center" wrap="wrap">
+            <Heading level={3} color="inherit">
+              Delegate to Runner
+            </Heading>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              label="Delegate to Runner…"
+              icon={<Icon icon={Send} />}
+              data-delegate-trigger=""
+              onClick={openDialog}
+            />
+          </HStack>
+          <Text type="supporting">
+            Send this issue to one of your online Runners for this project. The issue assignee is
+            not changed.
+          </Text>
+        </>
+      )}
       {(dispatchList?.dispatches.length ?? 0) > 0 && (
         <Stack gap={1}>
           <Text type="supporting" weight="semibold">
@@ -222,174 +232,179 @@ export function DelegateToRunner({
           ))}
         </Stack>
       )}
-      <Dialog
-        isOpen={isOpen}
-        onOpenChange={(next) => (next ? undefined : closeDialog())}
-        purpose="form"
-        width={560}
-      >
-        <Layout
-          header={
-            <DialogHeader
-              title="Delegate to Runner"
-              subtitle="Choose a Runner and optionally steer how the Agent works on this issue."
-              onOpenChange={(next) => (next ? undefined : closeDialog())}
-            />
-          }
-          content={
-            <LayoutContent>
-              <VStack gap={4} data-delegate-dialog="">
-                {error !== undefined && (
-                  <Banner
-                    status="error"
-                    title="Delegation failed"
-                    description={error}
-                    collapsible={false}
+      {canDelegate && (
+        <Dialog
+          isOpen={isOpen}
+          onOpenChange={(next) => (next ? undefined : closeDialog())}
+          purpose="form"
+          width={560}
+        >
+          <Layout
+            header={
+              <DialogHeader
+                title="Delegate to Runner"
+                subtitle="Choose a Runner and optionally steer how the Agent works on this issue."
+                onOpenChange={(next) => (next ? undefined : closeDialog())}
+              />
+            }
+            content={
+              <LayoutContent>
+                <VStack gap={4} data-delegate-dialog="">
+                  {error !== undefined && (
+                    <Banner
+                      status="error"
+                      title="Delegation failed"
+                      description={error}
+                      collapsible={false}
+                    />
+                  )}
+                  <Selector
+                    label="Runner"
+                    placeholder={owned.length === 0 ? "No online Runners" : "Choose a Runner"}
+                    options={owned.map((runner) => ({
+                      value: runner.id,
+                      label: `${runner.displayName} · ${runner.presence}`,
+                    }))}
+                    value={runnerId}
+                    onChange={(value) =>
+                      setPreference((current) => ({ ...current, runnerId: value }))
+                    }
+                    isDisabled={owned.length === 0 || mutation.isPending}
                   />
-                )}
-                <Selector
-                  label="Runner"
-                  placeholder={owned.length === 0 ? "No online Runners" : "Choose a Runner"}
-                  options={owned.map((runner) => ({
-                    value: runner.id,
-                    label: `${runner.displayName} · ${runner.presence}`,
-                  }))}
-                  value={runnerId}
-                  onChange={(value) =>
-                    setPreference((current) => ({ ...current, runnerId: value }))
-                  }
-                  isDisabled={owned.length === 0 || mutation.isPending}
-                />
-                {harnesses.length > 0 && (
-                  <VStack gap={3}>
-                    <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-                      <Selector
-                        label="Harness"
-                        placeholder="Choose a Harness"
-                        options={harnesses.map((item) => ({
-                          value: item.id,
-                          label: item.displayName,
-                        }))}
-                        value={harness === "" ? null : harness}
-                        hasClear
-                        isOptional
-                        onChange={(value) =>
-                          // A Harness change invalidates both the Model and
-                          // its Effort: never send a previous model's effort.
-                          setPreference((current) => ({
-                            ...current,
-                            harness: value ?? "",
-                            model: "",
-                            effort: "",
-                          }))
+                  {harnesses.length > 0 && (
+                    <VStack gap={3}>
+                      <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+                        <Selector
+                          label="Harness"
+                          placeholder="Choose a Harness"
+                          options={harnesses.map((item) => ({
+                            value: item.id,
+                            label: item.displayName,
+                          }))}
+                          value={harness === "" ? null : harness}
+                          hasClear
+                          isOptional
+                          onChange={(value) =>
+                            // A Harness change invalidates both the Model and
+                            // its Effort: never send a previous model's effort.
+                            setPreference((current) => ({
+                              ...current,
+                              harness: value ?? "",
+                              model: "",
+                              effort: "",
+                            }))
+                          }
+                          isDisabled={mutation.isPending}
+                          data-delegate-harness=""
+                        />
+                        <HarnessBadge
+                          harness={harness === "" ? null : harness}
+                          empty="No Harness"
+                        />
+                      </Stack>
+                      {harness !== "" && (
+                        <Selector
+                          label="Model"
+                          placeholder="Choose a model"
+                          options={models.map((item) => ({
+                            value: item.id,
+                            label: item.label ?? item.id,
+                            description:
+                              item.reasoningDiscovery === "known"
+                                ? "Reasoning levels available"
+                                : "Reasoning levels not probed yet",
+                          }))}
+                          value={model ?? ""}
+                          onChange={(value) =>
+                            // Switching Model immediately clears stale Effort.
+                            setPreference((current) => ({
+                              ...current,
+                              model: value ?? "",
+                              effort: "",
+                            }))
+                          }
+                          isDisabled={mutation.isPending}
+                          data-delegate-model=""
+                        />
+                      )}
+                      {model !== "" && efforts.length > 0 && (
+                        <Selector
+                          label="Effort"
+                          placeholder="Choose a reasoning effort"
+                          options={efforts.map((value) => ({ value, label: value }))}
+                          value={effort === "" ? null : effort}
+                          hasClear
+                          isOptional
+                          onChange={(value) =>
+                            setPreference((current) => ({ ...current, effort: value ?? "" }))
+                          }
+                          isDisabled={mutation.isPending}
+                          data-delegate-effort=""
+                        />
+                      )}
+                    </VStack>
+                  )}
+                  <Selector
+                    label="Agent"
+                    isOptional
+                    placeholder="Use the Runner's default Agent"
+                    options={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
+                    value={agentId}
+                    onChange={(value) =>
+                      setPreference((current) => ({ ...current, agentId: value ?? "" }))
+                    }
+                    hasClear
+                    isDisabled={mutation.isPending}
+                  />
+                  <TextArea
+                    label="Prompt / Instructions"
+                    isOptional
+                    description="Optional instructions for this Dispatch only, visible to everyone who can read the project. Never saved for the next issue."
+                    placeholder="Tell the Agent how to approach this issue…"
+                    value={prompt}
+                    onChange={setPrompt}
+                    rows={5}
+                    maxLength={MAX_DISPATCH_PROMPT_LENGTH}
+                    htmlMaxLength={MAX_DISPATCH_PROMPT_LENGTH}
+                    {...(promptTooLong
+                      ? {
+                          status: {
+                            type: "error" as const,
+                            message: `Use at most ${MAX_DISPATCH_PROMPT_LENGTH.toLocaleString()} characters.`,
+                          },
                         }
-                        isDisabled={mutation.isPending}
-                        data-delegate-harness=""
-                      />
-                      <HarnessBadge harness={harness === "" ? null : harness} empty="No Harness" />
-                    </Stack>
-                    {harness !== "" && (
-                      <Selector
-                        label="Model"
-                        placeholder="Choose a model"
-                        options={models.map((item) => ({
-                          value: item.id,
-                          label: item.label ?? item.id,
-                          description:
-                            item.reasoningDiscovery === "known"
-                              ? "Reasoning levels available"
-                              : "Reasoning levels not probed yet",
-                        }))}
-                        value={model ?? ""}
-                        onChange={(value) =>
-                          // Switching Model immediately clears stale Effort.
-                          setPreference((current) => ({
-                            ...current,
-                            model: value ?? "",
-                            effort: "",
-                          }))
-                        }
-                        isDisabled={mutation.isPending}
-                        data-delegate-model=""
-                      />
-                    )}
-                    {model !== "" && efforts.length > 0 && (
-                      <Selector
-                        label="Effort"
-                        placeholder="Choose a reasoning effort"
-                        options={efforts.map((value) => ({ value, label: value }))}
-                        value={effort === "" ? null : effort}
-                        hasClear
-                        isOptional
-                        onChange={(value) =>
-                          setPreference((current) => ({ ...current, effort: value ?? "" }))
-                        }
-                        isDisabled={mutation.isPending}
-                        data-delegate-effort=""
-                      />
-                    )}
-                  </VStack>
-                )}
-                <Selector
-                  label="Agent"
-                  isOptional
-                  placeholder="Use the Runner's default Agent"
-                  options={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
-                  value={agentId}
-                  onChange={(value) =>
-                    setPreference((current) => ({ ...current, agentId: value ?? "" }))
-                  }
-                  hasClear
-                  isDisabled={mutation.isPending}
-                />
-                <TextArea
-                  label="Prompt / Instructions"
-                  isOptional
-                  description="Optional instructions for this Dispatch only, visible to everyone who can read the project. Never saved for the next issue."
-                  placeholder="Tell the Agent how to approach this issue…"
-                  value={prompt}
-                  onChange={setPrompt}
-                  rows={5}
-                  maxLength={MAX_DISPATCH_PROMPT_LENGTH}
-                  htmlMaxLength={MAX_DISPATCH_PROMPT_LENGTH}
-                  {...(promptTooLong
-                    ? {
-                        status: {
-                          type: "error" as const,
-                          message: `Use at most ${MAX_DISPATCH_PROMPT_LENGTH.toLocaleString()} characters.`,
-                        },
-                      }
-                    : {})}
-                  isDisabled={mutation.isPending}
-                />
-              </VStack>
-            </LayoutContent>
-          }
-          footer={
-            <LayoutFooter>
-              <HStack gap={2} hAlign="end">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  label="Cancel"
-                  isDisabled={mutation.isPending}
-                  onClick={closeDialog}
-                />
-                <Button
-                  type="button"
-                  variant="primary"
-                  label="Delegate to Runner"
-                  icon={<Icon icon={Send} />}
-                  isDisabled={runnerId === "" || promptTooLong || mutation.isPending}
-                  isLoading={mutation.isPending}
-                  data-delegate-dispatch=""
-                  onClick={submit}
-                />
-              </HStack>
-            </LayoutFooter>
-          }
-        />
-      </Dialog>
+                      : {})}
+                    isDisabled={mutation.isPending}
+                  />
+                </VStack>
+              </LayoutContent>
+            }
+            footer={
+              <LayoutFooter>
+                <HStack gap={2} hAlign="end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    label="Cancel"
+                    isDisabled={mutation.isPending}
+                    onClick={closeDialog}
+                  />
+                  <Button
+                    type="button"
+                    variant="primary"
+                    label="Delegate to Runner"
+                    icon={<Icon icon={Send} />}
+                    isDisabled={runnerId === "" || promptTooLong || mutation.isPending}
+                    isLoading={mutation.isPending}
+                    data-delegate-dispatch=""
+                    onClick={submit}
+                  />
+                </HStack>
+              </LayoutFooter>
+            }
+          />
+        </Dialog>
+      )}
     </Stack>
   );
 }
