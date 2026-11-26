@@ -18,7 +18,7 @@ import {
   harnessesJsonPath,
   type HarnessDefinition,
 } from "./harnesses.ts";
-import { parseDiscovery } from "./probe.ts";
+import { activeSessionModel, parseDiscovery } from "./probe.ts";
 import { z } from "zod";
 
 /** ACP config option ids that carry reasoning-effort choices for the active model. */
@@ -244,10 +244,11 @@ async function restoreDefaults(
     }
   }
   for (const option of previous.options) {
+    if (option.id === "model") continue;
     try {
       await client.requestInBudget(
         "session/set_config_option",
-        { sessionId: client.id, optionId: option.id, value: option.value },
+        { sessionId: client.id, configId: option.id, value: option.value },
         deadline,
       );
     } catch {
@@ -265,9 +266,10 @@ async function restoreDefaults(
 async function recoveryRestore(
   definition: HarnessDefinition,
   previous: PreviousDefaults,
-  options: ProbeModelOptions,
+  options: ProbeModelOptions & { allowAlreadyRestored?: boolean },
 ): Promise<boolean> {
-  const deadline = Date.now() + RECOVERY_BUDGET_MS;
+  const budget = Math.max(RECOVERY_BUDGET_MS, options.timeoutMs);
+  const deadline = Date.now() + budget;
   let client: AcpStdioClient | undefined;
   try {
     const started = await AcpStdioClient.startProbe({
@@ -278,9 +280,18 @@ async function recoveryRestore(
       mcpServers: [],
       sessionMeta: { orreryProbe: true, orreryRecovery: true },
       worktreeReal: options.cwd,
-      timeoutMs: RECOVERY_BUDGET_MS,
+      timeoutMs: budget,
     });
     client = started.client;
+    if (
+      options.allowAlreadyRestored === true &&
+      previous.model !== undefined &&
+      activeSessionModel(started.session) === previous.model
+    ) {
+      // A brand-new session already opens on the previous default: the
+      // successful switch was session-scoped and never mutated the CLI default.
+      return true;
+    }
     return await restoreDefaults(client, previous, deadline);
   } catch {
     return false;
@@ -330,6 +341,8 @@ export async function probeModel(
       });
       client = started.client;
       const initial = sessionInfo(started.session);
+      const hasModelConfigOption =
+        initial?.options.some((option) => option.id === "model") ?? false;
       previous = {
         ...(initial?.currentModelId === undefined
           ? options.fallbackModel === undefined
@@ -337,18 +350,28 @@ export async function probeModel(
             : { model: options.fallbackModel }
           : { model: initial.currentModelId }),
         options: (initial?.options ?? [])
-          .filter((option) => option.currentValue !== undefined)
+          .filter((option) => option.id !== "model" && option.currentValue !== undefined)
           .slice(0, MAX_RESTORED_OPTIONS)
           .map((option) => ({ id: option.id, value: option.currentValue! })),
       };
       // ACP reports configOptions for the active model, so read them *after*
       // switching instead of reusing the previous model's effort levels.
-      const switched = await client.requestInBudget(
+      // Some ACP v1 adapters (e.g. Hermes) return `{}` from `session/set_model`
+      // and only return updated `configOptions` from `session/set_config_option`.
+      let switched = await client.requestInBudget(
         "session/set_model",
         { sessionId: client.id, modelId },
         deadline,
       );
-      const after = sessionInfo(switched);
+      let after = sessionInfo(switched);
+      if (hasModelConfigOption && (after === undefined || after.options.length === 0)) {
+        switched = await client.requestInBudget(
+          "session/set_config_option",
+          { sessionId: client.id, configId: "model", value: modelId },
+          deadline,
+        );
+        after = sessionInfo(switched);
+      }
       if (after !== undefined) {
         // A successful switch that advertised no reasoning options is still a
         // completed discovery: publish `known` with an empty effort list so the
@@ -382,7 +405,10 @@ export async function probeModel(
     let recovery = false;
     if (!restored && previous !== undefined) {
       recovery = true;
-      restored = await recoveryRestore(definition, previous, options);
+      restored = await recoveryRestore(definition, previous, {
+        ...options,
+        allowAlreadyRestored: failure === undefined && discovered !== undefined,
+      });
     }
 
     const detail =
