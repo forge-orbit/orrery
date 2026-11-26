@@ -2,17 +2,29 @@ import { createHash } from "node:crypto";
 import type {
   DispatchAcceptance,
   DispatchCommandPayload,
+  HarnessCatalog,
   InputResolvedCommandPayload,
 } from "@orrery/contract";
+import type { SessionDiagnostic } from "@orrery/contract";
 import { AcpStdioClient } from "./acp.ts";
+import { REASONING_OPTION_IDS } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import type { SupervisionConfig } from "./config.ts";
 import { ephemeralMcpConfig } from "./config.ts";
+import {
+  DispatchOptionFailure,
+  mergeExecutionChoice,
+  resolveExecutionChoice,
+  type ExecutionChoice,
+} from "./dispatch-options.ts";
+import { withHarnessLock } from "./harness-lock.ts";
+import type { HarnessDefinition } from "./harnesses.ts";
 import { McpAuthError, RunnerMcpClient } from "./mcp-client.ts";
 import {
   createStreamSpool,
   mainRepositoryRoot,
   spoolDirectory,
+  type SpoolEntry,
   type StreamSpool,
 } from "./spool.ts";
 import type { Slot, SlotController, SlotPool } from "./slots.ts";
@@ -35,6 +47,11 @@ export interface SupervisionOptions {
   pool: SlotPool;
   signal: AbortSignal;
   write: (line: string) => void;
+  /** Local registry seam and cached catalog for per-Dispatch execution options. */
+  harnessDefinitions?: readonly HarnessDefinition[] | undefined;
+  harnessCatalog?: HarnessCatalog | undefined;
+  /** CLI defaults on `start` / `work` for dispatches without an override. */
+  defaults?: ExecutionChoice | undefined;
   /** Called as soon as the controller exists, before any local work starts. */
   onController?: ((controller: SlotController) => void) | undefined;
 }
@@ -199,6 +216,16 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
       })
       .catch((error: unknown) => write(`Could not spool ACP stderr: ${String(error)}`));
   };
+  /** Awaited append for diagnostics/warnings that must precede the next flush. */
+  const spoolChunk = async (entry: SpoolEntry): Promise<void> => {
+    if (spool === undefined) return;
+    try {
+      const chunk = await spool.append(entry);
+      controller.lastSeq = Math.max(controller.lastSeq, chunk.seq);
+    } catch (error) {
+      write(`Could not spool ${entry.kind}: ${String(error)}`);
+    }
+  };
 
   const abortListener = () => requestCancel("shutdown");
   options.signal.addEventListener("abort", abortListener, { once: true });
@@ -223,6 +250,35 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     } catch (error) {
       write(`Stream spool unavailable for this dispatch: ${String(error)}`);
     }
+
+    const choice = mergeExecutionChoice(command, options.defaults);
+    const resolved = resolveExecutionChoice(choice, {
+      ...(options.harnessDefinitions === undefined
+        ? {}
+        : { definitions: options.harnessDefinitions }),
+      ...(options.harnessCatalog === undefined ? {} : { catalog: options.harnessCatalog }),
+      defaultCommand: config.acp,
+      ...(config.acpOverridden ? { acpOverride: config.acp } : {}),
+    });
+    if (resolved.kind === "error") {
+      throw new DispatchOptionFailure(
+        resolved.reason,
+        `Harness ${resolved.harness} is not installed on this Runner.`,
+        resolved.harness,
+      );
+    }
+    // A Dispatch carries only an opaque Harness id; command/args always come
+    // from the local registry (or the unchanged ACP config), never the server.
+    const harnessId =
+      resolved.kind === "harness"
+        ? resolved.definition.id
+        : config.acpOverridden
+          ? "custom"
+          : config.acp.command;
+    const commandSpec =
+      resolved.kind === "harness"
+        ? { command: resolved.definition.command, args: resolved.definition.args }
+        : resolved.command;
 
     // The claim is already active; start renewing before any local work begins.
     watchdog = setInterval(() => {
@@ -286,21 +342,71 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     const mcpServers = [mcpConfig];
 
     if (cancelledAlready) throw new Error("dispatch cancelled before ACP start");
-    acp = await AcpStdioClient.start({
-      command: config.acp.command,
-      args: config.acp.args,
-      cwd: worktree.path,
-      env: Object.fromEntries(mcpConfig.env.map((item) => [item.name, item.value])),
-      worktreeReal: worktree.realPath,
-      mcpServers,
-      onUpdate: (method, params) => spoolEvent(method, params),
-      onStderr: (line) => {
-        write(`acp stderr: ${line}`);
-        spoolStderr(line);
-      },
+    const sessionWorktree = worktree;
+    if (sessionWorktree === undefined) throw new Error("worktree was not created");
+    // Hold the per-Harness lock across session startup and option application
+    // so a concurrent probe cannot temporarily switch the default model under
+    // a Dispatch that omitted `model` (ADR-0011).
+    acp = await withHarnessLock(harnessId, async () => {
+      let started: AcpStdioClient | undefined;
+      try {
+        started = await AcpStdioClient.start({
+          command: commandSpec.command,
+          args: [...commandSpec.args],
+          cwd: sessionWorktree.path,
+          env: Object.fromEntries(mcpConfig.env.map((item) => [item.name, item.value])),
+          worktreeReal: sessionWorktree.realPath,
+          mcpServers,
+          onUpdate: (method, params) => spoolEvent(method, params),
+          onStderr: (line) => {
+            write(`acp stderr: ${line}`);
+            spoolStderr(line);
+          },
+        });
+        if (resolved.model !== undefined) {
+          try {
+            await started.setModel(resolved.model);
+            write(`ACP model set to ${resolved.model}.`);
+          } catch (error) {
+            throw new DispatchOptionFailure(
+              "model_rejected",
+              `Harness ${harnessId} rejected model ${resolved.model}: ${String(error)}`,
+              harnessId,
+            );
+          }
+        }
+        if (resolved.effort !== undefined) {
+          let applied = false;
+          for (const optionId of REASONING_OPTION_IDS) {
+            try {
+              await started.setConfigOption(optionId, resolved.effort);
+              applied = true;
+              write(`ACP effort set to ${resolved.effort} via ${optionId}.`);
+              break;
+            } catch {
+              // Another harness may name the option differently; try the next
+              // known id. A total refusal is non-fatal below.
+            }
+          }
+          if (!applied) {
+            await spoolChunk({
+              kind: "event",
+              eventType: "warning",
+              summary: `Effort ${resolved.effort} is unsupported by ${harnessId}; continuing without it.`,
+              data: { harness: harnessId, effort: resolved.effort },
+            });
+            write(`Effort ${resolved.effort} unsupported by ${harnessId}; continuing without it.`);
+          }
+        }
+        return started;
+      } catch (error) {
+        // A rejected option must not leak the just-started process group.
+        if (started !== undefined) await started.forceExit(config.cancelGraceMs);
+        throw error;
+      }
     });
     acpRunning = true;
-    write(`ACP ${config.acp.command} started (pid ${acp.pid}) in ${worktree.branch}.`);
+    write(`ACP ${commandSpec.command} started (pid ${acp.pid}) in ${worktree.branch}.`);
 
     type ParkWake =
       | { kind: "resume"; payload: InputResolvedCommandPayload }
@@ -508,6 +614,20 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
     }
   } catch (error) {
     write(`Dispatch supervision failed: ${String(error)}`);
+    if (error instanceof DispatchOptionFailure) {
+      const diagnostic: SessionDiagnostic =
+        error.kind === "harness_not_installed"
+          ? {
+              kind: "acp_not_installed",
+              version: 1,
+              message: error.message,
+              ...(error.harness === undefined ? {} : { harness: error.harness }),
+            }
+          : { kind: "acp_spawn_failed", version: 1, message: error.message };
+      // Awaited before the final flush so the diagnostic reaches the stream
+      // rollup together with the released session.
+      await spoolChunk({ kind: "diagnostic", diagnostic });
+    }
     controller.outcome = revoked ? "revoked" : cancelledAlready ? "cancelled" : "failed";
     if (acp !== undefined) await acp.forceExit(config.cancelGraceMs);
     // A failure before the ACP turn started must still release the claim and

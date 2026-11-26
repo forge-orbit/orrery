@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
 import { useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
+import { HarnessBadge } from "../../lib/harness.tsx";
 import { Link } from "../../lib/Link.tsx";
 import { formatCompactDateTime } from "../../lib/time.ts";
 import { createDispatch } from "./commands.ts";
@@ -77,12 +78,30 @@ export function DelegateToRunner({
 
   // Validate the remembered choices against live data on every render, so a
   // Runner going offline or stale browser storage never breaks delegation.
-  const { runnerId, agentId } = resolveDelegateChoice(preference, owned, agents);
+  const choice = resolveDelegateChoice(preference, owned, agents);
+  const { runnerId, agentId } = choice;
+  const harness = choice.harness ?? "";
+  const model = choice.model ?? "";
+  const effort = choice.effort ?? "";
+  const selectedRunner = owned.find((runner) => runner.id === runnerId);
+  const harnesses = selectedRunner?.harnessCatalog.harnesses ?? [];
+  const selectedHarness = harnesses.find((item) => item.id === harness);
+  const models = selectedHarness?.models ?? [];
+  const selectedModel = models.find((item) => item.id === model);
+  const efforts = selectedModel?.supportedEfforts ?? [];
   const trimmedPrompt = prompt.trim();
   const promptTooLong = trimmedPrompt.length > MAX_DISPATCH_PROMPT_LENGTH;
 
   const openDialog = () => {
-    setPreference(readDelegatePreference(projectId) ?? { runnerId: "", agentId: "" });
+    setPreference(
+      readDelegatePreference(projectId) ?? {
+        runnerId: "",
+        harness: "",
+        model: "",
+        effort: "",
+        agentId: "",
+      },
+    );
     // A new delegation never carries the previous issue's instructions.
     setPrompt("");
     setError(undefined);
@@ -101,9 +120,18 @@ export function DelegateToRunner({
         runnerId,
         ...(agentId === "" ? {} : { agentId }),
         ...(trimmedPrompt === "" ? {} : { prompt: trimmedPrompt }),
+        ...(harness === "" ? {} : { harness }),
+        ...(model === "" ? {} : { model }),
+        ...(effort === "" ? {} : { effort }),
       }),
     onSuccess: async (dispatch) => {
-      writeDelegatePreference(projectId, { runnerId: dispatch.runnerId, agentId });
+      writeDelegatePreference(projectId, {
+        runnerId: dispatch.runnerId,
+        harness,
+        model,
+        effort,
+        agentId,
+      });
       closeDialog();
       toast({
         body: `Delegated to ${owned.find((runner) => runner.id === dispatch.runnerId)?.displayName ?? "Runner"}.`,
@@ -163,6 +191,23 @@ export function DelegateToRunner({
                   ? ` · ${formatCompactDateTime(dispatch.acceptedAt)}`
                   : ""}
               </Text>
+              {(dispatch.harness !== undefined ||
+                dispatch.model !== undefined ||
+                dispatch.effort !== undefined) && (
+                <Stack
+                  direction="horizontal"
+                  gap={1}
+                  vAlign="center"
+                  wrap="wrap"
+                  data-dispatch-options=""
+                >
+                  <HarnessBadge harness={dispatch.harness ?? null} empty="harness unknown" />
+                  <Text type="supporting" color="secondary">
+                    {dispatch.model ?? "model unknown"}
+                    {dispatch.effort === undefined ? "" : ` · ${dispatch.effort}`}
+                  </Text>
+                </Stack>
+              )}
               <Link
                 to="/live/$runnerId/$dispatchId"
                 params={{ runnerId: dispatch.runnerId, dispatchId: dispatch.id }}
@@ -212,6 +257,76 @@ export function DelegateToRunner({
                   }
                   isDisabled={owned.length === 0 || mutation.isPending}
                 />
+                {harnesses.length > 0 && (
+                  <VStack gap={3}>
+                    <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+                      <Selector
+                        label="Harness"
+                        placeholder="Choose a Harness"
+                        options={harnesses.map((item) => ({
+                          value: item.id,
+                          label: item.displayName,
+                        }))}
+                        value={harness === "" ? null : harness}
+                        hasClear
+                        isOptional
+                        onChange={(value) =>
+                          // A Harness change invalidates both the Model and
+                          // its Effort: never send a previous model's effort.
+                          setPreference((current) => ({
+                            ...current,
+                            harness: value ?? "",
+                            model: "",
+                            effort: "",
+                          }))
+                        }
+                        isDisabled={mutation.isPending}
+                        data-delegate-harness=""
+                      />
+                      <HarnessBadge harness={harness === "" ? null : harness} empty="No Harness" />
+                    </Stack>
+                    {harness !== "" && (
+                      <Selector
+                        label="Model"
+                        placeholder="Choose a model"
+                        options={models.map((item) => ({
+                          value: item.id,
+                          label: item.label ?? item.id,
+                          description:
+                            item.reasoningDiscovery === "known"
+                              ? "Reasoning levels available"
+                              : "Reasoning levels not probed yet",
+                        }))}
+                        value={model ?? ""}
+                        onChange={(value) =>
+                          // Switching Model immediately clears stale Effort.
+                          setPreference((current) => ({
+                            ...current,
+                            model: value ?? "",
+                            effort: "",
+                          }))
+                        }
+                        isDisabled={mutation.isPending}
+                        data-delegate-model=""
+                      />
+                    )}
+                    {model !== "" && efforts.length > 0 && (
+                      <Selector
+                        label="Effort"
+                        placeholder="Choose a reasoning effort"
+                        options={efforts.map((value) => ({ value, label: value }))}
+                        value={effort === "" ? null : effort}
+                        hasClear
+                        isOptional
+                        onChange={(value) =>
+                          setPreference((current) => ({ ...current, effort: value ?? "" }))
+                        }
+                        isDisabled={mutation.isPending}
+                        data-delegate-effort=""
+                      />
+                    )}
+                  </VStack>
+                )}
                 <Selector
                   label="Agent"
                   isOptional

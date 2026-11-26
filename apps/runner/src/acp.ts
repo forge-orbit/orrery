@@ -28,6 +28,9 @@ type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => vo
 /** A permission request larger than this is refused without evaluating it. */
 export const MAX_PERMISSION_REQUEST_BYTES = 32 * 1024;
 
+/** Bounded wait for per-dispatch model/effort selection. */
+const ACP_OPTION_TIMEOUT_MS = 5000;
+
 /**
  * Newline-delimited JSON-RPC 2.0 over stdio, with the child spawned as a
  * detached process-group leader so cancellation can signal the whole tree.
@@ -335,6 +338,24 @@ export class AcpStdioClient {
       sessionId: this.sessionId,
       prompt: [{ type: "text", text }],
     });
+  }
+
+  /** Select a model on the live ACP session (#241). */
+  async setModel(modelId: string): Promise<void> {
+    await this.request(
+      "session/set_model",
+      { sessionId: this.sessionId, modelId },
+      ACP_OPTION_TIMEOUT_MS,
+    );
+  }
+
+  /** Set a reasoning-effort config option on the live ACP session (#241). */
+  async setConfigOption(optionId: string, value: string): Promise<void> {
+    await this.request(
+      "session/set_config_option",
+      { sessionId: this.sessionId, optionId, value },
+      ACP_OPTION_TIMEOUT_MS,
+    );
   }
 
   sendCancel(): void {

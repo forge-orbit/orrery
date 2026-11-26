@@ -316,6 +316,18 @@ export const DispatchPrompt = z
   .meta({ id: "DispatchPrompt" });
 export type DispatchPrompt = z.infer<typeof DispatchPrompt>;
 
+/**
+ * Optional per-Dispatch execution choices. They are identifiers, never
+ * executable paths or flags; the Runner resolves them through its own local
+ * registry. Empty strings are treated as omitted by the server.
+ */
+export const DispatchHarness = z.string().trim().max(64).meta({ id: "DispatchHarness" });
+export type DispatchHarness = z.infer<typeof DispatchHarness>;
+export const DispatchModel = z.string().trim().max(200).meta({ id: "DispatchModel" });
+export type DispatchModel = z.infer<typeof DispatchModel>;
+export const DispatchEffort = z.string().trim().max(64).meta({ id: "DispatchEffort" });
+export type DispatchEffort = z.infer<typeof DispatchEffort>;
+
 /** Thin delivery bridge; it never changes the issue's assignee. */
 export const Dispatch = z
   .object({
@@ -335,6 +347,9 @@ export const Dispatch = z
     lastDownSeq: z.int().min(0),
     branchName: z.string().nullable(),
     prompt: DispatchPrompt.optional(),
+    harness: DispatchHarness.optional(),
+    model: DispatchModel.optional(),
+    effort: DispatchEffort.optional(),
     dirtyWorktree: z.boolean(),
     createdAt: Timestamp,
     acceptedAt: Timestamp.nullable(),
@@ -348,6 +363,9 @@ export const CreateDispatchRequest = z
     runnerId: RunnerId,
     agentId: z.string().min(1).max(200).optional(),
     prompt: DispatchPrompt.optional(),
+    harness: DispatchHarness.optional(),
+    model: DispatchModel.optional(),
+    effort: DispatchEffort.optional(),
   })
   .meta({ id: "CreateDispatchRequest" });
 export type CreateDispatchRequest = z.infer<typeof CreateDispatchRequest>;
@@ -376,6 +394,9 @@ export const RunnerDispatchRequest = z
   .object({
     issueId: z.string().min(1).max(200),
     prompt: DispatchPrompt.optional(),
+    harness: DispatchHarness.optional(),
+    model: DispatchModel.optional(),
+    effort: DispatchEffort.optional(),
   })
   .meta({ id: "RunnerDispatchRequest" });
 export type RunnerDispatchRequest = z.infer<typeof RunnerDispatchRequest>;
@@ -459,6 +480,9 @@ export const DispatchCommandPayload = z
     workspaceId: z.string(),
     agentId: z.string(),
     prompt: DispatchPrompt.optional(),
+    harness: DispatchHarness.optional(),
+    model: DispatchModel.optional(),
+    effort: DispatchEffort.optional(),
   })
   .meta({ id: "DispatchCommandPayload" });
 export type DispatchCommandPayload = z.infer<typeof DispatchCommandPayload>;

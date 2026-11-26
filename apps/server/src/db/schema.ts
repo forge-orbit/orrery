@@ -1677,6 +1677,10 @@ export const runnerDispatches = pgTable(
     branchName: text("branch_name"),
     /** Optional requester instructions, trimmed by the contract before insert. */
     prompt: text("prompt"),
+    /** Optional per-Dispatch execution choices; identifiers, never commands. */
+    harness: text("harness"),
+    model: text("model"),
+    effort: text("effort"),
     dirtyWorktree: boolean("dirty_worktree").notNull().default(false),
     /** DB-time rate window for stream batch backpressure. */
     streamWindowStartedAt: timestamp("stream_window_started_at", { withTimezone: true }),
@@ -1699,6 +1703,10 @@ export const runnerDispatches = pgTable(
     ),
     check("runner_dispatches_stream_batch_count_nonnegative", sql`${t.streamBatchCount} >= 0`),
     check("runner_dispatches_prompt_length", sql`length(${t.prompt}) <= 16000`),
+    check(
+      "runner_dispatches_option_lengths",
+      sql`length(${t.harness}) <= 64 and length(${t.model}) <= 200 and length(${t.effort}) <= 64`,
+    ),
     check(
       "runner_dispatches_accepted_fields",
       sql`(${t.state} = 'pending' and ${t.acceptedAt} is null and ${t.runId} is null and ${t.workSessionId} is null)

@@ -142,6 +142,7 @@ export type RunnersErrorKind =
   | "runner_forbidden"
   | "runner_unavailable"
   | "runner_not_for_issue"
+  | "unknown_harness"
   | "insufficient_dispatch_access"
   | "dispatch_not_found"
   | "dispatch_not_pending"
@@ -179,6 +180,7 @@ const messages: Record<RunnersErrorKind, string> = {
   runner_forbidden: "Only the human who owns this Runner host may dispatch to it.",
   runner_unavailable: "This Runner is offline or has no free slot.",
   runner_not_for_issue: "This Runner is not registered for the issue's project.",
+  unknown_harness: "This Runner has not published that Harness in its catalog.",
   insufficient_dispatch_access: "The Runner host owner needs Contribute access to dispatch here.",
   dispatch_not_found: "No such pending Dispatch exists for this Runner.",
   dispatch_not_pending: "This Dispatch was already accepted or ended.",
@@ -446,6 +448,12 @@ const normalizedPrompt = (value: string | undefined): string | undefined => {
   return trimmed === undefined || trimmed === "" ? undefined : trimmed;
 };
 
+/** Blank execution choices are omitted everywhere, exactly like a blank prompt. */
+const normalizedOption = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+};
+
 /** DB-time expiry flag shared by every device-code read/write decision. */
 const dispatchBaseFields = {
   id: runnerDispatches.id,
@@ -463,6 +471,9 @@ const dispatchBaseFields = {
   lastDownSeq: runnerDispatches.lastDownSeq,
   branchName: runnerDispatches.branchName,
   prompt: runnerDispatches.prompt,
+  harness: runnerDispatches.harness,
+  model: runnerDispatches.model,
+  effort: runnerDispatches.effort,
   dirtyWorktree: runnerDispatches.dirtyWorktree,
   createdAt: runnerDispatches.createdAt,
   acceptedAt: runnerDispatches.acceptedAt,
@@ -488,6 +499,9 @@ type DispatchRow = {
   lastDownSeq: number;
   branchName: string | null;
   prompt: string | null;
+  harness: string | null;
+  model: string | null;
+  effort: string | null;
   dirtyWorktree: boolean;
   createdAt: Date;
   acceptedAt: Date | null;
@@ -511,6 +525,9 @@ const toDispatch = (row: DispatchRow): Dispatch => ({
   lastDownSeq: row.lastDownSeq,
   branchName: row.branchName,
   ...(row.prompt === null ? {} : { prompt: row.prompt }),
+  ...(row.harness === null ? {} : { harness: row.harness }),
+  ...(row.model === null ? {} : { model: row.model }),
+  ...(row.effort === null ? {} : { effort: row.effort }),
   dirtyWorktree: row.dirtyWorktree,
   createdAt: row.createdAt.toISOString(),
   acceptedAt: row.acceptedAt?.toISOString() ?? null,
@@ -1591,6 +1608,9 @@ interface DispatchCreationInput {
   agentId: string;
   requestedByHumanId: string;
   prompt?: string | undefined;
+  harness?: string | undefined;
+  model?: string | undefined;
+  effort?: string | undefined;
 }
 
 /**
@@ -1674,6 +1694,9 @@ async function insertDispatchLocked(
   if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
   await assertIssueDispatchable(tx, input.issueId, input.agentId);
   const prompt = normalizedPrompt(input.prompt);
+  const harness = normalizedOption(input.harness);
+  const model = normalizedOption(input.model);
+  const effort = normalizedOption(input.effort);
 
   const [created] = await tx
     .insert(runnerDispatches)
@@ -1689,6 +1712,9 @@ async function insertDispatchLocked(
       state: "pending",
       createdAt: sql`statement_timestamp()`,
       ...(prompt === undefined ? {} : { prompt }),
+      ...(harness === undefined ? {} : { harness }),
+      ...(model === undefined ? {} : { model }),
+      ...(effort === undefined ? {} : { effort }),
     })
     .returning({ id: runnerDispatches.id });
   const row = await readDispatch(tx, created!.id);
@@ -1704,6 +1730,9 @@ async function insertDispatchLocked(
       workspaceId: input.workspaceId,
       agentId: input.agentId,
       ...(prompt === undefined ? {} : { prompt }),
+      ...(harness === undefined ? {} : { harness }),
+      ...(model === undefined ? {} : { model }),
+      ...(effort === undefined ? {} : { effort }),
     },
   });
   return toDispatch(row);
@@ -2330,6 +2359,9 @@ export function createRunnersService(deps: RunnersDeps) {
     ): Promise<Dispatch> {
       const human = requireAccount(account);
       const prompt = normalizedPrompt(input.prompt);
+      const harness = normalizedOption(input.harness);
+      const model = normalizedOption(input.model);
+      const effort = normalizedOption(input.effort);
       return db.transaction(async (tx) => {
         const [issue] = await tx
           .select({
@@ -2389,6 +2421,16 @@ export function createRunnersService(deps: RunnersDeps) {
             joined.runner.activeSlotCount >= joined.runner.maxConcurrency)
         ) {
           throw new RunnersError("runner_unavailable");
+        }
+        // A Runner that published a catalog is authoritative for its Harness
+        // ids. An empty catalog means "not discovered yet": accept the choice
+        // and let the local Runner resolve it against its own registry.
+        if (
+          harness !== undefined &&
+          joined.runner.harnessCatalog.harnesses.length > 0 &&
+          !joined.runner.harnessCatalog.harnesses.some((candidate) => candidate.id === harness)
+        ) {
+          throw new RunnersError("unknown_harness", undefined, harness);
         }
 
         const agentId = input.agentId ?? joined.runner.agentId;
@@ -2451,6 +2493,9 @@ export function createRunnersService(deps: RunnersDeps) {
             state: "pending",
             createdAt: sql`statement_timestamp()`,
             ...(prompt === undefined ? {} : { prompt }),
+            ...(harness === undefined ? {} : { harness }),
+            ...(model === undefined ? {} : { model }),
+            ...(effort === undefined ? {} : { effort }),
           })
           .returning({ id: runnerDispatches.id });
         const row = await readDispatch(tx, created!.id);
@@ -2466,6 +2511,9 @@ export function createRunnersService(deps: RunnersDeps) {
             workspaceId: issue.workspaceId,
             agentId,
             ...(prompt === undefined ? {} : { prompt }),
+            ...(harness === undefined ? {} : { harness }),
+            ...(model === undefined ? {} : { model }),
+            ...(effort === undefined ? {} : { effort }),
           },
         });
         return toDispatch(row);
@@ -2648,6 +2696,7 @@ export function createRunnersService(deps: RunnersDeps) {
       runnerId: string,
       issueId: string,
       prompt?: string,
+      options: { harness?: string; model?: string; effort?: string } = {},
     ): Promise<Dispatch> {
       return db.transaction(async (tx) => {
         // Read-only live check, then lock the issue BEFORE the runner row.
@@ -2689,6 +2738,9 @@ export function createRunnersService(deps: RunnersDeps) {
           agentId: runner.agentId,
           requestedByHumanId: host.humanId,
           prompt,
+          harness: options.harness,
+          model: options.model,
+          effort: options.effort,
         });
       });
     },
@@ -2922,7 +2974,10 @@ export function createRunnersService(deps: RunnersDeps) {
             .limit(1);
           if (agent === undefined) throw new RunnersError("agent_not_found");
 
-          const harness = joined.runner.capabilities[0] ?? "opencode";
+          // A selected Harness wins; the Runner's declared capability is only
+          // a fallback for dispatches created without a choice.
+          const harness = dispatch.harness ?? joined.runner.capabilities[0] ?? "opencode";
+          const model = dispatch.model;
           const runId = randomUUID();
           const [insertedRun] = await tx
             .insert(runs)
@@ -2931,6 +2986,7 @@ export function createRunnersService(deps: RunnersDeps) {
               agentId: agent.id,
               workspaceId: joined.runner.workspaceId,
               harness,
+              ...(model === null ? {} : { model }),
               nativeSessionId: dispatch.dispatchAttemptId,
               createdAt: sql`statement_timestamp()`,
               updatedAt: sql`statement_timestamp()`,

@@ -6334,6 +6334,15 @@
           "prompt": {
             "$ref": "#/components/schemas/DispatchPrompt"
           },
+          "harness": {
+            "$ref": "#/components/schemas/DispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/DispatchModel"
+          },
+          "effort": {
+            "$ref": "#/components/schemas/DispatchEffort"
+          },
           "dirtyWorktree": {
             "type": "boolean"
           },
@@ -6402,6 +6411,18 @@
         "type": "string",
         "maxLength": 16000
       },
+      "DispatchHarness": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "DispatchModel": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "DispatchEffort": {
+        "type": "string",
+        "maxLength": 64
+      },
       "CreateDispatchRequest": {
         "type": "object",
         "properties": {
@@ -6415,6 +6436,15 @@
           },
           "prompt": {
             "$ref": "#/components/schemas/DispatchPrompt"
+          },
+          "harness": {
+            "$ref": "#/components/schemas/DispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/DispatchModel"
+          },
+          "effort": {
+            "$ref": "#/components/schemas/DispatchEffort"
           }
         },
         "required": [
@@ -6656,6 +6686,15 @@
           },
           "prompt": {
             "$ref": "#/components/schemas/DispatchPrompt"
+          },
+          "harness": {
+            "$ref": "#/components/schemas/DispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/DispatchModel"
+          },
+          "effort": {
+            "$ref": "#/components/schemas/DispatchEffort"
           }
         },
         "required": [
@@ -7304,6 +7343,15 @@
           },
           "prompt": {
             "$ref": "#/components/schemas/DispatchPrompt"
+          },
+          "harness": {
+            "$ref": "#/components/schemas/DispatchHarness"
+          },
+          "model": {
+            "$ref": "#/components/schemas/DispatchModel"
+          },
+          "effort": {
+            "$ref": "#/components/schemas/DispatchEffort"
           }
         },
         "required": [

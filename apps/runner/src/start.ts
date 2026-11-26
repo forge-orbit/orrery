@@ -7,6 +7,7 @@ import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
+import type { ExecutionChoice } from "./dispatch-options.ts";
 import { detectHarnesses, type HarnessDefinition } from "./harnesses.ts";
 import { SlotPool, type SlotController } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
@@ -35,7 +36,10 @@ export interface StartOptions {
   catalogProbeTimeoutMs?: number | undefined;
   /** Test seams: inject the harness list and observe each published catalog. */
   harnessDefinitions?: HarnessDefinition[] | undefined;
+  harnessCatalog?: HarnessCatalog | undefined;
   onCatalog?: ((catalog: HarnessCatalog) => void) | undefined;
+  /** CLI defaults for dispatches that do not select harness/model/effort. */
+  defaults?: ExecutionChoice | undefined;
 }
 
 /** Opaque digest of a checkout; the raw local path never leaves the machine. */
@@ -224,6 +228,9 @@ export async function start(options: StartOptions): Promise<void> {
               signal: controller.signal,
               write,
               onController: options.onController,
+              harnessDefinitions: options.harnessDefinitions,
+              harnessCatalog: options.harnessCatalog ?? publisher.current,
+              defaults: options.defaults,
             });
             pending.add(running);
             void running.finally(() => pending.delete(running));

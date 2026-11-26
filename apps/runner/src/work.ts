@@ -1,11 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import { MAX_DISPATCH_PROMPT_LENGTH } from "@orrery/contract";
-import { EMPTY_HARNESS_CATALOG } from "@orrery/contract";
+import {
+  MAX_DISPATCH_PROMPT_LENGTH,
+  EMPTY_HARNESS_CATALOG,
+  type HarnessCatalog,
+} from "@orrery/contract";
 import { readCachedCatalog } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
+import type { ExecutionChoice } from "./dispatch-options.ts";
+import type { HarnessDefinition } from "./harnesses.ts";
 import { repoFingerprint } from "./start.ts";
 import { SlotPool, type SlotController, type SupervisionOutcome } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
@@ -23,6 +28,12 @@ export interface WorkOptions {
   supervision?: SupervisionConfig | undefined;
   heartbeatMs?: number | undefined;
   commandWaitMs?: number | undefined;
+  /** CLI defaults, also sent to the server so the Run records the choice. */
+  defaults?: ExecutionChoice | undefined;
+  /** Test seam for the local Harness registry. */
+  harnessDefinitions?: HarnessDefinition[] | undefined;
+  /** Cached catalog used to resolve a Harness's defaultModel. */
+  harnessCatalog?: HarnessCatalog | undefined;
 }
 
 /**
@@ -101,6 +112,9 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     const dispatch = await client.createRunnerDispatch(runner.id, {
       issueId: resolved.issueId,
       ...(prompt === undefined ? {} : { prompt }),
+      ...(options.defaults?.harness === undefined ? {} : { harness: options.defaults.harness }),
+      ...(options.defaults?.model === undefined ? {} : { model: options.defaults.model }),
+      ...(options.defaults?.effort === undefined ? {} : { effort: options.defaults.effort }),
     });
     write(`Created Dispatch ${dispatch.id} for ${resolved.identifier}.`);
     const acceptance = await client.acceptDispatch(runner.id, dispatch.id);
@@ -184,11 +198,18 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
         workspaceId: resolved.workspaceId,
         agentId: acceptance.dispatch.agentId,
         ...(prompt === undefined ? {} : { prompt }),
+        ...(options.defaults?.harness === undefined ? {} : { harness: options.defaults.harness }),
+        ...(options.defaults?.model === undefined ? {} : { model: options.defaults.model }),
+        ...(options.defaults?.effort === undefined ? {} : { effort: options.defaults.effort }),
       },
       slot,
       pool,
       signal: sessionAbort.signal,
       write,
+      harnessDefinitions: options.harnessDefinitions,
+      harnessCatalog:
+        options.harnessCatalog ?? readCachedCatalog(repoFingerprint(repoPath)) ?? undefined,
+      defaults: options.defaults,
       onController: (ctrl) => {
         activeController = ctrl;
         commandLoopPromise = runCommandLoop();

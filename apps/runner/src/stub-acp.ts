@@ -331,6 +331,50 @@ function handle(message: Record<string, unknown>): void {
     });
     return;
   }
+  if (method === "session/set_model") {
+    const params = recordOf(message.params) ?? {};
+    const modelId = params.modelId;
+    const rejected = mode === "model-reject";
+    record({ event: "set_model", ...(typeof modelId === "string" ? { modelId } : {}), rejected });
+    if (rejected || mode === "model-unsupported") {
+      send({
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: rejected ? -32000 : -32601,
+          message: rejected ? "model rejected" : "unsupported session/set_model",
+        },
+      });
+      return;
+    }
+    reply(id, {});
+    return;
+  }
+  if (method === "session/set_config_option") {
+    const params = recordOf(message.params) ?? {};
+    const optionId = params.optionId;
+    const value = params.value;
+    const rejected = mode === "effort-reject";
+    record({
+      event: "set_config_option",
+      ...(typeof optionId === "string" ? { optionId } : {}),
+      ...(typeof value === "string" ? { value } : {}),
+      rejected,
+    });
+    if (rejected || mode === "effort-unsupported") {
+      send({
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: rejected ? -32000 : -32601,
+          message: rejected ? "config option rejected" : "unsupported session/set_config_option",
+        },
+      });
+      return;
+    }
+    reply(id, {});
+    return;
+  }
   if (method === "session/prompt") {
     const items = recordOf(message.params)?.prompt;
     lastPromptText = Array.isArray(items)

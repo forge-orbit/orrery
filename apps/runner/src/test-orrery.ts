@@ -37,6 +37,7 @@ export interface TestStreamChunk {
   eventType?: string;
   summary?: string;
   data?: Record<string, unknown>;
+  diagnostic?: Record<string, unknown>;
 }
 
 export interface TestCommand {
@@ -136,6 +137,7 @@ export class TestOrrery {
   private readonly dispatchIssues = new Map<string, string>();
   private readonly dispatchAttempts = new Map<string, string>();
   private readonly createdPrompts: Array<string | null> = [];
+  private readonly createdExecutions: Array<Record<string, unknown>> = [];
   private readonly streamed: TestStreamChunk[] = [];
   reconnectCalls = 0;
   /** Number of heartbeats to answer with a transient 503 before recovering. */
@@ -216,7 +218,12 @@ export class TestOrrery {
     return command;
   }
 
-  enqueueDispatch(issueId: string, attemptId: string = randomUUID(), prompt?: string): TestCommand {
+  enqueueDispatch(
+    issueId: string,
+    attemptId: string = randomUUID(),
+    prompt?: string,
+    execution: { harness?: string; model?: string; effort?: string } = {},
+  ): TestCommand {
     const dispatchId = `dispatch-${issueId}`;
     this.dispatchIssues.set(dispatchId, issueId);
     this.dispatchAttempts.set(dispatchId, attemptId);
@@ -228,6 +235,9 @@ export class TestOrrery {
       workspaceId: "workspace-test-1",
       agentId: "agent-test-1",
       ...(prompt === undefined ? {} : { prompt }),
+      ...(execution.harness === undefined ? {} : { harness: execution.harness }),
+      ...(execution.model === undefined ? {} : { model: execution.model }),
+      ...(execution.effort === undefined ? {} : { effort: execution.effort }),
     });
   }
 
@@ -294,6 +304,11 @@ export class TestOrrery {
   /** Prompts sent by one-shot `orrery-runner work` create-dispatch requests. */
   recordedPrompts(): readonly (string | null)[] {
     return this.createdPrompts;
+  }
+
+  /** Harness/model/effort sent by one-shot `orrery-runner work` (#241). */
+  recordedExecutions(): readonly Record<string, unknown>[] {
+    return this.createdExecutions;
   }
 
   private attemptIdFor(dispatchId: string): string {
@@ -561,6 +576,12 @@ export class TestOrrery {
       this.dispatchAttempts.set(dispatchId, attemptId);
       const prompt = typeof body.prompt === "string" ? body.prompt : null;
       this.createdPrompts.push(prompt);
+      this.createdExecutions.push({
+        dispatchId,
+        ...(typeof body.harness === "string" ? { harness: body.harness } : {}),
+        ...(typeof body.model === "string" ? { model: body.model } : {}),
+        ...(typeof body.effort === "string" ? { effort: body.effort } : {}),
+      });
       const stamp = now();
       sendJson(res, 201, {
         id: dispatchId,
@@ -627,6 +648,9 @@ export class TestOrrery {
           ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
           ...(typeof record.data === "object" && record.data !== null
             ? { data: Object.fromEntries(Object.entries(record.data)) }
+            : {}),
+          ...(typeof record.diagnostic === "object" && record.diagnostic !== null
+            ? { diagnostic: Object.fromEntries(Object.entries(record.diagnostic)) }
             : {}),
         });
       }
