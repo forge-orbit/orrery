@@ -19,6 +19,7 @@ import {
   QuestionStatus,
   RunnerCommandKind,
   type RunnerCommandPayload,
+  type HarnessCatalog,
   RunEndReason,
   RunStatus,
   SessionActivityKind,
@@ -1605,6 +1606,12 @@ export const runners = pgTable(
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    /**
+     * The live Harness catalog the Runner published (issue #240): ACP
+     * harnesses, models and per-model reasoning-effort levels. Separate from
+     * `capabilities`, which stays a flat string list.
+     */
+    harnessCatalog: jsonb("harness_catalog").$type<HarnessCatalog | null>(),
     maxConcurrency: integer("max_concurrency").notNull().default(1),
     activeSlotCount: integer("active_slot_count").notNull().default(0),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),

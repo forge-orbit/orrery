@@ -53,6 +53,31 @@ function describeError(error: unknown): string {
 }
 
 /** Correlates an active Runner slot with its dispatch and diagnostic state. */
+/** Live per-Runner Harness catalog line: harness · models · default effort. */
+function HarnessCatalogCell({ runner }: { runner: FleetRunner }) {
+  const harnesses = runner.harnessCatalog?.harnesses ?? [];
+  if (harnesses.length === 0) {
+    return <Text type="supporting">No harness probed yet</Text>;
+  }
+  return (
+    <Stack gap={1}>
+      {harnesses.map((harness) => {
+        const effort = harness.models.find(
+          (model) => model.id === harness.defaultModel,
+        )?.defaultEffort;
+        return (
+          <Text key={harness.id} type="supporting" data-runner-harness={harness.id}>
+            {harness.displayName} · {harness.models.length} model
+            {harness.models.length === 1 ? "" : "s"}
+            {harness.defaultModel === null ? "" : ` · ${harness.defaultModel}`}
+            {effort === undefined || effort === null ? "" : ` · effort ${effort}`}
+          </Text>
+        );
+      })}
+    </Stack>
+  );
+}
+
 function FleetLiveCell({
   workspaceId,
   runner,
@@ -222,7 +247,10 @@ export function RunnersSection({ workspaceId }: { workspaceId: string }) {
                   {host.runners.map((runner) => (
                     <TableRow key={runner.id} data-runner-id={runner.id}>
                       <TableCell>
-                        <Text type="supporting">{runner.displayName}</Text>
+                        <Stack gap={1}>
+                          <Text type="supporting">{runner.displayName}</Text>
+                          <HarnessCatalogCell runner={runner} />
+                        </Stack>
                       </TableCell>
                       <TableCell>
                         <Text type="supporting">{runner.repoFingerprint.slice(0, 12)}</Text>

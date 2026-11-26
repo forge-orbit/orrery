@@ -16,6 +16,7 @@ import {
   type CommandsQuery,
   type CreateDeviceCodeRequest,
   type ExchangeDeviceCodeRequest,
+  type HarnessCatalog,
   type HeartbeatRequest,
   type IssueResolveRequest,
   type ReconnectRequest,
@@ -68,7 +69,7 @@ export class OrreryClient {
     }
     if (!response.ok) {
       let code: string | null = null;
-      let detail = response.statusText;
+      let detail: string = response.statusText;
       try {
         const body = z
           .object({
@@ -122,6 +123,16 @@ export class OrreryClient {
     return Runner.parse(
       await this.request(`/api/runners/${encodeURIComponent(runnerId)}/heartbeat`, {
         method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  /** Publish the live Harness catalog; the server merges, never regresses. */
+  async updateCatalog(runnerId: string, input: HarnessCatalog) {
+    return Runner.parse(
+      await this.request(`/api/runners/${encodeURIComponent(runnerId)}/catalog`, {
+        method: "PUT",
         body: JSON.stringify(input),
       }),
     );

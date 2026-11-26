@@ -9,6 +9,13 @@ export interface AcpHarnessConfig {
 /** Timing and layout knobs for local dispatch supervision. */
 export interface SupervisionConfig {
   acp: AcpHarnessConfig;
+  /**
+   * True when the ACP command/args came from an explicit `--acp-command` /
+   * `--acp-arg` (or `ORRERY_ACP_COMMAND` / `ORRERY_ACP_ARGS`) rather than the
+   * `opencode acp` default; an explicit override becomes a custom Harness
+   * catalog entry (issue #240).
+   */
+  acpExplicit: boolean;
   /** Renew the five-minute work-session lease this often. */
   leaseRenewMs: number;
   /** Grace period before escalating SIGTERM to SIGKILL on cancel. */
@@ -58,6 +65,10 @@ export function loadSupervisionConfig(
   const root = overrides.worktreeRoot ?? env.ORRERY_WORKTREE_ROOT;
   return {
     acp: { command, args: [...args] },
+    acpExplicit:
+      overrides.acp !== undefined ||
+      env.ORRERY_ACP_COMMAND !== undefined ||
+      env.ORRERY_ACP_ARGS !== undefined,
     leaseRenewMs: positiveInt(
       overrides.leaseRenewMs ?? env.ORRERY_LEASE_RENEW_MS,
       "leaseRenewMs",

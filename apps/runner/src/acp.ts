@@ -18,6 +18,19 @@ export interface AcpStartOptions {
   mcpServers: unknown[];
   /** Worktree realpath used for the local permission policy. */
   worktreeReal: string;
+  /**
+   * Hard deadline for the whole `initialize` -> `session/new` handshake; used
+   * by the Harness catalog probe so a hanging harness cannot stall startup.
+   * Omitted (no timeout) for production dispatch supervision.
+   */
+  handshakeTimeoutMs?: number | undefined;
+  /** Capture the raw initialize/session results for the catalog probe. */
+  captureHandshake?: boolean | undefined;
+  /**
+   * Aborting before or during the handshake kills the detached process group
+   * immediately, so a shutting-down runner never waits on a probe.
+   */
+  signal?: AbortSignal | undefined;
   onPermission?: ((params: unknown) => PermissionResponse) | undefined;
   onUpdate?: ((method: string, params: unknown) => void) | undefined;
   onStderr?: ((line: string) => void) | undefined;
@@ -110,6 +123,9 @@ export class AcpStdioClient {
   }
 
   static async start(options: AcpStartOptions): Promise<AcpStdioClient> {
+    if (options.signal?.aborted === true) {
+      throw new Error("ACP start aborted before the child was spawned.");
+    }
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
       env: sanitizeAcpEnv(process.env, options.env),
@@ -117,25 +133,63 @@ export class AcpStdioClient {
       stdio: ["pipe", "pipe", "pipe"],
     });
     const client = new AcpStdioClient(child, options);
+    const onAbort = (): void => {
+      client.signal("SIGKILL");
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    const offAbort = (): void => options.signal?.removeEventListener("abort", onAbort);
+    child.once("close", offAbort);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = <T>(call: Promise<T>): Promise<T> =>
+      options.handshakeTimeoutMs === undefined
+        ? call
+        : Promise.race([
+            call,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () =>
+                  reject(
+                    new Error(`ACP handshake timed out after ${options.handshakeTimeoutMs}ms`),
+                  ),
+                options.handshakeTimeoutMs,
+              );
+            }),
+          ]);
     try {
-      await client.request("initialize", {
-        protocolVersion: 1,
-        clientInfo: { name: "orrery-runner", version: "1" },
-        clientCapabilities: {},
-      });
-      const session = await client.request("session/new", {
-        cwd: options.cwd,
-        mcpServers: options.mcpServers,
-      });
+      const initResult = await deadline(
+        client.request("initialize", {
+          protocolVersion: 1,
+          clientInfo: { name: "orrery-runner", version: "1" },
+          clientCapabilities: {},
+        }),
+      );
+      const session = await deadline(
+        client.request("session/new", {
+          cwd: options.cwd,
+          mcpServers: options.mcpServers,
+        }),
+      );
+      if (options.captureHandshake === true) {
+        client.initResult = initResult;
+        client.sessionResult = session;
+      }
       const sessionId = asRecord(session)?.sessionId;
       client.sessionId = typeof sessionId === "string" ? sessionId : "";
+      if (timer !== undefined) clearTimeout(timer);
+      offAbort();
       return client;
     } catch (error) {
+      offAbort();
       // Never leak a detached process group when the handshake fails.
       await client.forceExit(500);
       throw error;
     }
   }
+
+  /** Raw `initialize` result, set only when `captureHandshake` is enabled. */
+  initResult: unknown;
+  /** Raw `session/new` result, set only when `captureHandshake` is enabled. */
+  sessionResult: unknown;
 
   get id(): string {
     return this.sessionId;

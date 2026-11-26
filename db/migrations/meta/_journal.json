@@ -407,6 +407,13 @@
       "when": 1795662786545,
       "tag": "0057_dispatch_prompt",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795671981334,
+      "tag": "0058_typical_bruce_banner",
+      "breakpoints": true
     }
   ]
 }
