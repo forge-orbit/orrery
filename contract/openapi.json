@@ -5811,6 +5811,9 @@
             },
             "maxItems": 64
           },
+          "harnessCatalog": {
+            "$ref": "#/components/schemas/HarnessCatalog"
+          },
           "maxConcurrency": {
             "type": "integer",
             "minimum": 1,
@@ -5866,6 +5869,7 @@
           "displayName",
           "repoFingerprint",
           "capabilities",
+          "harnessCatalog",
           "maxConcurrency",
           "activeSlotCount",
           "lastSeenAt",
@@ -5873,6 +5877,102 @@
           "revokedAt",
           "createdAt",
           "presence"
+        ]
+      },
+      "HarnessCatalog": {
+        "type": "object",
+        "properties": {
+          "harnesses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HarnessCatalogEntry"
+            },
+            "maxItems": 64
+          },
+          "probedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "harnesses",
+          "probedAt"
+        ]
+      },
+      "HarnessCatalogEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "defaultModel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HarnessModel"
+            },
+            "maxItems": 200
+          },
+          "probedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "displayName",
+          "defaultModel",
+          "models",
+          "probedAt"
+        ]
+      },
+      "HarnessModel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "reasoningDiscovery": {
+            "type": "string",
+            "enum": [
+              "known",
+              "unknown"
+            ]
+          },
+          "supportedEfforts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 32
+          },
+          "defaultEffort": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "id",
+          "reasoningDiscovery"
         ]
       },
       "RunnerPresence": {
@@ -5916,6 +6016,9 @@
             },
             "maxItems": 64,
             "default": []
+          },
+          "harnessCatalog": {
+            "$ref": "#/components/schemas/HarnessCatalog"
           },
           "maxConcurrency": {
             "type": "integer",
@@ -6073,6 +6176,9 @@
             },
             "maxItems": 64
           },
+          "harnessCatalog": {
+            "$ref": "#/components/schemas/HarnessCatalog"
+          },
           "maxConcurrency": {
             "type": "integer",
             "minimum": 1,
@@ -6137,6 +6243,7 @@
           "displayName",
           "repoFingerprint",
           "capabilities",
+          "harnessCatalog",
           "maxConcurrency",
           "activeSlotCount",
           "lastSeenAt",
@@ -17374,6 +17481,104 @@
         "responses": {
           "200": {
             "description": "The Runner with derived DB-time presence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Runner"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The enrollment request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, the host credential was revoked, or the Runner lost access",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The device verifier does not match this enrollment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such device code, host, Agent or Runner exists",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device code is pending, expired, used, or the host has no default Agent",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many incorrect user codes; try again in ten minutes",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/{runnerId}/catalog": {
+      "put": {
+        "summary": "Publish a Runner's discovered Harness catalog",
+        "description": "Host-credential authenticated and project-access checked. Previously known per-model effort levels are preserved; heartbeats never carry the catalog.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/RunnerId"
+            },
+            "required": true,
+            "name": "runnerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HarnessCatalog"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Runner with its merged Harness catalog",
             "content": {
               "application/json": {
                 "schema": {

@@ -21,6 +21,8 @@ export interface AcpStartOptions {
   onPermission?: ((params: unknown) => PermissionResponse) | undefined;
   onUpdate?: ((method: string, params: unknown) => void) | undefined;
   onStderr?: ((line: string) => void) | undefined;
+  /** Bound each JSON-RPC request; probes always pass an explicit timeout. */
+  requestTimeoutMs?: number | undefined;
 }
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void };
@@ -58,6 +60,7 @@ export class AcpStdioClient {
   private readonly onPermission: (params: unknown) => PermissionResponse;
   private readonly onUpdate: (method: string, params: unknown) => void;
   private readonly onStderr: (line: string) => void;
+  private readonly requestTimeoutMs: number | undefined;
   private nextId = 1;
   private sessionId = "";
   private buffer = "";
@@ -77,6 +80,7 @@ export class AcpStdioClient {
       ((params) => respondToPermission(params, evaluatePermission(params, options.worktreeReal)));
     this.onUpdate = options.onUpdate ?? (() => {});
     this.onStderr = options.onStderr ?? (() => {});
+    this.requestTimeoutMs = options.requestTimeoutMs;
     this.exited = new Promise<AcpExit>((resolve) => {
       child.once("close", (code, signal) => {
         const exit = { code, signal };
@@ -109,32 +113,73 @@ export class AcpStdioClient {
     });
   }
 
-  static async start(options: AcpStartOptions): Promise<AcpStdioClient> {
+  private static spawnClient(options: AcpStartOptions): AcpStdioClient {
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
       env: sanitizeAcpEnv(process.env, options.env),
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
-    const client = new AcpStdioClient(child, options);
+    return new AcpStdioClient(child, options);
+  }
+
+  static async start(options: AcpStartOptions): Promise<AcpStdioClient> {
+    const client = AcpStdioClient.spawnClient(options);
     try {
-      await client.request("initialize", {
-        protocolVersion: 1,
-        clientInfo: { name: "orrery-runner", version: "1" },
-        clientCapabilities: {},
-      });
-      const session = await client.request("session/new", {
-        cwd: options.cwd,
-        mcpServers: options.mcpServers,
-      });
-      const sessionId = asRecord(session)?.sessionId;
-      client.sessionId = typeof sessionId === "string" ? sessionId : "";
+      await client.initializeSession(options);
       return client;
     } catch (error) {
       // Never leak a detached process group when the handshake fails.
       await client.forceExit(500);
       throw error;
     }
+  }
+
+  /**
+   * One bounded discovery session. The raw `session/new` result is returned so
+   * callers can read `models` and `configOptions`; the process group is always
+   * torn down, including on timeout or a hung harness (ADR-0011).
+   */
+  static async probe(
+    options: AcpStartOptions & { timeoutMs: number; sessionMeta?: Record<string, unknown> },
+  ): Promise<unknown> {
+    const client = AcpStdioClient.spawnClient({ ...options, requestTimeoutMs: options.timeoutMs });
+    try {
+      await client.request(
+        "initialize",
+        {
+          protocolVersion: 1,
+          clientInfo: { name: "orrery-runner", version: "1" },
+          clientCapabilities: {},
+        },
+        options.timeoutMs,
+      );
+      return await client.request(
+        "session/new",
+        {
+          cwd: options.cwd,
+          mcpServers: options.mcpServers,
+          ...(options.sessionMeta === undefined ? {} : options.sessionMeta),
+        },
+        options.timeoutMs,
+      );
+    } finally {
+      await client.forceExit(250);
+    }
+  }
+
+  private async initializeSession(options: AcpStartOptions): Promise<void> {
+    await this.request("initialize", {
+      protocolVersion: 1,
+      clientInfo: { name: "orrery-runner", version: "1" },
+      clientCapabilities: {},
+    });
+    const session = await this.request("session/new", {
+      cwd: options.cwd,
+      mcpServers: options.mcpServers,
+    });
+    const sessionId = asRecord(session)?.sessionId;
+    this.sessionId = typeof sessionId === "string" ? sessionId : "";
   }
 
   get id(): string {
@@ -150,12 +195,27 @@ export class AcpStdioClient {
     if (this.child.stdin.writable) this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
-  private request(method: string, params: Record<string, unknown>): Promise<unknown> {
+  private request(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs: number | undefined = this.requestTimeoutMs,
+  ): Promise<unknown> {
     if (this.spawnError !== undefined) return Promise.reject(this.spawnError);
     const id = this.nextId++;
-    return new Promise<unknown>((resolve, reject) => {
+    const pendingRequest = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.send({ jsonrpc: "2.0", id, method, params });
+    });
+    if (timeoutMs === undefined) return pendingRequest;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`ACP ${method} timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+    });
+    return Promise.race([pendingRequest, timeout]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
     });
   }
 

@@ -1,0 +1,246 @@
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type HarnessCatalog, type HarnessCatalogEntry, type HarnessModel } from "@orrery/contract";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  catalogEntryFromSession,
+  CatalogPublisher,
+  probeHarness,
+  readCachedCatalog,
+} from "./catalog.ts";
+import { detectHarnesses } from "./harnesses.ts";
+
+const stubPath = new URL("./stub-acp.ts", import.meta.url).pathname;
+const tempDirs: string[] = [];
+
+const makeDir = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), "orrery-catalog-"));
+  tempDirs.push(dir);
+  return dir;
+};
+
+const knownModel: HarnessModel = {
+  id: "stub-model-1",
+  reasoningDiscovery: "known",
+  supportedEfforts: ["low", "high"],
+  defaultEffort: "low",
+};
+
+const entryOf = (model: HarnessModel, probedAt: string): HarnessCatalogEntry => ({
+  id: "custom",
+  displayName: "Stub",
+  defaultModel: "stub-model-1",
+  models: [model],
+  probedAt,
+});
+
+const catalogOf = (probedAt: string, ...harnesses: HarnessCatalogEntry[]): HarnessCatalog => ({
+  harnesses,
+  probedAt,
+});
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  delete process.env.STUB_ACP_MODE;
+  delete process.env.STUB_ACP_MARKER;
+  delete process.env.STUB_ACP_ALIVE_FILE;
+  delete process.env.STUB_ACP_MODE_FILE;
+});
+
+describe("built-in ACP harness detection", () => {
+  it("detects installed presets, the --acp-command override and harnesses.json", () => {
+    const dir = makeDir();
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    for (const command of ["opencode", "codex", "hermes"]) {
+      writeFileSync(join(bin, command), "#!/bin/sh\n", { mode: 0o755 });
+    }
+    const configDir = join(dir, "config");
+    mkdirSync(configDir);
+    writeFileSync(
+      join(configDir, "harnesses.json"),
+      JSON.stringify({
+        harnesses: [
+          {
+            id: "opencode",
+            displayName: "My OpenCode",
+            command: "/custom/opencode",
+            args: ["acp"],
+          },
+          { id: "local", displayName: "Local ACP", command: "/usr/local/bin/local-acp" },
+        ],
+      }),
+    );
+
+    const detected = detectHarnesses({
+      pathEnv: bin,
+      configDir,
+      acpOverride: { command: process.execPath, args: ["--acp-arg", "stub"] },
+    });
+    const ids = detected.map((item) => item.id);
+    expect(ids).toEqual(expect.arrayContaining(["codex", "hermes", "custom", "local"]));
+    expect(ids).toContain("opencode");
+    expect(ids.filter((id) => id === "opencode")).toHaveLength(1);
+    expect(detected.find((item) => item.id === "opencode")?.command).toBe("/custom/opencode");
+    expect(detected.find((item) => item.id === "custom")).toMatchObject({
+      command: process.execPath,
+      args: ["--acp-arg", "stub"],
+    });
+    expect(detected.find((item) => item.id === "local")?.args).toEqual(["acp"]);
+  });
+
+  it("rejects a malformed harnesses.json instead of silently skipping it", () => {
+    const dir = makeDir();
+    writeFileSync(join(dir, "harnesses.json"), "{not json");
+    expect(() => detectHarnesses({ pathEnv: "", configDir: dir })).toThrow(/harnesses\.json/);
+  });
+});
+
+describe("ACP session/new parsing", () => {
+  it("marks only the active model's reasoning effort as known", () => {
+    const parsed = catalogEntryFromSession(
+      { id: "codex", displayName: "Codex", command: "codex", args: ["acp"] },
+      {
+        sessionId: "s1",
+        models: {
+          availableModels: [
+            { modelId: "gpt-5", name: "GPT-5" },
+            { modelId: "gpt-5-mini", name: "GPT-5 mini" },
+          ],
+          currentModelId: "gpt-5",
+        },
+        configOptions: [
+          {
+            id: "thought_level",
+            options: [{ value: "low" }, { value: "high" }],
+            currentValue: "low",
+          },
+        ],
+      },
+      "2026-05-01T00:00:00.000Z",
+    );
+    expect(parsed.defaultModel).toBe("gpt-5");
+    expect(parsed.models[0]).toEqual({
+      id: "gpt-5",
+      label: "GPT-5",
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "low",
+    });
+    expect(parsed.models[1]).toEqual({
+      id: "gpt-5-mini",
+      label: "GPT-5 mini",
+      reasoningDiscovery: "unknown",
+    });
+  });
+
+  it("treats missing models and configOptions as unknown", () => {
+    const parsed = catalogEntryFromSession(
+      { id: "custom", displayName: "Stub", command: "stub", args: [] },
+      { sessionId: "s1" },
+      "2026-05-01T00:00:00.000Z",
+    );
+    expect(parsed.models).toEqual([]);
+    expect(parsed.defaultModel).toBe("default");
+  });
+});
+
+describe("bounded startup probing", () => {
+  it("reads models and configOptions from the deterministic ACP stub", async () => {
+    process.env.STUB_ACP_MODE = "normal";
+    const entry = await probeHarness(
+      { id: "custom", displayName: "Stub", command: process.execPath, args: [stubPath] },
+      { cwd: makeDir(), timeoutMs: 2000 },
+    );
+    expect(entry.models.map((model) => model.id)).toContain("stub-model-1");
+    expect(entry.defaultModel).toBe("stub-model-1");
+    expect(entry.models[0]).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+      defaultEffort: "low",
+    });
+  });
+
+  it("times out a hung probe and tears down its whole process group", async () => {
+    const dir = makeDir();
+    const alive = join(dir, "alive.txt");
+    process.env.STUB_ACP_MODE = "probe-hang";
+    process.env.STUB_ACP_MARKER = join(dir, "marker.jsonl");
+    process.env.STUB_ACP_ALIVE_FILE = alive;
+
+    await expect(
+      probeHarness(
+        { id: "custom", displayName: "Stub", command: process.execPath, args: [stubPath] },
+        { cwd: dir, timeoutMs: 250 },
+      ),
+    ).rejects.toThrow(/timed out/);
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(existsSync(alive)).toBe(true);
+    const before = statSync(alive).size;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(statSync(alive).size).toBe(before);
+    expect(readFileSync(join(dir, "marker.jsonl"), "utf8")).toContain("grandchild");
+  });
+});
+
+describe("serialized catalog publication", () => {
+  it("preserves known effort entries when a stale refresh arrives later", async () => {
+    const dir = makeDir();
+    const sent: HarnessCatalog[] = [];
+    const client = {
+      putCatalog: async (_runnerId: string, body: HarnessCatalog) => {
+        sent.push(body);
+        return {};
+      },
+    };
+    const publisher = new CatalogPublisher({ client, runnerId: "runner-1", configDir: dir });
+
+    await publisher.publish(
+      catalogOf("2026-02-01T00:00:00.000Z", entryOf(knownModel, "2026-02-01T00:00:00.000Z")),
+    );
+    await publisher.publish(
+      catalogOf(
+        "2026-01-01T00:00:00.000Z",
+        entryOf({ id: "stub-model-1", reasoningDiscovery: "unknown" }, "2026-01-01T00:00:00.000Z"),
+      ),
+    );
+
+    expect(sent[1]?.harnesses[0]?.models[0]).toMatchObject({
+      reasoningDiscovery: "known",
+      supportedEfforts: ["low", "high"],
+    });
+    expect(publisher.current.probedAt).toBe("2026-02-01T00:00:00.000Z");
+    expect(readCachedCatalog(dir)).toEqual(publisher.current);
+  });
+
+  it("never issues overlapping PUTs even when publishes are concurrent", async () => {
+    const dir = makeDir();
+    let inFlight = 0;
+    let peak = 0;
+    const client = {
+      putCatalog: async () => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        inFlight -= 1;
+        return {};
+      },
+    };
+    const publisher = new CatalogPublisher({ client, runnerId: "runner-1", configDir: dir });
+    await Promise.all([
+      publisher.publish(catalogOf("2026-01-01T00:00:00.000Z")),
+      publisher.publish(catalogOf("2026-01-02T00:00:00.000Z")),
+    ]);
+    expect(peak).toBe(1);
+  });
+});

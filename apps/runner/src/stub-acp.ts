@@ -279,10 +279,55 @@ function handle(message: Record<string, unknown>): void {
     return;
   }
   if (method === "session/new") {
-    record({ event: "session/new", params: message.params });
-    const value = recordOf(message.params)?.sessionId;
+    // Catalog discovery is a separate session; keeping it out of `session/new`
+    // marker events keeps dispatch supervision assertions deterministic.
+    const params = recordOf(message.params);
+    record({
+      event: params?.orreryProbe === true ? "catalog-probe" : "session/new",
+      params: message.params,
+    });
+    const value = params?.sessionId;
     if (typeof value === "string") sessionId = value;
-    reply(id, { sessionId });
+    if (mode === "probe-hang") {
+      // Never reply: the runner must bound the wait and kill the whole group,
+      // including this detached grandchild that keeps writing a heartbeat.
+      const aliveFile = process.env.STUB_ACP_ALIVE_FILE;
+      if (aliveFile !== undefined) {
+        const heartbeat = [
+          "setInterval(()=>{try{require('fs').appendFileSync(",
+          JSON.stringify(aliveFile),
+          ",'alive\\n')}catch{}},50)",
+        ].join("");
+        grandchild = spawn(process.execPath, ["-e", heartbeat], {
+          stdio: "ignore",
+          detached: false,
+        });
+        record({ event: "grandchild", pid: grandchild.pid ?? -1 });
+      }
+      return;
+    }
+    reply(id, {
+      sessionId,
+      models: {
+        availableModels: [
+          { modelId: "stub-model-1", name: "Stub Model 1" },
+          { modelId: "stub-model-2", name: "Stub Model 2" },
+        ],
+        currentModelId: "stub-model-1",
+      },
+      configOptions: [
+        {
+          id: "thought_level",
+          name: "Thinking level",
+          type: "select",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "high", name: "High" },
+          ],
+          currentValue: "low",
+        },
+      ],
+    });
     return;
   }
   if (method === "session/prompt") {

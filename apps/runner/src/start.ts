@@ -1,11 +1,18 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ReadyWorkFilter } from "@orrery/contract";
+import {
+  EMPTY_HARNESS_CATALOG,
+  type HarnessCatalog,
+  type HarnessCatalogEntry,
+  type ReadyWorkFilter,
+} from "@orrery/contract";
+import { CatalogPublisher, probeHarness, readCachedCatalog } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
+import { detectHarnesses, type HarnessDefinition } from "./harnesses.ts";
 import { SlotPool, type SlotController } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
@@ -29,6 +36,12 @@ export interface StartOptions {
   autoClaim?: boolean | undefined;
   autoClaimFilter?: ReadyWorkFilter | undefined;
   autoClaimPollMs?: number | undefined;
+  /** Background catalog discovery timing (defaults: 5s per probe, 60s refresh). */
+  catalogProbeTimeoutMs?: number | undefined;
+  catalogRefreshMs?: number | undefined;
+  /** Test seams: inject the harness list and observe each published catalog. */
+  harnessDefinitions?: HarnessDefinition[] | undefined;
+  onCatalog?: ((catalog: HarnessCatalog) => void) | undefined;
 }
 
 /** Opaque digest of a checkout; the raw local path never leaves the machine. */
@@ -76,10 +89,17 @@ export async function start(options: StartOptions): Promise<void> {
     ...(options.displayName === undefined ? {} : { displayName: options.displayName }),
     repoFingerprint: repoFingerprint(options.repoPath ?? process.cwd()),
     capabilities: options.capabilities ?? [],
+    // The cache gives us a useful initial catalog without delaying registration.
+    harnessCatalog: readCachedCatalog() ?? EMPTY_HARNESS_CATALOG,
     maxConcurrency: options.maxConcurrency ?? 1,
     ephemeral: false,
   });
   write(`Runner ${runner.id} registered (${runner.presence}).`);
+  const publisher = new CatalogPublisher({
+    client,
+    runnerId: runner.id,
+    onUnauthorized: (message) => revoke(message),
+  });
 
   // Startup/recovery reconciliation marks uncertain attempts and lets an
   // agent reconnecting after sleep stream into Live Session Studio seamlessly.
@@ -326,7 +346,53 @@ export async function start(options: StartOptions): Promise<void> {
     }
   };
 
-  await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop()]);
+  /**
+   * Startup discovery runs off the hot path and publishes through the
+   * serialized writer. Probe commands (#241/#242) share this publisher later;
+   * every refresh is bounded and merges known effort entries rather than
+   * overwriting them with a slow probe's `unknown` values.
+   */
+  const catalogLoop = async (): Promise<void> => {
+    const definitions =
+      options.harnessDefinitions ?? detectHarnesses({ acpOverride: supervision.acp });
+    const timeoutMs = options.catalogProbeTimeoutMs ?? 5000;
+    while (!controller.signal.aborted) {
+      const harnesses: HarnessCatalogEntry[] = [];
+      for (const definition of definitions) {
+        if (controller.signal.aborted) return;
+        try {
+          harnesses.push(
+            await probeHarness(definition, {
+              cwd: options.repoPath ?? process.cwd(),
+              timeoutMs,
+            }),
+          );
+        } catch (error) {
+          write(`Harness ${definition.id} probe failed: ${String(error)}`);
+        }
+      }
+      if (controller.signal.aborted) return;
+      if (harnesses.length > 0 || definitions.length === 0) {
+        try {
+          await publisher.publish({ harnesses, probedAt: new Date().toISOString() });
+          options.onCatalog?.(publisher.current);
+        } catch (error) {
+          if (error instanceof RunnerRequestError && error.status === 401) {
+            revoke("Catalog publish rejected (401). Stopping local operation immediately.");
+            return;
+          }
+          write(`Catalog publish failed; retrying on next refresh: ${String(error)}`);
+        }
+      }
+      try {
+        await delay(options.catalogRefreshMs ?? 60_000, controller.signal, "Runner stopped.");
+      } catch {
+        return;
+      }
+    }
+  };
+
+  await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop(), catalogLoop()]);
   options.signal?.removeEventListener("abort", onExternalAbort);
   pool.cancelAll("shutdown");
   await Promise.all(pending);

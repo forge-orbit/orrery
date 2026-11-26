@@ -72,6 +72,93 @@ export const RunnerHost = z
   .meta({ id: "RunnerHost" });
 export type RunnerHost = z.infer<typeof RunnerHost>;
 
+/** One model an ACP harness advertised during a discovery probe. */
+export const HarnessModel = z
+  .object({
+    id: z.string().min(1).max(200),
+    label: z.string().min(1).max(200).optional(),
+    reasoningDiscovery: z.enum(["known", "unknown"]),
+    supportedEfforts: z.array(z.string().min(1).max(64)).max(32).optional(),
+    defaultEffort: z.string().min(1).max(64).optional(),
+  })
+  .meta({ id: "HarnessModel" });
+export type HarnessModel = z.infer<typeof HarnessModel>;
+
+/** One ACP harness discovered on a Runner host, with its probed model list. */
+export const HarnessCatalogEntry = z
+  .object({
+    id: z.string().min(1).max(64),
+    displayName: z.string().min(1).max(120),
+    defaultModel: z.string().min(1).max(200),
+    models: z.array(HarnessModel).max(200),
+    probedAt: Timestamp,
+  })
+  .meta({ id: "HarnessCatalogEntry" });
+export type HarnessCatalogEntry = z.infer<typeof HarnessCatalogEntry>;
+
+/** A live Runner's locally discovered harnesses, published separately from heartbeats. */
+export const HarnessCatalog = z
+  .object({
+    harnesses: z.array(HarnessCatalogEntry).max(64),
+    probedAt: Timestamp,
+  })
+  .meta({ id: "HarnessCatalog" });
+export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
+
+/** Newly registered Runners start with an empty catalog until their first probe. */
+export const EMPTY_HARNESS_CATALOG: HarnessCatalog = {
+  harnesses: [],
+  probedAt: "1970-01-01T00:00:00.000Z",
+};
+
+const laterTimestamp = (a: string, b: string): string => (Date.parse(a) >= Date.parse(b) ? a : b);
+
+/**
+ * Fold a slower/stale catalog refresh into the last published one. A model whose
+ * effort levels were discovered once must never regress to `unknown` just because
+ * a later probe only saw its default model (or a delayed refresh arrives late).
+ * Harnesses that are no longer advertised are dropped, so the catalog still
+ * reflects what is installed now.
+ */
+export function mergeHarnessCatalog(
+  stored: HarnessCatalog | undefined | null,
+  incoming: HarnessCatalog,
+): HarnessCatalog {
+  if (stored === undefined || stored === null) return HarnessCatalog.parse(incoming);
+  const known = new Map<string, HarnessModel>();
+  for (const harness of stored.harnesses) {
+    for (const model of harness.models) {
+      if (model.reasoningDiscovery === "known") {
+        known.set(`${harness.id}\u0000${model.id}`, model);
+      }
+    }
+  }
+  return HarnessCatalog.parse({
+    probedAt: laterTimestamp(stored.probedAt, incoming.probedAt),
+    harnesses: incoming.harnesses.map((harness) => {
+      const previous = stored.harnesses.find((item) => item.id === harness.id);
+      return {
+        ...harness,
+        ...(previous === undefined ? {} : { probedAt: laterTimestamp(previous.probedAt, harness.probedAt) }),
+        models: harness.models.map((model) => {
+          if (model.reasoningDiscovery === "known") return model;
+          const prior = known.get(`${harness.id}\u0000${model.id}`);
+          if (prior === undefined) return model;
+          return {
+            ...model,
+            ...(prior.label === undefined ? {} : { label: prior.label }),
+            reasoningDiscovery: "known",
+            ...(prior.supportedEfforts === undefined
+              ? {}
+              : { supportedEfforts: [...prior.supportedEfforts] }),
+            ...(prior.defaultEffort === undefined ? {} : { defaultEffort: prior.defaultEffort }),
+          };
+        }),
+      };
+    }),
+  });
+}
+
 export const Runner = z
   .object({
     id: RunnerId,
@@ -82,6 +169,7 @@ export const Runner = z
     displayName: RunnerHostDisplayName,
     repoFingerprint: Sha256Hex,
     capabilities: z.array(z.string().min(1).max(64)).max(64),
+    harnessCatalog: HarnessCatalog,
     maxConcurrency: z.int().min(1).max(64),
     activeSlotCount: z.int().min(0).max(64),
     lastSeenAt: Timestamp,
@@ -178,6 +266,8 @@ export const RegisterRunnerRequest = z
     displayName: RunnerHostDisplayName.optional(),
     repoFingerprint: Sha256Hex,
     capabilities: z.array(z.string().min(1).max(64)).max(64).default([]),
+    /** Seeded from the local cache or a fast startup probe; refined via PUT /catalog. */
+    harnessCatalog: HarnessCatalog.optional(),
     maxConcurrency: z.int().min(1).max(64).default(1),
     /** One-shot `orrery-runner work` runners never reuse a persistent row. */
     ephemeral: z.boolean().default(false),

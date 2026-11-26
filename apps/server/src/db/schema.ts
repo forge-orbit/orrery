@@ -5,6 +5,7 @@ import {
   AttachmentHolderType,
   DispatchState,
   FallbackPolicy,
+  type HarnessCatalog,
   InvitationDelivery,
   InvitationStatus,
   IssueLinkKind,
@@ -1605,6 +1606,11 @@ export const runners = pgTable(
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    /** Locally discovered ACP harnesses; separate from free-form capabilities. */
+    harnessCatalog: jsonb("harness_catalog")
+      .$type<HarnessCatalog>()
+      .notNull()
+      .default(sql`'{"harnesses":[],"probedAt":"1970-01-01T00:00:00.000Z"}'::jsonb`),
     maxConcurrency: integer("max_concurrency").notNull().default(1),
     activeSlotCount: integer("active_slot_count").notNull().default(0),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),

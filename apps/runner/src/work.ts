@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { EMPTY_HARNESS_CATALOG } from "@orrery/contract";
+import { readCachedCatalog } from "./catalog.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
@@ -55,6 +57,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     displayName: `${stored.displayName} (one-shot)`,
     repoFingerprint: fingerprint,
     capabilities: [],
+    harnessCatalog: readCachedCatalog() ?? EMPTY_HARNESS_CATALOG,
     maxConcurrency: 1,
     ephemeral: true,
   });
