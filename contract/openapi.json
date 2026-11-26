@@ -1797,7 +1797,7 @@
       },
       "ProjectDescription": {
         "type": "string",
-        "maxLength": 500
+        "maxLength": 350
       },
       "UpdateProjectRequest": {
         "type": "object",
@@ -6342,6 +6342,9 @@
           "state": {
             "$ref": "#/components/schemas/DispatchState"
           },
+          "prompt": {
+            "$ref": "#/components/schemas/DispatchPrompt"
+          },
           "runId": {
             "type": [
               "string",
@@ -6367,9 +6370,6 @@
               "string",
               "null"
             ]
-          },
-          "prompt": {
-            "$ref": "#/components/schemas/DispatchPrompt"
           },
           "harness": {
             "$ref": "#/components/schemas/DispatchHarness"
@@ -6424,6 +6424,7 @@
           "agentId",
           "dispatchAttemptId",
           "state",
+          "prompt",
           "runId",
           "workSessionId",
           "lastUpSeq",
@@ -6445,7 +6446,10 @@
         ]
       },
       "DispatchPrompt": {
-        "type": "string",
+        "type": [
+          "string",
+          "null"
+        ],
         "maxLength": 16000
       },
       "CreateDispatchRequest": {
@@ -18093,6 +18097,94 @@
           },
           "429": {
             "description": "Too many failed dispatch attempts; try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/dispatches/{dispatchId}": {
+      "get": {
+        "summary": "Read one Dispatch's metadata, including its custom prompt",
+        "description": "A human with project Read access or the Runner host may read it; workspace members without project Read access receive 404.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/DispatchId"
+            },
+            "required": true,
+            "name": "dispatchId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The Dispatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dispatch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The dispatch request is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in, or the Runner host credential is invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The viewer cannot read this project",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Dispatch is accessible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Dispatch is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests; try again later",
             "content": {
               "application/problem+json": {
                 "schema": {

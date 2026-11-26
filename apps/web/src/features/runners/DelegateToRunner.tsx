@@ -125,6 +125,7 @@ export function DelegateToRunner({
         ...(effort === "" ? {} : { effort }),
       }),
     onSuccess: async (dispatch) => {
+      setError(undefined);
       writeDelegatePreference(projectId, {
         runnerId: dispatch.runnerId,
         harness,
@@ -136,6 +137,7 @@ export function DelegateToRunner({
       toast({
         body: `Delegated to ${owned.find((runner) => runner.id === dispatch.runnerId)?.displayName ?? "Runner"}.`,
       });
+      setIsOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issueDispatchesQuery(issueId).queryKey }),
         queryClient.invalidateQueries({ queryKey: workspaceRunnersQueryKey(workspaceId) }),
@@ -145,9 +147,11 @@ export function DelegateToRunner({
       setError(
         cause instanceof ApiProblemError && cause.code === "issue_not_claimable"
           ? "This issue is not claimable by that Agent (check its assignee and status)."
-          : cause instanceof Error
-            ? cause.message
-            : "The issue could not be delegated.",
+          : cause instanceof ApiProblemError && cause.code === "validation_failed"
+            ? "The prompt is too long (16,000 characters max)."
+            : cause instanceof Error
+              ? cause.message
+              : "The issue could not be delegated.",
       );
     },
   });
@@ -235,7 +239,7 @@ export function DelegateToRunner({
           }
           content={
             <LayoutContent>
-              <VStack gap={4}>
+              <VStack gap={4} data-delegate-dialog="">
                 {error !== undefined && (
                   <Banner
                     status="error"
@@ -342,7 +346,7 @@ export function DelegateToRunner({
                 <TextArea
                   label="Prompt / Instructions"
                   isOptional
-                  description="Optional instructions for this Dispatch only. Never saved for the next issue."
+                  description="Optional instructions for this Dispatch only, visible to everyone who can read the project. Never saved for the next issue."
                   placeholder="Tell the Agent how to approach this issue…"
                   value={prompt}
                   onChange={setPrompt}

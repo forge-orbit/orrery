@@ -440,7 +440,7 @@ export const projects = pgTable(
   },
   (t) => [
     check("projects_key_format", sql`${t.key} ~ '^[A-Z][A-Z0-9]{1,9}$'`),
-    check("projects_description_length", sql`char_length(${t.description}) <= 500`),
+    check("projects_description_length", sql`char_length(${t.description}) <= 350`),
     check("projects_next_issue_number_positive", sql`${t.nextIssueNumber} > 0`),
     check(
       "projects_fallback_policy",
@@ -1675,14 +1675,14 @@ export const runnerDispatches = pgTable(
       .notNull()
       .references(() => agents.id),
     dispatchAttemptId: text("dispatch_attempt_id").notNull(),
+    /** Optional requester steering text, appended by the Runner after its preamble. */
+    prompt: text("prompt"),
     state: text("state").$type<DispatchState>().notNull().default("pending"),
     runId: text("run_id").references(() => runs.id),
     workSessionId: text("work_session_id").references(() => workSessions.id),
     lastUpSeq: integer("last_up_seq").notNull().default(0),
     lastDownSeq: integer("last_down_seq").notNull().default(0),
     branchName: text("branch_name"),
-    /** Optional requester instructions, trimmed by the contract before insert. */
-    prompt: text("prompt"),
     /** Optional per-Dispatch execution choices; identifiers, never commands. */
     harness: text("harness"),
     model: text("model"),
@@ -1708,10 +1708,13 @@ export const runnerDispatches = pgTable(
       sql`${t.lastUpSeq} >= 0 and ${t.lastDownSeq} >= 0`,
     ),
     check("runner_dispatches_stream_batch_count_nonnegative", sql`${t.streamBatchCount} >= 0`),
-    check("runner_dispatches_prompt_length", sql`length(${t.prompt}) <= 16000`),
     check(
       "runner_dispatches_option_lengths",
       sql`length(${t.harness}) <= 64 and length(${t.model}) <= 200 and length(${t.effort}) <= 64`,
+    ),
+    check(
+      "runner_dispatches_prompt_bounded",
+      sql`${t.prompt} is null or char_length(${t.prompt}) <= 16000`,
     ),
     check(
       "runner_dispatches_accepted_fields",

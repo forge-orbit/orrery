@@ -732,6 +732,7 @@ export class TestOrrery {
           agentId: "agent-test-1",
           dispatchAttemptId: this.attemptIdFor(dispatchId),
           state: "active",
+          prompt: null,
           runId,
           workSessionId: sessionId,
           lastUpSeq: 0,

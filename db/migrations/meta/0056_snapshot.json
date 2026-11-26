@@ -1,5 +1,5 @@
 {
-  "id": "71459f1b-4239-44df-95a1-bd019d2f42ed",
+  "id": "f4073ca1-afaa-4a8b-a889-2d77468999f0",
   "prevId": "b7a91cf5-1153-47a4-addd-45043dc7bd30",
   "version": "7",
   "dialect": "postgresql",
@@ -3730,7 +3730,7 @@
         },
         "projects_description_length": {
           "name": "projects_description_length",
-          "value": "char_length(\"projects\".\"description\") <= 500"
+          "value": "char_length(\"projects\".\"description\") <= 350"
         },
         "projects_next_issue_number_positive": {
           "name": "projects_next_issue_number_positive",
@@ -4708,12 +4708,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "prompt": {
-          "name": "prompt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "dirty_worktree": {
           "name": "dirty_worktree",
           "type": "boolean",
@@ -4931,10 +4925,6 @@
         "runner_dispatches_stream_batch_count_nonnegative": {
           "name": "runner_dispatches_stream_batch_count_nonnegative",
           "value": "\"runner_dispatches\".\"stream_batch_count\" >= 0"
-        },
-        "runner_dispatches_prompt_length": {
-          "name": "runner_dispatches_prompt_length",
-          "value": "length(\"runner_dispatches\".\"prompt\") <= 16000"
         },
         "runner_dispatches_accepted_fields": {
           "name": "runner_dispatches_accepted_fields",

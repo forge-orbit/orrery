@@ -1,5 +1,6 @@
 import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Stack, StackItem } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
@@ -15,9 +16,9 @@ export interface PageHeaderProps {
   subtitle?: ReactNode;
   actions?: ReactNode;
   /**
-   * Keep the action buttons pinned to the top-right: long titles wrap on the
-   * left instead of pushing the actions onto a second row. Other pages keep
-   * the default centre-aligned, wrapping behaviour.
+   * Override whether action buttons stay pinned on the same row (`true`) or may
+   * wrap below the title (`false`). Defaults to staying inline above 48rem so
+   * long descriptions wrap on the left without pushing actions to a second row.
    */
   nonWrappingActions?: boolean;
   /** Draw a bottom divider beneath the header. Set false inside LayoutHeader hasDivider. */
@@ -31,9 +32,11 @@ export function PageHeader({
   statusToken,
   subtitle,
   actions,
-  nonWrappingActions = false,
+  nonWrappingActions,
   hasDivider = true,
 }: PageHeaderProps) {
+  const isCompact = useMediaQuery("(max-width: 48rem)");
+  const keepActionsInline = nonWrappingActions ?? !isCompact;
   const titleBlock = (
     <Stack gap={0.5}>
       <Stack direction="horizontal" gap={2} align="center" wrap="wrap">
@@ -67,7 +70,7 @@ export function PageHeader({
       direction="horizontal"
       gap={2}
       align="center"
-      wrap={nonWrappingActions ? "nowrap" : "wrap"}
+      wrap={keepActionsInline ? "nowrap" : "wrap"}
     >
       {actions}
     </Stack>
@@ -96,11 +99,11 @@ export function PageHeader({
       <Stack
         direction="horizontal"
         justify="between"
-        align={nonWrappingActions ? "start" : "center"}
+        align={nonWrappingActions === true ? "start" : "center"}
         gap={3}
-        wrap={nonWrappingActions ? "nowrap" : "wrap"}
+        wrap={keepActionsInline ? "nowrap" : "wrap"}
       >
-        {nonWrappingActions ? (
+        {keepActionsInline ? (
           <>
             <StackItem size="fill">{titleBlock}</StackItem>
             {actionsBlock && <StackItem size="static">{actionsBlock}</StackItem>}

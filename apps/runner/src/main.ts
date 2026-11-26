@@ -57,7 +57,8 @@ Options:
   --auto-claim-filter FILTER  assignedToMe | unassigned | all (start; default: assignedToMe)
   --auto-claim-poll-ms N    Auto-claim poll interval (start; default: 1000)
   --workspace SLUG-OR-ID    Disambiguate an issue key (work)
-  --prompt TEXT             Requester instructions for one Dispatch (work; max 16,000 chars)
+  --prompt TEXT             Optional requester instructions appended after the
+                            runner's preamble (work; max 16,000 characters)
   --harness ID              Harness id default, resolved from the local registry (start/work)
   --model ID                Model id default for dispatches without an override (start/work)
   --effort LEVEL            Reasoning effort default for dispatches without an override (start/work)
@@ -78,6 +79,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       platform: { type: "string" },
       "poll-ms": { type: "string" },
       workspace: { type: "string" },
+      prompt: { type: "string" },
       project: { type: "string" },
       agent: { type: "string" },
       name: { type: "string" },
@@ -87,7 +89,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       "auto-claim-filter": { type: "string" },
       "auto-claim-poll-ms": { type: "string" },
       repo: { type: "string" },
-      prompt: { type: "string" },
       harness: { type: "string" },
       model: { type: "string" },
       effort: { type: "string" },

@@ -27,6 +27,7 @@ import type {
   RunnerCommandsResponse,
   RunnerHost,
   RunnerPresence,
+  RunnerDispatchRequest,
   StreamBatchRequest,
   StreamBatchResponse,
   StreamResponse,
@@ -481,12 +482,12 @@ const dispatchBaseFields = {
   agentId: runnerDispatches.agentId,
   dispatchAttemptId: runnerDispatches.dispatchAttemptId,
   state: runnerDispatches.state,
+  prompt: runnerDispatches.prompt,
   runId: runnerDispatches.runId,
   workSessionId: runnerDispatches.workSessionId,
   lastUpSeq: runnerDispatches.lastUpSeq,
   lastDownSeq: runnerDispatches.lastDownSeq,
   branchName: runnerDispatches.branchName,
-  prompt: runnerDispatches.prompt,
   harness: runnerDispatches.harness,
   model: runnerDispatches.model,
   effort: runnerDispatches.effort,
@@ -509,12 +510,12 @@ type DispatchRow = {
   agentId: string;
   dispatchAttemptId: string;
   state: Dispatch["state"];
+  prompt: string | null;
   runId: string | null;
   workSessionId: string | null;
   lastUpSeq: number;
   lastDownSeq: number;
   branchName: string | null;
-  prompt: string | null;
   harness: string | null;
   model: string | null;
   effort: string | null;
@@ -535,12 +536,12 @@ const toDispatch = (row: DispatchRow): Dispatch => ({
   agentId: row.agentId,
   dispatchAttemptId: row.dispatchAttemptId,
   state: row.state,
+  prompt: row.prompt,
   runId: row.runId,
   workSessionId: row.workSessionId,
   lastUpSeq: row.lastUpSeq,
   lastDownSeq: row.lastDownSeq,
   branchName: row.branchName,
-  ...(row.prompt === null ? {} : { prompt: row.prompt }),
   ...(row.harness === null ? {} : { harness: row.harness }),
   ...(row.model === null ? {} : { model: row.model }),
   ...(row.effort === null ? {} : { effort: row.effort }),
@@ -1727,7 +1728,7 @@ async function insertDispatchLocked(
       dispatchAttemptId: randomUUID(),
       state: "pending",
       createdAt: sql`statement_timestamp()`,
-      ...(prompt === undefined ? {} : { prompt }),
+      prompt: prompt ?? null,
       ...(harness === undefined ? {} : { harness }),
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
@@ -2525,7 +2526,7 @@ export function createRunnersService(deps: RunnersDeps) {
             dispatchAttemptId: randomUUID(),
             state: "pending",
             createdAt: sql`statement_timestamp()`,
-            ...(prompt === undefined ? {} : { prompt }),
+            prompt: prompt ?? null,
             ...(harness === undefined ? {} : { harness }),
             ...(model === undefined ? {} : { model }),
             ...(effort === undefined ? {} : { effort }),
@@ -2702,8 +2703,8 @@ export function createRunnersService(deps: RunnersDeps) {
               projectId: runner.projectId,
               agentId: runner.agentId,
               requestedByHumanId: host.humanId,
-              // Auto-claim has no human choices: record the Runner's CLI
-              // defaults on the Dispatch, exactly as its local execution uses.
+              // Auto-claim has no human choices: record the Runner's registered
+              // CLI defaults on the Dispatch, exactly as its local execution uses.
               ...runner.executionDefaults,
             });
             return { dispatch };
@@ -2730,10 +2731,12 @@ export function createRunnersService(deps: RunnersDeps) {
     async createRunnerDispatch(
       credential: string | undefined,
       runnerId: string,
-      issueId: string,
-      prompt?: string,
-      options: { harness?: string; model?: string; effort?: string } = {},
+      input: RunnerDispatchRequest,
     ): Promise<Dispatch> {
+      const issueId = input.issueId;
+      const requestedPrompt = input.prompt ?? "";
+      // Same normalization as the manual path: trimmed, empty means omitted.
+      const prompt = requestedPrompt.trim() === "" ? undefined : requestedPrompt.trim();
       return db.transaction(async (tx) => {
         // Read-only live check, then lock the issue BEFORE the runner row.
         await authenticateHostRunnerForDeps(deps, tx, credential, runnerId, false, "contribute");
@@ -2774,9 +2777,9 @@ export function createRunnersService(deps: RunnersDeps) {
           agentId: runner.agentId,
           requestedByHumanId: host.humanId,
           prompt,
-          harness: options.harness,
-          model: options.model,
-          effort: options.effort,
+          harness: input.harness,
+          model: input.model,
+          effort: input.effort,
         });
       });
     },
@@ -2872,6 +2875,42 @@ export function createRunnersService(deps: RunnersDeps) {
           .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
           .where(eq(runnerDispatches.issueId, issueId));
         return rows.map(toDispatch);
+      });
+    },
+
+    /**
+     * One Dispatch's metadata, including its prompt, for the Live Session
+     * Studio. Project readers may view it (issue #239); workspace members
+     * without project Read access keep receiving 404, never a 403 oracle.
+     */
+    async getDispatch(
+      credential: string | undefined,
+      account: SessionAccount | null,
+      dispatchId: string,
+    ): Promise<Dispatch> {
+      if (account === null) {
+        // Authenticate first: an anonymous or invalid host credential gets 401,
+        // never a 404 that would leak whether the dispatch id exists.
+        await db.transaction((tx) => readHostByCredential(tx, credential));
+      }
+      return db.transaction(async (tx) => {
+        const dispatch = await readDispatch(tx, dispatchId);
+        if (account !== null) {
+          if (!(await canSeeWorkspace(tx, dispatch.workspaceId, account.humanId))) {
+            throw new RunnersError("dispatch_not_found");
+          }
+          const ceiling = await projectAccessCeiling(tx, dispatch.workspaceId, account.humanId, [
+            dispatch.projectId,
+          ]);
+          if (!hasAccess(ceiling.get(dispatch.projectId), "read", projectAccessAtLeast)) {
+            throw new RunnersError("dispatch_not_found");
+          }
+          return toDispatch(dispatch);
+        }
+        // Runner host credential: the host owns every Runner it enrolled.
+        const host = await readHostByCredential(tx, credential);
+        if (dispatch.hostId !== host.host.id) throw new RunnersError("dispatch_not_found");
+        return toDispatch(dispatch);
       });
     },
 

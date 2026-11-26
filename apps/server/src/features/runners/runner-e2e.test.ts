@@ -199,12 +199,15 @@ async function createIssue(title: string): Promise<string> {
   return str(field(issue.body, "id"));
 }
 
-async function dispatch(title: string): Promise<string> {
+async function dispatch(title: string, prompt?: string): Promise<string> {
   const issueId = await createIssue(title);
   const created = await api(`/api/issues/${issueId}/dispatches`, {
     method: "POST",
     cookie: world.cookie,
-    body: { runnerId: world.runnerId },
+    body: {
+      runnerId: world.runnerId,
+      ...(prompt === undefined ? {} : { prompt }),
+    },
   });
   if (created.status !== 201) {
     throw new Error(
@@ -573,5 +576,28 @@ describe("orrery-runner against a real Orrery server (#198)", { timeout: 120_000
       encoding: "utf8",
     }).stdout;
     expect(listed).toContain(branch);
+  });
+
+  it("carries the requester prompt into the ACP turn after the preamble", async () => {
+    await waitForRunnerOnline();
+    await setMode("normal");
+    const issueId = await dispatch("prompted dispatch", "Use the additive migration strategy.");
+    await until(async () => {
+      const current = (await sessionsOf(issueId))[0];
+      return str(field(current, "status")) === "completed" ? true : undefined;
+    });
+    const prompted = (await markerEvents()).filter(
+      (item) =>
+        typeof item.text === "string" && item.text.includes("Use the additive migration strategy."),
+    );
+    expect(prompted.length).toBeGreaterThan(0);
+    const first = prompted[0];
+    if (first === undefined) throw new Error("no prompted marker recorded");
+    const text = String(first.text);
+    // The operational preamble comes first, then the explicit section header.
+    expect(text.indexOf("Do not write outside this worktree.")).toBeGreaterThan(-1);
+    const headerIndex = text.indexOf("Additional instructions from the requester:");
+    expect(headerIndex).toBeGreaterThan(text.indexOf("Do not write outside this worktree."));
+    expect(text.indexOf("Use the additive migration strategy.")).toBeGreaterThan(headerIndex);
   });
 });

@@ -260,6 +260,15 @@ const testCatalog: HarnessCatalog = {
   ],
 };
 
+async function dispatchCommand(dispatchId: string) {
+  const [command] = await database.db
+    .select()
+    .from(runnerCommands)
+    .where(and(eq(runnerCommands.dispatchId, dispatchId), eq(runnerCommands.kind, "dispatch")));
+  if (command === undefined) throw new Error("no dispatch command in the outbox");
+  return command;
+}
+
 async function acceptedFixture() {
   const host = await enrollHost(adminCookie);
   const runner = await registerRunner(host.credential);
@@ -477,6 +486,121 @@ describe("manual dispatch creation (#196)", () => {
     });
     expect(reset.status).toBe(200);
     expect((await createDispatch(unassignedIssue.id, runner.id, adminCookie)).status).toBe(201);
+  });
+});
+
+describe("custom dispatch prompt (#239)", () => {
+  it("persists the prompt and carries it in the outbox dispatch command", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("prompted dispatch");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: "  Use the additive migration strategy.  " },
+      cookie: adminCookie,
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch.prompt).toBe("Use the additive migration strategy.");
+
+    const command = await dispatchCommand(dispatch.id);
+    expect(field(command.payload, "prompt")).toBe("Use the additive migration strategy.");
+
+    // The one-shot `orrery-runner work` path shares the same persistence.
+    const oneShotIssue = await createIssue("one-shot prompted dispatch");
+    const oneShot = await request(`/api/runners/${runner.id}/dispatches`, {
+      method: "POST",
+      body: { issueId: oneShotIssue.id, prompt: "Work only inside the worktree." },
+      token: host.credential,
+    });
+    expect(oneShot.status).toBe(201);
+    const oneShotDispatch = Dispatch.parse(await oneShot.json());
+    expect(oneShotDispatch.prompt).toBe("Work only inside the worktree.");
+    expect(field((await dispatchCommand(oneShotDispatch.id)).payload, "prompt")).toBe(
+      "Work only inside the worktree.",
+    );
+  });
+
+  it("treats a whitespace-only prompt as omitted and rejects an over-limit prompt", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("blank prompt dispatch");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: "   \n\t " },
+      cookie: adminCookie,
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+    expect(dispatch.prompt).toBeNull();
+    const command = await dispatchCommand(dispatch.id);
+    expect(field(command.payload, "prompt")).toBeUndefined();
+
+    await expectProblem(
+      await request(`/api/issues/${issue.id}/dispatches`, {
+        method: "POST",
+        body: { runnerId: runner.id, prompt: "x".repeat(16001) },
+        cookie: adminCookie,
+      }),
+      400,
+      "validation_failed",
+    );
+    expect(
+      (
+        await database.db
+          .select({ prompt: runnerDispatches.prompt })
+          .from(runnerDispatches)
+          .where(eq(runnerDispatches.issueId, issue.id))
+      ).every((row) => row.prompt === null),
+    ).toBe(true);
+  });
+
+  it("serves the prompt to project readers through the single-dispatch endpoint", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const issue = await createIssue("reader prompt dispatch");
+    const created = await request(`/api/issues/${issue.id}/dispatches`, {
+      method: "POST",
+      body: { runnerId: runner.id, prompt: "Focus on the migration first." },
+      cookie: adminCookie,
+    });
+    expect(created.status).toBe(201);
+    const dispatch = Dispatch.parse(await created.json());
+
+    const reader = await insertHuman(`reader-${randomUUID()}@example.com`);
+    await database.db.insert(workspaceMemberships).values({
+      id: randomUUID(),
+      workspaceId,
+      humanId: reader.id,
+      isOwner: false,
+    });
+    await database.db.insert(projectAccessGrants).values({
+      id: randomUUID(),
+      projectId,
+      humanId: reader.id,
+      level: "read",
+      grantedByHumanId: adminHumanId,
+    });
+    const readerRead = await request(`/api/runners/dispatches/${dispatch.id}`, {
+      cookie: await browserCookie(reader.id),
+    });
+    expect(readerRead.status).toBe(200);
+    expect(Dispatch.parse(await readerRead.json()).prompt).toBe("Focus on the migration first.");
+
+    const member = await insertHuman(`no-grant-${randomUUID()}@example.com`);
+    await database.db.insert(workspaceMemberships).values({
+      id: randomUUID(),
+      workspaceId,
+      humanId: member.id,
+      isOwner: false,
+    });
+    await expectProblem(
+      await request(`/api/runners/dispatches/${dispatch.id}`, {
+        cookie: await browserCookie(member.id),
+      }),
+      404,
+      "dispatch_not_found",
+    );
   });
 });
 

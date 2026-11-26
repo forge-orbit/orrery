@@ -21,7 +21,7 @@ export interface WorkOptions {
   workspace?: string | undefined;
   repoPath?: string | undefined;
   agentId?: string | undefined;
-  /** Requester instructions appended to the operational ACP preamble. */
+  /** Optional requester steering text appended to the operational ACP preamble. */
   prompt?: string | undefined;
   signal?: AbortSignal | undefined;
   write?: ((line: string) => void) | undefined;

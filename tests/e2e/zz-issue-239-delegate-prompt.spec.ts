@@ -318,10 +318,10 @@ test("a project reader can expand the custom prompt in Live Session Studio", asy
     await page.goto(
       `/live/${fixture.runnerId}/${dispatchId}?issueId=${fixture.issueId}&workspaceId=${fixture.workspaceId}`,
     );
-    await expect(page.locator("[data-dispatch-prompt-section]")).toBeVisible();
-    const trigger = page.getByRole("button", { name: /Custom dispatch prompt/ });
-    await trigger.click();
-    await expect(page.getByText(PROMPT)).toBeVisible();
+    const promptSection = page.locator("[data-dispatch-prompt]");
+    await expect(promptSection).toBeVisible();
+    await promptSection.getByText("Show the full prompt").click();
+    await expect(promptSection.getByText(PROMPT)).toBeVisible();
   } finally {
     await context.close();
   }

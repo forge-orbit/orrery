@@ -1,1 +1,0 @@
-ALTER TABLE "runners" ADD COLUMN "execution_defaults" jsonb DEFAULT '{}'::jsonb NOT NULL;
