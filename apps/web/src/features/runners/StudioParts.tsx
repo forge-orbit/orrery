@@ -340,15 +340,17 @@ export function ContextRail({
 
       <Section padding={3}>
         <Stack gap={2}>
-          <Heading level={3} color="inherit">
-            Host Health
-          </Heading>
-          <Token
-            label={presence}
-            size="sm"
-            color={presence === "busy" ? "orange" : presence === "offline" ? "gray" : "green"}
-            data-host-health-presence=""
-          />
+          <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
+            <Heading level={3} color="inherit">
+              Host Health
+            </Heading>
+            <Token
+              label={presence}
+              size="sm"
+              color={presence === "busy" ? "orange" : presence === "offline" ? "gray" : "green"}
+              data-host-health-presence=""
+            />
+          </Stack>
           <Text type="supporting" color="secondary">
             {host?.displayName ?? "Runner host"} · {host?.platform ?? "unknown platform"}
           </Text>
