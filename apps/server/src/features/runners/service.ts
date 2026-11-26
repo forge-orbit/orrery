@@ -14,10 +14,9 @@ import type {
   ReadyWorkFilter,
   FleetRunner,
   FleetRunnerHost,
-  HarnessCatalog,
   HeartbeatRequest,
 } from "@orrery/contract";
-import { mergeHarnessCatalog } from "@orrery/contract";
+import { EMPTY_HARNESS_CATALOG, HarnessCatalog, mergeHarnessCatalog } from "@orrery/contract";
 import type {
   HostCredentialResponse,
   ProjectAccessLevel,
@@ -140,6 +139,7 @@ export type RunnersErrorKind =
   | "runner_forbidden"
   | "runner_unavailable"
   | "runner_not_for_issue"
+  | "catalog_too_large"
   | "insufficient_dispatch_access"
   | "dispatch_not_found"
   | "dispatch_not_pending"
@@ -177,6 +177,7 @@ const messages: Record<RunnersErrorKind, string> = {
   runner_forbidden: "Only the human who owns this Runner host may dispatch to it.",
   runner_unavailable: "This Runner is offline or has no free slot.",
   runner_not_for_issue: "This Runner is not registered for the issue's project.",
+  catalog_too_large: "The published Harness catalog exceeds the 256 KiB limit.",
   insufficient_dispatch_access: "The Runner host owner needs Contribute access to dispatch here.",
   dispatch_not_found: "No such pending Dispatch exists for this Runner.",
   dispatch_not_pending: "This Dispatch was already accepted or ended.",
@@ -304,7 +305,7 @@ type RunnerRow = {
   displayName: string;
   repoFingerprint: string;
   capabilities: string[];
-  harnessCatalog: HarnessCatalog | null;
+  harnessCatalog: HarnessCatalog;
   maxConcurrency: number;
   activeSlotCount: number;
   lastSeenAt: Date;
@@ -352,7 +353,17 @@ const toHostResponse = (row: {
 });
 
 /** An empty catalog is the merge identity for Runners without one yet. */
-const EMPTY_CATALOG: HarnessCatalog = { harnesses: [], updatedAt: "1970-01-01T00:00:00.000Z" };
+const EMPTY_CATALOG: HarnessCatalog = EMPTY_HARNESS_CATALOG;
+
+/** One validation boundary for every catalog that reaches the database. */
+const MAX_CATALOG_BYTES = 256 * 1024;
+function validatedCatalog(value: unknown): HarnessCatalog {
+  const parsed = HarnessCatalog.parse(value);
+  if (Buffer.byteLength(JSON.stringify(parsed), "utf8") > MAX_CATALOG_BYTES) {
+    throw new RunnersError("catalog_too_large");
+  }
+  return parsed;
+}
 
 async function joinRunner(tx: DbTransaction, runnerId: string) {
   const [row] = await tx
@@ -2163,6 +2174,7 @@ export function createRunnersService(deps: RunnersDeps) {
           : await tx
               .select({ id: runners.id, harnessCatalog: runners.harnessCatalog })
               .from(runners)
+              .for("update")
               .where(
                 and(
                   eq(runners.hostId, host.host.id),
@@ -2183,15 +2195,14 @@ export function createRunnersService(deps: RunnersDeps) {
               activeSlotCount: 0,
               lastSeenAt: sql`statement_timestamp()`,
               disconnectedAt: null,
-              ...(input.harnessCatalog === undefined
-                ? {}
-                : {
-                    // Re-registration with a catalog merges, never regresses.
-                    harnessCatalog: mergeHarnessCatalog(
-                      existing.harnessCatalog ?? EMPTY_CATALOG,
-                      input.harnessCatalog,
+              // A re-register before the startup probe finishes carries no (or
+              // an empty) catalog: never wipe stored harnesses or known efforts.
+              harnessCatalog:
+                input.harnessCatalog === undefined || input.harnessCatalog.harnesses.length === 0
+                  ? existing.harnessCatalog
+                  : validatedCatalog(
+                      mergeHarnessCatalog(existing.harnessCatalog, input.harnessCatalog),
                     ),
-                  }),
             })
             .where(eq(runners.id, existing.id));
           const row = await joinRunner(tx, existing.id);
@@ -2212,7 +2223,10 @@ export function createRunnersService(deps: RunnersDeps) {
             capabilities: input.capabilities,
             maxConcurrency: input.maxConcurrency,
             activeSlotCount: 0,
-            ...(input.harnessCatalog === undefined ? {} : { harnessCatalog: input.harnessCatalog }),
+            harnessCatalog:
+              input.harnessCatalog === undefined
+                ? EMPTY_CATALOG
+                : validatedCatalog(input.harnessCatalog),
           })
           .returning({ id: runners.id });
         const row = await joinRunner(tx, created!.id);
@@ -2233,7 +2247,7 @@ export function createRunnersService(deps: RunnersDeps) {
     ): Promise<Runner> {
       return db.transaction(async (tx) => {
         const { runner } = await authenticateHostRunnerForDeps(deps, tx, credential, runnerId);
-        const merged = mergeHarnessCatalog(runner.harnessCatalog ?? EMPTY_CATALOG, input);
+        const merged = validatedCatalog(mergeHarnessCatalog(runner.harnessCatalog, input));
         await tx.update(runners).set({ harnessCatalog: merged }).where(eq(runners.id, runnerId));
         const row = await joinRunner(tx, runnerId);
         if (row === undefined) throw new RunnersError("runner_not_found");
@@ -2864,13 +2878,10 @@ export function createRunnersService(deps: RunnersDeps) {
           .innerJoin(runners, eq(runnerDispatches.runnerId, runners.id))
           .innerJoin(runnerHosts, eq(runners.hostId, runnerHosts.id))
           .innerJoin(projects, eq(runnerDispatches.projectId, projects.id))
-          .where(
-            and(
-              eq(runnerDispatches.issueId, issueId),
-              eq(runnerHosts.humanId, human.humanId),
-              isNull(projects.deletedAt),
-            ),
-          );
+          // Project readers (not just the host owner) see Recent dispatches;
+          // access was already checked above (#239 reader visibility). #257:
+          // hide dispatches whose project is in the Trash.
+          .where(and(eq(runnerDispatches.issueId, issueId), isNull(projects.deletedAt)));
         return rows.map(toDispatch);
       });
     },
@@ -2892,6 +2903,15 @@ export function createRunnersService(deps: RunnersDeps) {
       }
       return db.transaction(async (tx) => {
         const dispatch = await readDispatch(tx, dispatchId);
+        const [issue] = await tx
+          .select({ deletedAt: issues.deletedAt, projectDeletedAt: projects.deletedAt })
+          .from(issues)
+          .innerJoin(projects, eq(issues.projectId, projects.id))
+          .where(eq(issues.id, dispatch.issueId))
+          .limit(1);
+        if (issue === undefined || issue.deletedAt !== null || issue.projectDeletedAt !== null) {
+          throw new RunnersError("dispatch_not_found");
+        }
         if (account !== null) {
           if (!(await canSeeWorkspace(tx, dispatch.workspaceId, account.humanId))) {
             throw new RunnersError("dispatch_not_found");
@@ -2904,9 +2924,30 @@ export function createRunnersService(deps: RunnersDeps) {
           }
           return toDispatch(dispatch);
         }
-        // Runner host credential: the host owns every Runner it enrolled.
+        // Runner host credential: a still-valid credential alone is not enough.
+        // Re-check the owner's live Runner, workspace membership and project
+        // Read in this transaction. Every denial is a 404, never an oracle for
+        // a Dispatch id the host can no longer see (#239 live ACL).
         const host = await readHostByCredential(tx, credential);
-        if (dispatch.hostId !== host.host.id) throw new RunnersError("dispatch_not_found");
+        const [runner] = await tx
+          .select({ revokedAt: runners.revokedAt })
+          .from(runners)
+          .where(eq(runners.id, dispatch.runnerId))
+          .limit(1);
+        if (
+          dispatch.hostId !== host.host.id ||
+          runner === undefined ||
+          runner.revokedAt !== null ||
+          !(await canSeeWorkspace(tx, dispatch.workspaceId, host.humanId))
+        ) {
+          throw new RunnersError("dispatch_not_found");
+        }
+        const ceiling = await projectAccessCeiling(tx, dispatch.workspaceId, host.humanId, [
+          dispatch.projectId,
+        ]);
+        if (!hasAccess(ceiling.get(dispatch.projectId), "read", projectAccessAtLeast)) {
+          throw new RunnersError("dispatch_not_found");
+        }
         return toDispatch(dispatch);
       });
     },

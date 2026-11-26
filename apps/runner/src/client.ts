@@ -129,7 +129,7 @@ export class OrreryClient {
   }
 
   /** Publish the live Harness catalog; the server merges, never regresses. */
-  async updateCatalog(runnerId: string, input: HarnessCatalog) {
+  async putCatalog(runnerId: string, input: HarnessCatalog) {
     return Runner.parse(
       await this.request(`/api/runners/${encodeURIComponent(runnerId)}/catalog`, {
         method: "PUT",

@@ -1,12 +1,19 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ReadyWorkFilter } from "@orrery/contract";
+import type { HarnessCatalog, ReadyWorkFilter } from "@orrery/contract";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
-import { readCatalogCache, startCatalogSync } from "./catalog.ts";
+import {
+  CatalogPublisher,
+  harnessConfigKey,
+  probeHarness,
+  readCachedCatalog,
+  runStartupCatalogProbe,
+} from "./catalog.ts";
 import { readCredential } from "./credential.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
+import { detectHarnesses, type HarnessDefinition } from "./harnesses.ts";
 import { SlotPool, type SlotController } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
@@ -30,6 +37,11 @@ export interface StartOptions {
   autoClaim?: boolean | undefined;
   autoClaimFilter?: ReadyWorkFilter | undefined;
   autoClaimPollMs?: number | undefined;
+  /** Bounded time budget for the one startup catalog probe pass (default 5s). */
+  catalogProbeTimeoutMs?: number | undefined;
+  /** Test seams: inject the harness list and observe each published catalog. */
+  harnessDefinitions?: HarnessDefinition[] | undefined;
+  onCatalog?: ((catalog: HarnessCatalog) => void) | undefined;
 }
 
 /** Opaque digest of a checkout; the raw local path never leaves the machine. */
@@ -70,38 +82,61 @@ export async function start(options: StartOptions): Promise<void> {
     signal: controller.signal,
   });
   const supervision = options.supervision ?? loadSupervisionConfig();
-  // Seed registration with the cached Harness catalog so the Fleet shows
-  // harnesses, models and effort levels before the background probe lands.
-  const cachedCatalog = await readCatalogCache();
+  const fingerprint = repoFingerprint(options.repoPath ?? process.cwd());
+  const configKey = harnessConfigKey(
+    supervision.acpOverridden ? { acpOverride: supervision.acp } : {},
+  );
+  // Only a cache hit seeds registration: omitting the field lets the server
+  // keep a previously stored catalog when this Runner re-registers before probing.
+  const cached = readCachedCatalog(fingerprint, undefined, configKey);
   const runner = await client.registerRunner({
     workspaceId: options.workspaceId,
     projectId: options.projectId,
     ...(options.agentId === undefined ? {} : { agentId: options.agentId }),
     ...(options.displayName === undefined ? {} : { displayName: options.displayName }),
-    repoFingerprint: repoFingerprint(options.repoPath ?? process.cwd()),
+    repoFingerprint: fingerprint,
     capabilities: options.capabilities ?? [],
     maxConcurrency: options.maxConcurrency ?? 1,
     ephemeral: false,
-    ...(cachedCatalog === null ? {} : { harnessCatalog: cachedCatalog }),
+    ...(cached === null ? {} : { harnessCatalog: cached }),
   });
   write(`Runner ${runner.id} registered (${runner.presence}).`);
 
-  // Background Harness discovery pushes updates via PUT /catalog so the
-  // five-second heartbeat keeps carrying only `activeSlotCount` (issue #240).
-  // Only an explicit --acp-command / --acp-arg override becomes a custom
-  // Harness catalog entry; the `opencode acp` default is a preset instead.
-  const catalog = startCatalogSync({
+  const publisher = new CatalogPublisher({
     client,
     runnerId: runner.id,
-    initial: cachedCatalog,
-    override: supervision.acpExplicit
-      ? { command: supervision.acp.command, args: supervision.acp.args }
-      : undefined,
-    cwd: options.repoPath ?? process.cwd(),
-    signal: controller.signal,
-    write,
+    repoFingerprint: fingerprint,
+    initial: runner.harnessCatalog,
+    configKey,
+    onUnauthorized: () =>
+      revoke("Catalog update rejected (401). Stopping local operation immediately."),
   });
-  void catalog.done.catch(() => {});
+
+  /** One bounded startup discovery pass, shared by the Runner's single probe. */
+  const probeCatalogOnce = async (): Promise<void> => {
+    try {
+      await runStartupCatalogProbe({
+        definitions:
+          options.harnessDefinitions ??
+          detectHarnesses(supervision.acpOverridden ? { acpOverride: supervision.acp } : {}),
+        probe: (definition) =>
+          probeHarness(definition, {
+            cwd: options.repoPath ?? process.cwd(),
+            timeoutMs: options.catalogProbeTimeoutMs ?? 5000,
+            signal: controller.signal,
+          }),
+        publish: async (catalog) => {
+          await publisher.publish(catalog);
+          options.onCatalog?.(publisher.current);
+        },
+        previous: publisher.current,
+        isAborted: () => controller.signal.aborted,
+        write,
+      });
+    } catch (error) {
+      if (!controller.signal.aborted) write(`Catalog publish failed: ${String(error)}`);
+    }
+  };
 
   // Startup/recovery reconciliation marks uncertain attempts and lets an
   // agent reconnecting after sleep stream into Live Session Studio seamlessly.
@@ -348,7 +383,7 @@ export async function start(options: StartOptions): Promise<void> {
     }
   };
 
-  await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop()]);
+  await Promise.all([heartbeatLoop(), commandLoop(), autoClaimLoop(), probeCatalogOnce()]);
   options.signal?.removeEventListener("abort", onExternalAbort);
   pool.cancelAll("shutdown");
   await Promise.all(pending);

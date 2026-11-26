@@ -18,18 +18,7 @@ export interface AcpStartOptions {
   mcpServers: unknown[];
   /** Worktree realpath used for the local permission policy. */
   worktreeReal: string;
-  /**
-   * Hard deadline for the whole `initialize` -> `session/new` handshake; used
-   * by the Harness catalog probe so a hanging harness cannot stall startup.
-   * Omitted (no timeout) for production dispatch supervision.
-   */
-  handshakeTimeoutMs?: number | undefined;
-  /** Capture the raw initialize/session results for the catalog probe. */
-  captureHandshake?: boolean | undefined;
-  /**
-   * Aborting before or during the handshake kills the detached process group
-   * immediately, so a shutting-down runner never waits on a probe.
-   */
+  /** Aborting kills the detached probe process group immediately (PR #255). */
   signal?: AbortSignal | undefined;
   onPermission?: ((params: unknown) => PermissionResponse) | undefined;
   onUpdate?: ((method: string, params: unknown) => void) | undefined;
@@ -77,6 +66,8 @@ export class AcpStdioClient {
   private stderrBuffer = "";
   private spawnError: Error | undefined;
   private exitValue: AcpExit | undefined;
+  /** Raw `initialize` result, captured for the catalog discovery parser. */
+  initResult: unknown;
   cancelSent = false;
   termSent = false;
   killSent = false;
@@ -122,74 +113,119 @@ export class AcpStdioClient {
     });
   }
 
-  static async start(options: AcpStartOptions): Promise<AcpStdioClient> {
-    if (options.signal?.aborted === true) {
-      throw new Error("ACP start aborted before the child was spawned.");
-    }
+  private static spawnClient(options: AcpStartOptions): AcpStdioClient {
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
       env: sanitizeAcpEnv(process.env, options.env),
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
-    const client = new AcpStdioClient(child, options);
-    const onAbort = (): void => {
-      client.signal("SIGKILL");
-    };
+    return new AcpStdioClient(child, options);
+  }
+
+  static async start(options: AcpStartOptions): Promise<AcpStdioClient> {
+    if (options.signal?.aborted === true) {
+      throw new Error("ACP start aborted before the child was spawned.");
+    }
+    const client = AcpStdioClient.spawnClient(options);
+    const onAbort = (): void => client.signalGroup("SIGKILL");
     options.signal?.addEventListener("abort", onAbort, { once: true });
-    const offAbort = (): void => options.signal?.removeEventListener("abort", onAbort);
-    child.once("close", offAbort);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = <T>(call: Promise<T>): Promise<T> =>
-      options.handshakeTimeoutMs === undefined
-        ? call
-        : Promise.race([
-            call,
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () =>
-                  reject(
-                    new Error(`ACP handshake timed out after ${options.handshakeTimeoutMs}ms`),
-                  ),
-                options.handshakeTimeoutMs,
-              );
-            }),
-          ]);
     try {
-      const initResult = await deadline(
-        client.request("initialize", {
-          protocolVersion: 1,
-          clientInfo: { name: "orrery-runner", version: "1" },
-          clientCapabilities: {},
-        }),
-      );
-      const session = await deadline(
-        client.request("session/new", {
-          cwd: options.cwd,
-          mcpServers: options.mcpServers,
-        }),
-      );
-      if (options.captureHandshake === true) {
-        client.initResult = initResult;
-        client.sessionResult = session;
-      }
-      const sessionId = asRecord(session)?.sessionId;
-      client.sessionId = typeof sessionId === "string" ? sessionId : "";
-      if (timer !== undefined) clearTimeout(timer);
-      offAbort();
+      await client.initializeSession(options);
       return client;
     } catch (error) {
-      offAbort();
       // Never leak a detached process group when the handshake fails.
       await client.forceExit(500);
       throw error;
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
     }
   }
 
-  /** Raw `initialize` result, set only when `captureHandshake` is enabled. */
-  initResult: unknown;
-  /** Raw `session/new` result, set only when `captureHandshake` is enabled. */
-  sessionResult: unknown;
+  /**
+   * One bounded discovery session. The raw `session/new` result is returned so
+   * callers can read `models` and `configOptions`; the process group is always
+   * torn down, including on timeout or a hung harness (ADR-0011).
+   */
+  static async probe(
+    options: AcpStartOptions & { timeoutMs: number; sessionMeta?: Record<string, unknown> },
+  ): Promise<{ session: unknown; initResult: unknown }> {
+    const started = await AcpStdioClient.startProbe(options);
+    try {
+      return { session: started.session, initResult: started.client.initResult };
+    } finally {
+      await started.client.forceExit(250);
+    }
+  }
+
+  /**
+   * Start a probe session without tearing it down. The caller owns the client
+   * and can issue further bounded RPCs (model switch, options, restore) against
+   * one shared deadline before calling `forceExit`.
+   */
+  static async startProbe(
+    options: AcpStartOptions & { timeoutMs: number; sessionMeta?: Record<string, unknown> },
+  ): Promise<{ client: AcpStdioClient; session: unknown; deadline: number }> {
+    if (options.signal?.aborted === true) {
+      throw new Error("ACP probe aborted before the child was spawned.");
+    }
+    const deadline = Date.now() + options.timeoutMs;
+    const client = AcpStdioClient.spawnClient(options);
+    const onAbort = (): void => client.signalGroup("SIGKILL");
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      // One total budget shared by both RPCs: a slow initialize cannot buy a
+      // second full timeout for session/new.
+      const session = await client.initializeSession(options, {
+        deadline,
+        ...(options.sessionMeta === undefined ? {} : { sessionMeta: options.sessionMeta }),
+      });
+      return { client, session, deadline };
+    } catch (error) {
+      await client.forceExit(250);
+      throw error;
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  /** Issue one RPC against a caller-owned deadline (minimum 1ms, never unbounded). */
+  async requestInBudget(
+    method: string,
+    params: Record<string, unknown>,
+    deadline: number,
+  ): Promise<unknown> {
+    return await this.request(method, params, Math.max(1, deadline - Date.now()));
+  }
+
+  private async initializeSession(
+    options: AcpStartOptions,
+    budget?: { deadline: number; sessionMeta?: Record<string, unknown> },
+  ): Promise<unknown> {
+    const remaining = (): number | undefined =>
+      budget === undefined ? undefined : Math.max(0, budget.deadline - Date.now());
+    this.initResult = await this.request(
+      "initialize",
+      {
+        protocolVersion: 1,
+        clientInfo: { name: "orrery-runner", version: "1" },
+        clientCapabilities: {},
+      },
+      remaining(),
+    );
+    const session = await this.request(
+      "session/new",
+      {
+        cwd: options.cwd,
+        mcpServers: options.mcpServers,
+        ...(budget?.sessionMeta === undefined ? {} : budget.sessionMeta),
+      },
+      remaining(),
+    );
+    const sessionId = asRecord(session)?.sessionId;
+    this.sessionId = typeof sessionId === "string" ? sessionId : "";
+    return session;
+  }
 
   get id(): string {
     return this.sessionId;
@@ -204,12 +240,27 @@ export class AcpStdioClient {
     if (this.child.stdin.writable) this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
-  private request(method: string, params: Record<string, unknown>): Promise<unknown> {
+  private request(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<unknown> {
     if (this.spawnError !== undefined) return Promise.reject(this.spawnError);
     const id = this.nextId++;
-    return new Promise<unknown>((resolve, reject) => {
+    const pendingRequest = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.send({ jsonrpc: "2.0", id, method, params });
+    });
+    if (timeoutMs === undefined) return pendingRequest;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`ACP ${method} timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+    });
+    return Promise.race([pendingRequest, timeout]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
     });
   }
 
@@ -337,8 +388,12 @@ export class AcpStdioClient {
     this.notify("session/cancel", { sessionId: this.sessionId });
   }
 
-  private signal(signal: NodeJS.Signals): void {
-    if (this.exitValue !== undefined || this.pid < 1) return;
+  /**
+   * Signal the whole detached group. The leader may already have exited while
+   * a grandchild survives, so this deliberately works after `exitValue` is set.
+   */
+  private signalGroup(signal: NodeJS.Signals): void {
+    if (this.pid < 1) return;
     try {
       process.kill(-this.pid, signal);
     } catch {
@@ -348,6 +403,10 @@ export class AcpStdioClient {
         // Already gone; the close event will settle `exited`.
       }
     }
+  }
+
+  private signal(signal: NodeJS.Signals): void {
+    this.signalGroup(signal);
   }
 
   private async waitForExit(ms: number): Promise<boolean> {
@@ -375,7 +434,13 @@ export class AcpStdioClient {
         this.signal("SIGKILL");
       }
     }
-    return await this.exited;
+    const exit = await this.exited;
+    // The leader is gone but a detached grandchild can still be alive. Kill the
+    // group once more before reporting success (#255 review, issue #240).
+    this.signalGroup("SIGTERM");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    this.signalGroup("SIGKILL");
+    return exit;
   }
 
   /**
@@ -392,7 +457,11 @@ export class AcpStdioClient {
         this.signal("SIGKILL");
       }
     }
-    return await this.exited;
+    const exit = await this.exited;
+    this.signalGroup("SIGTERM");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    this.signalGroup("SIGKILL");
+    return exit;
   }
 
   stderr(): string {

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -199,7 +199,8 @@ async function waitForRunnerOnline(): Promise<void> {
  * lookup targets the override entry by id, not the first harness.
  */
 async function waitForRunnerCatalog(): Promise<Record<string, unknown>> {
-  const id = basename(process.execPath);
+  // The explicit --acp-command override is published as the "custom" entry.
+  const id = "custom";
   try {
     return await until(async () => {
       const fleet = await api(`/api/workspaces/${world.workspaceId}/runners`, {
@@ -470,12 +471,12 @@ describe("orrery-runner against a real Orrery server (#198)", { timeout: 120_000
     const harness = await waitForRunnerCatalog();
     const models = list(harness.models).map((model) => recordOf(model) ?? {});
     const ids = models.map((model) => str(field(model, "id"))).toSorted();
-    expect(ids).toEqual(["stub-deep", "stub-fast"]);
-    const fast = models.find((model) => str(field(model, "id")) === "stub-fast");
-    expect(field(fast, "reasoningDiscovery")).toBe("known");
-    expect(field(fast, "defaultEffort")).toBe("medium");
+    expect(ids).toEqual(["stub-deep", "stub-fast", "stub-model-1", "stub-model-2"]);
+    const activeModel = models.find((model) => str(field(model, "id")) === "stub-model-1");
+    expect(field(activeModel, "reasoningDiscovery")).toBe("known");
+    expect(field(activeModel, "defaultEffort")).toBe("low");
     const deep = models.find((model) => str(field(model, "id")) === "stub-deep");
-    expect(field(deep, "reasoningDiscovery")).toBe("known");
+    expect(field(deep, "reasoningDiscovery")).toBe("unknown");
     await setMode("normal");
     const issueId = await dispatch("real lease renewal");
     const session = await until(async () => {

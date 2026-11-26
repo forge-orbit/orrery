@@ -81,88 +81,111 @@ export const HarnessEffortDiscovery = z
   .meta({ id: "HarnessEffortDiscovery" });
 export type HarnessEffortDiscovery = z.infer<typeof HarnessEffortDiscovery>;
 
-/** One model a Runner's Harness advertised, with its reasoning-effort knowledge. */
-export const HarnessModelCatalog = z
+/** One model an ACP harness advertised during a discovery probe. */
+export const HarnessModel = z
   .object({
     id: z.string().trim().min(1).max(200),
     label: z.string().trim().min(1).max(200).optional(),
-    reasoningDiscovery: HarnessEffortDiscovery.default("unknown"),
+    reasoningDiscovery: HarnessEffortDiscovery,
     /** Supported effort levels in ascending order, e.g. `["low", "high"]`. */
-    effortLevels: z.array(z.string().trim().min(1).max(64)).max(32).default([]),
-    defaultEffort: z.string().trim().min(1).max(64).nullable().default(null),
-    /** When the Runner last probed this model; null when not probed yet. */
-    probedAt: Timestamp.nullable().default(null),
+    supportedEfforts: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
+    defaultEffort: z.string().trim().min(1).max(64).optional(),
+    /** When the Runner last parsed this model's discovery payload. */
+    probedAt: Timestamp.optional(),
   })
-  .meta({ id: "HarnessModelCatalog" });
-export type HarnessModelCatalog = z.infer<typeof HarnessModelCatalog>;
+  .meta({ id: "HarnessModel" });
+export type HarnessModel = z.infer<typeof HarnessModel>;
 
 /** Where a Runner found a Harness: a built-in preset, `--acp-command`, or `harnesses.json`. */
-export const HarnessSource = z
-  .enum(["preset", "override", "user"])
-  .meta({ id: "HarnessSource" });
+export const HarnessSource = z.enum(["preset", "override", "user"]).meta({ id: "HarnessSource" });
 export type HarnessSource = z.infer<typeof HarnessSource>;
 
-/** One ACP-compatible Harness a Runner discovered on its machine. */
+/** One ACP harness discovered on a Runner host, with its probed model list. */
 export const HarnessCatalogEntry = z
   .object({
     id: z.string().trim().min(1).max(64),
     displayName: z.string().trim().min(1).max(120),
-    source: HarnessSource.default("preset"),
-    defaultModel: z.string().trim().min(1).max(200).nullable().default(null),
-    models: z.array(HarnessModelCatalog).max(256).default([]),
-    /** When the Runner last probed this Harness; null when not probed yet. */
-    probedAt: Timestamp.nullable().default(null),
+    source: HarnessSource.optional(),
+    defaultModel: z.string().trim().min(1).max(200),
+    models: z.array(HarnessModel).max(200),
+    probedAt: Timestamp,
   })
   .meta({ id: "HarnessCatalogEntry" });
 export type HarnessCatalogEntry = z.infer<typeof HarnessCatalogEntry>;
 
-/** The live Harness catalog a Runner publishes to Orrery. */
+/** A live Runner's locally discovered harnesses, published separately from heartbeats. */
 export const HarnessCatalog = z
   .object({
     harnesses: z.array(HarnessCatalogEntry).max(64),
-    updatedAt: Timestamp,
+    probedAt: Timestamp,
   })
   .meta({ id: "HarnessCatalog" });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
 
+/** Newly registered Runners start with an empty catalog until their first probe. */
+export const EMPTY_HARNESS_CATALOG: HarnessCatalog = {
+  harnesses: [],
+  probedAt: "1970-01-01T00:00:00.000Z",
+};
+
+const laterTimestamp = (a: string, b: string): string => (Date.parse(a) >= Date.parse(b) ? a : b);
+
 /**
- * Merges a freshly discovered catalog into a stored one without regressing
- * per-model reasoning-effort knowledge: a model entry whose effort levels are
- * already `"known"` stays `"known"` even when a slower startup probe or a
- * later refresh reports it `"unknown"` (issue #240). Harness entries the
- * incoming catalog no longer reports are preserved so a failed probe never
- * erases a previously discovered Harness.
+ * Fold a slower/stale catalog refresh into the last published one. A model whose
+ * effort levels were discovered once must never regress to `unknown` just because
+ * a later probe only saw its default model (or a delayed refresh arrives late).
+ * Harnesses that are no longer advertised are dropped, so the catalog reflects
+ * what is installed now (#240).
  */
 export function mergeHarnessCatalog(
-  stored: HarnessCatalog,
+  stored: HarnessCatalog | undefined | null,
   incoming: HarnessCatalog,
 ): HarnessCatalog {
-  const merged = new Map<string, HarnessCatalogEntry>();
-  for (const harness of stored.harnesses) merged.set(harness.id, harness);
-  for (const harness of incoming.harnesses) {
-    const previous = merged.get(harness.id);
-    if (previous === undefined) {
-      merged.set(harness.id, harness);
-      continue;
-    }
-    const models = new Map(previous.models.map((model) => [model.id, model]));
+  if (stored === undefined || stored === null) return HarnessCatalog.parse(incoming);
+  const known = new Map<string, HarnessModel>();
+  for (const harness of stored.harnesses) {
     for (const model of harness.models) {
-      const before = models.get(model.id);
-      models.set(
-        model.id,
-        before !== undefined &&
-          before.reasoningDiscovery === "known" &&
-          model.reasoningDiscovery !== "known"
-          ? before
-          : model,
-      );
+      if (model.reasoningDiscovery === "known") {
+        known.set(`${harness.id}\u0000${model.id}`, model);
+      }
     }
-    merged.set(harness.id, { ...harness, models: [...models.values()] });
   }
-  return {
-    harnesses: [...merged.values()],
-    updatedAt: incoming.updatedAt > stored.updatedAt ? incoming.updatedAt : stored.updatedAt,
-  };
+  return HarnessCatalog.parse({
+    probedAt: laterTimestamp(stored.probedAt, incoming.probedAt),
+    harnesses: incoming.harnesses.map((harness) => {
+      const previous = stored.harnesses.find((item) => item.id === harness.id);
+      return {
+        ...harness,
+        ...(previous === undefined ? {} : { probedAt: laterTimestamp(previous.probedAt, harness.probedAt) }),
+        models: harness.models.map((model) => {
+          const key = `${harness.id}\u0000${model.id}`;
+          const prior = known.get(key);
+          // A known entry with no effort levels is not evidence that the
+          // previously discovered levels disappeared (#242 partial probes).
+          if (
+            model.reasoningDiscovery === "known" &&
+            prior !== undefined &&
+            (model.supportedEfforts?.length ?? 0) === 0 &&
+            (prior.supportedEfforts?.length ?? 0) > 0
+          ) {
+            return prior;
+          }
+          if (model.reasoningDiscovery === "known") return model;
+          if (prior === undefined) return model;
+          return {
+            ...model,
+            ...(prior.label === undefined ? {} : { label: prior.label }),
+            reasoningDiscovery: "known",
+            ...(prior.supportedEfforts === undefined
+              ? {}
+              : { supportedEfforts: [...prior.supportedEfforts] }),
+            ...(prior.defaultEffort === undefined ? {} : { defaultEffort: prior.defaultEffort }),
+            probedAt: model.probedAt ?? prior.probedAt,
+          };
+        }),
+      };
+    }),
+  });
 }
 
 export const Runner = z
@@ -176,7 +199,7 @@ export const Runner = z
     repoFingerprint: Sha256Hex,
     capabilities: z.array(z.string().min(1).max(64)).max(64),
     /** The live Harness catalog this Runner published, or null before discovery. */
-    harnessCatalog: HarnessCatalog.nullable(),
+    harnessCatalog: HarnessCatalog,
     maxConcurrency: z.int().min(1).max(64),
     activeSlotCount: z.int().min(0).max(64),
     lastSeenAt: Timestamp,
@@ -308,11 +331,30 @@ export type DispatchAttemptId = z.infer<typeof DispatchAttemptId>;
  * appends it after its operational worktree/MCP preamble; every project reader
  * may see it, so it must never carry secrets.
  */
+export const MAX_DISPATCH_PROMPT_LENGTH = 16_000;
+
+/**
+ * The prompt bound is measured in Unicode code points, the same unit as
+ * Postgres `char_length`. Zod's string `.max` would count UTF-16 code units,
+ * so the limit is expressed as a refinement over the trimmed value instead.
+ */
 export const DispatchPrompt = z
   .string()
-  .max(16000, "Use at most 16,000 characters.")
+  .trim()
+  .refine((value) => Array.from(value).length <= MAX_DISPATCH_PROMPT_LENGTH, {
+    message: "Use at most 16,000 characters.",
+  })
   .meta({ id: "DispatchPrompt" });
 export type DispatchPrompt = z.infer<typeof DispatchPrompt>;
+
+/**
+ * Only the response field is nullable; requests keep blank-as-omitted. The
+ * separate component id keeps the shared `DispatchPrompt` schema string-only
+ * in OpenAPI instead of inheriting nullability from `.nullable()`.
+ */
+export const NullableDispatchPrompt = DispatchPrompt.nullable().meta({
+  id: "NullableDispatchPrompt",
+});
 
 /** Database-backed reconciliation state of a Dispatch. */
 export const DispatchState = z
@@ -333,7 +375,7 @@ export const Dispatch = z
     agentId: z.string(),
     dispatchAttemptId: DispatchAttemptId,
     state: DispatchState,
-    prompt: DispatchPrompt.nullable(),
+    prompt: NullableDispatchPrompt,
     runId: z.string().nullable(),
     workSessionId: z.string().nullable(),
     lastUpSeq: z.int().min(0),
