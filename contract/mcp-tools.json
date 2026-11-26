@@ -4808,6 +4808,8 @@
             "project_created",
             "project_renamed",
             "project_fallback_policy_changed",
+            "project_deleted",
+            "project_restored",
             "issue_created",
             "issue_edited",
             "issue_commented",

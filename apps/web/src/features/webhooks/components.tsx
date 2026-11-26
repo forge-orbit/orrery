@@ -56,6 +56,8 @@ const eventLabels: Record<WebhookEvent, string> = {
   project_created: "Project created",
   project_renamed: "Project renamed",
   project_fallback_policy_changed: "Project fallback policy changed",
+  project_deleted: "Project moved to Trash",
+  project_restored: "Project restored from Trash",
   project_label_created: "Project label created",
   project_label_edited: "Project label edited",
   project_label_deleted: "Project label deleted",
@@ -94,7 +96,13 @@ const eventGroups: readonly {
 }[] = [
   {
     title: "Project",
-    events: ["project_created", "project_renamed", "project_fallback_policy_changed"],
+    events: [
+      "project_created",
+      "project_renamed",
+      "project_fallback_policy_changed",
+      "project_deleted",
+      "project_restored",
+    ],
   },
   {
     title: "Issues",

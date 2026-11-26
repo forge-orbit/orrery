@@ -45,7 +45,18 @@ import { useState } from "react";
 import { sessionQuery } from "../features/accounts/index.ts";
 import { AgentsSection, agentKeysQuery, agentsQuery } from "../features/agents/index.ts";
 import { InvitationList } from "../features/invitations/index.ts";
-import { createProject, projectQuery, projectsQuery } from "../features/projects/index.ts";
+import {
+  createProject,
+  issuesQuery,
+  knowledgeEntriesQuery,
+  projectActivityQuery,
+  projectLabelsQuery,
+  projectQuery,
+  projectsQuery,
+  restoreProject,
+  workspaceTrashProjectsQuery,
+} from "../features/projects/index.ts";
+import { workspaceHistoryQuery } from "../features/history/index.ts";
 import { RunnersSection } from "../features/runners/index.ts";
 import { RunsSection, workspaceRunsQuery } from "../features/runs/index.ts";
 import { WebhooksSection, workspaceWebhooksQuery } from "../features/webhooks/index.ts";
@@ -67,6 +78,7 @@ import { HumanAvatar } from "../lib/avatar.tsx";
 import { TextAreaField, TextField } from "../lib/fields.tsx";
 import { Link } from "../lib/Link.tsx";
 import { PageHeader } from "../lib/PageHeader.tsx";
+import { formatFullDateTime } from "../lib/time.ts";
 
 const capabilityLabels: Record<WorkspaceCapability, string> = {
   canCreateProjects: "Create projects",
@@ -122,7 +134,7 @@ type PermissionDraft = {
   capabilities: Partial<Record<WorkspaceCapability, boolean>>;
 };
 
-type WorkspaceTab = "projects" | "agents" | "runs" | "runners" | "members" | "webhooks";
+type WorkspaceTab = "projects" | "trash" | "agents" | "runs" | "runners" | "members" | "webhooks";
 
 export const Route = createFileRoute("/workspaces/$workspaceId")({
   loader: async ({ context, params }) => {
@@ -142,6 +154,9 @@ export const Route = createFileRoute("/workspaces/$workspaceId")({
         : []),
       ...(workspace.isOwner
         ? [context.queryClient.ensureQueryData(workspaceWebhooksQuery(params.workspaceId))]
+        : []),
+      ...(workspace.isOwner
+        ? [context.queryClient.ensureQueryData(workspaceTrashProjectsQuery(params.workspaceId))]
         : []),
     ];
     await Promise.all(loads);
@@ -171,7 +186,9 @@ function WorkspacePage() {
   const showMembersTab = mayManageMembers(workspace) || mayInvite(workspace);
   const showWebhooksTab = workspace.isOwner;
   const activeTab: WorkspaceTab =
-    (tab === "members" && !showMembersTab) || (tab === "webhooks" && !showWebhooksTab)
+    (tab === "trash" && !workspace.isOwner) ||
+    (tab === "members" && !showMembersTab) ||
+    (tab === "webhooks" && !showWebhooksTab)
       ? "projects"
       : tab;
 
@@ -234,6 +251,7 @@ function WorkspacePage() {
         onChange={(value) => {
           if (
             value === "projects" ||
+            value === "trash" ||
             value === "agents" ||
             value === "runs" ||
             value === "runners" ||
@@ -254,6 +272,7 @@ function WorkspacePage() {
           panelId="panel-projects"
           endContent={<Badge label={projects.length} />}
         />
+        {workspace.isOwner && <Tab value="trash" label="Trash" panelId="panel-trash" />}
         <Tab
           value="agents"
           label="Agents"
@@ -300,6 +319,12 @@ function WorkspacePage() {
             canCreate={canCreate}
             onCreateClick={() => setCreateProjectOpen(true)}
           />
+        </Stack>
+      )}
+
+      {activeTab === "trash" && workspace.isOwner && (
+        <Stack as="section" id="panel-trash" role="tabpanel" gap={4}>
+          <WorkspaceTrash workspaceId={workspace.id} />
         </Stack>
       )}
 
@@ -392,6 +417,140 @@ function WorkspacePage() {
         </Drawer>
       )}
     </Stack>
+  );
+}
+
+function WorkspaceTrash({ workspaceId }: { workspaceId: string }) {
+  const { data: trash } = useSuspenseQuery(workspaceTrashProjectsQuery(workspaceId));
+  const { projects } = trash;
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [error, setError] = useState<string>();
+  const [restoringProjectId, setRestoringProjectId] = useState<string>();
+
+  async function onRestore(projectId: string, projectName: string) {
+    if (restoringProjectId !== undefined) return;
+    setRestoringProjectId(projectId);
+    setError(undefined);
+    try {
+      const restored = await restoreProject(projectId);
+      queryClient.setQueryData(projectQuery(restored.id).queryKey, restored);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: projectsQuery(workspaceId).queryKey }),
+        queryClient.invalidateQueries({
+          queryKey: workspaceTrashProjectsQuery(workspaceId).queryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: workspaceHistoryQuery(workspaceId).queryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: projectActivityQuery(restored.id).queryKey,
+        }),
+        queryClient.invalidateQueries({ queryKey: issuesQuery(restored.id).queryKey }),
+        queryClient.invalidateQueries({
+          queryKey: knowledgeEntriesQuery(restored.id).queryKey,
+        }),
+        queryClient.invalidateQueries({ queryKey: projectLabelsQuery(restored.id).queryKey }),
+      ]);
+      toast({ body: `Restored "${projectName}" from Workspace Trash.` });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not restore the project.");
+    } finally {
+      setRestoringProjectId(undefined);
+    }
+  }
+
+  return (
+    <Section padding={4}>
+      <Stack gap={3}>
+        <Stack gap={1}>
+          <Heading level={2} color="inherit">
+            Workspace Trash
+          </Heading>
+          <Text as="p" type="supporting" color="secondary">
+            Trashed projects can be restored for 30 days after deletion. Projects are then purged
+            automatically.
+          </Text>
+        </Stack>
+        {error !== undefined && (
+          <Banner
+            status="error"
+            role="alert"
+            title="Could not restore project"
+            description={error}
+            collapsible={false}
+          />
+        )}
+        {projects.length === 0 ? (
+          <EmptyState
+            title="Trash is empty"
+            description="Projects moved to Trash will appear here for 30 days."
+            isCompact
+            headingLevel={3}
+          />
+        ) : (
+          <Table aria-label="Trashed projects">
+            <TableHeader>
+              <TableRow>
+                <TableHeaderCell>Project</TableHeaderCell>
+                <TableHeaderCell>Moved to Trash</TableHeaderCell>
+                <TableHeaderCell>Recovery time left</TableHeaderCell>
+                <TableHeaderCell>Actions</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {projects.map((project) => {
+                const daysRemaining = Math.max(
+                  1,
+                  Math.ceil(
+                    (Date.parse(project.deletedAt) + 30 * 24 * 60 * 60 * 1000 - trash.fetchedAt) /
+                      (24 * 60 * 60 * 1000),
+                  ),
+                );
+                return (
+                  <TableRow key={project.id} data-trashed-project-id={project.id}>
+                    <TableCell>
+                      <Stack gap={0.5}>
+                        <Text type="label">{project.name}</Text>
+                        <Text type="supporting" color="secondary">
+                          {project.key}
+                        </Text>
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Text type="supporting" color="secondary">
+                        <time
+                          dateTime={project.deletedAt}
+                          title={formatFullDateTime(project.deletedAt)}
+                        >
+                          {formatFullDateTime(project.deletedAt)}
+                        </time>
+                      </Text>
+                    </TableCell>
+                    <TableCell>
+                      <Text type="supporting" color="secondary">
+                        {daysRemaining} {daysRemaining === 1 ? "day" : "days"} remaining
+                      </Text>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        type="button"
+                        label="Restore"
+                        variant="secondary"
+                        size="sm"
+                        isLoading={restoringProjectId === project.id}
+                        isDisabled={restoringProjectId !== undefined}
+                        onClick={() => void onRestore(project.id, project.name)}
+                      />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </Stack>
+    </Section>
   );
 }
 

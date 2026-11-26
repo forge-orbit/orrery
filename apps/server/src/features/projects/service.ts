@@ -35,6 +35,7 @@ import {
   type ProjectActivity,
   type ProjectActivityType,
   type ProjectLabel,
+  type TrashedProject,
   type SetIssueFallbackPolicyRequest,
   type SetProjectAccessRequest,
   type SetProjectFallbackPolicyRequest,
@@ -59,14 +60,23 @@ import {
   issueLinks,
   issues,
   knowledgeEntries,
+  notifications,
   projectAccessEvents,
   projectAccessGrants,
   projectActivity,
   projectLabels,
+  projectTransferAuthorizations,
   projects,
   questions,
+  runnerDispatches,
+  runners,
+  storedObjects,
+  webhookProjects,
+  workspaceInvitationGrants,
   workspaceMemberships,
+  workspaceEvents,
   workspaces,
+  workSessions,
 } from "../../db/schema.ts";
 import type { SessionAccount } from "../accounts/index.ts";
 import { attachmentHolderKey, type AttachmentSeams } from "../attachments/index.ts";
@@ -104,7 +114,11 @@ export type ProjectsErrorKind =
   | "issue_active_session_exists"
   | "issue_needs_input"
   | "issue_purged"
-  | "knowledge_entry_purged";
+  | "knowledge_entry_purged"
+  | "agents_cannot_delete_projects"
+  | "workspace_owner_required"
+  | "project_active_work_exists"
+  | "project_purged";
 
 const messages = {
   not_signed_in: "Not signed in.",
@@ -141,6 +155,12 @@ const messages = {
   issue_purged: "This issue's trash window has ended and it can no longer be restored.",
   knowledge_entry_purged:
     "This knowledge entry's trash window has ended and it can no longer be restored.",
+  agents_cannot_delete_projects:
+    "Agents cannot delete or restore projects; only a workspace owner can.",
+  workspace_owner_required: "Only a workspace owner can manage project Trash.",
+  project_active_work_exists:
+    "This project has active work or a dispatch; stop it before deleting the project.",
+  project_purged: "This project's trash window has ended and it can no longer be restored.",
 } as const satisfies Record<ProjectsErrorKind, string>;
 
 const ACCESS_RANK: Record<ProjectAccessLevel, number> = {
@@ -228,7 +248,7 @@ export async function projectAccessCeilingInTransaction(
       projectAccessGrants,
       and(eq(projectAccessGrants.projectId, projects.id), eq(projectAccessGrants.humanId, humanId)),
     )
-    .where(inArray(projects.id, uniqueProjectIds));
+    .where(and(inArray(projects.id, uniqueProjectIds), isNull(projects.deletedAt)));
 
   const rowsById = new Map(rows.map((row) => [row.id, row]));
   const workspaceKind = WorkspaceKind.parse(workspace.kind);
@@ -307,6 +327,12 @@ export type WorkActor =
 
 function requireActor(actor: WorkActor | null): WorkActor {
   if (actor === null) throw new ProjectsError("not_signed_in");
+  return actor;
+}
+
+function requireProjectHuman(actorArg: WorkActor | null): Extract<WorkActor, { kind: "human" }> {
+  const actor = requireActor(actorArg);
+  if (actor.kind === "agent") throw new ProjectsError("agents_cannot_delete_projects");
   return actor;
 }
 
@@ -455,6 +481,7 @@ const labelAgentCreator = alias(agents, "label_agent_creator");
 const dependencyHumanCreator = alias(humans, "dependency_human_creator");
 const dependencyAgentCreator = alias(agents, "dependency_agent_creator");
 const blockerIssue = alias(issues, "blocker_issue");
+const blockerProject = alias(projects, "blocker_project");
 
 const projectColumns = {
   id: projects.id,
@@ -1077,6 +1104,21 @@ async function readWorkspaceFacts(
   };
 }
 
+async function readProjectWorkspaceFacts(
+  tx: DbTransaction,
+  workspaceId: string,
+  humanId: string,
+): Promise<WorkspaceFacts> {
+  try {
+    return await readWorkspaceFacts(tx, workspaceId, humanId);
+  } catch (error) {
+    if (error instanceof ProjectsError && error.kind === "workspace_not_found") {
+      throw new ProjectsError("project_not_found");
+    }
+    throw error;
+  }
+}
+
 async function requireProject(
   tx: DbTransaction,
   projectId: string,
@@ -1101,7 +1143,7 @@ async function requireProject(
       and(eq(workspaceMemberships.workspaceId, projects.workspaceId), membershipMatch),
     )
     .leftJoin(projectAccessGrants, and(eq(projectAccessGrants.projectId, projects.id), grantMatch))
-    .where(eq(projects.id, projectId))
+    .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
     .limit(1);
 
   if (row === undefined) throw new ProjectsError("project_not_found");
@@ -1165,8 +1207,8 @@ async function requireIssue(
     .leftJoin(projectAccessGrants, and(eq(projectAccessGrants.projectId, projects.id), grantMatch))
     .where(
       includeDeleted
-        ? eq(issues.id, issueId)
-        : and(eq(issues.id, issueId), isNull(issues.deletedAt)),
+        ? and(eq(issues.id, issueId), isNull(projects.deletedAt))
+        : and(eq(issues.id, issueId), isNull(issues.deletedAt), isNull(projects.deletedAt)),
     )
     .limit(1);
 
@@ -1214,7 +1256,14 @@ async function loadBlockedByIdsForIssues(
     })
     .from(issueDependencies)
     .innerJoin(blockerIssue, eq(blockerIssue.id, issueDependencies.blockedByIssueId))
-    .where(and(inArray(issueDependencies.issueId, [...issueIds]), isNull(blockerIssue.deletedAt)))
+    .innerJoin(blockerProject, eq(blockerProject.id, blockerIssue.projectId))
+    .where(
+      and(
+        inArray(issueDependencies.issueId, [...issueIds]),
+        isNull(blockerIssue.deletedAt),
+        isNull(blockerProject.deletedAt),
+      ),
+    )
     .orderBy(issueDependencies.issueId, issueDependencies.blockedByIssueId);
   for (const row of rows) {
     const list = grouped.get(row.issueId) ?? [];
@@ -1271,7 +1320,7 @@ async function requireLabel(
       and(eq(workspaceMemberships.workspaceId, projects.workspaceId), membershipMatch),
     )
     .leftJoin(projectAccessGrants, and(eq(projectAccessGrants.projectId, projects.id), grantMatch))
-    .where(eq(projectLabels.id, labelId))
+    .where(and(eq(projectLabels.id, labelId), isNull(projects.deletedAt)))
     .limit(1);
 
   if (row === undefined) throw new ProjectsError("label_not_found");
@@ -1463,8 +1512,12 @@ async function requireKnowledge(
     .leftJoin(projectAccessGrants, and(eq(projectAccessGrants.projectId, projects.id), grantMatch))
     .where(
       includeDeleted
-        ? eq(knowledgeEntries.id, entryId)
-        : and(eq(knowledgeEntries.id, entryId), isNull(knowledgeEntries.deletedAt)),
+        ? and(eq(knowledgeEntries.id, entryId), isNull(projects.deletedAt))
+        : and(
+            eq(knowledgeEntries.id, entryId),
+            isNull(knowledgeEntries.deletedAt),
+            isNull(projects.deletedAt),
+          ),
     )
     .limit(1);
 
@@ -1479,6 +1532,8 @@ type RecordActivityInput =
         | "project_created"
         | "project_renamed"
         | "project_fallback_policy_changed"
+        | "project_deleted"
+        | "project_restored"
         | "project_label_created"
         | "project_label_edited"
         | "project_label_deleted";
@@ -1640,23 +1695,27 @@ async function applyInvitationGrantsInTransaction(
   await lockWorkspaceOwnershipWrites(tx);
   const projectIds = [...new Set(offered.map((grant) => grant.projectId))];
   const currentProjects = await tx
-    .select({ id: projects.id, workspaceId: projects.workspaceId })
+    .select({ id: projects.id, workspaceId: projects.workspaceId, deletedAt: projects.deletedAt })
     .from(projects)
     .where(inArray(projects.id, projectIds));
-  const currentWorkspaceByProject = new Map(
-    currentProjects.map((project) => [project.id, project.workspaceId]),
-  );
+  const currentById = new Map(currentProjects.map((project) => [project.id, project]));
   const invalid = projectIds.filter(
-    (projectId) => currentWorkspaceByProject.get(projectId) !== workspaceId,
+    (projectId) => currentById.get(projectId)?.workspaceId !== workspaceId,
   );
   if (invalid.length > 0) return invalid;
+
+  const activeProjectIds = currentProjects
+    .filter((project) => project.deletedAt === null)
+    .map((project) => project.id);
+  if (activeProjectIds.length === 0) return [];
+  const activeProjectIdSet = new Set(activeProjectIds);
 
   const existing = await tx
     .select({ projectId: projectAccessGrants.projectId, level: projectAccessGrants.level })
     .from(projectAccessGrants)
     .where(
       and(
-        inArray(projectAccessGrants.projectId, projectIds),
+        inArray(projectAccessGrants.projectId, activeProjectIds),
         eq(projectAccessGrants.humanId, humanId),
       ),
     );
@@ -1670,6 +1729,7 @@ async function applyInvitationGrantsInTransaction(
     currentLevel: ProjectAccessLevel | null;
   }[] = [];
   for (const offer of offered) {
+    if (!activeProjectIdSet.has(offer.projectId)) continue;
     const currentLevel = levelByProject.get(offer.projectId) ?? null;
     const nextLevel =
       currentLevel === null || ACCESS_RANK[offer.level] > ACCESS_RANK[currentLevel]
@@ -1811,6 +1871,12 @@ async function freezeDueQuestions(
 export interface ProjectsService {
   listProjects(actor: WorkActor | null, workspaceId: string): Promise<Project[]>;
   getProject(actor: WorkActor | null, projectId: string): Promise<Project>;
+  deleteProject(actor: WorkActor | null, projectId: string): Promise<void>;
+  restoreProject(actor: WorkActor | null, projectId: string): Promise<Project>;
+  listWorkspaceProjectTrash(
+    actor: WorkActor | null,
+    workspaceId: string,
+  ): Promise<TrashedProject[]>;
   createProject(
     account: SessionAccount | null,
     workspaceId: string,
@@ -2131,14 +2197,15 @@ export function createProjectsService({
               ),
             )
             .where(
-              workspace.kind === WorkspaceKind.enum.personal
-                ? eq(projects.workspaceId, workspaceId)
-                : workspace.isOwner
+              and(
+                workspace.kind === WorkspaceKind.enum.personal || workspace.isOwner
                   ? eq(projects.workspaceId, workspaceId)
                   : and(
                       eq(projects.workspaceId, workspaceId),
                       isNotNull(projectAccessGrants.level),
                     ),
+                isNull(projects.deletedAt),
+              ),
             )
             .orderBy(projects.createdAt, projects.id);
 
@@ -2161,6 +2228,201 @@ export function createProjectsService({
       );
     },
 
+    async deleteProject(actorArg, projectId) {
+      const actor = requireProjectHuman(actorArg);
+      await db.transaction(async (tx) => {
+        await tx
+          .select({ id: projectTransferAuthorizations.id })
+          .from(projectTransferAuthorizations)
+          .where(
+            and(
+              eq(projectTransferAuthorizations.projectId, projectId),
+              eq(projectTransferAuthorizations.status, "pending"),
+            ),
+          )
+          .orderBy(projectTransferAuthorizations.id)
+          .for("update");
+        await lockWorkspaceOwnershipWrites(tx);
+        await lockProjectForMutation(tx, projectId);
+        const [project] = await tx
+          .select({
+            id: projects.id,
+            workspaceId: projects.workspaceId,
+            name: projects.name,
+            deletedAt: projects.deletedAt,
+          })
+          .from(projects)
+          .where(eq(projects.id, projectId))
+          .limit(1);
+        if (project === undefined) throw new ProjectsError("project_not_found");
+
+        const workspace = await readProjectWorkspaceFacts(
+          tx,
+          project.workspaceId,
+          actor.account.humanId,
+        );
+        if (!workspace.isOwner) throw new ProjectsError("workspace_owner_required");
+        if (project.deletedAt !== null) throw new ProjectsError("project_not_found");
+
+        const [activeSession] = await tx
+          .select({ id: workSessions.id })
+          .from(workSessions)
+          .innerJoin(issues, eq(issues.id, workSessions.issueId))
+          .where(
+            and(
+              eq(issues.projectId, projectId),
+              eq(workSessions.status, "active"),
+              gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+            ),
+          )
+          .limit(1);
+        const [activeDispatch] = await tx
+          .select({ id: runnerDispatches.id })
+          .from(runnerDispatches)
+          .where(
+            and(
+              eq(runnerDispatches.projectId, projectId),
+              inArray(runnerDispatches.state, ["pending", "active", "uncertain"]),
+              isNull(runnerDispatches.endedAt),
+            ),
+          )
+          .limit(1);
+        if (activeSession !== undefined || activeDispatch !== undefined) {
+          throw new ProjectsError("project_active_work_exists");
+        }
+
+        await tx
+          .update(projectTransferAuthorizations)
+          .set({ status: "revoked", revokedAt: sql`statement_timestamp()` })
+          .where(
+            and(
+              eq(projectTransferAuthorizations.projectId, projectId),
+              eq(projectTransferAuthorizations.status, "pending"),
+            ),
+          );
+        await tx
+          .update(projects)
+          .set({
+            deletedAt: sql`statement_timestamp()`,
+            deletedByHumanId: actor.account.humanId,
+          })
+          .where(eq(projects.id, projectId));
+        await recordActivity(tx, {
+          projectId,
+          type: "project_deleted",
+          actor,
+          summary: project.name,
+        });
+        await tx.insert(workspaceEvents).values({
+          id: randomUUID(),
+          workspaceId: project.workspaceId,
+          type: "project_deleted",
+          actorHumanId: actor.account.humanId,
+          subjectHumanId: actor.account.humanId,
+          createdAt: sql`statement_timestamp()`,
+        });
+      });
+    },
+
+    async restoreProject(actorArg, projectId) {
+      const actor = requireProjectHuman(actorArg);
+      return db.transaction(async (tx) => {
+        await lockWorkspaceOwnershipWrites(tx);
+        await lockProjectForMutation(tx, projectId);
+        const [project] = await tx
+          .select({
+            id: projects.id,
+            workspaceId: projects.workspaceId,
+            name: projects.name,
+            deletedAt: projects.deletedAt,
+            deletedByHumanId: projects.deletedByHumanId,
+            purgedAt: projects.purgedAt,
+            trashExpired: sql<boolean>`${projects.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+          })
+          .from(projects)
+          .where(eq(projects.id, projectId))
+          .limit(1);
+        if (project === undefined) throw new ProjectsError("project_not_found");
+
+        const workspace = await readProjectWorkspaceFacts(
+          tx,
+          project.workspaceId,
+          actor.account.humanId,
+        );
+        if (!workspace.isOwner) throw new ProjectsError("workspace_owner_required");
+        if (project.deletedAt === null || project.deletedByHumanId === null) {
+          throw new ProjectsError("project_not_found");
+        }
+        if (project.purgedAt !== null || project.trashExpired) {
+          throw new ProjectsError("project_purged");
+        }
+
+        await tx
+          .update(projects)
+          .set({ deletedAt: null, deletedByHumanId: null })
+          .where(eq(projects.id, projectId));
+        await recordActivity(tx, {
+          projectId,
+          type: "project_restored",
+          actor,
+          summary: project.name,
+        });
+        await tx.insert(workspaceEvents).values({
+          id: randomUUID(),
+          workspaceId: project.workspaceId,
+          type: "project_restored",
+          actorHumanId: actor.account.humanId,
+          subjectHumanId: actor.account.humanId,
+          createdAt: sql`statement_timestamp()`,
+        });
+        return toProject(
+          await requireProject(tx, projectId, actor, ProjectAccessLevel.enum.manage),
+        );
+      });
+    },
+
+    async listWorkspaceProjectTrash(actorArg, workspaceId) {
+      const actor = requireProjectHuman(actorArg);
+      return db.transaction(
+        async (tx) => {
+          const workspace = await readWorkspaceFacts(tx, workspaceId, actor.account.humanId);
+          if (!workspace.isOwner) throw new ProjectsError("workspace_owner_required");
+          const rows = await tx
+            .select({
+              ...projectColumns,
+              workspaceKind: workspaces.kind,
+              deletedAt: projects.deletedAt,
+              deletedByHumanId: projects.deletedByHumanId,
+            })
+            .from(projects)
+            .innerJoin(workspaces, eq(workspaces.id, projects.workspaceId))
+            .innerJoin(projectCreator, eq(projectCreator.id, projects.createdByHumanId))
+            .where(
+              and(
+                eq(projects.workspaceId, workspaceId),
+                isNotNull(projects.deletedAt),
+                isNull(projects.purgedAt),
+                gt(projects.deletedAt, THIRTY_DAYS_AGO),
+              ),
+            )
+            .orderBy(projects.deletedAt, projects.id);
+          return rows.map((row) => {
+            if (row.deletedAt === null || row.deletedByHumanId === null) {
+              throw new Error("project trash row violated its deletion constraints");
+            }
+            return Object.assign(
+              toProject({ ...row, accessLevel: ProjectAccessLevel.enum.manage }),
+              {
+                deletedAt: row.deletedAt.toISOString(),
+                deletedByHumanId: row.deletedByHumanId,
+              },
+            );
+          });
+        },
+        { accessMode: "read only" },
+      );
+    },
+
     async createProject(account, workspaceId, input) {
       const actor = requireAccount(account);
       const workActor: WorkActor = { kind: "human", account: actor };
@@ -2175,7 +2437,7 @@ export function createProjectsService({
         const existing = await tx
           .select({ key: projects.key })
           .from(projects)
-          .where(eq(projects.workspaceId, workspaceId));
+          .where(and(eq(projects.workspaceId, workspaceId), isNull(projects.purgedAt)));
         const used = new Set(existing.map((row) => row.key));
         const key = input.key ?? availableProjectKey(baseProjectKey(input.name), used);
         if (used.has(key)) throw new ProjectsError("project_key_taken");
@@ -2829,32 +3091,102 @@ export function createProjectsService({
 
     async purgeExpiredTrash() {
       return db.transaction(async (tx) => {
-        const expired = await tx
-          .select({ id: issues.id })
-          .from(issues)
+        const expiredProjects = await tx
+          .select({
+            id: projects.id,
+            deletedAt: projects.deletedAt,
+            deletedByHumanId: projects.deletedByHumanId,
+          })
+          .from(projects)
           .where(
             and(
-              isNotNull(issues.deletedAt),
-              isNull(issues.purgedAt),
-              sql`${issues.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+              isNotNull(projects.deletedAt),
+              isNull(projects.purgedAt),
+              sql`${projects.deletedAt} <= ${THIRTY_DAYS_AGO}`,
             ),
+          )
+          .orderBy(projects.id)
+          .for("update", { skipLocked: true });
+        const expiredProjectIds = expiredProjects.map((row) => row.id);
+        const expiredIssueClause = and(
+          isNotNull(issues.deletedAt),
+          isNull(issues.purgedAt),
+          sql`${issues.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+        );
+        const lockedIssues = await tx
+          .select({ id: issues.id, projectId: issues.projectId, purgedAt: issues.purgedAt })
+          .from(issues)
+          .where(
+            expiredProjectIds.length > 0
+              ? or(inArray(issues.projectId, expiredProjectIds), expiredIssueClause)
+              : expiredIssueClause,
           )
           .orderBy(issues.id)
           .for("update", { skipLocked: true });
-        const expiredIds = expired.map((row) => row.id);
-        const expiredKnowledge = await tx
-          .select({ id: knowledgeEntries.id })
+        const expiredKnowledgeClause = and(
+          isNotNull(knowledgeEntries.deletedAt),
+          isNull(knowledgeEntries.purgedAt),
+          sql`${knowledgeEntries.deletedAt} <= ${THIRTY_DAYS_AGO}`,
+        );
+        const lockedKnowledge = await tx
+          .select({
+            id: knowledgeEntries.id,
+            projectId: knowledgeEntries.projectId,
+            purgedAt: knowledgeEntries.purgedAt,
+          })
           .from(knowledgeEntries)
           .where(
-            and(
-              isNotNull(knowledgeEntries.deletedAt),
-              isNull(knowledgeEntries.purgedAt),
-              sql`${knowledgeEntries.deletedAt} <= ${THIRTY_DAYS_AGO}`,
-            ),
+            expiredProjectIds.length > 0
+              ? or(inArray(knowledgeEntries.projectId, expiredProjectIds), expiredKnowledgeClause)
+              : expiredKnowledgeClause,
           )
           .orderBy(knowledgeEntries.id)
           .for("update", { skipLocked: true });
-        const expiredKnowledgeIds = expiredKnowledge.map((row) => row.id);
+
+        if (expiredProjectIds.length > 0) {
+          await tx
+            .update(issues)
+            .set({
+              deletedAt: sql`coalesce(${issues.deletedAt}, ${projects.deletedAt})`,
+              deletedByHumanId: sql`coalesce(${issues.deletedByHumanId}, ${projects.deletedByHumanId})`,
+            })
+            .from(projects)
+            .where(
+              and(
+                eq(issues.projectId, projects.id),
+                inArray(projects.id, expiredProjectIds),
+                isNull(issues.deletedAt),
+              ),
+            );
+          await tx
+            .update(knowledgeEntries)
+            .set({
+              deletedAt: sql`coalesce(${knowledgeEntries.deletedAt}, ${projects.deletedAt})`,
+              deletedByHumanId: sql`coalesce(${knowledgeEntries.deletedByHumanId}, ${projects.deletedByHumanId})`,
+            })
+            .from(projects)
+            .where(
+              and(
+                eq(knowledgeEntries.projectId, projects.id),
+                inArray(projects.id, expiredProjectIds),
+                isNull(knowledgeEntries.deletedAt),
+              ),
+            );
+        }
+
+        const expiredProjectIdSet = new Set(expiredProjectIds);
+        const projectIssueRows = lockedIssues.filter((row) =>
+          expiredProjectIdSet.has(row.projectId),
+        );
+        const expired = lockedIssues.filter((row) => !expiredProjectIdSet.has(row.projectId));
+        const projectKnowledgeRows = lockedKnowledge.filter((row) =>
+          expiredProjectIdSet.has(row.projectId),
+        );
+        const expiredKnowledge = lockedKnowledge.filter(
+          (row) => !expiredProjectIdSet.has(row.projectId),
+        );
+        const issueIdsToScrub = lockedIssues.map((row) => row.id);
+        const knowledgeIdsToScrub = lockedKnowledge.map((row) => row.id);
         // Collect every holder across the whole batch before locking any
         // attachment row: a per-issue purge could lock B from issue 1 then A
         // from issue 2 (A < B) and AB-BA deadlock against a save. One batch call
@@ -2863,30 +3195,33 @@ export function createProjectsService({
           holderType: "issue" | "comment" | "knowledge";
           holderId: string;
         }[] = [];
-        if (expiredIds.length > 0) {
+        if (issueIdsToScrub.length > 0) {
           // Comments are hard-deleted, so collect their holder ids before the
           // rows vanish. References from both the issue and its comments have to
           // be dropped before the zero-reference check.
           const comments = await tx
             .select({ id: issueComments.id })
             .from(issueComments)
-            .where(inArray(issueComments.issueId, expiredIds));
-          await tx.delete(issueComments).where(inArray(issueComments.issueId, expiredIds));
+            .where(inArray(issueComments.issueId, issueIdsToScrub));
+          await tx.delete(issueComments).where(inArray(issueComments.issueId, issueIdsToScrub));
           attachmentHolders.push(
-            ...expiredIds.map((issueId) => ({ holderType: "issue" as const, holderId: issueId })),
+            ...issueIdsToScrub.map((issueId) => ({
+              holderType: "issue" as const,
+              holderId: issueId,
+            })),
             ...comments.map((comment) => ({
               holderType: "comment" as const,
               holderId: comment.id,
             })),
           );
-          await tx.delete(issueLinks).where(inArray(issueLinks.issueId, expiredIds));
-          await tx.delete(issueLabels).where(inArray(issueLabels.issueId, expiredIds));
+          await tx.delete(issueLinks).where(inArray(issueLinks.issueId, issueIdsToScrub));
+          await tx.delete(issueLabels).where(inArray(issueLabels.issueId, issueIdsToScrub));
           await tx
             .delete(issueDependencies)
             .where(
               or(
-                inArray(issueDependencies.issueId, expiredIds),
-                inArray(issueDependencies.blockedByIssueId, expiredIds),
+                inArray(issueDependencies.issueId, issueIdsToScrub),
+                inArray(issueDependencies.blockedByIssueId, issueIdsToScrub),
               ),
             );
           await tx
@@ -2897,15 +3232,15 @@ export function createProjectsService({
               parentIssueId: null,
               assigneeType: null,
               assigneeId: null,
-              purgedAt: sql`statement_timestamp()`,
+              purgedAt: sql`coalesce(${issues.purgedAt}, statement_timestamp())`,
             })
-            .where(inArray(issues.id, expiredIds));
+            .where(inArray(issues.id, issueIdsToScrub));
         }
-        if (expiredKnowledgeIds.length > 0) {
+        if (knowledgeIdsToScrub.length > 0) {
           // Knowledge entries keep their attachment references while in Trash so a
           // restore stays whole; the references drop here, at purge.
           attachmentHolders.push(
-            ...expiredKnowledgeIds.map((entryId) => ({
+            ...knowledgeIdsToScrub.map((entryId) => ({
               holderType: "knowledge" as const,
               holderId: entryId,
             })),
@@ -2915,21 +3250,113 @@ export function createProjectsService({
             .set({
               title: "[deleted]",
               body: "",
-              purgedAt: sql`statement_timestamp()`,
+              purgedAt: sql`coalesce(${knowledgeEntries.purgedAt}, statement_timestamp())`,
             })
-            .where(inArray(knowledgeEntries.id, expiredKnowledgeIds));
+            .where(inArray(knowledgeEntries.id, knowledgeIdsToScrub));
         }
-        if (attachmentSeams !== undefined && attachmentHolders.length > 0) {
-          await attachmentSeams.purgeHolders(tx, attachmentHolders);
+        let releasedStreamObjectIds: string[] = [];
+        if (expiredProjectIds.length > 0) {
+          const projectSessions = await tx
+            .select({ id: workSessions.id, streamObjectId: workSessions.streamObjectId })
+            .from(workSessions)
+            .innerJoin(issues, eq(issues.id, workSessions.issueId))
+            .where(
+              and(
+                inArray(issues.projectId, expiredProjectIds),
+                isNotNull(workSessions.streamObjectId),
+              ),
+            )
+            .orderBy(workSessions.id)
+            .for("update", { of: workSessions });
+          const sessionIds = projectSessions.map((session) => session.id);
+          const streamObjectIds = [
+            ...new Set(projectSessions.flatMap((session) => session.streamObjectId ?? [])),
+          ];
+          if (sessionIds.length > 0) {
+            await tx
+              .update(workSessions)
+              .set({ streamObjectId: null, updatedAt: sql`statement_timestamp()` })
+              .where(inArray(workSessions.id, sessionIds));
+          }
+          if (streamObjectIds.length > 0) {
+            const stillReferenced = await tx
+              .selectDistinct({ id: workSessions.streamObjectId })
+              .from(workSessions)
+              .where(inArray(workSessions.streamObjectId, streamObjectIds));
+            const retainedIds = new Set(
+              stillReferenced.flatMap((row) => (row.id === null ? [] : [row.id])),
+            );
+            releasedStreamObjectIds = streamObjectIds.filter((id) => !retainedIds.has(id));
+          }
         }
 
-        if (expiredIds.length > 0) {
+        // Sessions are locked and detached before the attachment seam takes its
+        // one ascending-id lock pass. Only after both families are complete do
+        // we lock and mark their released stored_objects together.
+        const releasedAttachmentObjectIds =
+          attachmentSeams === undefined
+            ? []
+            : await attachmentSeams.purgeForTrash(tx, attachmentHolders, expiredProjectIds);
+        const releasedObjectIds = [
+          ...new Set([...releasedStreamObjectIds, ...releasedAttachmentObjectIds]),
+        ].toSorted();
+        if (releasedObjectIds.length > 0) {
+          await tx
+            .select({ id: storedObjects.id })
+            .from(storedObjects)
+            .where(inArray(storedObjects.id, releasedObjectIds))
+            .orderBy(storedObjects.id)
+            .for("update");
+          await tx
+            .update(storedObjects)
+            .set({ status: "deleted", deletedAt: sql`statement_timestamp()` })
+            .where(
+              and(inArray(storedObjects.id, releasedObjectIds), eq(storedObjects.status, "active")),
+            );
+        }
+
+        if (expiredProjectIds.length > 0) {
+          await tx
+            .delete(projectAccessGrants)
+            .where(inArray(projectAccessGrants.projectId, expiredProjectIds));
+          await tx
+            .delete(workspaceInvitationGrants)
+            .where(inArray(workspaceInvitationGrants.projectId, expiredProjectIds));
+          await tx
+            .delete(agentApiKeyProjects)
+            .where(inArray(agentApiKeyProjects.projectId, expiredProjectIds));
+          await tx.delete(projectLabels).where(inArray(projectLabels.projectId, expiredProjectIds));
+          await tx
+            .delete(projectTransferAuthorizations)
+            .where(inArray(projectTransferAuthorizations.projectId, expiredProjectIds));
+          await tx
+            .delete(webhookProjects)
+            .where(inArray(webhookProjects.projectId, expiredProjectIds));
+          await tx.delete(runners).where(inArray(runners.projectId, expiredProjectIds));
+          await tx.delete(notifications).where(inArray(notifications.projectId, expiredProjectIds));
+          await tx
+            .update(projects)
+            .set({
+              name: "[deleted]",
+              description: "",
+              purgedAt: sql`statement_timestamp()`,
+            })
+            .where(inArray(projects.id, expiredProjectIds));
+        }
+
+        if (issueIdsToScrub.length > 0) {
           await tx
             .update(issues)
             .set({ parentIssueId: null })
-            .where(inArray(issues.parentIssueId, expiredIds));
+            .where(inArray(issues.parentIssueId, issueIdsToScrub));
         }
-        return expired.length + expiredKnowledge.length;
+        return (
+          expiredProjects.length +
+          projectIssueRows.filter((row) => row.purgedAt === null).length +
+          expired.length +
+          projectKnowledgeRows.filter((row) => row.purgedAt === null).length +
+          expiredKnowledge.length
+        );
       });
     },
 

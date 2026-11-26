@@ -490,7 +490,12 @@ async function loadOfferedProjectGrants(
         eq(projects.workspaceId, workspaceId),
       ),
     )
-    .where(inArray(workspaceInvitationGrants.invitationId, [...invitationIds]));
+    .where(
+      and(
+        inArray(workspaceInvitationGrants.invitationId, [...invitationIds]),
+        isNull(projects.deletedAt),
+      ),
+    );
   for (const row of rows) {
     const grants = byInvitation.get(row.invitationId) ?? [];
     grants.push({
@@ -571,7 +576,13 @@ async function offeredProjectsInWorkspace(
   const rows = await tx
     .select({ id: projects.id })
     .from(projects)
-    .where(and(eq(projects.workspaceId, workspaceId), inArray(projects.id, ids)));
+    .where(
+      and(
+        eq(projects.workspaceId, workspaceId),
+        inArray(projects.id, ids),
+        isNull(projects.deletedAt),
+      ),
+    );
   return rows.length === ids.length;
 }
 

@@ -414,6 +414,13 @@
       "when": 1795671981334,
       "tag": "0058_typical_bruce_banner",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795678276407,
+      "tag": "0059_fearless_skin",
+      "breakpoints": true
     }
   ]
 }

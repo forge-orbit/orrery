@@ -27,6 +27,7 @@ import {
   ProjectLabel,
   ProjectLabelsResponse,
   ProjectsResponse,
+  TrashedProjectsResponse,
   SetIssueFallbackPolicyRequest,
   SetProjectAccessRequest,
   SetProjectFallbackPolicyRequest,
@@ -127,6 +128,64 @@ const updateProject = createRoute({
     403: problem("Read or Contribute access cannot configure the project"),
     404: problem("No project with this id is accessible to the caller"),
     409: problem("A project's key cannot be changed after it is created"),
+  },
+});
+
+const deleteProject = createRoute({
+  method: "delete",
+  path: "/api/projects/{projectId}",
+  summary: "Move a project to Workspace Trash",
+  description:
+    "Only a human Workspace owner can move a project to Trash. Projects with a live Work session or a pending, active, or uncertain Dispatch cannot be trashed. Pending project transfers are revoked in the same transaction.",
+  request: { params: projectParams },
+  responses: {
+    204: { description: "The project was moved to Trash" },
+    400: problem("The project id is invalid"),
+    401: problem("Not signed in as a human"),
+    403: problem(
+      "Only a Workspace owner can move a project to Trash; agents cannot delete projects",
+    ),
+    404: problem("No project with this id is accessible to the caller"),
+    409: problem("The project has active work or a non-ended Dispatch"),
+  },
+});
+
+const restoreProject = createRoute({
+  method: "post",
+  path: "/api/projects/{projectId}/restore",
+  summary: "Restore a project from Workspace Trash",
+  description:
+    "Only a human Workspace owner can restore a project within 30 days of deletion. A trashed project past its recovery window cannot be restored, even before the purge sweep runs.",
+  request: { params: projectParams },
+  responses: {
+    200: {
+      description: "The restored project",
+      content: { "application/json": { schema: Project } },
+    },
+    400: problem("The project id is invalid"),
+    401: problem("Not signed in as a human"),
+    403: problem("Only a Workspace owner can restore a project; agents cannot restore projects"),
+    404: problem("No trashed project with this id is accessible to the caller"),
+    410: problem("The project's 30-day Trash window has ended"),
+  },
+});
+
+const listWorkspaceProjectTrash = createRoute({
+  method: "get",
+  path: "/api/workspaces/{workspaceId}/trash/projects",
+  summary: "List restorable trashed projects in a workspace",
+  description:
+    "Only a human Workspace owner can view project Trash. The response includes projects deleted within the last 30 days that have not been purged.",
+  request: { params: workspaceParams },
+  responses: {
+    200: {
+      description: "The workspace's restorable trashed projects",
+      content: { "application/json": { schema: TrashedProjectsResponse } },
+    },
+    400: problem("The workspace id is invalid"),
+    401: problem("Not signed in as a human"),
+    403: problem("Only a Workspace owner can view project Trash"),
+    404: problem("No workspace with this id is accessible to the caller"),
   },
 });
 
@@ -995,6 +1054,9 @@ export const routes = [
   createProject,
   getProject,
   updateProject,
+  deleteProject,
+  restoreProject,
+  listWorkspaceProjectTrash,
   setProjectFallbackPolicy,
   listProjectAccess,
   listProjectAccessCandidates,
@@ -1066,6 +1128,10 @@ const statusFor = {
   issue_needs_input: 409,
   issue_purged: 409,
   knowledge_entry_purged: 409,
+  agents_cannot_delete_projects: 403,
+  workspace_owner_required: 403,
+  project_active_work_exists: 409,
+  project_purged: 410,
 } as const satisfies Record<ProjectsErrorKind, number>;
 
 function isKind<K extends readonly ProjectsErrorKind[]>(
@@ -1085,6 +1151,24 @@ const projectReadKinds = ["not_signed_in", "project_not_found"] as const;
 const projectWriteKinds = [...projectReadKinds, "insufficient_project_access"] as const;
 
 const projectUpdateKinds = [...projectWriteKinds, "project_key_immutable"] as const;
+const projectDeleteKinds = [
+  ...projectReadKinds,
+  "agents_cannot_delete_projects",
+  "workspace_owner_required",
+  "project_active_work_exists",
+] as const;
+const projectRestoreKinds = [
+  ...projectReadKinds,
+  "agents_cannot_delete_projects",
+  "workspace_owner_required",
+  "project_purged",
+] as const;
+const workspaceProjectTrashKinds = [
+  "not_signed_in",
+  "workspace_not_found",
+  "agents_cannot_delete_projects",
+  "workspace_owner_required",
+] as const;
 const accessKinds = [
   ...projectWriteKinds,
   "member_not_found",
@@ -1213,6 +1297,13 @@ export function createProjectsRest(
     return account === null ? null : { kind: "human", account };
   };
 
+  const projectLifecycleActor = async (c: Context): Promise<WorkActor | null> => {
+    const identity = await agentAuthenticator(c.req.raw);
+    if (identity !== null) return { kind: "agent", identity };
+    const account = await sessionReader(c);
+    return account === null ? null : { kind: "human", account };
+  };
+
   const fenceKnowledgeEntry = async (actor: WorkActor | null, entryId: string) => {
     if (actor?.kind !== "agent" || actor.identity.dispatchScope === undefined) return;
     const entryProjectId = await service.knowledgeProjectId(entryId);
@@ -1260,6 +1351,37 @@ export function createProjectsRest(
       );
     } catch (error) {
       return failure(c, error, projectUpdateKinds);
+    }
+  });
+
+  app.openapi(deleteProject, async (c) => {
+    try {
+      const { projectId } = c.req.valid("param");
+      await service.deleteProject(await projectLifecycleActor(c), projectId);
+      return c.body(null, 204);
+    } catch (error) {
+      return failure(c, error, projectDeleteKinds);
+    }
+  });
+
+  app.openapi(restoreProject, async (c) => {
+    try {
+      const { projectId } = c.req.valid("param");
+      return c.json(await service.restoreProject(await projectLifecycleActor(c), projectId), 200);
+    } catch (error) {
+      return failure(c, error, projectRestoreKinds);
+    }
+  });
+
+  app.openapi(listWorkspaceProjectTrash, async (c) => {
+    try {
+      const { workspaceId } = c.req.valid("param");
+      return c.json(
+        await service.listWorkspaceProjectTrash(await projectLifecycleActor(c), workspaceId),
+        200,
+      );
+    } catch (error) {
+      return failure(c, error, workspaceProjectTrashKinds);
     }
   });
 
