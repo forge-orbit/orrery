@@ -13,6 +13,8 @@ export interface WorkOptions {
   workspace?: string | undefined;
   repoPath?: string | undefined;
   agentId?: string | undefined;
+  /** Optional requester steering text (from `--prompt`) carried on the Dispatch. */
+  prompt?: string | undefined;
   signal?: AbortSignal | undefined;
   write?: ((line: string) => void) | undefined;
   supervision?: SupervisionConfig | undefined;
@@ -87,6 +89,9 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     heartbeatTimer.unref();
     const dispatch = await client.createRunnerDispatch(runner.id, {
       issueId: resolved.issueId,
+      ...(options.prompt === undefined || options.prompt.trim() === ""
+        ? {}
+        : { prompt: options.prompt }),
     });
     write(`Created Dispatch ${dispatch.id} for ${resolved.identifier}.`);
     const acceptance = await client.acceptDispatch(runner.id, dispatch.id);

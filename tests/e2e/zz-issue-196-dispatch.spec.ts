@@ -112,6 +112,8 @@ test("the issue page delegates to an owned online Runner with an optional Agent"
     await signIn(page);
     await page.goto(`/issues/${issueId}`);
     await expect(page.getByRole("heading", { name: "Delegate to Runner" })).toBeVisible();
+    await page.locator("[data-delegate-trigger]").click();
+    await expect(page.locator("[data-delegate-dialog]")).toBeVisible();
     await page.getByRole("combobox", { name: "Runner" }).click();
     await page.getByRole("option", { name: new RegExp(runnerDisplayName) }).click();
     await page.getByRole("combobox", { name: /^Agent/ }).click();

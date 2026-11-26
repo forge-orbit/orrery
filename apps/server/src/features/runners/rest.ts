@@ -243,6 +243,31 @@ const listIssueDispatches = createRoute({
   },
 });
 
+const readDispatchErrors = {
+  400: problem("The dispatch request is invalid"),
+  401: problem("Not signed in, or the Runner host credential is invalid"),
+  403: problem("The viewer cannot read this project"),
+  404: problem("No such Dispatch is accessible"),
+  409: problem("The Dispatch is unavailable"),
+  429: problem("Too many requests; try again later"),
+};
+
+const readDispatchRoute = createRoute({
+  method: "get",
+  path: "/api/runners/dispatches/{dispatchId}",
+  summary: "Read one Dispatch's metadata, including its custom prompt",
+  description:
+    "A human with project Read access or the Runner host may read it; workspace members without project Read access receive 404.",
+  request: { params: resolveParams },
+  responses: {
+    200: {
+      description: "The Dispatch",
+      content: { "application/json": { schema: Dispatch } },
+    },
+    ...readDispatchErrors,
+  },
+});
+
 const acceptDispatch = createRoute({
   method: "post",
   path: "/api/runners/{runnerId}/dispatches/{dispatchId}/accept",
@@ -570,6 +595,7 @@ export const routes = [
   revokeRunnerHost,
   createDispatch,
   listIssueDispatches,
+  readDispatchRoute,
   acceptDispatch,
   pollCommands,
   ackCommands,
@@ -679,6 +705,15 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
     }
   });
 
+  app.openapi(readDispatchRoute, async (c) => {
+    try {
+      const { dispatchId } = c.req.valid("param");
+      return c.json(await service.getDispatch(bearer(c), await sessionReader(c), dispatchId), 200);
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
   app.openapi(acceptDispatch, async (c) => {
     try {
       const { runnerId, dispatchId } = c.req.valid("param");
@@ -737,7 +772,7 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
     try {
       const { runnerId } = c.req.valid("param");
       return c.json(
-        await service.createRunnerDispatch(bearer(c), runnerId, c.req.valid("json").issueId),
+        await service.createRunnerDispatch(bearer(c), runnerId, c.req.valid("json")),
         201,
       );
     } catch (error) {
