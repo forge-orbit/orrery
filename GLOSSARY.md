@@ -117,8 +117,12 @@ A live `orrery-runner` process on a runner host, bound to one project and local 
 _Avoid_: Worker, daemon, runner instance
 
 **Dispatch**:
-A server-issued instruction targeting an issue to a specific runner, linked to the resulting work session once accepted without mutating the issue's assignee.
+A server-issued instruction targeting an issue to a specific runner, optionally carrying behavioral instructions, harness, model, and reasoning effort, linked to the resulting work session once accepted without mutating the issue's assignee.
 _Avoid_: Job, execution, task
+
+**Harness catalog**:
+The list of harnesses, models, and supported reasoning effort levels that a live runner discovers locally and advertises to Orrery for delegation.
+_Avoid_: Capabilities, provider list, model registry
 
 **Dispatch token**:
 A short-lived credential minted when a runner accepts a dispatch, scoped strictly to one work session and invalidated when that session ends or the runner host is revoked.

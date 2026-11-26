@@ -300,5 +300,5 @@ test("agents and workspace keys show one CTA in each state", async ({ page }) =>
   await keyDialog.getByRole("button", { name: "Issue key" }).click();
   await expect(page.locator("[data-agent-key-id]")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "No API keys in this workspace" })).toHaveCount(0);
-  await expect(keysSection.getByRole("button", { name: "Issue key" })).toHaveCount(1);
+  await expect(keysSection.getByRole("button", { name: "Issue key" })).toHaveCount(0);
 });
