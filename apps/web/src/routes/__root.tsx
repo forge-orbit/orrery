@@ -5,10 +5,11 @@ import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { Item } from "@astryxdesign/core/Item";
 import { Layout } from "@astryxdesign/core/Layout";
 import { Link as AstryxLink, LinkProvider } from "@astryxdesign/core/Link";
 import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
-import { Stack } from "@astryxdesign/core/Stack";
+import { Stack, StackItem } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -686,21 +687,23 @@ function SidebarFooter({
         {showAppearance && session?.signedIn && <Divider />}
         {session?.signedIn && (
           <Stack direction="horizontal" justify="between" vAlign="center" gap={1.5}>
-            <Link
-              to="/account"
-              color="inherit"
-              display="block"
-              data-sidebar-account-link=""
-              {...clickProp}
-            >
-              <Stack as="span" direction="horizontal" gap={2} align="center">
-                <HumanAvatar
-                  name={session.displayName ?? session.email}
-                  avatarUrl={session.avatarUrl}
-                  size="sm"
-                  tooltip={false}
-                />
-                <Stack as="span" gap={0}>
+            <StackItem size="fill">
+              <Item
+                href="/account"
+                density="compact"
+                labelLines={1}
+                descriptionLines={1}
+                data-sidebar-account-link=""
+                {...clickProp}
+                startContent={
+                  <HumanAvatar
+                    name={session.displayName ?? session.email}
+                    avatarUrl={session.avatarUrl}
+                    size="sm"
+                    tooltip={false}
+                  />
+                }
+                label={
                   <Text
                     as="span"
                     type="body"
@@ -711,23 +714,21 @@ function SidebarFooter({
                   >
                     {session.displayName ?? session.email}
                   </Text>
-                  {session.displayName !== null && (
-                    <Text as="span" type="supporting" color="secondary" maxLines={1}>
-                      {session.email}
-                    </Text>
-                  )}
-                </Stack>
-              </Stack>
-            </Link>
-            <IconButton
-              type="button"
-              variant="ghost"
-              size="sm"
-              label="Sign out"
-              icon={<SignOutIcon />}
-              isDisabled={logout.isPending}
-              onClick={() => logout.mutate()}
-            />
+                }
+                description={session.displayName !== null ? session.email : undefined}
+              />
+            </StackItem>
+            <StackItem size="static">
+              <IconButton
+                type="button"
+                variant="ghost"
+                size="sm"
+                label="Sign out"
+                icon={<SignOutIcon />}
+                isDisabled={logout.isPending}
+                onClick={() => logout.mutate()}
+              />
+            </StackItem>
           </Stack>
         )}
       </Stack>
