@@ -6,7 +6,7 @@ System administrators invite new humans to the installation via the **Installati
 
 - `invite-admin-ui-and-api` `GET /api/invitations/installation` (eagerly expires overdue rows), `POST /api/invitations/installation` (`201`, `409 account_exists` / `invitation_pending` / `smtp_unconfigured`), `POST /api/invitations/installation/{invitationId}/resend` (rotates token), and `POST /api/invitations/installation/{invitationId}/revoke`.
 - `invite-register-and-decline` `POST /api/invitations/installation/registration` (`200 {email, emailVerified: true}`, `400 invitation_invalid` on reuse, `403 inviter_not_authorized`, `409 account_exists`) and `POST /api/invitations/installation/decline` (`204`).
-- `invite-browser` `/register?token=…` (`Password`, `Register`, `Decline invitation`) and `/workspace-invitation?token=…` (`Accept invitation`, `Create account and join`, `Decline invitation`).
+- `invite-browser` `/register?token=…` (`Password`, `Register`, `Decline invitation` with confirmation dialog) and `/workspace-invitation?token=…` (4 branches: signed-out new account `Create account and join`, signed-out existing account `Sign in`, signed-in email mismatch `Sign out and switch account`, signed-in match `Accept invitation` / `Decline invitation` with confirmation dialog). Workspace `Invite member` also offers `Known people` autocomplete (`GET /api/workspaces/{workspaceId}/human-suggestions`).
 
 ## Preconditions
 

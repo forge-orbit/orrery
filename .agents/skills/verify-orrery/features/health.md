@@ -1,12 +1,12 @@
 # Health endpoints
 
-Operators and orchestrators check Orrery with `/healthz` (the process is up) and `/readyz` (the database answers). Both return JSON `{status, version}`.
+Operators and orchestrators check Orrery with `/healthz` (the process is up) and `/readyz` (Postgres and object storage both answer). Both return JSON `{status, version}`.
 
 ## Sub-features
 
 - `health-live` `/healthz` returns 200 `{"status":"ok","version":...}`.
-- `health-ready` `/readyz` returns 200 `{"status":"ok",...}` while Postgres is reachable.
-- `health-degraded` `/readyz` returns 503 `{"status":"degraded",...}` when Postgres is not reachable, while `/healthz` stays 200.
+- `health-ready` `/readyz` returns 200 `{"status":"ok",...}` while Postgres and object storage (`LOCAL_DATA_DIR/objects` or S3) are healthy.
+- `health-degraded` `/readyz` returns 503 `{"status":"degraded",...}` when Postgres or object storage is unreachable, while `/healthz` stays 200.
 
 ## How to get to it (user POV)
 

@@ -2,7 +2,7 @@
 
 Signed-in humans have two cross-workspace attention surfaces:
 - **My work (`/my-work`, `GET /api/my-work`)**: aggregates open non-deleted assigned issues (`Read`), active work sessions running under the human's agents (`Read`, live DB-time lease), and open/paused `needs_input` questions on `Contribute`/`Manage` projects. Human session only (`401` if signed out or deactivated).
-- **In-app notifications (`GET /api/notifications`, `POST /api/notifications/{id}/read`, `POST /api/notifications/read-all`)**: human-only alerts populated atomically for `handoff`, `needs_input` (asked/paused), and `session_expired` (from the 60s sweeper or lazy expiry). Filtered live in SQL against current project access (including transfers), active membership, active human, and non-trashed issues, with lossless microsecond keyset pagination (`400 invalid_cursor` on malformed cursor). Invalid/revoked bearer keys return `401`; valid agent keys return `403`.
+- **In-app notifications (`/notifications`, `GET /api/notifications`, `POST /api/notifications/{id}/read`, `POST /api/notifications/read-all`)**: human-only alerts populated atomically for `handoff`, `needs_input` (asked/paused), `session_expired` (from the 60s sweeper or lazy expiry), and `issue_mentioned` (`@handle`). Filtered live in SQL against current project access (including transfers), active membership, active human, and non-trashed issues, with lossless microsecond keyset pagination (`400 invalid_cursor` on malformed cursor), hourly retention pruning (90d read / 180d unread), and a sidebar unread badge. Invalid/revoked bearer keys return `401`; valid agent keys return `403`.
 
 ## Sub-features
 
@@ -32,5 +32,5 @@ curl -fsS -b "$A" -X POST "$URL/api/notifications/read-all" | jq -c '{markedCoun
 
 ## Gotchas
 
-- The `/notifications` web UI route ships in `#125` (planned); today notifications are verified through the REST API (`tests/e2e/zz-notifications.spec.ts`).
-- `/my-work` is live in the sidebar and polls every 3–5 seconds via TanStack Query.
+- `/notifications` is live in the sidebar (polls every 15s via TanStack Query) with an unread badge (`data-notifications-link`).
+- `/my-work` is live in the sidebar and polls every 4 seconds (`refetchInterval: 4000`) via TanStack Query.

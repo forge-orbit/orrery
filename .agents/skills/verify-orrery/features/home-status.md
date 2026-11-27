@@ -4,9 +4,9 @@ The web app's `/` route loads `/readyz`, `/api/auth/session`, and `/api/setup/st
 
 - **Fresh installation (signed out):** `/` redirects to `/setup` (heading `Set up Orrery`).
 - **Setup complete (signed out):** `/` redirects to `/signin` (heading `Sign in`).
-- **Signed in:** renders the Astryx sidebar shell (`Orrery` brand link, `Workspaces`, `My work`, `Inbox`, `Your workspaces`, and for system administrators `Admin` → `SMTP settings`, `Installation history`, plus account footer with `/account` and Sign out) and the `Workspaces` dashboard (`heading:Workspaces`, `Signed in as <email>.`, `New workspace` drawer, `Your workspaces` cards, and `Installation administration` for admins).
+- **Signed in:** renders the Astryx sidebar shell (`Orrery` wordmark link, `Workspaces`, `My work`, `Inbox`, `Notifications` with unread badge, `Your workspaces`, and for system administrators `Admin` → `SMTP settings`, `Installation history`, plus account footer with `HumanAvatar`, `AppearancePicker`, `/account`, and Sign out) and the `Workspaces` dashboard (`heading:Workspaces`, `Signed in as <email>.`, `New workspace` drawer, `Your workspaces` cards, and `Installation administration` for admins).
 - **Database down on reload:** loader fails and renders `Server: unreachable`.
-- **Unknown client route:** SPA fallback (HTTP 200) renders heading `Page not found` with link `Go to your workspaces`.
+- **Unknown client route (signed in):** SPA fallback (HTTP 200) renders heading `Page not found` with link `Go to your workspaces` (signed-out unknown routes redirect to `/signin?next=…`).
 
 ## Sub-features
 
@@ -28,9 +28,9 @@ Preconditions: healthy instance, `doctor` exits 0.
     --fill "Email=admin@orrery.test" --fill "Password=browser-checked-admin-password" \
     --click-button "Sign in" --expect-role "heading:Workspaces" \
     --expect-text "Signed in as admin@orrery.test." \
-    --expect-role "link:My work" --expect-role "link:Inbox" --expect-role "link:SMTP settings"
+    --expect-role "link:My work" --expect-role "link:Inbox" --expect-role "link:Notifications" --expect-role "link:SMTP settings"
   ```
-- **Not found:** `node $SK/browse.mjs $RUN_DIR /some/client/route --allow-http 401 --slug home-notfound --expect-role 'heading:Page not found'`
+- **Not found:** signed-out unknown routes redirect to `/signin?next=…`; verify `heading:Page not found` in an authenticated Playwright session on `/does-not-exist`.
 - **Unreachable:** stop only `$CONTAINER`, then:
   `node $SK/browse.mjs $RUN_DIR / --allow-http 401 --allow-http 500 --allow-http 503 --allow-console ZodError --slug home-unreachable --expect-text "Server: unreachable"`
   Always restart `$CONTAINER` afterwards and poll `/readyz` back to 200.
