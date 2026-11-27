@@ -105,6 +105,7 @@ test("the link's GET is inert; the POST registers; reuse fails", async () => {
   });
   expect(res.status()).toBe(200);
   expect(await res.json()).toEqual({
+    humanId: expect.any(String),
     email: INVITEE_EMAIL,
     handle: expect.any(String),
     displayName: null,
@@ -126,6 +127,7 @@ test("the link's GET is inert; the POST registers; reuse fails", async () => {
     expect(login.status()).toBe(200);
     const session = await newcomer.get("/api/auth/session");
     expect(await session.json()).toEqual({
+      humanId: expect.any(String),
       email: INVITEE_EMAIL,
       handle: expect.any(String),
       displayName: null,

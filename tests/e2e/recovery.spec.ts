@@ -86,6 +86,7 @@ test("delivers a reset link only to a verified address, and GETting it changes n
   });
   expect(registered.status()).toBe(200);
   expect(await registered.json()).toEqual({
+    humanId: expect.any(String),
     email: RECOVERED_EMAIL,
     handle: expect.any(String),
     displayName: null,

@@ -171,7 +171,7 @@ test("Create more keeps the triage fields and toasts a link to each created issu
     "Second batch issue",
   ]);
   for (const issue of batchIssues) {
-    expect(field(field(issue, "assignee"), "email")).toBe(ADMIN_EMAIL);
+    expect(field(field(issue, "assignee"), "displayName")).toBe(ADMIN_EMAIL);
   }
   expect(firstIdentifier).toBeTruthy();
 });

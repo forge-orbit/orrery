@@ -31,7 +31,6 @@ let workspaceId = "";
 let otherWorkspaceId = "";
 let projectId = "";
 let ownerHumanId = "";
-let teammateHumanId = "";
 
 test.setTimeout(180_000);
 
@@ -69,7 +68,6 @@ test.beforeAll(async () => {
   await joinWorkspace(PEER_EMAIL, otherWorkspaceId, `${WORKSPACE} Other`);
   await joinWorkspace(TEAMMATE_EMAIL, workspaceId, WORKSPACE);
   ownerHumanId = await memberIdFor(workspaceId, OWNER_EMAIL);
-  teammateHumanId = await memberIdFor(workspaceId, TEAMMATE_EMAIL);
 
   const appointed = await api.post(`/api/workspaces/${workspaceId}/owners`, {
     data: { humanId: ownerHumanId },
@@ -125,25 +123,16 @@ test("a non-admin owner never learns about Humans outside their shared workspace
   }
 });
 
-test("the assignee picker flags a Member without project access on both pages", async ({
-  page,
-}) => {
+test("the assignee picker omits a Member without project access", async ({ page }) => {
   await signInPage(page, ADMIN_EMAIL, ADMIN_PASSWORD);
   await page.goto(`/projects/${projectId}/issues/new`);
   await page.getByRole("combobox", { name: "Assignee" }).click();
-  const option = page.getByRole("option", { name: new RegExp(TEAMMATE_EMAIL) });
-  await expect(option).toContainText("No project access");
-  await option.click();
-  await expect(page.getByText("No project access", { exact: true }).last()).toBeVisible();
-
-  const issue = await api.post(`/api/projects/${projectId}/issues`, {
-    data: { title: "Assigned without access", assigneeHumanId: teammateHumanId },
-  });
-  expect(issue.status()).toBe(201);
-  const issueId = asText(field(await issue.json(), "id"), "issue id");
-  await page.goto(`/issues/${issueId}`);
-  await expect(page.getByText("Assignee", { exact: true })).toBeVisible();
-  await expect(page.getByText("No project access", { exact: true }).last()).toBeVisible();
+  await expect(
+    page.getByRole("option", { name: `Human · ${OWNER_EMAIL}`, exact: true }),
+  ).toHaveCount(1);
+  // Only Humans with project access are offered; the flagging "No project access"
+  // option is gone with the human-only cutover.
+  await expect(page.getByRole("option", { name: new RegExp(TEAMMATE_EMAIL) })).toHaveCount(0);
 });
 
 test("Project Access uses a searchable member selector instead of typing an email", async ({
