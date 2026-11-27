@@ -303,11 +303,11 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
       try {
         hit = resolveProject(targets, flags.project, bound);
       } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
         throw new Error(
-          `No project matches '${flags.project}' in workspace '${bound.name}' (from the saved binding). ` +
-            `Pass --project with an exact ID, key or name within that workspace, or run ` +
-            `'orrery-runner start --reconfigure' to switch workspaces. ` +
-            `The saved binding was left unchanged.`,
+          `${reason} (Scoped to workspace '${bound.name}' from the saved binding; ` +
+            `run 'orrery-runner start --reconfigure' or pass --workspace to switch workspaces. ` +
+            `The saved binding was left unchanged.)`,
           { cause: error },
         );
       }
@@ -333,9 +333,10 @@ export async function resolveTargets(request: ResolutionRequest): Promise<Resolv
     if (project === undefined) {
       throw new Error(
         `The saved project '${binding.projectKey ?? binding.projectId}' ` +
-          `is no longer available in workspace '${bound.name}'. Run ` +
-          `'orrery-runner start --reconfigure' to choose new targets. ` +
-          `The saved binding was left unchanged.`,
+          `was not found in workspace '${bound.name}'. It may have been moved to Trash ` +
+          `(restorable for 30 days) or your access was revoked. Run ` +
+          `'orrery-runner start --reconfigure' or 'orrery-runner init --workspace <ID> --project <ID>' ` +
+          `to choose new targets. The saved binding was left unchanged.`,
       );
     }
     resolvedWorkspaceId = bound.id;

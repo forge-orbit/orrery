@@ -42,7 +42,7 @@ const isReadyWorkFilter = (value: string): value is ReadyWorkFilter =>
 const usage = `orrery-runner — local agent runner for Orrery
 
 Commands:
-  login                     Enroll this machine as a Runner host in the browser
+  login                     Enroll this Runner host in the browser
   init [--workspace W] [--project P]
                             Resolve and remember a checkout binding, then exit
   start [--workspace W] [--project P]
@@ -52,7 +52,7 @@ Commands:
 
 Options:
   --server URL              Orrery base URL (login: switch installations; start/work/init: must match enrollment)
-  --host-name NAME          Display name for this machine (login)
+  --host-name NAME          Display name for this Runner host (login)
   --platform NAME           Platform label (login)
   --agent ID-OR-NAME        Default Agent (start/init/work; otherwise the host owner's first Agent)
   --name NAME               Runner display name (start)

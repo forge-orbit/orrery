@@ -13,10 +13,11 @@ import {
   type HarnessAdapter,
 } from "./adapter.ts";
 import { harnessConfigKey, writeCachedCatalog } from "./catalog.ts";
+import { runnerFingerprint } from "./checkout.ts";
 import { loadSupervisionConfig } from "./config.ts";
 import type { HarnessDefinition } from "./harnesses.ts";
 import type { SlotController } from "./slots.ts";
-import { repoFingerprint, start } from "./start.ts";
+import { start } from "./start.ts";
 import { TestOrrery, type TestActivity, type TestSession } from "./test-orrery.ts";
 
 interface Fixture {
@@ -204,7 +205,7 @@ async function makeFixture(options: FixtureOptions): Promise<Fixture> {
   // The cache is read before registration, exactly like a real cold start.
   if (options.cachedCatalog !== undefined) {
     await writeCachedCatalog(
-      repoFingerprint(repo),
+      runnerFingerprint(repo),
       options.cachedCatalog,
       configDir,
       harnessConfigKey(config.acpOverridden ? { acpOverride: config.acp } : {}),

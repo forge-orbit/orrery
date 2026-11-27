@@ -229,12 +229,63 @@ describe("target resolution precedence (#267)", () => {
     expect(resolved.notices.join("\n")).toContain("left unchanged");
   });
 
-  it("refuses a lone --project outside the bound workspace instead of switching", async () => {
+  it("refuses a lone --project outside the bound workspace instead of switching, listing authorized candidates", async () => {
     const calls = { count: 0 };
     await expect(
       resolve(calls, targets, { binding: saved, flags: { project: "THREE" } }),
-    ).rejects.toThrow(/in workspace 'Acme'.*--reconfigure.*left unchanged/s);
+    ).rejects.toThrow(
+      /No project matches 'THREE' in workspace 'Acme'.*proj-one.*proj-two.*--reconfigure.*left unchanged/s,
+    );
     expect(calls.count).toBe(1);
+  });
+
+  it("preserves ambiguity candidates and IDs when a lone --project is ambiguous inside the bound workspace", async () => {
+    const ambiguousTargets: RunnerTargetsResponse = {
+      ...targets,
+      workspaces: [
+        {
+          id: "ws-acme",
+          name: "Acme",
+          slug: "acme",
+          kind: "shared",
+          projects: [
+            { id: "proj-dup-1", key: "D1", name: "Dup", accessLevel: "manage" },
+            { id: "proj-dup-2", key: "D2", name: "Dup", accessLevel: "contribute" },
+          ],
+        },
+      ],
+    };
+    await expect(
+      resolve({ count: 0 }, ambiguousTargets, { binding: saved, flags: { project: "Dup" } }),
+    ).rejects.toThrow(/ambiguous.*proj-dup-1.*proj-dup-2.*--reconfigure.*left unchanged/s);
+  });
+
+  it("preserves the empty-workspace diagnostic when a lone --project hits a bound workspace with zero Contribute+ projects", async () => {
+    const emptyBound: RunnerTargetsResponse = {
+      ...targets,
+      workspaces: [{ id: "ws-acme", name: "Acme", slug: "acme", kind: "shared", projects: [] }],
+    };
+    await expect(
+      resolve({ count: 0 }, emptyBound, { binding: saved, flags: { project: "ONE" } }),
+    ).rejects.toThrow(/has no projects you can contribute to.*--reconfigure.*left unchanged/s);
+  });
+
+  it("reports a stale bound project with 30-day Trash and init guidance when --agent triggers discovery", async () => {
+    const missingProject: RunnerTargetsResponse = {
+      ...targets,
+      workspaces: [
+        {
+          id: "ws-acme",
+          name: "Acme",
+          slug: "acme",
+          kind: "shared",
+          projects: [{ id: "proj-two", key: "TWO", name: "Two", accessLevel: "manage" }],
+        },
+      ],
+    };
+    await expect(
+      resolve({ count: 0 }, missingProject, { binding: saved, flags: { agent: "Bo" } }),
+    ).rejects.toThrow(/Trash.*30 days.*--reconfigure.*init.*left unchanged/s);
   });
 
   it("checks a lone --workspace against the bound project symmetrically", async () => {

@@ -111,30 +111,33 @@ export interface CredentialedOriginOptions extends InsecureCheckOptions {
   envUrl?: string | undefined;
 }
 
+function assertOriginMatches(
+  source: string,
+  raw: string,
+  stored: string,
+  remediation: string,
+): void {
+  const asserted = canonicalizeServerUrl(raw);
+  if (asserted !== stored) {
+    throw new Error(
+      `Server mismatch: ${source} ${asserted} does not match enrolled origin ${stored}. ${remediation}`,
+    );
+  }
+}
+
 /**
  * Resolve the authoritative origin for credentialed commands (`start`,
- * `work`, and future `init`). The stored enrollment wins; `--server` and
+ * `work`, and `init`). The stored enrollment wins; `--server` and
  * `ORRERY_URL` act as assertions that fail fast before any HTTP request.
  * Never falls back to `http://localhost:8080`.
  */
 export function resolveCredentialedOrigin(options: CredentialedOriginOptions): string {
   const stored = canonicalizeServerUrl(options.storedServer);
+  const remediation = "Use 'orrery-runner login --server <url>' to switch installations.";
   if (options.serverFlag !== undefined && options.serverFlag !== "") {
-    const asserted = canonicalizeServerUrl(options.serverFlag);
-    if (asserted !== stored) {
-      throw new Error(
-        `Server mismatch: --server ${asserted} does not match enrolled origin ${stored}. ` +
-          `Use 'orrery-runner login --server <url>' to switch installations.`,
-      );
-    }
+    assertOriginMatches("--server", options.serverFlag, stored, remediation);
   } else if (options.envUrl !== undefined && options.envUrl !== "") {
-    const asserted = canonicalizeServerUrl(options.envUrl);
-    if (asserted !== stored) {
-      throw new Error(
-        `Server mismatch: ORRERY_URL ${asserted} does not match enrolled origin ${stored}. ` +
-          `Use 'orrery-runner login --server <url>' to switch installations.`,
-      );
-    }
+    assertOriginMatches("ORRERY_URL", options.envUrl, stored, remediation);
   }
   assertSecureOrigin(stored, options);
   return stored;
@@ -159,13 +162,12 @@ export function resolveLoginOrigin(options: LoginOriginOptions): string {
   if (options.storedServer !== undefined && options.storedServer !== "") {
     const stored = canonicalizeServerUrl(options.storedServer);
     if (options.envUrl !== undefined && options.envUrl !== "") {
-      const asserted = canonicalizeServerUrl(options.envUrl);
-      if (asserted !== stored) {
-        throw new Error(
-          `Server mismatch: ORRERY_URL ${asserted} does not match enrolled origin ${stored}. ` +
-            `Pass --server <url> to switch installations.`,
-        );
-      }
+      assertOriginMatches(
+        "ORRERY_URL",
+        options.envUrl,
+        stored,
+        "Pass --server <url> to switch installations.",
+      );
     }
     return stored;
   }

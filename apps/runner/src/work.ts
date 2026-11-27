@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DispatchOptions } from "@orrery/contract";
 import { harnessConfigKey, readCachedCatalog, verifiedDefaultModel } from "./catalog.ts";
-import { runnerFingerprint } from "./checkout.ts";
+import { validateCheckout } from "./checkout.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { defaultWorkDisplayName } from "./display-name.ts";
@@ -10,7 +10,6 @@ import { delay } from "./delay.ts";
 import { loadUserHarnesses, resolveDefaultHarness, validateExplicitHarness } from "./harnesses.ts";
 import { resolveCredentialedOrigin } from "./origin.ts";
 import { resolveWorkAgent } from "./resolution.ts";
-import { validateCheckout } from "./checkout.ts";
 import { SlotPool, type SlotController, type SupervisionOutcome } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
@@ -44,7 +43,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     ...(process.env.ORRERY_URL === undefined ? {} : { envUrl: process.env.ORRERY_URL }),
   });
   const repoPath = options.repoPath ?? process.cwd();
-  validateCheckout(repoPath);
+  const checkout = validateCheckout(repoPath);
   const supervision =
     options.supervision ??
     loadSupervisionConfig(options.harness === undefined ? {} : { harness: options.harness });
@@ -82,7 +81,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
   // A fresh digest guarantees this Runner row is single-use and cannot reuse
   // (or overwrite) a persistent `start` Runner for the same checkout.
   const fingerprint = createHash("sha256")
-    .update(`${runnerFingerprint(repoPath)}:${randomUUID()}`)
+    .update(`${checkout.runnerFingerprint}:${randomUUID()}`)
     .digest("hex");
   const runner = await client.registerRunner({
     workspaceId: resolved.workspaceId,
@@ -205,7 +204,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
           }
         : { defaultHarness: resolveDefaultHarness({}) },
     );
-    const cachedCatalog = readCachedCatalog(runnerFingerprint(repoPath), undefined, configKey);
+    const cachedCatalog = readCachedCatalog(checkout.runnerFingerprint, undefined, configKey);
     const controller = await superviseDispatch({
       server,
       repoPath,

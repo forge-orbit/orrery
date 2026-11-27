@@ -17,12 +17,19 @@ export interface ValidatedCheckout {
   repoRoot: string;
   /** The canonical main-checkout root shared by linked worktrees (real path). */
   mainRoot: string;
+  /** Server-facing worktree-level fingerprint (distinct per linked worktree). */
+  runnerFingerprint: string;
+  /** Canonical main-checkout binding fingerprint shared by linked worktrees. */
+  bindingFingerprint: string;
 }
 
+const sha256Hex = (value: string): string => createHash("sha256").update(value).digest("hex");
+
 /**
- * Shared up-front repository validator for `start` and `work` (reusable by
- * future `init`): verify `git` exists, the path is inside a git work tree,
- * and `HEAD` exists. Runs before any network call.
+ * Shared up-front repository validator for `start`, `work`, and `init`:
+ * verify `git` exists, the path is inside a git work tree, and `HEAD` exists.
+ * Runs before any network call and derives both checkout digests without
+ * re-spawning git.
  */
 export function validateCheckout(repoPath: string): ValidatedCheckout {
   const cwd = repoPath === "" ? "." : repoPath;
@@ -59,20 +66,16 @@ export function validateCheckout(repoPath: string): ValidatedCheckout {
     );
   }
   const repoRoot = realpathSync(resolve(toplevel));
-  return { repoRoot, mainRoot: mainCheckoutRoot(cwd) };
+  const mainRoot = mainCheckoutRootFrom(cwd, repoRoot);
+  return {
+    repoRoot,
+    mainRoot,
+    runnerFingerprint: sha256Hex(repoRoot),
+    bindingFingerprint: sha256Hex(mainRoot),
+  };
 }
 
-/**
- * Canonical main-checkout root: the first `worktree ` entry of
- * `git worktree list --porcelain`. Works uniformly for main checkouts and
- * linked worktrees. Inside a submodule `worktree list` reports the submodule's
- * gitdir (`.git/modules/...`) rather than a worktree, so gitdir candidates
- * are ignored and the submodule's own top level is used (fixing the old
- * `--git-common-dir` resolution that escaped submodules into the superproject).
- */
-export function mainCheckoutRoot(repoPath: string): string {
-  const cwd = repoPath === "" ? "." : repoPath;
-  const toplevel = realpathSync(resolve(gitSync(cwd, ["rev-parse", "--show-toplevel"])));
+function mainCheckoutRootFrom(cwd: string, toplevel: string): string {
   let porcelain: string;
   try {
     porcelain = execFileSync("git", ["-C", cwd, "worktree", "list", "--porcelain"], {
@@ -100,15 +103,27 @@ export function mainCheckoutRoot(repoPath: string): string {
   return toplevel;
 }
 
+/**
+ * Canonical main-checkout root: the first `worktree ` entry of
+ * `git worktree list --porcelain`. Works uniformly for main checkouts and
+ * linked worktrees. Inside a submodule `worktree list` reports the submodule's
+ * gitdir (`.git/modules/...`) rather than a worktree, so gitdir candidates
+ * are ignored and the submodule's own top level is used (fixing the old
+ * `--git-common-dir` resolution that escaped submodules into the superproject).
+ */
+export function mainCheckoutRoot(repoPath: string): string {
+  const cwd = repoPath === "" ? "." : repoPath;
+  const toplevel = realpathSync(resolve(gitSync(cwd, ["rev-parse", "--show-toplevel"])));
+  return mainCheckoutRootFrom(cwd, toplevel);
+}
+
 /** Server-facing worktree-level fingerprint (distinct per linked worktree). */
 export function runnerFingerprint(repoPath: string): string {
   const toplevel = gitSync(repoPath === "" ? "." : repoPath, ["rev-parse", "--show-toplevel"]);
-  return createHash("sha256")
-    .update(realpathSync(resolve(toplevel)))
-    .digest("hex");
+  return sha256Hex(realpathSync(resolve(toplevel)));
 }
 
 /** Canonical main-checkout binding fingerprint shared by linked worktrees. */
 export function bindingFingerprint(repoPath: string): string {
-  return createHash("sha256").update(mainCheckoutRoot(repoPath)).digest("hex");
+  return sha256Hex(mainCheckoutRoot(repoPath));
 }

@@ -1,10 +1,6 @@
 import type { HarnessCatalog, ReadyWorkFilter } from "@orrery/contract";
 import { adapterForHarness, type AdapterResolver } from "./adapter.ts";
-import {
-  bindingFingerprint,
-  runnerFingerprint as checkoutRunnerFingerprint,
-  validateCheckout,
-} from "./checkout.ts";
+import { validateCheckout } from "./checkout.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import {
   CatalogPublisher,
@@ -73,11 +69,6 @@ export interface StartOptions {
   onCatalog?: ((catalog: HarnessCatalog) => void) | undefined;
 }
 
-/** Opaque digest of a checkout; the raw local path never leaves the machine. */
-export function repoFingerprint(repoPath: string): string {
-  return checkoutRunnerFingerprint(repoPath);
-}
-
 /**
  * Register a project-bound Runner, then supervise accepted dispatches in a
  * bounded slot pool while heartbeating. A 401 on any call is a hard revocation:
@@ -97,8 +88,8 @@ export async function start(options: StartOptions): Promise<void> {
   // Shared git/HEAD validator before any network call (reusable by `init`).
   const repoPath = options.repoPath ?? process.cwd();
   const checkout = validateCheckout(repoPath);
-  const fingerprint = checkoutRunnerFingerprint(repoPath);
-  const checkoutBindingFingerprint = bindingFingerprint(repoPath);
+  const fingerprint = checkout.runnerFingerprint;
+  const checkoutBindingFingerprint = checkout.bindingFingerprint;
   const displayName =
     options.displayName === undefined
       ? defaultStartDisplayName(stored.displayName, checkout)

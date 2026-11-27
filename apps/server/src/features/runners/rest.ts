@@ -639,14 +639,18 @@ const statusFor = {
   targets_too_large: 409,
 } as const satisfies Record<RunnersErrorKind, Status>;
 
+function runnersProblem<S extends Status>(c: Context, status: S, error: RunnersError) {
+  return problemResponse(c, {
+    status,
+    code: error.kind,
+    title: error.message,
+    ...(error.detail === undefined ? {} : { detail: error.detail }),
+  });
+}
+
 function failure(c: Context, error: unknown) {
   if (error instanceof RunnersError) {
-    return problemResponse(c, {
-      status: statusFor[error.kind],
-      code: error.kind,
-      title: error.message,
-      ...(error.detail === undefined ? {} : { detail: error.detail }),
-    });
+    return runnersProblem(c, statusFor[error.kind], error);
   }
   throw error;
 }
@@ -656,12 +660,7 @@ function readDispatchFailure(c: Context, error: unknown) {
   if (!(error instanceof RunnersError)) throw error;
   const status = statusFor[error.kind];
   if (status !== 400 && status !== 401 && status !== 404) throw error;
-  return problemResponse(c, {
-    status,
-    code: error.kind,
-    title: error.message,
-    ...(error.detail === undefined ? {} : { detail: error.detail }),
-  });
+  return runnersProblem(c, status, error);
 }
 
 /** `listTargets` only emits credential and bound-cap failures. */
@@ -669,13 +668,7 @@ function targetsFailure(c: Context, error: unknown) {
   if (!(error instanceof RunnersError)) throw error;
   const status = statusFor[error.kind];
   if (status !== 401 && status !== 409) throw error;
-  c.header("Cache-Control", "no-store");
-  return problemResponse(c, {
-    status,
-    code: error.kind,
-    title: error.message,
-    ...(error.detail === undefined ? {} : { detail: error.detail }),
-  });
+  return runnersProblem(c, status, error);
 }
 
 function streamFailure(c: Context, error: unknown) {

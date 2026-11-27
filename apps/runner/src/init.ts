@@ -1,4 +1,4 @@
-import { bindingFingerprint, validateCheckout } from "./checkout.ts";
+import { validateCheckout } from "./checkout.ts";
 import { OrreryClient } from "./client.ts";
 import { readCredential } from "./credential.ts";
 import { resolveCredentialedOrigin } from "./origin.ts";
@@ -36,8 +36,7 @@ export async function init(options: InitOptions): Promise<void> {
   });
   // Shared git/HEAD validator before any network call.
   const repoPath = options.repoPath ?? process.cwd();
-  validateCheckout(repoPath);
-  const fingerprint = bindingFingerprint(repoPath);
+  const { bindingFingerprint: fingerprint } = validateCheckout(repoPath);
 
   const client = new OrreryClient({
     server,

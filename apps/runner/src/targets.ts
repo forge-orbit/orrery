@@ -35,6 +35,12 @@ const noWorkspaceMatch = (raw: string, targets: RunnerTargetsResponse): Error =>
   );
 };
 
+const ambiguousWorkspaceError = (raw: string, matches: RunnerTargetWorkspace[]): Error =>
+  new Error(
+    `Workspace '${raw}' is ambiguous. Matching workspaces: ` +
+      `${describeWorkspaces(matches)}. Pass --workspace with an exact ID.`,
+  );
+
 /**
  * Resolve `--workspace`: exact ID → exact name → exact slug (ignoring empty
  * slugs) → unique case-insensitive name/slug. Duplicate exact names or slugs
@@ -47,21 +53,11 @@ export function resolveWorkspace(
   const byId = targets.workspaces.find((item) => item.id === raw);
   if (byId !== undefined) return byId;
   const byName = targets.workspaces.filter((item) => item.name === raw);
-  if (byName.length > 1) {
-    throw new Error(
-      `Workspace '${raw}' is ambiguous. Matching workspaces: ` +
-        `${describeWorkspaces(byName)}. Pass --workspace with an exact ID.`,
-    );
-  }
+  if (byName.length > 1) throw ambiguousWorkspaceError(raw, byName);
   if (byName.length === 1 && byName[0] !== undefined) return byName[0];
   if (raw !== "") {
     const bySlug = targets.workspaces.filter((item) => item.slug !== "" && item.slug === raw);
-    if (bySlug.length > 1) {
-      throw new Error(
-        `Workspace '${raw}' is ambiguous. Matching workspaces: ` +
-          `${describeWorkspaces(bySlug)}. Pass --workspace with an exact ID.`,
-      );
-    }
+    if (bySlug.length > 1) throw ambiguousWorkspaceError(raw, bySlug);
     if (bySlug.length === 1 && bySlug[0] !== undefined) return bySlug[0];
   }
   const lowered = raw.toLowerCase();
@@ -71,12 +67,7 @@ export function resolveWorkspace(
       (item.slug !== "" && item.slug.toLowerCase() === lowered),
   );
   if (fuzzy.length === 1 && fuzzy[0] !== undefined) return fuzzy[0];
-  if (fuzzy.length > 1) {
-    throw new Error(
-      `Workspace '${raw}' is ambiguous. Matching workspaces: ` +
-        `${describeWorkspaces(fuzzy)}. Pass --workspace with an exact ID.`,
-    );
-  }
+  if (fuzzy.length > 1) throw ambiguousWorkspaceError(raw, fuzzy);
   throw noWorkspaceMatch(raw, targets);
 }
 
@@ -135,6 +126,33 @@ const noProjectMatch = (
   );
 };
 
+function matchProjects(
+  workspaces: RunnerTargetWorkspace[],
+  predicate: (project: RunnerTargetWorkspace["projects"][number]) => boolean,
+  ambiguityPrefix: string,
+): ResolvedProject | undefined {
+  const matches = workspaces.flatMap((workspace) =>
+    workspace.projects.filter(predicate).map((project) => ({ workspace, project })),
+  );
+  if (matches.length === 1 && matches[0] !== undefined) {
+    const hit = matches[0];
+    return {
+      workspace: hit.workspace,
+      projectId: hit.project.id,
+      projectKey: hit.project.key,
+      projectName: hit.project.name,
+    };
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `${ambiguityPrefix}. Matching projects: ` +
+        `${describeProjects(matches.map((hit) => ({ workspaceName: hit.workspace.name, name: hit.project.name, key: hit.project.key, id: hit.project.id })))}. ` +
+        `Pass --project with an exact ID, or add --workspace to choose one.`,
+    );
+  }
+  return undefined;
+}
+
 /**
  * Resolve `--project`: exact ID → case-insensitive Project key → unique
  * exact name. Scoped to the resolved Workspace when one is given (or when a
@@ -159,54 +177,18 @@ export function resolveProject(
     }
   }
   const lowered = raw.toLowerCase();
-  const byKey = workspaces.flatMap((workspace) =>
-    workspace.projects
-      .filter((project) => project.key.toLowerCase() === lowered)
-      .map((project) => ({
-        workspace,
-        project,
-      })),
+  const byKey = matchProjects(
+    workspaces,
+    (project) => project.key.toLowerCase() === lowered,
+    `Project '${raw}' is ambiguous across workspaces`,
   );
-  if (byKey.length === 1 && byKey[0] !== undefined) {
-    const hit = byKey[0];
-    return {
-      workspace: hit.workspace,
-      projectId: hit.project.id,
-      projectKey: hit.project.key,
-      projectName: hit.project.name,
-    };
-  }
-  if (byKey.length > 1) {
-    throw new Error(
-      `Project '${raw}' is ambiguous across workspaces. Matching projects: ` +
-        `${describeProjects(byKey.map((hit) => ({ workspaceName: hit.workspace.name, name: hit.project.name, key: hit.project.key, id: hit.project.id })))}. ` +
-        `Pass --project with an exact ID, or add --workspace to choose one.`,
-    );
-  }
-  const byName = workspaces.flatMap((workspace) =>
-    workspace.projects
-      .filter((project) => project.name === raw)
-      .map((project) => ({
-        workspace,
-        project,
-      })),
+  if (byKey !== undefined) return byKey;
+  const byName = matchProjects(
+    workspaces,
+    (project) => project.name === raw,
+    `Project '${raw}' is ambiguous`,
   );
-  if (byName.length === 1 && byName[0] !== undefined) {
-    const hit = byName[0];
-    return {
-      workspace: hit.workspace,
-      projectId: hit.project.id,
-      projectKey: hit.project.key,
-      projectName: hit.project.name,
-    };
-  }
-  if (byName.length > 1) {
-    throw new Error(
-      `Project '${raw}' is ambiguous. Matching projects: ` +
-        `${describeProjects(byName.map((hit) => ({ workspaceName: hit.workspace.name, name: hit.project.name, key: hit.project.key, id: hit.project.id })))}. ` +
-        `Pass --project with an exact ID, or add --workspace to choose one.`,
-    );
-  }
+  if (byName !== undefined) return byName;
   throw noProjectMatch(raw, scope, targets);
 }
 

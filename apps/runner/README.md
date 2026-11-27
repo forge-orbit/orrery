@@ -26,7 +26,7 @@ npx @forge-orbit/orrery-runner --version
 
 ## Quick start
 
-Enroll your machine once with browser device-code login:
+Enroll your Runner host once with browser device-code login:
 
 ```sh
 orrery-runner login --server https://orrery.example.com
@@ -63,7 +63,7 @@ run without modifying it.
 
 | Command | What it does |
 | --- | --- |
-| `login [--server URL]` | Enroll this machine as a Runner host via the browser |
+| `login [--server URL]` | Enroll this Runner host via the browser |
 | `init [--workspace W] [--project P] [--agent A]` | Resolve and save a checkout binding, then exit |
 | `start [options]` | Register a project-bound Runner and heartbeat until stopped |
 | `work <ISSUE>` | Run one issue in an ephemeral Runner and exit |
