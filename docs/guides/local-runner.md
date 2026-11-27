@@ -125,16 +125,42 @@ cd /path/to/repo
 orrery-runner start --auto-claim --auto-claim-filter assignedToMe
 ```
 
+An issue's **Assignee** is always a **Human** (or empty); **Agents** execute work through **Work
+sessions** and **Dispatches** and are never the assignee. `assignedToMe` therefore means issues
+assigned to this Runner host's owner **Human**, and the owner's other Agents may claim the same
+issue too. Issues assigned to *another* Human are never eligible.
+
 `--auto-claim-filter` controls which ready issues are eligible:
 
 | Value | Picks up |
 | --- | --- |
-| `assignedToMe` *(default)* | Ready `todo` issues assigned to this Runner's Agent |
+| `assignedToMe` *(default)* | Ready `todo` issues assigned to this Runner host's owner Human |
 | `unassigned` | Unassigned ready `todo` issues |
-| `all` | Either unassigned or assigned to this Runner's Agent |
+| `all` | Either unassigned or assigned to this Runner host's owner Human |
+
+Autonomous pickup is label-gated by default so a runner never silently grabs your personal `todo`
+issues (ADR-0013):
+
+```sh
+# Default: only issues carrying the ready-for-agent label
+orrery-runner start --auto-claim
+
+# A specialised checkout: every named label must be attached (AND, case-insensitive)
+orrery-runner start --auto-claim --auto-claim-label Frontend --auto-claim-label urgent
+
+# Treat every one of your todo issues as runner-eligible (opt out of the gate)
+orrery-runner start --auto-claim --auto-claim-any-label
+```
+
+- `--auto-claim-label NAME` is repeatable, matched against project label names case-insensitively,
+  and an issue must carry **all** requested labels. It defaults to `ready-for-agent`.
+- `--auto-claim-any-label` sends no label filter at all. Combining it with `--auto-claim-label`
+  fails fast, and an empty `--auto-claim-label` value is rejected before contacting the server.
+- Labels combine with `--auto-claim-filter`: for example `--auto-claim-filter unassigned` plus a
+  `ready-for-agent` label picks up shared team backlog that was explicitly opted in.
 
 Issues with an open blocker, a live Work session, an active/pending/uncertain Dispatch, or
-`Needs input` are never claimed.
+`Needs input` are never claimed. Issues assigned to your Human sort ahead of unassigned ones.
 
 ### One-shot issue mode (`work`)
 
@@ -149,6 +175,10 @@ orrery-runner work PROJ-42
 `work` accepts an issue UUID, a `KEY-N` identifier (such as `PROJ-42`), or a full Orrery issue URL.
 If a `KEY-N` identifier matches projects in more than one workspace you belong to, Orrery refuses
 to guess and lists the matching workspaces — pass `--workspace <ID|name|slug>` to disambiguate.
+
+Like **Delegate to Runner**, `work` accepts an issue that is unassigned or assigned to you, and
+rejects issues assigned to another Human (`409 issue_assigned_to_other_human`). The issue keeps its
+human **Assignee**; your Agent only executes the work.
 
 `work` registers an ephemeral single-use Runner, dispatches and supervises the issue (including
 heartbeats, Live Session Studio streaming, Needs Input resume, and teammate Stop), marks the
@@ -199,11 +229,22 @@ repositories, and never store display names — `--name` stays per-run.
 - View connected machines and project-bound runners in the workspace's **Runners** fleet view.
   Presence (`Online` / `Busy` / `Offline`) is derived by Postgres from `last_seen_at` and active
   slots.
-- On any ready `todo` issue, the owner of an online Runner host can click **Delegate to Runner**
-  (and optionally choose another of their own Agents compatible with `issues.assignee`).
+- An issue's **Assignee** is always a **Human** with project access (or unassigned); **Agents**
+  never appear in the assignee picker. Execution stays visible through live **Work session**
+  indicators on the board and issue page.
+- On any ready `todo` issue assigned to you or unassigned, click **Delegate to Runner** (and
+  optionally choose another of your own Agents). Delegating **your own** assigned issue keeps you
+  accountable as the assignee while your Agent executes the work; any Agent you own may be chosen,
+  not just a pre-assigned one.
+- An issue assigned to **another Human** cannot be delegated by you: the button is disabled and the
+  panel explains that the assignee must delegate it or reassign it first.
 - **Owner-only dispatch:** Teammates with project access can see your Runner in the fleet, but only
   you can dispatch work to your machine. Any project contributor or manager can still click
   **Stop** on an active session to enqueue an emergency `cancel`.
+- **Mid-flight reassignment:** reassigning an `in_progress` issue to another Human is allowed and
+  does not stop the active session. The new assignee is enforced at the next `claim`, `reacquire`,
+  or queued dispatch acceptance, so a handoff can never let the old owner's automation keep working
+  the issue.
 
 ### Live Session Studio
 
@@ -309,7 +350,9 @@ marks the attempt `uncertain` instead of auto-rerunning it:
 | `--repo PATH` | — | current directory | `start`, `work`, `init` | Local git checkout path |
 | `--heartbeat-ms N` | — | `5000` | `start` | Heartbeat interval in ms (min `10`) |
 | `--auto-claim` | — | `false` | `start` | Opt in to autonomous ready-work pickup |
-| `--auto-claim-filter` | — | `assignedToMe` | `start` | `assignedToMe`, `unassigned`, or `all` |
+| `--auto-claim-filter` | — | `assignedToMe` | `start` | `assignedToMe` (owner Human's issues), `unassigned`, or `all` |
+| `--auto-claim-label NAME` | — | `ready-for-agent` | `start` | Repeatable required project label (AND, case-insensitive) |
+| `--auto-claim-any-label` | — | `false` | `start` | Disable the default label gate (conflicts with `--auto-claim-label`) |
 | `--auto-claim-poll-ms N` | — | `1000` | `start` | Auto-claim polling interval in ms |
 | `--prompt TEXT` | — | — | `work` | Optional instructions appended after the runner's preamble (max 16,000 chars) |
 | `--harness ID` | — | `opencode` | `start`, `work` | Local Harness preset (`opencode`, `codex`, `claude`, `omp`, `grok`, `hermes`, `cursor`) |

@@ -50,7 +50,7 @@ async function createIssue(
   };
   if (assigneeHumanId !== undefined) {
     const assigned = await client.patch(`/api/issues/${issue.id}`, {
-      data: { assignee: { type: "human", id: assigneeHumanId } },
+      data: { assigneeHumanId },
     });
     expect(assigned.status()).toBe(200);
   }

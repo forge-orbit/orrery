@@ -137,7 +137,7 @@ test("the assignee picker flags a Member without project access on both pages", 
   await expect(page.getByText("No project access", { exact: true }).last()).toBeVisible();
 
   const issue = await api.post(`/api/projects/${projectId}/issues`, {
-    data: { title: "Assigned without access", assignee: { type: "human", id: teammateHumanId } },
+    data: { title: "Assigned without access", assigneeHumanId: teammateHumanId },
   });
   expect(issue.status()).toBe(201);
   const issueId = asText(field(await issue.json(), "id"), "issue id");
@@ -185,6 +185,97 @@ test("the invitation form suggests known Humans but still accepts a brand-new ad
   await page.getByRole("button", { name: "Send invitation" }).click();
   await expect(page.getByText(`Invitation sent to ${BRAND_NEW_EMAIL}.`).first()).toBeVisible();
   for (const cookie of await page.context().cookies()) await recordSecret(cookie.value);
+});
+
+test("assignee pickers and board filters offer Humans only, never Agents", async ({ page }) => {
+  const agent = await api.post("/api/agents", { data: { name: `picker-agent-${suffix}` } });
+  expect(agent.status()).toBe(201);
+  const issue = await api.post(`/api/projects/${projectId}/issues`, {
+    data: { title: "Picker issue" },
+  });
+  expect(issue.status()).toBe(201);
+  const issueId = asText(field(await issue.json(), "id"), "issue id");
+
+  await signInPage(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await page.goto(`/issues/${issueId}`);
+  await page.getByRole("combobox", { name: "Assignee" }).click();
+  await expect(
+    page.getByRole("option", { name: `Human · ${OWNER_EMAIL}`, exact: true }),
+  ).toHaveCount(1);
+  await expect(page.getByRole("option", { name: /^Agent · / })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.goto(`/board/${projectId}`);
+  await page.getByRole("combobox", { name: "Assignee" }).click();
+  await expect(page.getByRole("option", { name: "Any assignee", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Unassigned", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Human", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Any agent", exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.goto(`/projects/${projectId}`);
+  await expect(page.getByText("Any agent")).toHaveCount(0);
+});
+
+test("delegation on another Human's issue is disabled with an explanation", async ({ page }) => {
+  const issue = await api.post(`/api/projects/${projectId}/issues`, {
+    data: { title: "Owned by the workspace owner", assigneeHumanId: ownerHumanId },
+  });
+  expect(issue.status()).toBe(201);
+  const issueId = asText(field(await issue.json(), "id"), "issue id");
+
+  await signInPage(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await page.goto(`/issues/${issueId}`);
+  await expect(page.getByRole("heading", { name: "Delegate to Runner" })).toBeVisible();
+  await expect(page.locator("[data-delegate-trigger]")).toBeDisabled();
+  await expect(
+    page.getByText(/that human can delegate it\. Reassign the issue to delegate it yourself\./),
+  ).toBeVisible();
+});
+
+test("another Human's Agent cannot claim an issue assigned to someone else", async () => {
+  const agent = await api.post("/api/agents", { data: { name: `foreign-agent-${suffix}` } });
+  expect(agent.status()).toBe(201);
+  const agentId = asText(field(await agent.json(), "id"), "agent id");
+  const key = await api.post("/api/agents/keys", {
+    data: {
+      agentId,
+      workspaceId,
+      validity: "90",
+      projects: [{ projectId, level: "contribute" }],
+    },
+  });
+  expect(key.status()).toBe(201);
+  const secret = asText(field(await key.json(), "secret"), "agent key");
+  await recordSecret(secret);
+
+  const issue = await api.post(`/api/projects/${projectId}/issues`, {
+    data: { title: "Claimed by another human", assigneeHumanId: ownerHumanId },
+  });
+  expect(issue.status()).toBe(201);
+  const issueId = asText(field(await issue.json(), "id"), "issue id");
+
+  const agentApi = await request.newContext({
+    baseURL: baseUrl,
+    extraHTTPHeaders: { authorization: `Bearer ${secret}` },
+  });
+  try {
+    const run = await agentApi.post("/api/runs/hook", {
+      data: {
+        schema: "orrery.run.hook.v1",
+        event: "run_started",
+        runKey: { harness: "member-autocomplete-e2e", nativeSessionId: randomUUID() },
+      },
+    });
+    expect(run.status()).toBe(200);
+    const runId = asText(field(await run.json(), "runId"), "run id");
+    const claim = await agentApi.post(`/api/issues/${issueId}/work-sessions`, { data: { runId } });
+    expect(claim.status()).toBe(409);
+    expect(claim.headers()["content-type"]).toContain("application/problem+json");
+    expect(await claim.json()).toMatchObject({ code: "issue_assigned_to_other_human" });
+  } finally {
+    await agentApi.dispose();
+  }
 });
 
 function field(value: unknown, key: string): unknown {

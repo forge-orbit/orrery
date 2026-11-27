@@ -231,7 +231,7 @@ test.beforeAll(async () => {
   issueId = requiredText(field(await bodyOf(issue), "id"), "the issue id");
 
   const assigned = await admin.patch(`/api/issues/${issueId}`, {
-    data: { assignee: { type: "human", id: adminHumanId } },
+    data: { assigneeHumanId: adminHumanId },
   });
   expect(assigned.status()).toBe(200);
   const assignee = field(await bodyOf(assigned), "assignee");
