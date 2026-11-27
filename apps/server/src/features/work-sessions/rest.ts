@@ -70,7 +70,7 @@ const claim = createRoute({
   path: "/api/issues/{issueId}/work-sessions",
   summary: "Claim an issue for an agent and run",
   description:
-    "Start a work session. The session belongs to the authenticated agent, the named run, the key's workspace and the issue — not to the key itself. An agent may claim only work that is unassigned or assigned to that same agent. At most one active session can hold an issue; helpers passing the same (agent, run, issue) join it. The claim is a five-minute lease evaluated in database time.",
+    "Start a work session. The session belongs to the authenticated agent, the named run, the key's workspace and the issue — not to the key itself. An agent may claim only work that is unassigned or assigned to its owner human. At most one active session can hold an issue; helpers passing the same (agent, run, issue) join it. The claim is a five-minute lease evaluated in database time.",
   request: {
     params: issueParams,
     body: { required: true, content: { "application/json": { schema: claimBody } } },
@@ -226,7 +226,7 @@ const reacquire = createRoute({
     403: problem("Contribute access is required to reacquire this claim"),
     404: problem("No such issue or run is in scope for this agent"),
     409: problem(
-      "The issue is claimed by another worker, paused for input, assigned to a human or another agent, or the claim was never expired",
+      "The issue is claimed by another worker, paused for input, assigned to another human, or the claim was never expired",
     ),
   },
 });
@@ -335,7 +335,7 @@ const readyWork = createRoute({
   path: "/api/projects/{projectId}/ready-work",
   summary: "Minimal ready-work listing for a project",
   description:
-    "Open issues that are not Needs input, have no live active session, and have no blocker whose status is not closed, evaluated in database time. `filter` selects all claimable work (the default), only work assigned to the caller, or only unassigned work; an agent never sees work assigned to a human or another agent. `labels` keeps only work carrying every named project label, matched case-insensitively; repeat the parameter for more labels. Assigned work sorts first, then priority, sortOrder and createdAt. Needs no claim; a full board is out of scope.",
+    "Open issues that are not Needs input, have no live active session, and have no blocker whose status is not closed, evaluated in database time. `filter` selects all claimable work (the default), only work assigned to the caller (for an agent, its owner human), or only unassigned work; an agent never sees work assigned to another human. `labels` keeps only work carrying every named project label, matched case-insensitively; repeat the parameter for more labels. Assigned work sorts first, then priority, sortOrder and createdAt. Needs no claim; a full board is out of scope.",
   request: { params: projectParams, query: readyWorkQuery },
   responses: {
     200: {
