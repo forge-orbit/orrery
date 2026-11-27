@@ -169,20 +169,48 @@ export async function superviseDispatch(options: SupervisionOptions): Promise<Sl
   let flushTimer: ReturnType<typeof setInterval> | undefined;
   let spool: StreamSpool | undefined;
   let activeFlush: Promise<number> | undefined;
+  let streamClosed = false;
   let renewing = false;
   let acpRunning = false;
   let worktree: WorktreeHandle | undefined;
   let acp: AcpStdioClient | undefined;
 
+  const stopStreamFlush = (): void => {
+    streamClosed = true;
+    if (flushTimer !== undefined) {
+      clearInterval(flushTimer);
+      flushTimer = undefined;
+    }
+  };
+
   // Coalesce every flush (periodic tick, pre-stop, final safety net) into one
   // chain; StreamSpool also serializes internally, so no duplicate POSTs race.
   const flushSpool = (): Promise<number> => {
-    if (spool === undefined) return Promise.resolve(0);
+    if (spool === undefined || streamClosed) return Promise.resolve(0);
     const current = spool;
     activeFlush = (activeFlush ?? Promise.resolve(0))
       .catch(() => {})
-      .then(() => current.flush())
+      .then(() => (streamClosed ? 0 : current.flush()))
       .catch((error: unknown) => {
+        if (error instanceof RunnerRequestError && error.status === 401) {
+          stopStreamFlush();
+          revoked = true;
+          write(`Stream flush rejected (${error.message}); terminating local ACP process group.`);
+          requestCancel("revoked");
+          return 0;
+        }
+        if (
+          error instanceof RunnerRequestError &&
+          error.status >= 400 &&
+          error.status < 500 &&
+          error.status !== 429
+        ) {
+          // A 409 (e.g. dispatch_not_pending / stream_attempt_mismatch), 404 or
+          // 400 is terminal: stop the periodic flush timer instead of retrying.
+          stopStreamFlush();
+          write(`Stream flush stopped (${error.message}).`);
+          return 0;
+        }
         write(`Stream flush failed; will retry: ${String(error)}`);
         return 0;
       });

@@ -141,6 +141,8 @@ export class TestOrrery {
     { harness?: string; model?: string; effort?: string }
   >();
   private readonly streamed: TestStreamChunk[] = [];
+  streamRequests = 0;
+  streamError: { status: number; code: string; detail: string } | undefined;
   reconnectCalls = 0;
   /** Harness catalogs PUT by the runner's background sync (issue #240). */
   catalogs: Array<Record<string, unknown>> = [];
@@ -620,6 +622,16 @@ export class TestOrrery {
     }
     const ingest = path.match(/^\/api\/runners\/[^/]+\/dispatches\/([^/]+)\/stream$/);
     if (req.method === "POST" && ingest !== null) {
+      this.streamRequests += 1;
+      if (this.streamError !== undefined) {
+        sendJson(res, this.streamError.status, {
+          status: this.streamError.status,
+          code: this.streamError.code,
+          title: this.streamError.detail,
+          detail: this.streamError.detail,
+        });
+        return;
+      }
       const body = recordOf(await bodyOf(req)) ?? {};
       const chunks = Array.isArray(body.chunks) ? body.chunks : [];
       for (const chunk of chunks) {
