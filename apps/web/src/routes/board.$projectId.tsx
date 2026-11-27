@@ -10,7 +10,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { Section } from "@astryxdesign/core/Section";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Stack } from "@astryxdesign/core/Stack";
+import { Stack, StackItem } from "@astryxdesign/core/Stack";
 import { StatusDot, type StatusDotVariant } from "@astryxdesign/core/StatusDot";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -1055,6 +1055,16 @@ function BoardCardContent({
       : session?.status;
   const assignee = issue.assignee;
   const assigneeType = assignee === null ? "none" : assignee.agentId != null ? "agent" : "human";
+  const hasLabels =
+    issue.priority !== "none" ||
+    state !== undefined ||
+    blockers.length > 0 ||
+    issue.labels.length > 0;
+  const workingAgent =
+    session !== undefined && run !== undefined && assignee?.agentId !== session.agentId
+      ? run
+      : undefined;
+  const hasAvatars = assignee !== null || workingAgent !== undefined;
 
   return (
     <Card
@@ -1084,73 +1094,77 @@ function BoardCardContent({
             </Text>
           </Stack>
         </Link>
-        {(issue.priority !== "none" ||
-          assignee !== null ||
-          state !== undefined ||
-          blockers.length > 0 ||
-          subtaskCount > 0 ||
-          issue.labels.length > 0) && (
-          <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
-            {issue.priority !== "none" && <PriorityBadge priority={issue.priority} />}
-            {state !== undefined && (
-              <Token
-                label={state === "needs-input" ? "Needs input" : state}
-                color={
-                  state === "active"
-                    ? "green"
-                    : state === "needs-input" || state === "stopping"
-                      ? "orange"
-                      : "gray"
-                }
-                size="sm"
-                data-session-state={state}
-              />
-            )}
-            {blockers.length > 0 && (
-              <Token
-                label={`Blocked by ${blockers.length}`}
-                color="red"
-                size="sm"
-                data-blocked-by={blockers.join(",")}
-              />
-            )}
-            {issue.labels.map((label) => (
-              <LabelPill key={label.id} label={label} />
-            ))}
-            {subtaskCount > 0 && (
-              <Text type="supporting" color="secondary">
-                Subtasks {doneCount}/{subtaskCount}
-              </Text>
-            )}
-            {assignee !== null && (
-              <Stack as="span" direction="horizontal" vAlign="center">
-                {assigneeType === "agent" ? (
-                  <AgentAvatar
-                    name={assignee.displayName}
-                    harness={session?.agentId === assignee.agentId ? run?.harness : undefined}
-                    size={16}
-                  />
-                ) : (
-                  <HumanAvatar
-                    name={assignee.displayName}
-                    avatarUrl={assignee.avatarUrl}
-                    size="xsm"
-                  />
-                )}
-                <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
-              </Stack>
-            )}
-            {session !== undefined &&
-              run !== undefined &&
-              assignee?.agentId !== session.agentId && (
-                <Stack as="span" direction="horizontal" vAlign="center" data-working-agent="">
-                  <AgentAvatar name={run.agentName} harness={run.harness} size={16} />
-                  <VisuallyHidden>{run.agentName}</VisuallyHidden>
+        {(hasLabels || hasAvatars) && (
+          <Stack direction="horizontal" gap={2} justify="between" vAlign="start">
+            <StackItem size="fill">
+              {hasLabels && (
+                <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
+                  {issue.priority !== "none" && <PriorityBadge priority={issue.priority} />}
+                  {state !== undefined && (
+                    <Token
+                      label={state === "needs-input" ? "Needs input" : state}
+                      color={
+                        state === "active"
+                          ? "green"
+                          : state === "needs-input" || state === "stopping"
+                            ? "orange"
+                            : "gray"
+                      }
+                      size="sm"
+                      data-session-state={state}
+                    />
+                  )}
+                  {blockers.length > 0 && (
+                    <Token
+                      label={`Blocked by ${blockers.length}`}
+                      color="red"
+                      size="sm"
+                      data-blocked-by={blockers.join(",")}
+                    />
+                  )}
+                  {issue.labels.map((label) => (
+                    <LabelPill key={label.id} label={label} />
+                  ))}
                 </Stack>
               )}
+            </StackItem>
+            {hasAvatars && (
+              <StackItem size="static">
+                <Stack direction="horizontal" gap={1} vAlign="center">
+                  {assignee !== null && (
+                    <Stack as="span" direction="horizontal" vAlign="center">
+                      {assigneeType === "agent" ? (
+                        <AgentAvatar
+                          name={assignee.displayName}
+                          harness={session?.agentId === assignee.agentId ? run?.harness : undefined}
+                          size={16}
+                        />
+                      ) : (
+                        <HumanAvatar
+                          name={assignee.displayName}
+                          avatarUrl={assignee.avatarUrl}
+                          size="xsm"
+                        />
+                      )}
+                      <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
+                    </Stack>
+                  )}
+                  {workingAgent !== undefined && (
+                    <Stack as="span" direction="horizontal" vAlign="center" data-working-agent="">
+                      <AgentAvatar
+                        name={workingAgent.agentName}
+                        harness={workingAgent.harness}
+                        size={16}
+                      />
+                      <VisuallyHidden>{workingAgent.agentName}</VisuallyHidden>
+                    </Stack>
+                  )}
+                </Stack>
+              </StackItem>
+            )}
           </Stack>
         )}
-        {(canMove || issue.needsInput || session !== undefined) && (
+        {(canMove || subtaskCount > 0 || issue.needsInput || session !== undefined) && (
           <Stack direction="horizontal" gap={1.5} justify="between" vAlign="center" wrap="wrap">
             {canMove && (
               <Selector
@@ -1167,8 +1181,13 @@ function BoardCardContent({
                 }))}
               />
             )}
-            {(issue.needsInput || session !== undefined) && (
+            {(subtaskCount > 0 || issue.needsInput || session !== undefined) && (
               <Stack direction="horizontal" gap={2} vAlign="center" wrap="wrap">
+                {subtaskCount > 0 && (
+                  <Text type="supporting" color="secondary">
+                    Subtasks {doneCount}/{subtaskCount}
+                  </Text>
+                )}
                 {issue.needsInput && (
                   <Link
                     to="/inbox"
