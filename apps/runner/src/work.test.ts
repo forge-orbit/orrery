@@ -86,13 +86,10 @@ vi.mock("./harnesses.ts", async (importOriginal) => {
       command: process.execPath,
       args: [],
     }),
-    commandOnPath: (...args: Parameters<typeof actual.commandOnPath>) => {
-      if (flags.noOpencode) return false;
-      return actual.commandOnPath(...args);
-    },
+    commandOnPath: () => !flags.noOpencode,
     resolveDefaultHarness: (...args: Parameters<typeof actual.resolveDefaultHarness>) => {
       if (flags.noOpencode) return undefined;
-      return actual.resolveDefaultHarness(...args);
+      return actual.resolveDefaultHarness(...args) ?? actual.BUILTIN_ACP_HARNESSES[0];
     },
   };
 });

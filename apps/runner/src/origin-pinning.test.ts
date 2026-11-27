@@ -77,6 +77,14 @@ function run(
     if (!("ORRERY_URL" in env)) delete merged.ORRERY_URL;
     if (!("ORRERY_RUNNER_ALLOW_INSECURE_HTTP" in env))
       delete merged.ORRERY_RUNNER_ALLOW_INSECURE_HTTP;
+    // Origin-pinning tests must not require a real opencode binary on PATH.
+    if (
+      !("ORRERY_ACP_COMMAND" in env) &&
+      !args.includes("--harness") &&
+      !args.includes("--acp-command")
+    ) {
+      merged.ORRERY_ACP_COMMAND = process.execPath;
+    }
     const child = spawn(process.execPath, [mainPath, ...args], {
       env: merged,
       cwd,

@@ -109,6 +109,15 @@ function run(
     if (!("ORRERY_RUNNER_ALLOW_INSECURE_HTTP" in env)) {
       delete merged.ORRERY_RUNNER_ALLOW_INSECURE_HTTP;
     }
+    // Control-plane CLI tests must not require a real opencode binary on PATH
+    // (GitHub Actions ubuntu-latest has no ACP harnesses installed).
+    if (
+      !("ORRERY_ACP_COMMAND" in env) &&
+      !args.includes("--harness") &&
+      !args.includes("--acp-command")
+    ) {
+      merged.ORRERY_ACP_COMMAND = process.execPath;
+    }
     const child = spawn(process.execPath, [mainPath, ...args], {
       env: merged,
       stdio: ["ignore", "pipe", "pipe"],
