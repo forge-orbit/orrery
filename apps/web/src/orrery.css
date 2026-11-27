@@ -276,6 +276,31 @@ a[data-color="primary"]:hover {
   max-height: min(14.5rem, calc(100dvh - 1rem));
 }
 
+[data-device-handoff] {
+  min-inline-size: 0;
+}
+
+[data-device-endpoint] {
+  min-inline-size: 0;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--orrery-border);
+  border-radius: 999px;
+  background: var(--orrery-canvas);
+}
+
+[data-device-code-well] {
+  border: 1px solid var(--orrery-border);
+  border-radius: 0.65rem;
+  background: var(--orrery-canvas);
+}
+
+[data-device-code-value] {
+  font-size: clamp(1.45rem, 3vw, 1.85rem);
+  line-height: 1.2;
+  letter-spacing: 0.22em;
+  padding-inline-start: 0.22em;
+}
+
 @media (max-width: 40rem) {
   [data-access-layout] {
     display: block;
