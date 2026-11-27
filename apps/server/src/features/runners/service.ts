@@ -1713,14 +1713,15 @@ async function assertIssueStillDispatchable(
     filter === "unassigned" ? unassigned : filter === "assignedToMe" ? mine : unassigned || mine;
   if (!matches) throw new RunnersError("issue_not_claimable");
 
-  if (labels.length > 0) {
+  const requiredLabels = wantedLabels(labels);
+  if (requiredLabels.length > 0) {
     const attached = await tx
       .select({ name: projectLabels.name })
       .from(issueLabels)
       .innerJoin(projectLabels, eq(projectLabels.id, issueLabels.labelId))
       .where(eq(issueLabels.issueId, issueId));
     const present = new Set(attached.map((row) => row.name.toLowerCase()));
-    if (!labels.every((label) => present.has(label))) {
+    if (!requiredLabels.every((label) => present.has(label))) {
       throw new RunnersError("issue_not_claimable");
     }
   }

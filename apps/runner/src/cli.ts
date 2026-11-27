@@ -232,7 +232,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
         if (anyLabel && requestedLabels.length > 0) {
           fail("--auto-claim-label and --auto-claim-any-label cannot be combined");
         }
-        // Autonomous pickup is label-gated by default so a daemon never silently
+        // Autonomous pickup is label-gated by default so a runner never silently
         // pulls personal human todo issues (ADR-0013).
         const autoClaimLabels = anyLabel
           ? undefined

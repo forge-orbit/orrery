@@ -713,7 +713,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
   });
 
   it("auto-claims only issues carrying every requested label, case-insensitively", async () => {
-    const { projectId, runnerId } = await projectWithRunner(6);
+    const { projectId, runnerId } = await projectWithRunner(7);
     const frontend = await createLabel(projectId, "Frontend");
     const urgent = await createLabel(projectId, "Urgent");
     const backend = await createLabel(projectId, "Backend");
@@ -722,6 +722,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
     const bothTwo = await makeIssue("frontend and urgent two", { projectId });
     const frontOnly = await makeIssue("frontend only", { projectId });
     const backOnly = await makeIssue("backend only", { projectId });
+    const unlabeled = await makeIssue("unlabeled", { projectId });
     for (const issue of [bothOne, bothTwo, frontOnly]) {
       await attachLabel(issue.id, frontend);
     }
@@ -745,8 +746,9 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
     // Nothing carries both any more; unknown labels match nothing at all.
     expect(await claim({ labels: ["frontend", "urgent"] })).toBe("");
     expect(await claim({ labels: ["ready-for-agent"] })).toBe("");
-    // Omitted labels stay unfiltered at the API layer for any caller.
-    expect(await claim({})).toBe(backOnly.id);
+    // Empty and omitted labels stay unfiltered at the API layer for any caller.
+    expect(await claim({ labels: [] })).toBe(backOnly.id);
+    expect(await claim({})).toBe(unlabeled.id);
   });
 
   it("re-checks labels under the claim lock when one is removed during the scan", async () => {
