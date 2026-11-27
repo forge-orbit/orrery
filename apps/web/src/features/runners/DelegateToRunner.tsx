@@ -501,6 +501,7 @@ export function DelegateToRunner({
                       <Selector
                         label="Runner"
                         width="100%"
+                        placement="below"
                         placeholder={owned.length === 0 ? "No online Runners" : "Choose a Runner"}
                         options={owned.map((runner) => ({
                           value: runner.id,
@@ -528,6 +529,7 @@ export function DelegateToRunner({
                   <Selector
                     label="Agent"
                     isOptional
+                    placement="below"
                     placeholder="Use the Runner's default Agent"
                     options={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
                     value={agentId}
@@ -538,6 +540,7 @@ export function DelegateToRunner({
                   <Selector
                     label="Harness"
                     isOptional
+                    placement="below"
                     placeholder={
                       selectedRunner === undefined
                         ? "Choose a Runner first"
@@ -559,6 +562,7 @@ export function DelegateToRunner({
                   <Selector
                     label="Model"
                     isOptional
+                    placement="below"
                     placeholder={
                       selectedHarness === undefined
                         ? "Choose a Harness first"
@@ -580,6 +584,7 @@ export function DelegateToRunner({
                     <Selector
                       label="Effort"
                       isOptional
+                      placement="below"
                       placeholder="Use the model default effort"
                       options={supportedEfforts.map((level) => ({
                         value: level,

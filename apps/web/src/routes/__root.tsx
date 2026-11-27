@@ -43,6 +43,8 @@ export interface RouterContext {
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {
     accessPage?: boolean;
+    accessCoverHeading?: string;
+    accessCoverBody?: string;
     fullHeightLayout?: boolean;
   }
 }
@@ -236,14 +238,23 @@ function NavSharedWorkspaceIcon() {
 }
 
 function RootLayout() {
-  const accessPage = useMatches({
-    select: (matches) => matches.some((match) => match.staticData.accessPage === true),
+  const accessCover = useMatches({
+    select: (matches) => {
+      const match = matches.toReversed().find((item) => item.staticData.accessPage === true);
+      if (match === undefined) return null;
+      return {
+        heading: match.staticData.accessCoverHeading ?? "Projects for humans and agents.",
+        body:
+          match.staticData.accessCoverBody ??
+          "Track issues, share knowledge, and give agents direction when they need it.",
+      };
+    },
   });
   const fullHeightLayout = useMatches({
     select: (matches) => matches.some((match) => match.staticData.fullHeightLayout === true),
   });
 
-  if (accessPage) {
+  if (accessCover !== null) {
     return (
       <LinkProvider component={RouterAnchor}>
         <Stack data-access-layout="">
@@ -256,10 +267,10 @@ function RootLayout() {
             <DarkThemeScope>
               <Stack gap={2} maxWidth="25rem">
                 <Text as="p" display="block" type="display-2" color="primary" textWrap="balance">
-                  Projects for humans and agents.
+                  {accessCover.heading}
                 </Text>
                 <Text as="p" display="block" type="body" color="secondary">
-                  Track issues, share knowledge, and give agents direction when they need it.
+                  {accessCover.body}
                 </Text>
               </Stack>
             </DarkThemeScope>
