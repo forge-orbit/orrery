@@ -1178,5 +1178,25 @@ describe(
       expect(resolvedIds).toContain("custom");
       expect(applied).toContainEqual({ model: "stub-deep", effort: "high" });
     });
+
+    it("stops stream flushing once on terminal 409 instead of retrying every second", async () => {
+      const fixture = await makeFixture({ mode: "normal" });
+      fixture.control.streamError = {
+        status: 409,
+        code: "dispatch_not_pending",
+        detail: "Dispatch already ended.",
+      };
+      fixture.control.enqueueDispatch("TEST-STREAM-409");
+      const session = await settledSession(fixture);
+      expect(session.status).toBe("completed");
+      // The first flush sees 409 and disables further periodic/final flushes.
+      expect(fixture.control.streamRequests).toBe(1);
+      expect(
+        fixture.lines.filter((line) => line.includes("Stream flush stopped (Orrery returned 409")),
+      ).toHaveLength(1);
+      expect(
+        fixture.lines.filter((line) => line.includes("Stream flush failed; will retry")),
+      ).toEqual([]);
+    });
   },
 );

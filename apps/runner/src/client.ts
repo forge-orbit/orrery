@@ -31,11 +31,44 @@ export class RunnerRequestError extends Error {
   readonly code: string | null;
 
   constructor(status: number, code: string | null, message: string) {
-    super(`Orrery returned ${status}${code === null ? "" : ` (${code})`}: ${message}`);
+    const trimmed = message.trim();
+    const prefix = `Orrery returned ${status}${code === null ? "" : ` (${code})`}`;
+    super(trimmed === "" ? prefix : `${prefix}: ${trimmed}`);
     this.name = "RunnerRequestError";
     this.status = status;
     this.code = code;
   }
+}
+
+const ProblemBody = z.object({
+  code: z.string().optional(),
+  detail: z.string().optional(),
+  title: z.string().optional(),
+});
+
+/** Parse an HTTP error response into a typed RunnerRequestError, preserving RFC 9457 Problem Details. */
+export async function readRunnerRequestError(response: Response): Promise<RunnerRequestError> {
+  let code: string | null = null;
+  let detail: string = response.statusText.trim();
+  const raw = (await response.text().catch(() => "")).trim();
+  if (raw !== "") {
+    let parsedJson = false;
+    try {
+      const parsed = ProblemBody.safeParse(JSON.parse(raw) as unknown);
+      if (parsed.success) {
+        parsedJson = true;
+        if (parsed.data.code !== undefined) code = parsed.data.code;
+        if (parsed.data.detail !== undefined) detail = parsed.data.detail;
+        else if (parsed.data.title !== undefined) detail = parsed.data.title;
+      }
+    } catch {
+      // Non-JSON proxy/gateway response (e.g. 502 HTML or plain text).
+    }
+    if (!parsedJson && detail === "" && !raw.startsWith("<")) {
+      detail = raw.slice(0, 200);
+    }
+  }
+  return new RunnerRequestError(response.status, code, detail);
 }
 
 export interface OrreryClientOptions {
@@ -72,25 +105,7 @@ export class OrreryClient {
       throw new Error(`Cannot reach Orrery at ${this.server}: ${String(error)}`, { cause: error });
     }
     if (!response.ok) {
-      let code: string | null = null;
-      let detail: string = response.statusText;
-      try {
-        const body = z
-          .object({
-            code: z.string().optional(),
-            detail: z.string().optional(),
-            title: z.string().optional(),
-          })
-          .safeParse(await response.json());
-        if (body.success) {
-          if (body.data.code !== undefined) code = body.data.code;
-          if (body.data.detail !== undefined) detail = body.data.detail;
-          else if (body.data.title !== undefined) detail = body.data.title;
-        }
-      } catch {
-        // A non-JSON failure still becomes a typed status error.
-      }
-      throw new RunnerRequestError(response.status, code, detail);
+      throw await readRunnerRequestError(response);
     }
     if (response.status === 204) return undefined;
     return response.json();
