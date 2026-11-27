@@ -707,6 +707,7 @@ describe("invitations", () => {
       });
       expect(ok.status).toBe(200);
       expect(await ok.json()).toEqual({
+        humanId: expect.any(String),
         email: INVITEE,
         handle: "member",
         displayName: null,
@@ -758,6 +759,7 @@ describe("invitations", () => {
       });
       expect(res.status).toBe(200);
       expect(SessionResponse.parse(await res.json())).toEqual({
+        humanId: expect.any(String),
         email: INVITEE,
         handle: "member",
         displayName: null,
@@ -797,6 +799,7 @@ describe("invitations", () => {
         ?.split(";")[0];
       const session = await app.request("/api/auth/session", { headers: { cookie: cookie ?? "" } });
       expect(await session.json()).toEqual({
+        humanId: expect.any(String),
         email: INVITEE,
         handle: "member",
         displayName: null,
@@ -826,6 +829,7 @@ describe("invitations", () => {
       });
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
+        humanId: expect.any(String),
         email: INVITEE,
         handle: "member",
         displayName: null,
@@ -943,6 +947,7 @@ describe("invitations", () => {
       });
       expect(valid.status).toBe(200);
       expect(await valid.json()).toEqual({
+        humanId: expect.any(String),
         email: "still.valid@example.com",
         handle: "still-valid",
         displayName: null,

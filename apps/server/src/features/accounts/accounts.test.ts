@@ -345,6 +345,7 @@ describe("accounts", () => {
       expect(withSession.status).toBe(200);
 
       expect(await withSession.json()).toEqual({
+        humanId: expect.any(String),
         email: EMAIL,
         handle: "admin",
         displayName: null,
@@ -439,6 +440,7 @@ describe("accounts", () => {
       const stillSignedIn = await second.request("/api/auth/session", { headers: { cookie } });
       expect(stillSignedIn.status).toBe(200);
       expect(await stillSignedIn.json()).toEqual({
+        humanId: expect.any(String),
         email: EMAIL,
         handle: "admin",
         displayName: null,
@@ -473,6 +475,7 @@ describe("accounts", () => {
       });
       expect(updated.status).toBe(200);
       expect(await updated.json()).toEqual({
+        humanId: expect.any(String),
         email: EMAIL,
         handle: "admin",
         displayName: "Ada Lovelace",
@@ -482,6 +485,7 @@ describe("accounts", () => {
 
       const session = await app.request("/api/auth/session", { headers: { cookie } });
       expect(await session.json()).toEqual({
+        humanId: expect.any(String),
         email: EMAIL,
         handle: "admin",
         displayName: "Ada Lovelace",
@@ -496,6 +500,7 @@ describe("accounts", () => {
       });
       expect(cleared.status).toBe(200);
       expect(await cleared.json()).toEqual({
+        humanId: expect.any(String),
         email: EMAIL,
         handle: "admin",
         displayName: null,

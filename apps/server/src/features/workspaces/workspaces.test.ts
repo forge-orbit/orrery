@@ -762,6 +762,7 @@ describe("workspaces", () => {
     });
     expect(registered.status).toBe(200);
     expect(await registered.json()).toEqual({
+      humanId: expect.any(String),
       email: "new.member@example.com",
       handle: "new-member",
       displayName: null,
