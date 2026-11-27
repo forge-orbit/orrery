@@ -49,6 +49,7 @@ interface World {
   agentId: string;
   otherAgentId: string;
   humanId: string;
+  otherHumanId: string;
   testRunnerId: string;
   privateWorkspaceId: string;
   readOnlyIssueId: string;
@@ -114,7 +115,7 @@ async function until<T>(load: () => Promise<T | undefined>, timeoutMs = 20_000):
 
 interface IssueOptions {
   projectId?: string;
-  agentId?: string | null;
+  assigneeHumanId?: string | null;
   status?: string;
   blockedBy?: string;
   trashed?: boolean;
@@ -130,9 +131,9 @@ async function makeIssue(
     body: {
       title,
       ...(options.status === undefined ? {} : { status: options.status }),
-      ...(options.agentId === undefined
+      ...(options.assigneeHumanId === undefined
         ? {}
-        : { assignee: options.agentId === null ? null : { type: "agent", id: options.agentId } }),
+        : { assigneeHumanId: options.assigneeHumanId }),
     },
   });
   if (created.status !== 201)
@@ -361,6 +362,7 @@ beforeAll(async () => {
     agentId: "",
     otherAgentId: "",
     humanId: admin.id,
+    otherHumanId: "",
     testRunnerId: "",
     privateWorkspaceId: "",
     readOnlyIssueId: "",
@@ -408,6 +410,19 @@ beforeAll(async () => {
   });
   if (other.status !== 201) throw new Error(`other failed: ${JSON.stringify(other.body)}`);
   world.otherAgentId = str(field(other.body, "id"));
+  // A second human in the same workspace, for "assigned to someone else" cases.
+  world.otherHumanId = randomUUID();
+  await database.db.insert(humans).values({
+    id: world.otherHumanId,
+    email: `other-${world.otherHumanId}@example.com`,
+    passwordHash: "scrypt$x",
+  });
+  await database.db.insert(workspaceMemberships).values({
+    id: randomUUID(),
+    workspaceId: world.workspaceA,
+    humanId: world.otherHumanId,
+    isOwner: false,
+  });
   // An Agent is only assignable in a workspace where it holds a live key.
   const issueKey = async (agentId: string, workspaceId: string, projectId: string) => {
     const key = await api("/api/agents/keys", {
@@ -561,19 +576,28 @@ afterAll(async () => {
 describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, () => {
   it("start --auto-claim defaults to assignedToMe and streams through the Studio", async () => {
     const blocker = await makeIssue("unassigned blocker");
-    const assigned = await makeIssue("assigned to default agent", { agentId: world.agentId });
+    const assigned = await makeIssue("assigned to default agent", {
+      assigneeHumanId: world.humanId,
+    });
     const unassigned = await makeIssue("unassigned human issue");
-    const other = await makeIssue("assigned to another agent", { agentId: world.otherAgentId });
+    const other = await makeIssue("assigned to another human", {
+      assigneeHumanId: world.otherHumanId,
+    });
     const blocked = await makeIssue("blocked assigned issue", {
-      agentId: world.agentId,
+      assigneeHumanId: world.humanId,
       blockedBy: blocker.id,
     });
-    const done = await makeIssue("done assigned issue", { agentId: world.agentId, status: "done" });
+    const done = await makeIssue("done assigned issue", {
+      assigneeHumanId: world.humanId,
+      status: "done",
+    });
     const trashed = await makeIssue("trashed assigned issue", {
-      agentId: world.agentId,
+      assigneeHumanId: world.humanId,
       trashed: true,
     });
-    const uncertain = await makeIssue("uncertain assigned issue", { agentId: world.agentId });
+    const uncertain = await makeIssue("uncertain assigned issue", {
+      assigneeHumanId: world.humanId,
+    });
     // The CLI now gates autonomous pickup on `ready-for-agent` by default (#280),
     // so every issue whose exclusion is NOT the label must carry it. The trashed
     // issue cannot take a label after deletion; deletion excludes it on its own.
@@ -680,7 +704,10 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
       throw new Error(`register failed: ${JSON.stringify(runnerId.body)}`);
     const testRunner = str(field(runnerId.body, "id"));
     const unassigned = await makeIssue("filter unassigned", { projectId });
-    const assigned = await makeIssue("filter assigned", { projectId, agentId: world.agentId });
+    const assigned = await makeIssue("filter assigned", {
+      projectId,
+      assigneeHumanId: world.humanId,
+    });
 
     const claim = (filter: string) =>
       api(`/api/runners/${testRunner}/auto-claim`, {
@@ -829,7 +856,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
   });
 
   it("one-shot work completes by ID, flushes streams and tears down the Runner", async () => {
-    const issue = await makeIssue("one-shot by id", { agentId: world.agentId });
+    const issue = await makeIssue("one-shot by id", { assigneeHumanId: world.humanId });
     const result = spawnCli([
       "work",
       issue.id,
@@ -865,7 +892,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
   });
 
   it("one-shot work resolves URLs and disambiguated keys, and fails cleanly on ambiguity", async () => {
-    const byUrlIssue = await makeIssue("one-shot by url", { agentId: world.agentId });
+    const byUrlIssue = await makeIssue("one-shot by url", { assigneeHumanId: world.humanId });
     const urlRun = spawnCli([
       "work",
       `${world.baseUrl}/issues/${byUrlIssue.id}`,
@@ -884,7 +911,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
 
     const ambiguous = await makeIssue("one-shot ambiguous", {
       projectId: world.projectB,
-      agentId: world.agentId,
+      assigneeHumanId: world.humanId,
     });
     const key = `${world.keyA}-${ambiguous.number}`;
     const ambiguousRun = spawnCli([
@@ -925,7 +952,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
   });
 
   it("one-shot work exits non-zero on an ACP crash and still tears down", async () => {
-    const issue = await makeIssue("one-shot crash", { agentId: world.agentId });
+    const issue = await makeIssue("one-shot crash", { assigneeHumanId: world.humanId });
     const result = spawnCli(
       [
         "work",
@@ -973,7 +1000,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
     });
     if (runner.status !== 201) throw new Error(`register failed: ${JSON.stringify(runner.body)}`);
     const runnerId = str(field(runner.body, "id"));
-    const issue = await makeIssue("race candidate", { projectId, agentId: world.agentId });
+    const issue = await makeIssue("race candidate", { projectId, assigneeHumanId: world.humanId });
 
     const results = await Promise.all(
       Array.from({ length: 4 }, () =>
@@ -1017,7 +1044,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
     });
     if (runner.status !== 201) throw new Error(`register failed: ${JSON.stringify(runner.body)}`);
     const runnerId = str(field(runner.body, "id"));
-    const issue = await makeIssue("needs input", { projectId, agentId: world.agentId });
+    const issue = await makeIssue("needs input", { projectId, assigneeHumanId: world.humanId });
     await database.db.update(issues).set({ needsInput: true }).where(eq(issues.id, issue.id));
 
     const claimed = await api(`/api/runners/${runnerId}/auto-claim`, {
@@ -1056,7 +1083,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
   });
 
   it("flushes owner-only stderr chunks before stop_session rolls up the stream", async () => {
-    const issue = await makeIssue("owner-only stderr", { agentId: world.agentId });
+    const issue = await makeIssue("owner-only stderr", { assigneeHumanId: world.humanId });
     const result = spawnCli(
       [
         "work",
@@ -1094,7 +1121,7 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
   });
 
   it("SIGTERM on one-shot work revokes the Runner and settles its Dispatch", async () => {
-    const issue = await makeIssue("one-shot sigterm", { agentId: world.agentId });
+    const issue = await makeIssue("one-shot sigterm", { assigneeHumanId: world.humanId });
     const result = spawnCli(
       [
         "work",

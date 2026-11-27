@@ -171,8 +171,7 @@ export function createMyWorkService(deps: MyWorkDeps): MyWorkService {
                 and(
                   inArray(issues.projectId, readable),
                   inArray(projects.workspaceId, workspaceIds),
-                  eq(issues.assigneeType, "human"),
-                  eq(issues.assigneeId, actor.humanId),
+                  eq(issues.assigneeHumanId, actor.humanId),
                   isNull(issues.deletedAt),
                   notInArray(issues.status, [...TERMINAL_ISSUE_STATUSES]),
                 ),

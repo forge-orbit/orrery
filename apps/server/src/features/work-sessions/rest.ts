@@ -379,8 +379,7 @@ const statusFor = {
   agents_cannot_request_stop: 403,
   session_not_active: 409,
   session_not_found: 404,
-  issue_assigned_to_human: 409,
-  issue_assigned_to_other_agent: 409,
+  issue_assigned_to_other_human: 409,
 } as const satisfies Record<SessionsErrorKind, number>;
 
 function isKind<K extends readonly SessionsErrorKind[]>(
@@ -416,8 +415,7 @@ const claimKinds = [
   "issue_claimed",
   "issue_blocked",
   "issue_needs_input",
-  "issue_assigned_to_human",
-  "issue_assigned_to_other_agent",
+  "issue_assigned_to_other_human",
 ] as const;
 const writeKinds = [
   "not_signed_in",
@@ -447,8 +445,7 @@ const reacquireKinds = [
   "issue_claimed",
   "issue_blocked",
   "session_required",
-  "issue_assigned_to_human",
-  "issue_assigned_to_other_agent",
+  "issue_assigned_to_other_human",
 ] as const;
 const currentKinds = writeKinds;
 const listActivitiesKinds = ["not_signed_in", "issue_not_found", "session_not_found"] as const;

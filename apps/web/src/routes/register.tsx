@@ -71,6 +71,7 @@ function RegisterPage() {
       queryClient.clear();
       const session: Session = {
         signedIn: true,
+        humanId: account.humanId,
         email: account.email,
         handle: account.handle,
         displayName: null,

@@ -263,7 +263,7 @@ describe("issue_mentioned notifications", () => {
     await projectsService.createIssue(actor, projectId, {
       title: "Mention someone else",
       body: "Please review this, @reader2.",
-      assignee: { type: "human", id: readerId },
+      assigneeHumanId: readerId,
     });
     // The assignee still gets ordinary assignment activity, never a mention notification.
     expect(await notificationsFor("reader")).toHaveLength(0);

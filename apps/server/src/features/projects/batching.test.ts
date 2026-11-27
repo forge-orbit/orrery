@@ -465,8 +465,7 @@ describe("batched project access reads and writes", () => {
         title: "[deleted]",
         body: "",
         parentIssueId: null,
-        assigneeType: null,
-        assigneeId: null,
+        assigneeHumanId: null,
       });
       expect(tombstone.purgedAt).not.toBeNull();
     }
@@ -721,35 +720,29 @@ describe("project-first row locking", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("checks an agent assignee under a share lock on the key", async () => {
+  it("checks a human assignee under a share lock on the human", async () => {
     const owner = await insertHuman("owner");
-    const agentOwner = await insertHuman("agent-owner");
+    const member = await insertHuman("member");
     const workspaceId = await insertSharedWorkspace("Assignee locks", owner.id);
-    await insertMembership(workspaceId, agentOwner.id, false);
+    await insertMembership(workspaceId, member.id, false);
     const projectId = await insertProject(workspaceId, owner.id, "Assignee locks");
-    const agentId = await agentWithProjectKey(
-      agentOwner.id,
-      workspaceId,
-      projectId,
-      "assignee-agent",
-    );
     const service = makeService();
     const actor = humanActor(owner.id);
 
     const holder = holdRowLock(
-      (tx) => tx`select id from agent_api_keys where agent_id = ${agentId} for update`,
+      (tx) => tx`select id from humans where id = ${member.id} for update`,
     );
     try {
       await holder.locked;
       const creating = service.createIssue(actor, projectId, {
         title: "Assigned",
-        assignee: { type: "agent", id: agentId },
+        assigneeHumanId: member.id,
       });
-      await waitForWaitingQuery('%from "agent_api_keys"%for share%');
+      await waitForWaitingQuery('%from "humans"%for key share%');
       holder.release();
       await holder.holding;
       const issue = await creating;
-      expect(issue.assignee).toMatchObject({ agentId });
+      expect(issue.assignee).toMatchObject({ humanId: member.id });
     } finally {
       holder.release();
       await holder.holding.catch(() => {});

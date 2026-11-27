@@ -47,16 +47,9 @@ export type IssueSortOrder = z.infer<typeof IssueSortOrder>;
 
 
 
-export const AssigneeType = z.enum(["human", "agent"]).meta({ id: "AssigneeType" });
-export type AssigneeType = z.infer<typeof AssigneeType>;
-
-export const Assignee = z
-  .object({
-    type: AssigneeType,
-    id: z.string().trim().min(1).max(200),
-  })
-  .meta({ id: "Assignee" });
-export type Assignee = z.infer<typeof Assignee>;
+/** An issue's accountable human. Execution is tracked separately by work sessions. */
+export const AssigneeHumanId = z.string().trim().min(1).max(200).meta({ id: "AssigneeHumanId" });
+export type AssigneeHumanId = z.infer<typeof AssigneeHumanId>;
 
 
 
@@ -153,8 +146,25 @@ export type Actor = z.infer<typeof Actor>;
 
 
 
-export const IssueAssignee = Actor.nullable().meta({ id: "IssueAssignee" });
+/** Human-only assignee summary; agents are execution, never the assignee. */
+export const IssueAssignee = z
+  .object({
+    humanId: z.string(),
+    displayName: z.string(),
+  })
+  .nullable()
+  .meta({ id: "IssueAssignee" });
 export type IssueAssignee = z.infer<typeof IssueAssignee>;
+
+/**
+ * Assignee diffs in project activity keep their historical `Actor` shape:
+ * agent-assigned issues from before the human-only model still render.
+ */
+export const IssueAssigneeChange = z
+  .union([Actor, z.object({ humanId: z.string(), displayName: z.string() })])
+  .nullable()
+  .meta({ id: "IssueAssigneeChange" });
+export type IssueAssigneeChange = z.infer<typeof IssueAssigneeChange>;
 
 
 
@@ -458,7 +468,7 @@ export const CreateIssueRequest = z
     priority: IssuePriority.optional(),
     sortOrder: IssueSortOrder.optional(),
     
-    assignee: Assignee.nullable().optional(),
+    assigneeHumanId: AssigneeHumanId.nullable().optional(),
     labelIds: z.array(z.string().trim().min(1).max(200)).optional(),
     
     parentIssueId: z.string().trim().min(1).max(200).nullable().optional(),
@@ -478,7 +488,7 @@ export const UpdateIssueRequest = z
     sortOrder: IssueSortOrder.optional(),
     
     
-    assignee: Assignee.nullable().optional(),
+    assigneeHumanId: AssigneeHumanId.nullable().optional(),
     
     parentIssueId: z.string().trim().min(1).max(200).nullable().optional(),
   })
@@ -596,7 +606,7 @@ export type ActivityLabel = z.infer<typeof ActivityLabel>;
 const ActivityChange = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("status"), from: IssueStatus, to: IssueStatus }),
   z.object({ kind: z.literal("priority"), from: IssuePriority, to: IssuePriority }),
-  z.object({ kind: z.literal("assignee"), from: IssueAssignee, to: IssueAssignee }),
+  z.object({ kind: z.literal("assignee"), from: IssueAssigneeChange, to: IssueAssigneeChange }),
 ]);
 
 const ActivityIssueReference = z.object({

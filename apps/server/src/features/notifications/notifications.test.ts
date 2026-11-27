@@ -297,7 +297,7 @@ async function newIssue(
       updatedByHumanId: options.createdByHumanId ?? f.owner,
       ...(options.assigneeHumanId === undefined
         ? {}
-        : { assigneeType: "human", assigneeId: options.assigneeHumanId }),
+        : { assigneeHumanId: options.assigneeHumanId }),
     })
     .returning();
   return issue!;

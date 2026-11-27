@@ -5,7 +5,6 @@ import {
   WorkSessionStatus,
   type ActiveWorkSession,
   type AgentIdentity,
-  type AssigneeType,
   type Issue,
   type ReadyWorkFilter,
   type ReacquireWorkSessionInput,
@@ -73,8 +72,7 @@ export type SessionsErrorKind =
   | "agents_cannot_request_stop"
   | "session_not_active"
   | "session_not_found"
-  | "issue_assigned_to_human"
-  | "issue_assigned_to_other_agent";
+  | "issue_assigned_to_other_human";
 
 const messages: Record<SessionsErrorKind, string> = {
   not_signed_in: "An agent key is required.",
@@ -91,8 +89,8 @@ const messages: Record<SessionsErrorKind, string> = {
   agents_cannot_request_stop: "Only a human with Contribute or Manage access may request a stop.",
   session_not_active: "The work session is no longer active.",
   session_not_found: "No such work session is in scope for the caller.",
-  issue_assigned_to_human: "This issue is assigned to a human and cannot be claimed by an agent.",
-  issue_assigned_to_other_agent: "This issue is assigned to another agent and cannot be claimed.",
+  issue_assigned_to_other_human:
+    "This issue is assigned to another human and cannot be claimed by this agent.",
 };
 
 export class SessionsError extends Error {
@@ -295,22 +293,24 @@ function requireAgent(actor: AgentActor | null) {
   return actor.identity;
 }
 
-function assertClaimAssignee(
-  assigneeType: AssigneeType | null,
-  assigneeId: string | null,
-  agentId: string,
-): void {
-  if (assigneeType === "human") throw new SessionsError("issue_assigned_to_human");
-  if (assigneeType === "agent" && assigneeId !== agentId) {
-    throw new SessionsError("issue_assigned_to_other_agent");
+/**
+ * An agent may claim or reacquire an issue when it is unassigned or assigned
+ * to the agent's owner human. Dispatch never mutates the assignee.
+ */
+function assertClaimAssignee(assigneeHumanId: string | null, ownerHumanId: string): void {
+  if (assigneeHumanId !== null && assigneeHumanId !== ownerHumanId) {
+    throw new SessionsError("issue_assigned_to_other_human");
   }
 }
 
 function assignedToActor(issue: Issue, actor: WorkActor): boolean {
   if (issue.assignee === null) return false;
-  return actor.kind === "agent"
-    ? issue.assignee.agentId === actor.identity.agentId
-    : issue.assignee.humanId === actor.account.humanId;
+  return issue.assignee.humanId === ownerHumanIdOf(actor);
+}
+
+/** The human an actor works for; an agent carries its owner in the identity. */
+function ownerHumanIdOf(actor: WorkActor): string {
+  return actor.kind === "agent" ? actor.identity.humanId : actor.account.humanId;
 }
 
 /**
@@ -516,8 +516,7 @@ async function lockIssue(tx: DbTransaction, issueId: string) {
       projectId: issues.projectId,
       status: issues.status,
       needsInput: issues.needsInput,
-      assigneeType: issues.assigneeType,
-      assigneeId: issues.assigneeId,
+      assigneeHumanId: issues.assigneeHumanId,
     })
     .from(issues)
     .innerJoin(projects, eq(issues.projectId, projects.id))
@@ -881,7 +880,7 @@ export async function claimInTransaction(
   );
 
   await requireRun(tx, identity, input.runId);
-  assertClaimAssignee(issue.assigneeType, issue.assigneeId, identity.agentId);
+  assertClaimAssignee(issue.assigneeHumanId, identity.humanId);
 
   const existing = await findActive(tx, issue.id);
   if (existing !== undefined) {
@@ -1461,7 +1460,7 @@ export function createSessionsService({
         );
         await requireRun(tx, identity, input.runId);
 
-        assertClaimAssignee(issue.assigneeType, issue.assigneeId, identity.agentId);
+        assertClaimAssignee(issue.assigneeHumanId, identity.humanId);
 
         const active = await findActive(tx, issue.id);
         if (active !== undefined) {
@@ -1617,18 +1616,14 @@ export function createSessionsService({
 
       await expireCommittedForProject(projectId);
 
-      const ownType = actor.kind === "agent" ? "agent" : "human";
-      const ownId = actor.kind === "agent" ? actor.identity.agentId : actor.account.humanId;
+      const ownHumanId = ownerHumanIdOf(actor);
       const assigneeFilter =
         filter === "unassigned"
-          ? isNull(issues.assigneeId)
+          ? isNull(issues.assigneeHumanId)
           : filter === "assignedToMe"
-            ? and(eq(issues.assigneeType, ownType), eq(issues.assigneeId, ownId))
+            ? eq(issues.assigneeHumanId, ownHumanId)
             : actor.kind === "agent"
-              ? or(
-                  isNull(issues.assigneeId),
-                  and(eq(issues.assigneeType, "agent"), eq(issues.assigneeId, ownId)),
-                )
+              ? or(isNull(issues.assigneeHumanId), eq(issues.assigneeHumanId, ownHumanId))
               : undefined;
 
       const eligible = await db.transaction(

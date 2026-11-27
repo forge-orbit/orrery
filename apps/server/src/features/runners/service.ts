@@ -618,14 +618,13 @@ async function endDispatchesWithoutLiveSession(
 async function assertIssueDispatchable(
   tx: DbTransaction,
   issueId: string,
-  agentId: string,
+  ownerHumanId: string,
 ): Promise<void> {
   let [issue] = await tx
     .select({
       status: issues.status,
       needsInput: issues.needsInput,
-      assigneeType: issues.assigneeType,
-      assigneeId: issues.assigneeId,
+      assigneeHumanId: issues.assigneeHumanId,
     })
     .from(issues)
     .innerJoin(projects, eq(issues.projectId, projects.id))
@@ -659,8 +658,7 @@ async function assertIssueDispatchable(
       .select({
         status: issues.status,
         needsInput: issues.needsInput,
-        assigneeType: issues.assigneeType,
-        assigneeId: issues.assigneeId,
+        assigneeHumanId: issues.assigneeHumanId,
       })
       .from(issues)
       .innerJoin(projects, eq(issues.projectId, projects.id))
@@ -671,8 +669,7 @@ async function assertIssueDispatchable(
   if (
     issue.status !== "todo" ||
     issue.needsInput ||
-    issue.assigneeType === "human" ||
-    (issue.assigneeType === "agent" && issue.assigneeId !== agentId)
+    (issue.assigneeHumanId !== null && issue.assigneeHumanId !== ownerHumanId)
   ) {
     throw new RunnersError("issue_not_claimable");
   }
@@ -1683,7 +1680,7 @@ function wantedLabels(labels: readonly string[] | undefined): string[] {
 async function assertIssueStillDispatchable(
   tx: DbTransaction,
   issueId: string,
-  agentId: string,
+  ownerHumanId: string,
   filter: ReadyWorkFilter,
   labels: readonly string[] = [],
 ): Promise<void> {
@@ -1692,8 +1689,7 @@ async function assertIssueStillDispatchable(
       deletedAt: issues.deletedAt,
       status: issues.status,
       needsInput: issues.needsInput,
-      assigneeType: issues.assigneeType,
-      assigneeId: issues.assigneeId,
+      assigneeHumanId: issues.assigneeHumanId,
     })
     .from(issues)
     .innerJoin(projects, eq(issues.projectId, projects.id))
@@ -1707,8 +1703,8 @@ async function assertIssueStillDispatchable(
   ) {
     throw new RunnersError("issue_not_claimable");
   }
-  const unassigned = issue.assigneeType === null && issue.assigneeId === null;
-  const mine = issue.assigneeType === "agent" && issue.assigneeId === agentId;
+  const unassigned = issue.assigneeHumanId === null;
+  const mine = issue.assigneeHumanId === ownerHumanId;
   const matches =
     filter === "unassigned" ? unassigned : filter === "assignedToMe" ? mine : unassigned || mine;
   if (!matches) throw new RunnersError("issue_not_claimable");
@@ -1832,7 +1828,8 @@ async function insertDispatchLocked(
     )
     .limit(1);
   if (uncertain !== undefined) throw new RunnersError("dispatch_uncertain");
-  await assertIssueDispatchable(tx, input.issueId, input.agentId);
+  // Every call site sets requestedByHumanId to the Runner host's owner human.
+  await assertIssueDispatchable(tx, input.issueId, input.requestedByHumanId);
   const { row, payload } = await insertDispatchRow(tx, input);
   await enqueueRunnerCommand(tx, {
     runnerId: input.runnerId,
@@ -2734,7 +2731,7 @@ export function createRunnersService(deps: RunnersDeps) {
           .limit(1);
         if (inFlight !== undefined) throw new RunnersError("issue_not_claimable");
         // Validate with Orrery's claim rules, without mutating issues.assignee.
-        await assertIssueDispatchable(tx, issueId, agentId);
+        await assertIssueDispatchable(tx, issueId, joined.hostHumanId);
 
         const { row, payload } = await insertDispatchRow(tx, {
           runnerId,
@@ -2819,15 +2816,15 @@ export function createRunnersService(deps: RunnersDeps) {
               ),
             ),
         );
+        // `assignedToMe` means the host human's issues; another human's
+        // assigned issues are never candidates for this runner.
+        const ownerHumanId = scanned.host.humanId;
         const assignee =
           filter === "unassigned"
-            ? isNull(issues.assigneeId)
+            ? isNull(issues.assigneeHumanId)
             : filter === "assignedToMe"
-              ? and(eq(issues.assigneeType, "agent"), eq(issues.assigneeId, scannedAgentId))
-              : or(
-                  isNull(issues.assigneeId),
-                  and(eq(issues.assigneeType, "agent"), eq(issues.assigneeId, scannedAgentId)),
-                );
+              ? eq(issues.assigneeHumanId, ownerHumanId)
+              : or(isNull(issues.assigneeHumanId), eq(issues.assigneeHumanId, ownerHumanId));
         const candidateConditions = [
           eq(issues.projectId, scanned.runner.projectId),
           isNull(issues.deletedAt),
@@ -2847,7 +2844,10 @@ export function createRunnersService(deps: RunnersDeps) {
           .innerJoin(projects, eq(issues.projectId, projects.id))
           .leftJoin(workSessions, liveSession)
           .where(and(...candidateConditions))
-          .orderBy(issues.number)
+          .orderBy(
+            sql`case when ${issues.assigneeHumanId} = ${ownerHumanId} then 0 else 1 end`,
+            issues.number,
+          )
           .limit(10);
         if (candidates.length === 0) return { dispatch: null };
 
@@ -2920,7 +2920,7 @@ export function createRunnersService(deps: RunnersDeps) {
         for (const candidate of candidates) {
           if (!held.has(candidate.id)) continue;
           try {
-            await assertIssueStillDispatchable(tx, candidate.id, runner.agentId, filter, wanted);
+            await assertIssueStillDispatchable(tx, candidate.id, host.humanId, filter, wanted);
             const dispatch = await insertDispatchLocked(tx, {
               runnerId,
               issueId: candidate.id,
@@ -3014,7 +3014,7 @@ export function createRunnersService(deps: RunnersDeps) {
           throw new RunnersError("issue_not_found");
         }
         assertHarnessAvailable(runner.harnessCatalog, input.harness);
-        await assertIssueStillDispatchable(tx, issueId, runner.agentId, "all");
+        await assertIssueStillDispatchable(tx, issueId, host.humanId, "all");
         return await insertDispatchLocked(tx, {
           runnerId,
           issueId,

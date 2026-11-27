@@ -381,7 +381,7 @@ const createIssue = createRoute({
   path: "/api/projects/{projectId}/issues",
   summary: "Create an issue in a project",
   description:
-    "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. Optional `assignee` (a human or agent in the workspace) and `labelIds` (labels in the project) are validated and applied in the same transaction as the issue, so an invalid value creates nothing. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
+    "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. Optional `assigneeHumanId` (an active human with access to the project's workspace) and `labelIds` (labels in the project) are validated and applied in the same transaction as the issue, so an invalid value creates nothing. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
   request: {
     params: projectParams,
     body: { required: true, content: { "application/json": { schema: CreateIssueRequest } } },
@@ -485,7 +485,7 @@ const updateIssue = createRoute({
   path: "/api/issues/{issueId}",
   summary: "Edit, close, or reopen an issue",
   description:
-    'Contribute or Manage. Every field is optional. A title, body, assignee or priority change records an edit; a status change records a close or a reopen; `parentIssueId` sets or clears a one-level parent in the same project. Set `assignee` to `{"type":"human"|"agent","id":"..."}` or null to clear it; the identity must be an active member or a registered agent in the workspace. A request that changes nothing returns the issue unchanged and records no event. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key\'s effective project access.',
+    "Contribute or Manage. Every field is optional. A title, body, assignee or priority change records an edit; a status change records a close or a reopen; `parentIssueId` sets or clears a one-level parent in the same project. Set `assigneeHumanId` to a human id or null to clear it; the identity must be an active human with access to the project's workspace. Reassigning an in-progress issue never stops its active work session. A request that changes nothing returns the issue unchanged and records no event. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
   request: {
     params: issueParams,
     body: { required: true, content: { "application/json": { schema: UpdateIssueRequest } } },

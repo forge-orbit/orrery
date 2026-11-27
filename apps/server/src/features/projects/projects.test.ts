@@ -1110,97 +1110,88 @@ describe("projects", () => {
     return { agentId, keyId };
   }
 
-  it("sets, changes and clears an assignee, and validates it against the workspace", async () => {
+  it("sets, changes and clears a human assignee, and validates it against the workspace", async () => {
     const { app, admin, adminCookie, workspaceId } = await readyApp();
     const project = await createProject(app, adminCookie, workspaceId, "Assigned");
     const issue = await createIssue(app, adminCookie, project.id, { title: "Assign me" });
     expect(issue.assignee).toBeNull();
     expect(issue.needsInput).toBe(false);
-    const { agentId } = await seedAgent(workspaceId, admin.id, "Builder");
 
-    const toHuman = await patchIssue(
-      app,
-      issue.id,
-      { assignee: { type: "human", id: admin.id } },
-      adminCookie,
-    );
+    const toHuman = await patchIssue(app, issue.id, { assigneeHumanId: admin.id }, adminCookie);
     expect(toHuman.status).toBe(200);
-    expect(Issue.parse(await toHuman.json()).assignee).toMatchObject({
+    expect(Issue.parse(await toHuman.json()).assignee).toEqual({
       humanId: admin.id,
-      email: EMAIL,
       displayName: EMAIL,
     });
-
-    const toAgent = await patchIssue(
-      app,
-      issue.id,
-      { assignee: { type: "agent", id: agentId } },
-      adminCookie,
-    );
-    expect(toAgent.status).toBe(200);
-    expect(Issue.parse(await toAgent.json()).assignee).toMatchObject({
-      agentId,
-      agentName: "Builder",
-      displayName: "Builder",
-    });
     const [row] = await database.db
-      .select({ type: issues.assigneeType, id: issues.assigneeId })
+      .select({ humanId: issues.assigneeHumanId })
       .from(issues)
       .where(eq(issues.id, issue.id));
-    expect(row).toEqual({ type: "agent", id: agentId });
+    expect(row).toEqual({ humanId: admin.id });
 
-    const cleared = await patchIssue(app, issue.id, { assignee: null }, adminCookie);
+    const other = randomUUID();
+    await database.db
+      .insert(humans)
+      .values({ id: other, email: `other-${other}@example.com`, passwordHash: "scrypt$x" });
+    await database.db
+      .insert(workspaceMemberships)
+      .values({ id: randomUUID(), workspaceId, humanId: other, isOwner: false });
+    const toOther = await patchIssue(app, issue.id, { assigneeHumanId: other }, adminCookie);
+    expect(toOther.status).toBe(200);
+    expect(Issue.parse(await toOther.json()).assignee).toMatchObject({ humanId: other });
+
+    const cleared = await patchIssue(app, issue.id, { assigneeHumanId: null }, adminCookie);
     expect(cleared.status).toBe(200);
     expect(Issue.parse(await cleared.json()).assignee).toBeNull();
     const [afterClear] = await database.db
-      .select({ type: issues.assigneeType, id: issues.assigneeId })
+      .select({ humanId: issues.assigneeHumanId })
       .from(issues)
       .where(eq(issues.id, issue.id));
-    expect(afterClear).toEqual({ type: null, id: null });
+    expect(afterClear).toEqual({ humanId: null });
 
     const kept = await patchIssue(app, issue.id, { title: "Still unassigned" }, adminCookie);
     expect(Issue.parse(await kept.json()).assignee).toBeNull();
   });
 
-  it("refuses unknown, unregistered and deactivated assignees with one 404", async () => {
+  it("refuses unknown, agent and deactivated assignees with one 404", async () => {
     const { app, admin, adminCookie, workspaceId } = await readyApp();
     const project = await createProject(app, adminCookie, workspaceId, "Bad assignees");
     const issue = await createIssue(app, adminCookie, project.id, { title: "Guarded" });
 
     await expectProblem(
-      await patchIssue(
-        app,
-        issue.id,
-        { assignee: { type: "human", id: randomUUID() } },
-        adminCookie,
-      ),
+      await patchIssue(app, issue.id, { assigneeHumanId: randomUUID() }, adminCookie),
       404,
       "assignee_not_found",
     );
+    // An Agent id is never an assignee, even when the agent has a live key.
     const { agentId } = await seedAgent(workspaceId, admin.id, "No key here");
-    await database.db.delete(agentApiKeys).where(eq(agentApiKeys.agentId, agentId));
     await expectProblem(
-      await patchIssue(app, issue.id, { assignee: { type: "agent", id: agentId } }, adminCookie),
+      await patchIssue(app, issue.id, { assigneeHumanId: agentId }, adminCookie),
       404,
       "assignee_not_found",
     );
 
-    const { agentId: revokedId, keyId } = await seedAgent(workspaceId, admin.id, "Revoked");
+    const deactivated = randomUUID();
+    await database.db.insert(humans).values({
+      id: deactivated,
+      email: `deactivated-${deactivated}@example.com`,
+      passwordHash: "scrypt$x",
+      deactivatedAt: new Date(),
+    });
     await database.db
-      .update(agentApiKeys)
-      .set({ revokedAt: sql`statement_timestamp()` })
-      .where(eq(agentApiKeys.id, keyId));
+      .insert(workspaceMemberships)
+      .values({ id: randomUUID(), workspaceId, humanId: deactivated, isOwner: false });
     await expectProblem(
-      await patchIssue(app, issue.id, { assignee: { type: "agent", id: revokedId } }, adminCookie),
+      await patchIssue(app, issue.id, { assigneeHumanId: deactivated }, adminCookie),
       404,
       "assignee_not_found",
     );
 
     const [row] = await database.db
-      .select({ type: issues.assigneeType, id: issues.assigneeId })
+      .select({ humanId: issues.assigneeHumanId })
       .from(issues)
       .where(eq(issues.id, issue.id));
-    expect(row).toEqual({ type: null, id: null });
+    expect(row).toEqual({ humanId: null });
   });
 
   it("stores an explicit workspace-unique key and derives one from the name when omitted", async () => {
@@ -1332,32 +1323,22 @@ describe("projects", () => {
     expect(Issue.parse(await edited.json()).identifier).toBe("ISK-1");
   });
 
-  it("keeps the assignee pair integral in the database and records only real changes", async () => {
+  it("enforces the assignee foreign key and records only real changes", async () => {
     const { app, admin, adminCookie, workspaceId } = await readyApp();
     const project = await createProject(app, adminCookie, workspaceId, "Integral");
     const issue = await createIssue(app, adminCookie, project.id, { title: "Integrity" });
 
     expect(
       await rejection(
-        database.db.execute(sql`update issues set assignee_type = 'human' where id = ${issue.id}`),
-      ),
-    ).toContain("issues_assignee_pair");
-    expect(
-      await rejection(
         database.db.execute(
-          sql`update issues set assignee_type = 'robot', assignee_id = ${randomUUID()} where id = ${issue.id}`,
+          sql`update issues set assignee_human_id = ${randomUUID()} where id = ${issue.id}`,
         ),
       ),
-    ).toContain("issues_assignee_type");
+    ).toContain("issues_assignee_human_id_humans_id_fk");
 
-    await patchIssue(app, issue.id, { assignee: { type: "human", id: admin.id } }, adminCookie);
+    await patchIssue(app, issue.id, { assigneeHumanId: admin.id }, adminCookie);
     const before = await activityFor(app, adminCookie, project.id);
-    const repeat = await patchIssue(
-      app,
-      issue.id,
-      { assignee: { type: "human", id: admin.id } },
-      adminCookie,
-    );
+    const repeat = await patchIssue(app, issue.id, { assigneeHumanId: admin.id }, adminCookie);
     expect(repeat.status).toBe(200);
     const after = await activityFor(app, adminCookie, project.id);
     expect(after.length).toBe(before.length);

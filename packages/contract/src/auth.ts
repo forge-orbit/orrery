@@ -39,6 +39,7 @@ export type AvatarUrl = z.infer<typeof AvatarUrl>;
 
 export const SessionResponse = z
   .object({
+    humanId: z.string(),
     email: Email,
     handle: Handle,
     displayName: z.string().nullable().optional(),

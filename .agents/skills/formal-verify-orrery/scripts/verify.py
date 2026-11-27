@@ -2125,23 +2125,25 @@ def extract_code_facts() -> dict[str, Any]:
     m28_detail_bound = "64_000" in sessions_contract_src and "JSON.stringify" in sessions_contract_src
     m28_schema_check = "work_session_activities_kind" in schema_src
 
-    # --- M29 (#84): board assignment and the strict claim policy ---
+    # --- M29 (#84 + #281): human-only assignment and the owner-human claim policy ---
     validate_assignee_fn = slice_between(
         proj_src, "async function validateAssignee(", "async function requireKnowledge("
     )
-    mig_0033 = read_text("db/migrations/0031_next_masked_marvel.sql")
+    mig_0064 = read_text("db/migrations/0064_mean_senator_kelly.sql")
     m29_db_check = (
-        "issues_assignee_pair" in schema_src
-        and "issues_assignee_type" in schema_src
-        and "issues_assignee_pair" in mig_0033
-        and "issues_assignee_type" in mig_0033
+        'assigneeHumanId: text("assignee_human_id")' in schema_src
+        and '"issues_assignee_human"' in schema_src
+        and "assignee_human_id" in mig_0064
+        and "assignee_type" in mig_0064
+        and 'a."human_id"' in mig_0064
+        and "assignee_type" not in schema_src
     )
     m29_assignee_validation = (
         "assignee_not_found" in proj_src
         and 'throw new ProjectsError("assignee_not_found")' in validate_assignee_fn
         and "isNull(humans.deactivatedAt)" in validate_assignee_fn
         and "isNull(workspaceMemberships.suspendedAt)" in validate_assignee_fn
-        and "agentApiKeys" in validate_assignee_fn
+        and "agentApiKeys" not in validate_assignee_fn
     )
     # The assignee locks precede the caller's issue lock (M22), and the account lock
     # precedes the membership lock, inside validateAssignee itself.
@@ -2156,13 +2158,12 @@ def extract_code_facts() -> dict[str, Any]:
         and update_issue_fn.find("validateAssignee(") < update_issue_fn.find('.for("update")')
     )
     m29_strict_claim = (
-        "assertClaimAssignee(issue.assigneeType, issue.assigneeId, identity.agentId)" in claim_fn
-        and "assertClaimAssignee(issue.assigneeType, issue.assigneeId, identity.agentId)"
-        in reacquire_fn
-        and 'throw new SessionsError("issue_assigned_to_human")' in sess_src
-        and 'throw new SessionsError("issue_assigned_to_other_agent")' in sess_src
-        and "issue_assigned_to_human: 409" in sess_rest_src
-        and "issue_assigned_to_other_agent: 409" in sess_rest_src
+        "assertClaimAssignee(issue.assigneeHumanId, identity.humanId)" in claim_fn
+        and "assertClaimAssignee(issue.assigneeHumanId, identity.humanId)" in reacquire_fn
+        and 'throw new SessionsError("issue_assigned_to_other_human")' in sess_src
+        and "issue_assigned_to_other_human: 409" in sess_rest_src
+        and "issue_assigned_to_human" not in sess_src
+        and "issue_assigned_to_other_agent" not in sess_src
     )
     m29_ready_filter = (
         'filter === "unassigned"' in ready_fn
@@ -2175,9 +2176,9 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m29_contract_surface = (
         "assignee: IssueAssignee" in pj_contract
-        and "assignee: Assignee.nullable().optional()" in pj_contract
+        and "assigneeHumanId: AssigneeHumanId.nullable().optional()" in pj_contract
         and "needsInput: z.boolean()" in pj_contract
-        and "assignee_type" in schema_src
+        and "assignee_human_id" in schema_src
     )
     # The access precheck and assignee validation are separate committed transactions;
     # the issue-locked transaction must recheck the workspace before writing the pair.
@@ -2624,8 +2625,7 @@ def extract_code_facts() -> dict[str, Any]:
         and 'title: "[deleted]"' in purge_project_fn
         and 'body: ""' in purge_project_fn
         and "parentIssueId: null" in purge_project_fn
-        and "assigneeType: null" in purge_project_fn
-        and "assigneeId: null" in purge_project_fn
+        and "assigneeHumanId: null" in purge_project_fn
         and "coalesce(${issues.purgedAt}, statement_timestamp())" in purge_project_fn
         and "delete(issues)" not in purge_project_fn
     )
@@ -2981,9 +2981,8 @@ def extract_code_facts() -> dict[str, Any]:
     issue_create_kinds = slice_between(proj_rest_src, "const issueCreateKinds =", "] as const;")
     m37_single_transaction = "db.transaction(async (tx)" in create_issue_fn
     m37_assignee_in_tx = (
-        "validateAssignee(tx, project.workspaceId, input.assignee)" in create_issue_fn
-        and "assigneeType: input.assignee?.type ?? null" in create_issue_fn
-        and "assigneeId: input.assignee?.id ?? null" in create_issue_fn
+        "validateAssignee(tx, project.workspaceId, input.assigneeHumanId)" in create_issue_fn
+        and "assigneeHumanId: input.assigneeHumanId ?? null" in create_issue_fn
         and "assignee: resolvedAssignee" in create_issue_fn
     )
     m37_labels_in_tx = (
@@ -2994,11 +2993,12 @@ def extract_code_facts() -> dict[str, Any]:
         and "rows.length !== labelIds.size" in require_project_labels_fn
     )
     m37_contract_surface = (
-        "assignee: Assignee.nullable().optional()" in create_issue_contract
+        "assigneeHumanId: AssigneeHumanId.nullable().optional()" in create_issue_contract
         and "labelIds: z.array(" in create_issue_contract
     )
     m37_mcp_surface = (
-        "assignee(args.assignee)" in create_issue_mcp and "labelIds(args.labelIds)" in create_issue_mcp
+        "assigneeHumanId(args.assigneeHumanId)" in create_issue_mcp
+        and "labelIds(args.labelIds)" in create_issue_mcp
     )
     m37_problem_details = (
         '"assignee_not_found"' in issue_create_kinds and '"label_not_found"' in issue_create_kinds
@@ -3393,10 +3393,10 @@ def extract_code_facts() -> dict[str, Any]:
         and "runner_forbidden: 403" in runners_rest_src
     )
     m43_assignee_compatible = (
-        "assertIssueDispatchable(tx, issueId, agentId)" in create_dispatch_fn
-        and 'issue.assigneeType === "human"' in dispatchable_fn
-        and "issue.assigneeId !== agentId" in dispatchable_fn
-        and "assignee:" not in dispatchable_fn
+        "assertIssueDispatchable(tx, issueId, joined.hostHumanId)" in create_dispatch_fn
+        and "(issue.assigneeHumanId !== null && issue.assigneeHumanId !== ownerHumanId)"
+        in dispatchable_fn
+        and ".set({ assigneeHumanId" not in dispatchable_fn
     )
     m43_atomic_accept = (
         "db.transaction(" in accept_dispatch_fn
@@ -3708,7 +3708,7 @@ def extract_code_facts() -> dict[str, Any]:
         m46_auto_fn, ".from(issues)", '.for("update")', "authenticateHostRunnerForDeps("
     )
     m46_auto_recheck = (
-        "await assertIssueStillDispatchable(tx, candidate.id, runner.agentId, filter,"
+        "await assertIssueStillDispatchable(tx, candidate.id, host.humanId, filter,"
         in m46_auto_fn
         and ordered(m46_auto_fn, '.for("update")', "await assertIssueStillDispatchable(")
     )
@@ -9578,7 +9578,7 @@ def check_m37(facts: dict[str, bool]) -> CheckResult:
                 # A failure after the insert or counter update leaves a partial issue.
                 v = bad(v, "triage_applied_outside_transaction")
             foreign = any(label not in ("a", "b") for label in labels)
-            bad_assignee = target not in ("none", "human", "agent")
+            bad_assignee = target not in ("none", "human")
             if foreign and not g["m37_labels_in_tx"]:
                 return (min(2, count + 1), frozenset(labels), target, bad(v, "foreign_label_accepted"))
             if bad_assignee and not g["m37_assignee_in_tx"]:
@@ -9595,7 +9595,7 @@ def check_m37(facts: dict[str, bool]) -> CheckResult:
     actions = [
         ("create an unassigned issue", create("none", ())),
         ("create an issue assigned to a human", create("human", ("a",))),
-        ("create an issue assigned to an agent", create("agent", ("a", "b"))),
+        ("create an issue assigned to an unknown human", create("ghost", ("a", "b"))),
         ("create with duplicate label ids", create("none", ("a", "a"))),
         ("create with a label from another project", create("none", ("foreign",))),
         ("create with an unknown label", create("human", ("unknown",))),

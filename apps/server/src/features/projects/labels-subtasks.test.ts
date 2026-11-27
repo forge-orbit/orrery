@@ -577,7 +577,7 @@ describe("atomic issue creation (#175)", () => {
       body: "Filed with its metadata.",
       status: "in_progress",
       priority: "high",
-      assignee: { type: "human", id: humanId },
+      assigneeHumanId: humanId,
       labelIds: [bug, ui, bug],
     });
     expect(created).toMatchObject({
@@ -588,7 +588,7 @@ describe("atomic issue creation (#175)", () => {
     expect(created.labels.map((label) => label.id).toSorted()).toEqual([bug, ui].toSorted());
 
     const [row] = await database.db.select().from(issues).where(eq(issues.id, created.id));
-    expect(row).toMatchObject({ assigneeType: "human", assigneeId: humanId });
+    expect(row).toMatchObject({ assigneeHumanId: humanId });
     const attached = await database.db
       .select({ labelId: issueLabels.labelId })
       .from(issueLabels)
@@ -623,7 +623,7 @@ describe("atomic issue creation (#175)", () => {
     await problemOf(
       await post(`/api/projects/${pid}/issues`, {
         title: "Unknown assignee",
-        assignee: { type: "human", id: randomUUID() },
+        assigneeHumanId: randomUUID(),
       }),
       404,
       "assignee_not_found",
@@ -635,7 +635,7 @@ describe("atomic issue creation (#175)", () => {
     ).toBe("label_not_found");
   });
 
-  it("accepts an agent assignee and label ids over MCP with the same validation", async () => {
+  it("accepts a human assignee and label ids over MCP with the same validation", async () => {
     const pid = await project();
     const label = await labelId(pid, "MCP label");
     const other = await project("Other", "OTH2");
@@ -695,12 +695,12 @@ describe("atomic issue creation (#175)", () => {
       projectId: pid,
       title: "MCP atomic issue",
       labelIds: [label],
-      assignee: { type: "agent", id: agentId },
+      assigneeHumanId: await adminHumanId(),
     });
     expect(created.isError).not.toBe(true);
     const createdIssue = created.structuredContent?.issue;
     expect(createdIssue).toMatchObject({ title: "MCP atomic issue", labels: [{ id: label }] });
-    expect(field(createdIssue, "assignee")).toMatchObject({ agentId });
+    expect(field(createdIssue, "assignee")).toMatchObject({ humanId: await adminHumanId() });
 
     const before = await issueCount(pid);
     const numberBefore = await nextIssueNumber(pid);
@@ -719,7 +719,7 @@ describe("atomic issue creation (#175)", () => {
     const badAssignee = await create({
       projectId: pid,
       title: "MCP unknown assignee",
-      assignee: { type: "human", id: randomUUID() },
+      assigneeHumanId: randomUUID(),
     });
     expect(badAssignee).toMatchObject({
       isError: true,

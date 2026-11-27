@@ -412,7 +412,7 @@ describe("manual dispatch creation (#196)", () => {
     });
   });
 
-  it("validates assignee compatibility without changing issues.assignee", async () => {
+  it("validates owner-human assignee compatibility without changing issues.assignee", async () => {
     const host = await enrollHost(adminCookie);
     const runner = await registerRunner(host.credential);
     const issue = await createIssue("assignee compatibility");
@@ -420,9 +420,13 @@ describe("manual dispatch creation (#196)", () => {
       .insert(agents)
       .values({ id: randomUUID(), humanId: adminHumanId, name: `other-${randomUUID()}` })
       .returning();
+    const otherHumanId = randomUUID();
+    await database.db
+      .insert(humans)
+      .values({ id: otherHumanId, email: `${otherHumanId}@example.com`, passwordHash: "scrypt$x" });
     await database.db
       .update(issues)
-      .set({ assigneeType: "agent", assigneeId: otherAgent!.id })
+      .set({ assigneeHumanId: otherHumanId })
       .where(eq(issues.id, issue.id));
     expect(issue.id.length).toBeGreaterThan(0);
     await expectProblem(
@@ -430,18 +434,25 @@ describe("manual dispatch creation (#196)", () => {
       409,
       "issue_not_claimable",
     );
+
+    // The host human's own assignment is dispatchable, and any Agent owned by
+    // that human is a valid override.
+    await database.db
+      .update(issues)
+      .set({ assigneeHumanId: adminHumanId })
+      .where(eq(issues.id, issue.id));
     const compatible = await createDispatch(issue.id, runner.id, adminCookie, otherAgent!.id);
     expect(compatible.status).toBe(201);
     const [after] = await database.db
-      .select({ assigneeType: issues.assigneeType, assigneeId: issues.assigneeId })
+      .select({ assigneeHumanId: issues.assigneeHumanId })
       .from(issues)
       .where(eq(issues.id, issue.id));
-    expect(after).toMatchObject({ assigneeType: "agent", assigneeId: otherAgent!.id });
+    expect(after).toMatchObject({ assigneeHumanId: adminHumanId });
 
     const unassignedIssue = await createIssue("unassigned compatibility");
     const reset = await request(`/api/issues/${unassignedIssue.id}`, {
       method: "PATCH",
-      body: { assignee: null },
+      body: { assigneeHumanId: null },
       cookie: adminCookie,
     });
     expect(reset.status).toBe(200);

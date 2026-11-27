@@ -338,9 +338,8 @@ async function liveWork(
     .orderBy(issues.number);
 }
 
-// Agent API keys are workspace-scoped, so a source-workspace agent cannot work
-// the issue after the move. A human assignee stays only if they can access the
-// destination workspace as its personal owner or an active member.
+// A human assignee stays only if they can access the destination workspace as
+// its personal owner or an active member.
 async function clearInvalidAssignees(
   tx: DbTransaction,
   projectId: string,
@@ -349,16 +348,15 @@ async function clearInvalidAssignees(
   const assigned = await tx
     .select({
       id: issues.id,
-      assigneeType: issues.assigneeType,
-      assigneeId: issues.assigneeId,
+      assigneeHumanId: issues.assigneeHumanId,
     })
     .from(issues)
-    .where(and(eq(issues.projectId, projectId), isNotNull(issues.assigneeId)));
+    .where(and(eq(issues.projectId, projectId), isNotNull(issues.assigneeHumanId)));
   const humanAssigneeIds = new Set<string>();
   for (const issue of assigned) {
-    if (issue.assigneeType !== "human" || issue.assigneeId === null) continue;
-    if (issue.assigneeId === destination.personalOwnerHumanId) continue;
-    humanAssigneeIds.add(issue.assigneeId);
+    if (issue.assigneeHumanId === null) continue;
+    if (issue.assigneeHumanId === destination.personalOwnerHumanId) continue;
+    humanAssigneeIds.add(issue.assigneeHumanId);
   }
   const validHumanIds = new Set<string>();
   if (destination.personalOwnerHumanId !== null) {
@@ -379,11 +377,7 @@ async function clearInvalidAssignees(
   }
   const staleIds: string[] = [];
   for (const issue of assigned) {
-    if (
-      issue.assigneeType === "human" &&
-      issue.assigneeId !== null &&
-      validHumanIds.has(issue.assigneeId)
-    ) {
+    if (issue.assigneeHumanId !== null && validHumanIds.has(issue.assigneeHumanId)) {
       continue;
     }
     staleIds.push(issue.id);
@@ -391,7 +385,7 @@ async function clearInvalidAssignees(
   if (staleIds.length === 0) return;
   await tx
     .update(issues)
-    .set({ assigneeType: null, assigneeId: null, updatedAt: sql`statement_timestamp()` })
+    .set({ assigneeHumanId: null, updatedAt: sql`statement_timestamp()` })
     .where(inArray(issues.id, staleIds));
 }
 
