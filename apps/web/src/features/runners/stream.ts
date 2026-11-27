@@ -609,3 +609,29 @@ export function telemetryText(input: {
     cost: `$${((input.costUsdMicros ?? 0) / 1_000_000).toFixed(2)}`,
   };
 }
+
+export type StudioConnectionState = "replay" | "reconnecting" | "connecting" | "connected" | "live";
+
+export const STUDIO_CONNECTION_BADGES = {
+  replay: { label: "Replay", color: "gray" },
+  reconnecting: { label: "Reconnecting", color: "orange" },
+  connecting: { label: "Connecting", color: "gray" },
+  connected: { label: "Connected", color: "green" },
+  live: { label: "Live", color: "green" },
+} as const satisfies Record<
+  StudioConnectionState,
+  { label: string; color: "green" | "orange" | "gray" }
+>;
+
+/** Steady connection badge for Live Session Studio; ignores per-poll `isFetching` ticks. */
+export function studioConnectionBadge(input: {
+  bareUrl: boolean;
+  active: boolean;
+  isPending: boolean;
+  isError: boolean;
+}): (typeof STUDIO_CONNECTION_BADGES)[StudioConnectionState] {
+  if (!input.bareUrl && !input.active) return STUDIO_CONNECTION_BADGES.replay;
+  if (input.isError) return STUDIO_CONNECTION_BADGES.reconnecting;
+  if (input.isPending) return STUDIO_CONNECTION_BADGES.connecting;
+  return input.bareUrl ? STUDIO_CONNECTION_BADGES.connected : STUDIO_CONNECTION_BADGES.live;
+}

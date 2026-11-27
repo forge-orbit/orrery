@@ -589,11 +589,7 @@ function IssuePage() {
               </Stack>
             )}
           <Text type="supporting" color="secondary">
-            Created by {issue.createdBy.displayName} · Updated{" "}
-            <time dateTime={issue.updatedAt} title={formatFullDateTime(issue.updatedAt)}>
-              {relativeTime(issue.updatedAt)}
-            </time>{" "}
-            by {issue.updatedBy.displayName}
+            Created by {issue.createdBy.displayName}
           </Text>
         </Stack>
       }
@@ -969,6 +965,8 @@ function IssuePage() {
 
       <SessionStatus issueId={issue.id} projectId={issue.projectId} canContribute={canContribute} />
 
+      <Divider />
+
       <DelegateToRunner
         issueId={issue.id}
         workspaceId={project.workspaceId}
@@ -976,6 +974,8 @@ function IssuePage() {
         agents={myAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
         canDelegate={canContribute}
       />
+
+      <Divider />
 
       <SessionInspector
         key={`${issue.id}:${inspector ?? false}:${inspectorSession ?? ""}`}

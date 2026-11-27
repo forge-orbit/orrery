@@ -1,13 +1,15 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
-import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
-import { Stack } from "@astryxdesign/core/Stack";
+import { Divider } from "@astryxdesign/core/Divider";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Stack, StackItem } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
 import type { ActiveWorkSession, WorkSession } from "@orrery/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Square } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { TextField } from "../../lib/fields.tsx";
@@ -47,7 +49,8 @@ export function SessionStatus({
   const status = stopping ? "stopping" : session.status;
 
   return (
-    <Card padding={3} data-session-id={session.id}>
+    <Stack gap={3} data-session-id={session.id}>
+      <Divider />
       <Stack gap={2}>
         <Stack direction="horizontal" gap={1.5} vAlign="center" justify="between" wrap="wrap">
           <Stack direction="horizontal" gap={1.5} vAlign="center">
@@ -91,7 +94,7 @@ export function SessionStatus({
           />
         )}
       </Stack>
-    </Card>
+    </Stack>
   );
 }
 
@@ -155,25 +158,32 @@ function StopAgentForm({
   return (
     <>
       <form onSubmit={onSubmit}>
-        <Stack gap={2} hAlign="start">
-          <TextField
-            label="Reason (optional)"
-            id={`stop-reason-${issueId}`}
-            htmlName="reason"
-            value={reason}
-            maxLength={2000}
-            onChange={setReason}
-            placeholder="Why should the agent stop?"
-            width="100%"
-          />
-          <Button
-            type="submit"
-            size="sm"
-            isDisabled={submitting}
-            isLoading={submitting}
-            label="Stop agent"
-            variant="destructive"
-          />
+        <Stack gap={2}>
+          <Stack direction="horizontal" gap={1.5} vAlign="end">
+            <StackItem size="fill">
+              <TextField
+                label="Reason (optional)"
+                id={`stop-reason-${issueId}`}
+                htmlName="reason"
+                value={reason}
+                maxLength={2000}
+                onChange={setReason}
+                placeholder="Why should the agent stop?"
+                size="sm"
+                width="100%"
+              />
+            </StackItem>
+            <IconButton
+              type="submit"
+              size="sm"
+              isDisabled={submitting}
+              isLoading={submitting}
+              label="Stop agent"
+              tooltip="Stop agent"
+              icon={<Icon icon={Square} />}
+              variant="destructive"
+            />
+          </Stack>
           {error !== undefined && <Banner status="error" role="alert" title={error} />}
         </Stack>
       </form>

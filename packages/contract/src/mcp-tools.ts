@@ -203,7 +203,8 @@ const listComments = {
 
 const createComment = {
   name: "create_comment",
-  description: "Comment on an in-scope issue. Requires Contribute access.",
+  description:
+    "Comment on an in-scope issue. Requires Contribute access. To embed images or files in Markdown, upload them first via POST $ORRERY_URL/api/projects/{projectId}/attachments (multipart field 'file', Bearer auth) and use the returned downloadUrl as ![alt](downloadUrl); external image URLs render as inert plain text.",
   input: CreateIssueCommentRequest.extend({ issueId: id("The issue id") }),
   output: z.object({ comment: IssueComment }),
 };

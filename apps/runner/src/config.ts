@@ -139,13 +139,15 @@ export interface DispatchMcpContext {
 }
 
 export function ephemeralMcpConfig(context: DispatchMcpContext): EphemeralMcpServer {
-  const url = `${canonicalizeServerUrl(context.server)}/mcp`;
+  const baseUrl = canonicalizeServerUrl(context.server);
+  const url = `${baseUrl}/mcp`;
   return {
     name: "orrery",
     type: "http",
     url,
     headers: [{ name: "authorization", value: `Bearer ${context.dispatchToken}` }],
     env: [
+      { name: "ORRERY_URL", value: baseUrl },
       { name: "ORRERY_MCP_URL", value: url },
       { name: "ORRERY_DISPATCH_TOKEN", value: context.dispatchToken },
       { name: "ORRERY_ISSUE_ID", value: context.issueId },
