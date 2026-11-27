@@ -47,7 +47,14 @@ const stopRequestBody = RequestStopWorkSessionInput.omit({ issueId: true });
 const resumeBody = ResumeWorkSessionInput.omit({ issueId: true });
 const reacquireBody = ReacquireWorkSessionInput.omit({ issueId: true });
 const logActivityBody = LogSessionActivityInput.omit({ issueId: true });
-const readyWorkQuery = ReadyWorkInput.omit({ projectId: true });
+const readyWorkQuery = ReadyWorkInput.omit({ projectId: true }).extend({
+  // Hono collapses a single repeated query value to a scalar, so accept both
+  // `?labels=bug` and `?labels=bug&labels=urgent` for the same string array.
+  labels: z.preprocess(
+    (value) => (typeof value === "string" ? [value] : value),
+    ReadyWorkInput.shape.labels,
+  ),
+});
 
 const telemetryOf = (body: SessionTelemetry | undefined): SessionTelemetry | undefined =>
   body === undefined
@@ -328,7 +335,7 @@ const readyWork = createRoute({
   path: "/api/projects/{projectId}/ready-work",
   summary: "Minimal ready-work listing for a project",
   description:
-    "Open issues that are not Needs input, have no live active session, and have no blocker whose status is not closed, evaluated in database time. `filter` selects all claimable work (the default), only work assigned to the caller, or only unassigned work; an agent never sees work assigned to a human or another agent. Assigned work sorts first, then priority, sortOrder and createdAt. Needs no claim; a full board is out of scope.",
+    "Open issues that are not Needs input, have no live active session, and have no blocker whose status is not closed, evaluated in database time. `filter` selects all claimable work (the default), only work assigned to the caller, or only unassigned work; an agent never sees work assigned to a human or another agent. `labels` keeps only work carrying every named project label, matched case-insensitively; repeat the parameter for more labels. Assigned work sorts first, then priority, sortOrder and createdAt. Needs no claim; a full board is out of scope.",
   request: { params: projectParams, query: readyWorkQuery },
   responses: {
     200: {
@@ -682,6 +689,7 @@ export function createSessionsRest(
           await workActor(c),
           c.req.valid("param").projectId,
           c.req.valid("query").filter,
+          c.req.valid("query").labels,
         ),
         200,
       );

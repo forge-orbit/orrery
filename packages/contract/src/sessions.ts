@@ -223,10 +223,17 @@ export const ReadyWorkFilter = z
   .meta({ id: "ReadyWorkFilter" });
 export type ReadyWorkFilter = z.infer<typeof ReadyWorkFilter>;
 
+/** Project label names an issue must all carry; matched case-insensitively. */
+export const LabelFilter = z
+  .array(z.string().trim().min(1).max(200))
+  .meta({ id: "LabelFilter" });
+export type LabelFilter = z.infer<typeof LabelFilter>;
+
 export const ReadyWorkInput = z
   .object({
     projectId: z.string().trim().min(1).max(200),
     filter: ReadyWorkFilter.optional(),
+    labels: LabelFilter.optional(),
   })
   .meta({ id: "ReadyWorkInput" });
 export type ReadyWorkInput = z.infer<typeof ReadyWorkInput>;

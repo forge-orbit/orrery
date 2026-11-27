@@ -59,6 +59,8 @@ export interface StartOptions {
   /** Opt-in autonomous pickup from the bound project's ready queue. */
   autoClaim?: boolean | undefined;
   autoClaimFilter?: ReadyWorkFilter | undefined;
+  /** Project labels every auto-claimed issue must carry; omitted means no label gate. */
+  autoClaimLabels?: string[] | undefined;
   autoClaimPollMs?: number | undefined;
   /** Overrides the adapter's `probeTimeoutMs` for discovery sessions. */
   catalogProbeTimeoutMs?: number | undefined;
@@ -576,6 +578,7 @@ export async function start(options: StartOptions): Promise<void> {
         try {
           const result = await client.autoClaim(runner.id, {
             filter: options.autoClaimFilter ?? "assignedToMe",
+            ...(options.autoClaimLabels === undefined ? {} : { labels: options.autoClaimLabels }),
           });
           if (result.dispatch !== null) {
             write(

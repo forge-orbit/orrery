@@ -98,6 +98,7 @@ interface Stub {
     agentId?: string;
     displayName: string;
   }>;
+  autoClaimBodies: unknown[];
   close(): Promise<void>;
 }
 
@@ -114,9 +115,10 @@ const registerBody = z.object({
   repoFingerprint: z.string().optional(),
 });
 
-async function listen(): Promise<Stub> {
+async function listen(options: { commandStatus?: number } = {}): Promise<Stub> {
   const requests: string[] = [];
   const registerBodies: Stub["registerBodies"] = [];
+  const autoClaimBodies: unknown[] = [];
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     void (async () => {
       requests.push(`${req.method} ${req.url}`);
@@ -156,8 +158,20 @@ async function listen(): Promise<Stub> {
         send(res, 200, { resolutions: [] });
         return;
       }
-      if (req.url?.endsWith("/heartbeat") || req.url?.includes("/commands")) {
+      if (req.method === "POST" && req.url === "/api/runners/runner-1/auto-claim") {
+        autoClaimBodies.push(body);
+        send(res, 200, { dispatch: null });
+        return;
+      }
+      if (req.url?.endsWith("/heartbeat")) {
         send(res, 401, { status: 401, code: "invalid_credential", title: "Revoked" });
+        return;
+      }
+      if (req.url?.includes("/commands")) {
+        // A 401 here aborts local operation immediately, so tests that must
+        // reach another loop first can soften the command poll instead.
+        const status = options.commandStatus ?? 401;
+        send(res, status, { status, code: "invalid_credential", title: "Revoked" });
         return;
       }
       if (req.method === "PUT" && req.url === "/api/runners/runner-1/catalog") {
@@ -183,6 +197,7 @@ async function listen(): Promise<Stub> {
     url: `http://127.0.0.1:${address.port}`,
     requests,
     registerBodies,
+    autoClaimBodies,
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
@@ -470,6 +485,54 @@ describe("start() target resolution end to end (#267)", () => {
       ).rejects.toThrow(/non-interactive/);
       expect(stub.requests.some((item) => item.includes("/api/runners/targets"))).toBe(false);
       expect(stub.registerBodies).toHaveLength(0);
+    } finally {
+      restoreEnv();
+      await stub.close();
+    }
+  });
+
+  it("forwards autoClaimLabels and omits the gate when unset (#280)", async () => {
+    const dir = await makeDir();
+    const repo = await makeRepo();
+    const stub = await listen({ commandStatus: 404 });
+    isolateEnv(dir);
+    try {
+      await writeCredential(dir, stub.url);
+      await start({
+        server: stub.url,
+        workspaceId: "Acme",
+        projectId: "ONE",
+        repoPath: repo,
+        heartbeatMs: 400,
+        commandWaitMs: 50,
+        harnessDefinitions: [],
+        write: () => {},
+        isTTY: false,
+        autoClaim: true,
+        autoClaimLabels: ["Frontend", "urgent"],
+        autoClaimPollMs: 20,
+      });
+      expect(stub.autoClaimBodies[0]).toMatchObject({
+        filter: "assignedToMe",
+        labels: ["Frontend", "urgent"],
+      });
+
+      stub.autoClaimBodies.length = 0;
+      await start({
+        server: stub.url,
+        workspaceId: "Acme",
+        projectId: "ONE",
+        repoPath: repo,
+        heartbeatMs: 400,
+        commandWaitMs: 50,
+        harnessDefinitions: [],
+        write: () => {},
+        isTTY: false,
+        autoClaim: true,
+        autoClaimPollMs: 20,
+      });
+      expect(stub.autoClaimBodies[0]).toMatchObject({ filter: "assignedToMe" });
+      expect(stub.autoClaimBodies[0]).not.toHaveProperty("labels");
     } finally {
       restoreEnv();
       await stub.close();

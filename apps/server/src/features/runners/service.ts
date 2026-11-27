@@ -72,7 +72,9 @@ import {
   dispatchTokens,
   humans,
   issueDependencies,
+  issueLabels,
   issues,
+  projectLabels,
   projects,
   runnerCommands,
   runnerDeviceCodeAttempts,
@@ -1646,17 +1648,44 @@ interface DispatchCreationInput extends DispatchOptions {
 }
 
 /**
+ * SQL condition: the issue carries a project label whose name matches
+ * case-insensitively. One condition per requested label gives AND semantics.
+ * Mirrors work-sessions' `issueCarriesLabel`; features stay independent.
+ */
+function issueCarriesLabel(tx: DbTransaction, lowerCaseName: string) {
+  return exists(
+    tx
+      .select({ labelId: issueLabels.labelId })
+      .from(issueLabels)
+      .innerJoin(projectLabels, eq(projectLabels.id, issueLabels.labelId))
+      .where(
+        and(
+          eq(issueLabels.issueId, issues.id),
+          sql`lower(${projectLabels.name}) = ${lowerCaseName}`,
+        ),
+      ),
+  );
+}
+
+/** Requested label names, lowercased and deduplicated for case-insensitive matching. */
+function wantedLabels(labels: readonly string[] | undefined): string[] {
+  return [...new Set((labels ?? []).map((label) => label.toLowerCase()))];
+}
+
+/**
  * Re-check every readiness rule while the issue row is locked. This closes the
  * scan-to-lock race between concurrent `autoClaim` and `createDispatch` calls:
  * a second transaction waits for the lock, then sees the first Dispatch and
- * skips the issue instead of claiming it again. The filter is also re-evaluated
- * under the lock so a re-assignment during the scan cannot be misread.
+ * skips the issue instead of claiming it again. The filter and labels are also
+ * re-evaluated under the lock so a re-assignment or label removal during the
+ * scan cannot be misread.
  */
 async function assertIssueStillDispatchable(
   tx: DbTransaction,
   issueId: string,
   agentId: string,
   filter: ReadyWorkFilter,
+  labels: readonly string[] = [],
 ): Promise<void> {
   const [issue] = await tx
     .select({
@@ -1683,6 +1712,18 @@ async function assertIssueStillDispatchable(
   const matches =
     filter === "unassigned" ? unassigned : filter === "assignedToMe" ? mine : unassigned || mine;
   if (!matches) throw new RunnersError("issue_not_claimable");
+
+  if (labels.length > 0) {
+    const attached = await tx
+      .select({ name: projectLabels.name })
+      .from(issueLabels)
+      .innerJoin(projectLabels, eq(projectLabels.id, issueLabels.labelId))
+      .where(eq(issueLabels.issueId, issueId));
+    const present = new Set(attached.map((row) => row.name.toLowerCase()));
+    if (!labels.every((label) => present.has(label))) {
+      throw new RunnersError("issue_not_claimable");
+    }
+  }
 
   const [blocker] = await tx
     .select({ id: issueDependencies.id })
@@ -2725,7 +2766,10 @@ export function createRunnersService(deps: RunnersDeps) {
       credential: string | undefined,
       runnerId: string,
       filter: ReadyWorkFilter = "assignedToMe",
+      labels: readonly string[] = [],
     ): Promise<AutoClaimResponse> {
+      // Labels match case-insensitively; resolve once for the scan and the lock re-check.
+      const wanted = wantedLabels(labels);
       return db.transaction(async (tx) => {
         // Read-only live checks first. Locking `runners` here would invert the
         // global issues -> runners -> runner_dispatches order when we later
@@ -2783,24 +2827,25 @@ export function createRunnersService(deps: RunnersDeps) {
                   isNull(issues.assigneeId),
                   and(eq(issues.assigneeType, "agent"), eq(issues.assigneeId, scannedAgentId)),
                 );
+        const candidateConditions = [
+          eq(issues.projectId, scanned.runner.projectId),
+          isNull(issues.deletedAt),
+          isNull(projects.deletedAt),
+          eq(issues.status, "todo"),
+          eq(issues.needsInput, false),
+          isNull(workSessions.id),
+          noOpenBlocker,
+          noActiveDispatch,
+          assignee,
+        ];
+        // Every requested label must be attached (case-insensitive AND).
+        for (const label of wanted) candidateConditions.push(issueCarriesLabel(tx, label));
         const candidates = await tx
           .select({ id: issues.id })
           .from(issues)
           .innerJoin(projects, eq(issues.projectId, projects.id))
           .leftJoin(workSessions, liveSession)
-          .where(
-            and(
-              eq(issues.projectId, scanned.runner.projectId),
-              isNull(issues.deletedAt),
-              isNull(projects.deletedAt),
-              eq(issues.status, "todo"),
-              eq(issues.needsInput, false),
-              isNull(workSessions.id),
-              noOpenBlocker,
-              noActiveDispatch,
-              assignee,
-            ),
-          )
+          .where(and(...candidateConditions))
           .orderBy(issues.number)
           .limit(10);
         if (candidates.length === 0) return { dispatch: null };
@@ -2874,7 +2919,7 @@ export function createRunnersService(deps: RunnersDeps) {
         for (const candidate of candidates) {
           if (!held.has(candidate.id)) continue;
           try {
-            await assertIssueStillDispatchable(tx, candidate.id, runner.agentId, filter);
+            await assertIssueStillDispatchable(tx, candidate.id, runner.agentId, filter, wanted);
             const dispatch = await insertDispatchLocked(tx, {
               runnerId,
               issueId: candidate.id,
