@@ -2,13 +2,15 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from "@astryxdesign/core/Layout";
-import { Section } from "@astryxdesign/core/Section";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { Stack } from "@astryxdesign/core/Stack";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Stack, StackItem } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
@@ -16,7 +18,7 @@ import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import type { WorkSession } from "@orrery/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Square, Terminal } from "lucide-react";
+import { ArrowLeft, GitBranch, Monitor, Square, Terminal } from "lucide-react";
 import { useState } from "react";
 import { TextField } from "../../lib/fields.tsx";
 import { HarnessBadge } from "../../lib/harness.tsx";
@@ -30,6 +32,7 @@ import {
   filterChunks,
   isOwnerOfRunner,
   mergeStreamChunks,
+  studioConnectionBadge,
   telemetryText,
   type StudioFilter,
 } from "./stream.ts";
@@ -237,15 +240,12 @@ export function LiveStudio({
     },
   });
 
-  const connection = bareUrl
-    ? live.isFetching
-      ? "Streaming"
-      : "Connected"
-    : live.isFetching && active
-      ? "Streaming"
-      : active
-        ? "Live"
-        : "Replay";
+  const connection = studioConnectionBadge({
+    bareUrl,
+    active,
+    isPending: live.isPending,
+    isError: live.isError,
+  });
   const telemetry = telemetryText({
     inputTokens: session?.inputTokens ?? null,
     outputTokens: session?.outputTokens ?? null,
@@ -293,9 +293,9 @@ export function LiveStudio({
                   Live Session Studio
                 </Heading>
                 <Token
-                  label={connection}
+                  label={connection.label}
                   size="sm"
-                  color={active ? "green" : "gray"}
+                  color={connection.color}
                   data-studio-connection=""
                 />
                 {sessionStatus !== undefined && (
@@ -311,44 +311,34 @@ export function LiveStudio({
                   <Token label="Archived replay" size="sm" color="blue" data-studio-replay="" />
                 )}
               </Stack>
-              {hasIssue ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  icon={<Icon icon={ArrowLeft} />}
-                  label="Back to issue"
-                  onClick={() => void navigate({ to: "/issues/$issueId", params: { issueId } })}
-                />
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  icon={<Icon icon={ArrowLeft} />}
-                  label="Back to workspaces"
-                  onClick={() => void navigate({ to: "/" })}
-                />
-              )}
-            </Stack>
-
-            <Stack direction="horizontal" gap={3} wrap="wrap" justify="between" vAlign="end">
               <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
-                <Token label={host?.displayName ?? "Runner host"} size="sm" color="gray" />
-                <Token
-                  label={dispatch?.branchName ?? "branch unknown"}
-                  size="sm"
-                  color="gray"
-                  data-studio-branch=""
-                />
-                <Token
-                  label={dispatch?.dirtyWorktree === true ? "dirty worktree" : "clean worktree"}
-                  size="sm"
-                  color={dispatch?.dirtyWorktree === true ? "orange" : "gray"}
-                />
                 {active && session !== null && session !== undefined && (
                   <LeaseCountdown leaseExpiresAt={session.leaseExpiresAt} enabled={active} />
                 )}
+                {hasIssue ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    icon={<Icon icon={ArrowLeft} />}
+                    label="Back to issue"
+                    onClick={() => void navigate({ to: "/issues/$issueId", params: { issueId } })}
+                  />
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    icon={<Icon icon={ArrowLeft} />}
+                    label="Back to workspaces"
+                    onClick={() => void navigate({ to: "/" })}
+                  />
+                )}
+              </Stack>
+            </Stack>
+
+            <Stack direction="horizontal" gap={3} wrap="wrap" justify="between" vAlign="end">
+              <Stack gap={1}>
                 <Stack
                   direction="horizontal"
                   gap={2}
@@ -360,34 +350,63 @@ export function LiveStudio({
                     harness={harnessDisplayName(runner, dispatch?.harness ?? run?.harness)}
                     empty="Harness unknown"
                   />
+                  <Text type="supporting" weight="semibold" color="inherit">
+                    {run?.agentName ?? "Agent"}
+                  </Text>
                   <Text type="supporting" color="secondary">
-                    {run?.agentName ?? "Agent"} · {dispatch?.model ?? run?.model ?? "model unknown"}
-                    {dispatch?.effort !== null && dispatch?.effort !== undefined
-                      ? ` · ${dispatch.effort} effort`
-                      : ""}{" "}
+                    {dispatch?.model ?? run?.model ?? "model unknown"}
+                  </Text>
+                  {dispatch?.effort !== null && dispatch?.effort !== undefined && (
+                    <Token label={`${dispatch.effort} effort`} size="sm" color="gray" />
+                  )}
+                </Stack>
+
+                <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="center">
+                  <Stack direction="horizontal" gap={1} vAlign="center">
+                    <Icon icon={Monitor} size="sm" />
+                    <Text type="supporting" color="secondary">
+                      {host?.displayName ?? "Runner host"}
+                    </Text>
+                  </Stack>
+                  <Text type="supporting" color="secondary">
+                    ·
+                  </Text>
+                  <Stack direction="horizontal" gap={1} vAlign="center">
+                    <Icon icon={GitBranch} size="sm" />
+                    <Text type="supporting" color="secondary" data-studio-branch="">
+                      {dispatch?.branchName ?? "branch unknown"}
+                    </Text>
+                  </Stack>
+                  {dispatch?.dirtyWorktree === true && (
+                    <Token label="dirty worktree" size="sm" color="orange" />
+                  )}
+                  <Text type="supporting" color="secondary">
                     · {telemetry.tokens} tokens · {telemetry.cost}
                   </Text>
                 </Stack>
               </Stack>
 
               {active && session !== null && session !== undefined && (
-                <Stack direction="horizontal" gap={2} wrap="wrap" vAlign="end">
-                  <TextField
-                    label="Stop reason (optional)"
-                    id={`studio-stop-reason-${dispatchId}`}
-                    htmlName="reason"
-                    value={reason}
-                    maxLength={2000}
-                    onChange={setReason}
-                    placeholder="Why should the agent stop?"
-                    size="sm"
-                    width="14rem"
-                  />
-                  <Button
+                <Stack direction="horizontal" gap={1.5} vAlign="end">
+                  <StackItem size="fill">
+                    <TextField
+                      label="Stop reason (optional)"
+                      id={`studio-stop-reason-${dispatchId}`}
+                      htmlName="reason"
+                      value={reason}
+                      maxLength={2000}
+                      onChange={setReason}
+                      placeholder="Why should the agent stop?"
+                      size="sm"
+                      width={isNarrow ? "100%" : "14rem"}
+                    />
+                  </StackItem>
+                  <IconButton
                     type="button"
                     size="sm"
                     variant="destructive"
                     label="Stop Agent"
+                    tooltip="Stop agent"
                     icon={<Icon icon={Square} />}
                     isDisabled={stop.isPending}
                     isLoading={stop.isPending}
@@ -497,17 +516,38 @@ export function LiveStudio({
               />
             )}
             <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" vAlign="center">
-              <SegmentedControl
-                label="Stream filter"
-                value={filter}
-                onChange={setFilter}
-                size="sm"
-                data-stream-filter=""
-              >
-                {FILTERS.map((entry) => (
-                  <SegmentedControlItem key={entry.value} value={entry.value} label={entry.label} />
-                ))}
-              </SegmentedControl>
+              {isNarrow ? (
+                <Selector
+                  label="Stream filter"
+                  isLabelHidden
+                  id="studio-stream-filter"
+                  variant="secondary"
+                  size="sm"
+                  value={filter}
+                  onChange={setFilter}
+                  options={FILTERS.map((entry) => ({
+                    value: entry.value,
+                    label: entry.value === "all" ? `Filter: ${entry.label}` : entry.label,
+                  }))}
+                  data-stream-filter=""
+                />
+              ) : (
+                <SegmentedControl
+                  label="Stream filter"
+                  value={filter}
+                  onChange={setFilter}
+                  size="sm"
+                  data-stream-filter=""
+                >
+                  {FILTERS.map((entry) => (
+                    <SegmentedControlItem
+                      key={entry.value}
+                      value={entry.value}
+                      label={entry.label}
+                    />
+                  ))}
+                </SegmentedControl>
+              )}
               {isOwner ? (
                 <ToggleButton
                   label="Raw output"
@@ -569,7 +609,8 @@ export function LiveStudio({
               ))}
             </Stack>
             {isNarrow && (
-              <Section padding={3} data-narrow-context="">
+              <Stack gap={3} paddingBlockStart={2} data-narrow-context="">
+                <Divider />
                 <Collapsible
                   trigger={
                     <Text type="body" weight="semibold">
@@ -578,9 +619,9 @@ export function LiveStudio({
                   }
                   defaultIsOpen={false}
                 >
-                  <Stack paddingBlockStart={2}>{contextRail}</Stack>
+                  <Stack paddingBlockStart={3}>{contextRail}</Stack>
                 </Collapsible>
-              </Section>
+              </Stack>
             )}
           </Stack>
         </LayoutContent>

@@ -1,12 +1,12 @@
-# Bootstrap, sign-in, account profile, and password recovery
+# Bootstrap, sign-in, account profile, avatars, and password recovery
 
-The first system administrator is created at `/setup` with `BOOTSTRAP_SECRET`, closing setup forever in one transaction. Sign-in at `/signin` sets the HttpOnly `orrery_session` cookie; `/api/auth/session` resolves `{email, displayName, emailVerified}`. Signed-in humans manage their profile (`displayName`), password (revoking other browser sessions), appearance, and sign-out at `/account`. Password recovery uses `/forgot-password` → Mailpit single-use token → `/reset-password`, plus `apps/server/src/recovery-cli.ts` for administrator local recovery without SMTP.
+The first system administrator is created at `/setup` with `BOOTSTRAP_SECRET`, closing setup forever in one transaction. Sign-in at `/signin` sets the HttpOnly `orrery_session` cookie; `/api/auth/session` resolves `{email, handle, displayName, emailVerified, avatarUrl}`. Signed-in humans manage their profile (`displayName`, `@mention` `handle`), profile photo (`PUT`/`DELETE /api/account/avatar`, served at `GET /api/humans/{humanId}/avatar`), password (revoking other browser sessions), appearance, and sign-out at `/account`. Password recovery uses `/forgot-password` → Mailpit single-use token → `/reset-password`, plus `apps/server/src/recovery-cli.ts` for administrator local recovery without SMTP.
 
 ## Sub-features
 
-- `setup-lifecycle` `GET /api/setup/status` (`false` → `true`); wrong secret `401 invalid_secret`; valid POST `201`; repeat POST `409 setup_complete`; missing `BOOTSTRAP_SECRET` `403 setup_unavailable`; `/setup` redirects to `/signin` after completion.
-- `signin-and-session` `/signin` posts to `/api/auth/login` (`401 invalid_credentials` on wrong password); `GET /api/auth/session` returns `{email, displayName, emailVerified}` or `401 not_signed_in`; `POST /api/auth/logout` clears the session.
-- `account-profile` `/account` (`Profile`, `Password`, `Appearance`, `Session`): `PATCH /api/account/profile` (`Save profile`), `POST /api/account/password` (`Update password`), and `Sign out`.
+- `setup-lifecycle` `GET /api/setup/status` (`false` → `true`); wrong secret `401 invalid_secret`; valid POST `201`; repeat POST `409 setup_complete`; missing `BOOTSTRAP_SECRET` `403 setup_unavailable`; before bootstrap all non-`/setup` routes redirect to `/setup`; after completion `/setup` redirects to `/signin` (and if already signed in, `/signin` chains to `/`).
+- `signin-and-session` `/signin` posts to `/api/auth/login` (`401 invalid_credentials` on wrong password); `GET /api/auth/session` returns `{email, handle, displayName, emailVerified, avatarUrl}` or `401 not_signed_in`; `POST /api/auth/logout` clears the session.
+- `account-profile` `/account` (`Profile`, `Password`, `Appearance`, `Session`): `PATCH /api/account/profile` (`displayName` + `handle`, `409 handle_taken`, `Save profile`), `PUT /api/account/avatar` / `DELETE /api/account/avatar` (`Remove photo`), `POST /api/account/password` (`Update password`), and `Sign out`.
 - `password-recovery` `/signin` links `Forgot your password?` → `/forgot-password` (`POST /api/auth/password-reset/request`, uniform response) → Mailpit reset link → `/reset-password` (`POST /api/auth/password-reset/confirm`, single-use, invalidates browser sessions while keeping agent keys live).
 
 ## Preconditions
@@ -17,7 +17,7 @@ The first system administrator is created at `/setup` with `BOOTSTRAP_SECRET`, c
 ## Recipe
 
 1. Verify `/api/setup/status` (`false`), wrong secret (`401`), bootstrap (`201`), repeat (`409`), and `/` signed-out redirect to `/signin`.
-2. Run the committed Playwright spec (`3 passed, 1 skipped` without `ORRERY_RESTART_CMD`):
+2. Run the committed Playwright spec (`4 passed, 1 skipped` without `ORRERY_RESTART_CMD`):
    ```bash
    ORRERY_URL=$URL ORRERY_SETUP_SECRET=$SECRET CHROMIUM_PATH=/usr/bin/chromium \
      pnpm --filter @orrery/e2e exec playwright test bootstrap.spec.ts

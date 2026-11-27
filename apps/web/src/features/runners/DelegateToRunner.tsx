@@ -10,6 +10,8 @@ import { Stack, StackItem } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useToast } from "@astryxdesign/core/Toast";
+import { Token } from "@astryxdesign/core/Token";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import {
   MAX_DISPATCH_PROMPT_LENGTH,
   type CatalogProbeRequest,
@@ -41,6 +43,13 @@ const stateLabels: Record<Dispatch["state"], string> = {
   active: "Running",
   uncertain: "Reconnecting",
   ended: "Ended",
+};
+
+const stateColors: Record<Dispatch["state"], "green" | "orange" | "gray"> = {
+  pending: "orange",
+  active: "green",
+  uncertain: "orange",
+  ended: "gray",
 };
 
 /**
@@ -447,20 +456,17 @@ export function DelegateToRunner({
             <Heading level={3} color="inherit">
               Delegate to Runner
             </Heading>
-            <Button
+            <IconButton
               type="button"
               size="sm"
               variant="secondary"
-              label="Delegate to Runner…"
+              label="Delegate to Runner"
+              tooltip="Delegate to Runner"
               icon={<Icon icon={Send} />}
               data-delegate-trigger=""
               onClick={openDialog}
             />
           </Stack>
-          <Text type="supporting">
-            Send this issue to one of your online Runners for this project. The issue assignee is
-            not changed.
-          </Text>
         </>
       )}
       {canDelegate && (
@@ -649,54 +655,59 @@ export function DelegateToRunner({
         </Dialog>
       )}
       {(dispatchList?.dispatches.length ?? 0) > 0 && (
-        <Stack gap={1}>
+        <Stack gap={1.5}>
           <Text type="supporting" weight="semibold">
             Recent dispatches
           </Text>
           {dispatchList?.dispatches.map((dispatch) => (
-            <Stack key={dispatch.id} direction="horizontal" gap={2} vAlign="center" wrap="wrap">
-              <Text type="supporting" color="secondary">
-                {stateLabels[dispatch.state]}
-                {dispatch.acceptedAt !== null
-                  ? ` · ${formatCompactDateTime(dispatch.acceptedAt)}`
-                  : ""}
-              </Text>
-              {(dispatch.harness !== null ||
-                dispatch.model !== null ||
-                dispatch.effort !== null) && (
-                <Stack
-                  direction="horizontal"
-                  gap={2}
-                  vAlign="center"
-                  wrap="wrap"
-                  data-dispatch-options=""
-                >
-                  <HarnessBadge
-                    harness={harnessDisplayName(
-                      allRunners.find((runner) => runner.id === dispatch.runnerId),
-                      dispatch.harness,
-                    )}
-                    empty="Runner default"
+            <Stack key={dispatch.id} gap={1} data-dispatch-options="">
+              <Stack direction="horizontal" gap={2} vAlign="center" justify="between" wrap="wrap">
+                <HarnessBadge
+                  harness={harnessDisplayName(
+                    allRunners.find((runner) => runner.id === dispatch.runnerId),
+                    dispatch.harness,
+                  )}
+                  empty="Runner default"
+                />
+                {dispatch.acceptedAt !== null ? (
+                  <Tooltip content={formatCompactDateTime(dispatch.acceptedAt)}>
+                    <Token
+                      label={stateLabels[dispatch.state]}
+                      size="sm"
+                      color={stateColors[dispatch.state]}
+                    />
+                  </Tooltip>
+                ) : (
+                  <Token
+                    label={stateLabels[dispatch.state]}
+                    size="sm"
+                    color={stateColors[dispatch.state]}
                   />
-                  {dispatch.model !== null && (
-                    <Text type="supporting" color="secondary">
-                      {dispatch.model}
-                    </Text>
-                  )}
-                  {dispatch.effort !== null && (
-                    <Text type="supporting" color="secondary">
-                      {dispatch.effort} effort
-                    </Text>
-                  )}
-                </Stack>
+                )}
+              </Stack>
+              {dispatch.model !== null && (
+                <Text type="supporting" color="secondary">
+                  {dispatch.model}
+                </Text>
               )}
-              <Link
-                to="/live/$runnerId/$dispatchId"
-                params={{ runnerId: dispatch.runnerId, dispatchId: dispatch.id }}
-                search={{ issueId, workspaceId }}
+              <Stack
+                direction="horizontal"
+                gap={2}
+                vAlign="center"
+                justify={dispatch.effort !== null ? "between" : "end"}
+                wrap="wrap"
               >
-                {dispatch.state === "ended" ? "Replay" : "Open Live Studio"}
-              </Link>
+                {dispatch.effort !== null && (
+                  <Token label={`${dispatch.effort} effort`} size="sm" color="gray" />
+                )}
+                <Link
+                  to="/live/$runnerId/$dispatchId"
+                  params={{ runnerId: dispatch.runnerId, dispatchId: dispatch.id }}
+                  search={{ issueId, workspaceId }}
+                >
+                  {dispatch.state === "ended" ? "Replay" : "Open Live Studio"}
+                </Link>
+              </Stack>
             </Stack>
           ))}
         </Stack>

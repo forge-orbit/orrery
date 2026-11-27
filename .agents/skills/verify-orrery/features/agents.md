@@ -4,11 +4,11 @@ Humans register agents (`POST/GET /api/agents`) and issue workspace- and project
 
 ## Sub-features
 
-- `agents-and-keys` `POST/GET /api/agents`, `POST/GET /api/agents/keys` (returns secret once + `key.keyHint`), `GET /api/agents/me` (bearer-only, `401` on invalid/revoked/expired/`human_deactivated`, `403` on wrong `workspaceId`/`projectId`).
+- `agents-and-keys` `POST/GET /api/agents`, `POST/GET /api/agents/keys` (returns secret once + `key.keyHint` formatted with ASCII `...`), `GET /api/agents/me` (bearer-only, resolves both `orr_ak_…` API keys and single-issue `orr_dt_…` dispatch tokens; `401` on invalid/revoked/expired/`human_deactivated`/`dispatch_token_invalid`, `403` on wrong `workspaceId`/`projectId`/`dispatch_forbidden`).
 - `key-rotation` `POST /api/agents/keys/{keyId}/rotate` creates a replacement (`replacesKeyId`, `agent_key_rotated` event); both keys work during overlap and revoke independently; rotating a revoked/expired key returns `409`.
 - `key-revocation` `DELETE /api/agents/keys/{keyId}` (self) and `GET/DELETE /api/workspaces/{workspaceId}/agent-keys[/{keyId}]` (owner-only, secret-free).
 - `runs` `POST /api/runs/hook` (Bearer key) and `GET /api/workspaces/{workspaceId}/runs` (also rendered on the workspace `Runs` tab).
-- `agents-ui` on `/workspaces/$WS`, clicking the `Agents` tab shows `Registered agents`, `Active work sessions`, and `Keys in this workspace` with `[data-agent-key-hint]`, `Rotate`, and `Revoke`.
+- `agents-ui` on `/workspaces/$WS`, clicking the `Agents` tab shows `Registered agents`, `Keys in this workspace` (defaulting to the `Active` filter — switch to `All` to see revoked/expired keys; own keys show `Revoke`, other members' keys show `Revoke (owner)` with an `AlertDialog` confirmation), and `Active work sessions`.
 
 ## Recipe
 

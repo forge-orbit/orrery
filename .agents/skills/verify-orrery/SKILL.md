@@ -5,7 +5,7 @@ description: Launch an isolated Orrery (Hono server + React web app + Postgres) 
 
 # Verify Orrery
 
-Orrery is one Node process (`apps/server`, port from `PORT`) that serves the REST API, MCP at `/mcp` (39 tools), and the built Astryx React web app, backed by Postgres. The user-facing surface spans `/setup`, `/signin`, `/register`, `/forgot-password`, `/reset-password`, `/account`, `/` (Workspaces dashboard), `/my-work`, `/inbox`, `/workspaces/$workspaceId`, `/projects/$projectId`, `/board/$projectId`, `/issues/$issueId`, `/trash/$projectId`, `/knowledge/$entryId`, `/settings/smtp`, `/history/*`, `/healthz`, `/readyz`, `/mcp`, and the `/api/notifications` REST API. Read `features/README.md` for the current map and extend it when you add a feature.
+Orrery is one Node process (`apps/server`, port from `PORT`) that serves the REST API, MCP at `/mcp` (39 tools), and the built Astryx React web app, backed by Postgres. The user-facing surface spans `/setup`, `/signin`, `/register`, `/forgot-password`, `/reset-password`, `/account`, `/` (Workspaces dashboard), `/my-work`, `/inbox`, `/notifications`, `/device`, `/live/$runnerId/$dispatchId` (Live Session Studio), `/workspaces/$workspaceId`, `/projects/$projectId`, `/projects/$projectId/issues/new`, `/projects/$projectId/knowledge/new`, `/board/$projectId`, `/issues/$issueId`, `/trash/$projectId`, `/knowledge/$entryId`, `/settings/smtp`, `/history/*`, `/healthz`, `/readyz`, and `/mcp`. Read `features/README.md` for the current map and extend it when you add a feature.
 
 ## Requirements and sandbox
 
