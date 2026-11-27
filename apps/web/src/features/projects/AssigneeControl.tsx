@@ -65,7 +65,12 @@ export function AssigneeControl({
   const assigneeIdentity =
     issue.assignee === null ? null : (
       <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-        <HumanAvatar name={issue.assignee.displayName} size="xsm" tooltip={false} />
+        <HumanAvatar
+          name={issue.assignee.displayName}
+          avatarUrl={issue.assignee.avatarUrl}
+          size="xsm"
+          tooltip={false}
+        />
         <Text type="supporting" color="primary" weight="medium">
           {issue.assignee.displayName}
         </Text>

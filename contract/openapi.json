@@ -2136,11 +2136,15 @@
           },
           "displayName": {
             "type": "string"
+          },
+          "avatarUrl": {
+            "$ref": "#/components/schemas/AvatarUrl"
           }
         },
         "required": [
           "humanId",
-          "displayName"
+          "displayName",
+          "avatarUrl"
         ]
       },
       "FallbackPolicyOverride": {

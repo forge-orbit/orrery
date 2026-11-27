@@ -1122,6 +1122,7 @@ describe("projects", () => {
     expect(Issue.parse(await toHuman.json()).assignee).toEqual({
       humanId: admin.id,
       displayName: EMAIL,
+      avatarUrl: null,
     });
     const [row] = await database.db
       .select({ humanId: issues.assigneeHumanId })

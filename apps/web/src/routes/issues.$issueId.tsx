@@ -539,7 +539,12 @@ function IssuePage() {
           <PriorityBadge priority={issue.priority} />
           {issue.assignee !== null && (
             <Stack as="span" direction="horizontal" gap={1} vAlign="center" data-issue-assignee="">
-              <HumanAvatar name={issue.assignee.displayName} size="xsm" tooltip={false} />
+              <HumanAvatar
+                name={issue.assignee.displayName}
+                avatarUrl={issue.assignee.avatarUrl}
+                size="xsm"
+                tooltip={false}
+              />
               <Text type="supporting" color="primary" weight="medium">
                 {issue.assignee.displayName}
               </Text>

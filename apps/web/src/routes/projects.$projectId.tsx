@@ -485,7 +485,11 @@ function ProjectPage() {
                                       vAlign="center"
                                       data-issue-assignee=""
                                     >
-                                      <HumanAvatar name={assignee.displayName} size="xsm" />
+                                      <HumanAvatar
+                                        name={assignee.displayName}
+                                        avatarUrl={assignee.avatarUrl}
+                                        size="xsm"
+                                      />
                                       <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
                                     </Stack>
                                   )}

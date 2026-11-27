@@ -418,6 +418,7 @@ function actorFromRow(
 function assigneeFromRow(row: {
   assigneeHumanId: string | null;
   assigneeHumanEmail: string | null;
+  assigneeHumanAvatarObjectId: string | null;
   assigneeHumanDeactivatedAt: Date | null;
 }): IssueAssignee {
   if (row.assigneeHumanId === null || row.assigneeHumanEmail === null) return null;
@@ -427,6 +428,10 @@ function assigneeFromRow(row: {
       row.assigneeHumanDeactivatedAt === null
         ? row.assigneeHumanEmail
         : `${row.assigneeHumanEmail} (deactivated)`,
+    avatarUrl:
+      row.assigneeHumanAvatarObjectId === null
+        ? null
+        : avatarUrlFor(row.assigneeHumanId, row.assigneeHumanAvatarObjectId),
   };
 }
 
@@ -499,6 +504,7 @@ const issueColumns = {
   parentIssueId: issues.parentIssueId,
   assigneeHumanId: issues.assigneeHumanId,
   assigneeHumanEmail: assigneeHuman.email,
+  assigneeHumanAvatarObjectId: assigneeHuman.avatarObjectId,
   assigneeHumanDeactivatedAt: assigneeHuman.deactivatedAt,
   fallbackPolicyOverride: issues.fallbackPolicyOverride,
   createdAt: issues.createdAt,
@@ -653,6 +659,7 @@ type IssueRow = {
   parentIssueId: string | null;
   assigneeHumanId: string | null;
   assigneeHumanEmail: string | null;
+  assigneeHumanAvatarObjectId: string | null;
   assigneeHumanDeactivatedAt: Date | null;
   fallbackPolicyOverride: FallbackPolicy | null;
 
@@ -1363,7 +1370,7 @@ async function validateAssignee(
   if (workspace === undefined) throw new ProjectsError("assignee_not_found");
 
   const [human] = await tx
-    .select({ id: humans.id, email: humans.email })
+    .select({ id: humans.id, email: humans.email, avatarObjectId: humans.avatarObjectId })
     .from(humans)
     .where(and(eq(humans.id, assigneeHumanId), isNull(humans.deactivatedAt)))
     .limit(1)
@@ -1385,7 +1392,11 @@ async function validateAssignee(
       .for("key share");
     if (membership === undefined) throw new ProjectsError("assignee_not_found");
   }
-  return { humanId: human.id, displayName: human.email };
+  return {
+    humanId: human.id,
+    displayName: human.email,
+    avatarUrl: human.avatarObjectId === null ? null : avatarUrlFor(human.id, human.avatarObjectId),
+  };
 }
 
 async function requireKnowledge(

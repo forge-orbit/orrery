@@ -582,11 +582,22 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "humanId",
-                "displayName"
+                "displayName",
+                "avatarUrl"
               ],
               "additionalProperties": false
             },
@@ -594,6 +605,10 @@
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -680,10 +695,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -934,11 +945,22 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "humanId",
-                "displayName"
+                "displayName",
+                "avatarUrl"
               ],
               "additionalProperties": false
             },
@@ -946,6 +968,10 @@
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -1032,10 +1058,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -1435,11 +1457,22 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "humanId",
-                "displayName"
+                "displayName",
+                "avatarUrl"
               ],
               "additionalProperties": false
             },
@@ -1447,6 +1480,10 @@
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -1533,10 +1570,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -1847,11 +1880,22 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "humanId",
-                "displayName"
+                "displayName",
+                "avatarUrl"
               ],
               "additionalProperties": false
             },
@@ -1859,6 +1903,10 @@
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -1945,10 +1993,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -2752,11 +2796,22 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "humanId",
-                "displayName"
+                "displayName",
+                "avatarUrl"
               ],
               "additionalProperties": false
             },
@@ -2764,6 +2819,10 @@
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -2850,10 +2909,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -3096,11 +3151,22 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "humanId",
-                "displayName"
+                "displayName",
+                "avatarUrl"
               ],
               "additionalProperties": false
             },
@@ -3108,6 +3174,10 @@
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -3194,10 +3264,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -3633,11 +3699,22 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "humanId",
-                "displayName"
+                "displayName",
+                "avatarUrl"
               ],
               "additionalProperties": false
             },
@@ -3645,6 +3722,10 @@
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -3731,10 +3812,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -3977,11 +4054,22 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "humanId",
-                "displayName"
+                "displayName",
+                "avatarUrl"
               ],
               "additionalProperties": false
             },
@@ -3989,6 +4077,10 @@
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -4075,10 +4167,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -8151,11 +8239,22 @@
                 },
                 "displayName": {
                   "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "humanId",
-                "displayName"
+                "displayName",
+                "avatarUrl"
               ],
               "additionalProperties": false
             },
@@ -8163,6 +8262,10 @@
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "Timestamp": {
           "type": "string",
@@ -8249,10 +8352,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [

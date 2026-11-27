@@ -1122,7 +1122,11 @@ function BoardCardContent({
                 <Stack direction="horizontal" gap={1} vAlign="center">
                   {assignee !== null && (
                     <Stack as="span" direction="horizontal" vAlign="center">
-                      <HumanAvatar name={assignee.displayName} size="xsm" />
+                      <HumanAvatar
+                        name={assignee.displayName}
+                        avatarUrl={assignee.avatarUrl}
+                        size="xsm"
+                      />
                       <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
                     </Stack>
                   )}

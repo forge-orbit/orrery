@@ -151,6 +151,8 @@ export const IssueAssignee = z
   .object({
     humanId: z.string(),
     displayName: z.string(),
+    /** The human's profile photo; null when none is uploaded. */
+    avatarUrl: AvatarUrl.nullable(),
   })
   .nullable()
   .meta({ id: "IssueAssignee" });
