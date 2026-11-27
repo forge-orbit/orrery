@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertSecureOrigin, canonicalizeServerUrl } from "./origin.ts";
 import {
   AckCommandsResponse,
   AutoClaimResponse,
@@ -11,6 +12,7 @@ import {
   Runner,
   RunnerCommandsResponse,
   RunnerOfflineResponse,
+  RunnerTargetsResponse,
   type AckCommandsRequest,
   type AutoClaimRequest,
   type CommandsQuery,
@@ -48,7 +50,8 @@ export class OrreryClient {
   private readonly signal: AbortSignal | undefined;
 
   constructor(options: OrreryClientOptions) {
-    this.server = options.server.replace(/\/$/, "");
+    this.server = canonicalizeServerUrl(options.server);
+    assertSecureOrigin(this.server);
     this.credential = options.credential;
     this.signal = options.signal;
   }
@@ -61,6 +64,7 @@ export class OrreryClient {
     try {
       response = await fetch(`${this.server}${path}`, {
         ...init,
+        redirect: "error",
         headers,
         signal: this.signal ?? null,
       });
@@ -203,6 +207,11 @@ export class OrreryClient {
         body: JSON.stringify(input),
       }),
     );
+  }
+
+  /** Host-authenticated target discovery for human-readable flag resolution. */
+  async getTargets() {
+    return RunnerTargetsResponse.parse(await this.request("/api/runners/targets"));
   }
 
   async markRunnerOffline(runnerId: string) {

@@ -1,5 +1,7 @@
 import { resolve } from "node:path";
 import type { DispatchOptions } from "@orrery/contract";
+import { isReservedHarnessId } from "./harnesses.ts";
+import { canonicalizeServerUrl } from "./origin.ts";
 
 /** The local ACP harness the Runner supervises over stdio. */
 export interface AcpHarnessConfig {
@@ -42,6 +44,33 @@ export function loadSupervisionConfig(
   overrides: SupervisionOverrides = {},
   env: NodeJS.ProcessEnv = process.env,
 ): SupervisionConfig {
+  const harness = overrides.harness;
+  // `--harness <preset>` and an explicit ACP command/args override are mutually
+  // exclusive: silently ignoring one would dispatch the wrong Harness. The
+  // reserved `custom` id explicitly selects the override entry, so it is the
+  // only `--harness` value allowed alongside an override.
+  if (harness !== undefined && !isReservedHarnessId(harness)) {
+    if (overrides.acp?.command !== undefined) {
+      throw new Error(
+        "Pass either --harness or --acp-command, not both: --harness selects a preset while --acp-command overrides it.",
+      );
+    }
+    if (overrides.acp?.args !== undefined) {
+      throw new Error(
+        "Pass either --harness or --acp-arg, not both: --harness selects a preset while --acp-arg overrides it.",
+      );
+    }
+    if (env.ORRERY_ACP_COMMAND !== undefined) {
+      throw new Error(
+        "Pass either --harness or ORRERY_ACP_COMMAND, not both: --harness selects a preset while ORRERY_ACP_COMMAND overrides it.",
+      );
+    }
+    if (env.ORRERY_ACP_ARGS !== undefined) {
+      throw new Error(
+        "Pass either --harness or ORRERY_ACP_ARGS, not both: --harness selects a preset while ORRERY_ACP_ARGS overrides it.",
+      );
+    }
+  }
   const acpOverridden =
     overrides.acp?.command !== undefined ||
     overrides.acp?.args !== undefined ||
@@ -110,7 +139,7 @@ export interface DispatchMcpContext {
 }
 
 export function ephemeralMcpConfig(context: DispatchMcpContext): EphemeralMcpServer {
-  const url = `${context.server.replace(/\/$/, "")}/mcp`;
+  const url = `${canonicalizeServerUrl(context.server)}/mcp`;
   return {
     name: "orrery",
     type: "http",

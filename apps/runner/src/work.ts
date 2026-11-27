@@ -1,16 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DispatchOptions } from "@orrery/contract";
 import { harnessConfigKey, readCachedCatalog, verifiedDefaultModel } from "./catalog.ts";
+import { validateCheckout } from "./checkout.ts";
 import { OrreryClient, RunnerRequestError } from "./client.ts";
 import { readCredential } from "./credential.ts";
+import { defaultWorkDisplayName } from "./display-name.ts";
 import { loadSupervisionConfig, type SupervisionConfig } from "./config.ts";
 import { delay } from "./delay.ts";
-import { repoFingerprint } from "./start.ts";
+import { loadUserHarnesses, resolveDefaultHarness, validateExplicitHarness } from "./harnesses.ts";
+import { resolveCredentialedOrigin } from "./origin.ts";
+import { resolveWorkAgent } from "./resolution.ts";
 import { SlotPool, type SlotController, type SupervisionOutcome } from "./slots.ts";
 import { superviseDispatch } from "./supervise.ts";
 
 export interface WorkOptions extends DispatchOptions {
-  server: string;
+  server?: string | undefined;
   /** Workspace id, name or slug used to disambiguate an issue key. */
   workspace?: string | undefined;
   repoPath?: string | undefined;
@@ -33,11 +37,39 @@ export interface WorkOptions extends DispatchOptions {
 export async function work(target: string, options: WorkOptions): Promise<SupervisionOutcome> {
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   const stored = await readCredential();
+  const server = resolveCredentialedOrigin({
+    storedServer: stored.server,
+    ...(options.server === undefined ? {} : { serverFlag: options.server }),
+    ...(process.env.ORRERY_URL === undefined ? {} : { envUrl: process.env.ORRERY_URL }),
+  });
+  const repoPath = options.repoPath ?? process.cwd();
+  const checkout = validateCheckout(repoPath);
+  const supervision =
+    options.supervision ??
+    loadSupervisionConfig(options.harness === undefined ? {} : { harness: options.harness });
+  // Eager startup validation (#266): a malformed harnesses.json, an unknown
+  // or missing explicit --harness, and a missing omitted-harness default all
+  // fail fast before any network call. One-shot work never warns-and-continues:
+  // it needs a runnable default immediately.
+  loadUserHarnesses();
+  const detectionOptions = supervision.acpOverridden ? { acpOverride: supervision.acp } : {};
+  const explicitHarness = options.harness ?? supervision.defaults.harness;
+  if (explicitHarness !== undefined) {
+    validateExplicitHarness(explicitHarness, detectionOptions);
+  } else if (!supervision.acpOverridden && resolveDefaultHarness(detectionOptions) === undefined) {
+    throw new Error(
+      "Default Harness 'opencode' is not installed on PATH. Install it or pass --harness explicitly.",
+    );
+  }
   const client = new OrreryClient({
-    server: options.server,
+    server,
     credential: stored.credential,
     signal: options.signal,
   });
+  // A human-readable `--agent` name resolves against the host's top-level
+  // targets; UUID-shaped values pass through for server-side validation.
+  const agentId =
+    options.agentId === undefined ? undefined : await resolveWorkAgent(client, options.agentId);
   const resolved = await client.resolveIssue({
     target,
     ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
@@ -46,17 +78,16 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     `Resolved ${target} to ${resolved.identifier} in ${resolved.workspaceName}/${resolved.projectKey}.`,
   );
 
-  const repoPath = options.repoPath ?? process.cwd();
   // A fresh digest guarantees this Runner row is single-use and cannot reuse
   // (or overwrite) a persistent `start` Runner for the same checkout.
   const fingerprint = createHash("sha256")
-    .update(`${repoFingerprint(repoPath)}:${randomUUID()}`)
+    .update(`${checkout.runnerFingerprint}:${randomUUID()}`)
     .digest("hex");
   const runner = await client.registerRunner({
     workspaceId: resolved.workspaceId,
     projectId: resolved.projectId,
-    ...(options.agentId === undefined ? {} : { agentId: options.agentId }),
-    displayName: `${stored.displayName} (one-shot)`,
+    ...(agentId === undefined ? {} : { agentId }),
+    displayName: defaultWorkDisplayName(stored.displayName),
     repoFingerprint: fingerprint,
     capabilities: [],
     maxConcurrency: 1,
@@ -102,13 +133,12 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     const acceptance = await client.acceptDispatch(runner.id, dispatch.id);
     write(`Accepted Dispatch ${dispatch.id}; work session ${acceptance.session.id} active.`);
 
-    const supervision = options.supervision ?? loadSupervisionConfig();
     const pool = new SlotPool(1);
     const slot = pool.acquire();
     if (slot === undefined) throw new Error("one-shot Runner has no free slot");
 
     const pollClient = new OrreryClient({
-      server: options.server,
+      server,
       credential: stored.credential,
       signal: sessionAbort.signal,
     });
@@ -167,11 +197,16 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     };
 
     const configKey = harnessConfigKey(
-      supervision.acpOverridden ? { acpOverride: supervision.acp } : {},
+      supervision.acpOverridden
+        ? {
+            acpOverride: supervision.acp,
+            defaultHarness: resolveDefaultHarness({ acpOverride: supervision.acp }),
+          }
+        : { defaultHarness: resolveDefaultHarness({}) },
     );
-    const cachedCatalog = readCachedCatalog(repoFingerprint(repoPath), undefined, configKey);
+    const cachedCatalog = readCachedCatalog(checkout.runnerFingerprint, undefined, configKey);
     const controller = await superviseDispatch({
-      server: options.server,
+      server,
       repoPath,
       credential: stored.credential,
       config: supervision,
@@ -209,7 +244,7 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
     // Teardown must run even on SIGINT/SIGTERM, when `options.signal` (and any
     // client bound to it) is already aborted. Use a fresh, bounded client.
     const teardown = new OrreryClient({
-      server: options.server,
+      server,
       credential: stored.credential,
       signal: AbortSignal.timeout(5_000),
     });

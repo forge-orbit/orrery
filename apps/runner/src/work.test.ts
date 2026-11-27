@@ -1,10 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DispatchCommandPayload } from "@orrery/contract";
 import { loadSupervisionConfig } from "./config.ts";
+import type * as credential from "./credential.ts";
+import type * as harnesses from "./harnesses.ts";
 import { work } from "./work.ts";
+
+const flags = vi.hoisted(() => ({ noOpencode: false }));
 
 const captured = vi.hoisted(() => ({
   command: undefined as DispatchCommandPayload | undefined,
+  getTargetsCalls: 0,
+  registeredAgentId: undefined as string | undefined,
 }));
 
 const runner = {
@@ -52,18 +61,44 @@ const dispatch = {
   endedAt: null,
 } as const;
 
-vi.mock("./credential.ts", () => ({
-  readCredential: async () => ({
-    server: "http://orrery.test",
-    hostId: "host-1",
-    credential: "orr_rh_local-credential-1234567890",
-    displayName: "TestLaptop",
-    platform: "linux-x64",
-  }),
-}));
+vi.mock("./credential.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof credential>();
+  return {
+    ...actual,
+    readCredential: async () => ({
+      server: "http://127.0.0.1:8080",
+      hostId: "host-1",
+      credential: "orr_rh_local-credential-1234567890",
+      displayName: "TestLaptop",
+      platform: "linux-x64",
+    }),
+  };
+});
 
-vi.mock("./start.ts", () => ({
-  repoFingerprint: () => "a".repeat(64),
+vi.mock("./harnesses.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof harnesses>();
+  return {
+    ...actual,
+    validateExplicitHarness: () => ({
+      id: "node",
+      displayName: "Node",
+      source: "user" as const,
+      command: process.execPath,
+      args: [],
+    }),
+    commandOnPath: () => !flags.noOpencode,
+    resolveDefaultHarness: (...args: Parameters<typeof actual.resolveDefaultHarness>) => {
+      if (flags.noOpencode) return undefined;
+      return actual.resolveDefaultHarness(...args) ?? actual.BUILTIN_ACP_HARNESSES[0];
+    },
+  };
+});
+
+vi.mock("./checkout.ts", () => ({
+  validateCheckout: () => ({ repoRoot: "/tmp/repo", mainRoot: "/tmp/repo" }),
+  runnerFingerprint: () => "a".repeat(64),
+  bindingFingerprint: () => "b".repeat(64),
+  mainCheckoutRoot: () => "/tmp/repo",
 }));
 
 vi.mock("./catalog.ts", () => ({
@@ -94,7 +129,16 @@ vi.mock("./client.ts", () => {
         title: "One-shot dispatch",
       };
     }
-    async registerRunner() {
+    async getTargets() {
+      captured.getTargetsCalls += 1;
+      return {
+        workspaces: [],
+        agents: [{ id: "agent-9", name: "Nina" }],
+        defaultAgentId: "agent-9",
+      };
+    }
+    async registerRunner(input: { agentId?: string }) {
+      captured.registeredAgentId = input.agentId;
       return runner;
     }
     async reconnect() {
@@ -175,9 +219,29 @@ vi.mock("./supervise.ts", () => ({
 }));
 
 describe("one-shot work execution options (#241)", () => {
+  let configDir = "";
+  let savedConfigDir: string | undefined;
+  let savedUrl: string | undefined;
+
+  beforeEach(() => {
+    savedConfigDir = process.env.ORRERY_RUNNER_CONFIG_DIR;
+    savedUrl = process.env.ORRERY_URL;
+    delete process.env.ORRERY_URL;
+    // work() eagerly validates the real harnesses.json: isolate it per test.
+    configDir = mkdtempSync(join(tmpdir(), "orrery-work-"));
+    process.env.ORRERY_RUNNER_CONFIG_DIR = configDir;
+  });
+
+  afterEach(() => {
+    if (savedConfigDir === undefined) delete process.env.ORRERY_RUNNER_CONFIG_DIR;
+    else process.env.ORRERY_RUNNER_CONFIG_DIR = savedConfigDir;
+    if (savedUrl === undefined) delete process.env.ORRERY_URL;
+    else process.env.ORRERY_URL = savedUrl;
+    rmSync(configDir, { recursive: true, force: true });
+  });
   it("forwards harness, model and effort without populated supervision defaults", async () => {
     const outcome = await work("KEY-1", {
-      server: "http://orrery.test",
+      server: "http://127.0.0.1:8080",
       harness: "node",
       model: "stub-deep",
       effort: "high",
@@ -190,5 +254,69 @@ describe("one-shot work execution options (#241)", () => {
       model: "stub-deep",
       effort: "high",
     });
+  });
+
+  it("fails fast when the default opencode Harness is missing (#266)", async () => {
+    flags.noOpencode = true;
+    try {
+      await expect(
+        work("KEY-1", {
+          server: "http://127.0.0.1:8080",
+          supervision: loadSupervisionConfig({}, {}),
+        }),
+      ).rejects.toThrow(/opencode.*not installed/);
+    } finally {
+      flags.noOpencode = false;
+    }
+  });
+
+  it("fails fast on a malformed harnesses.json before any network call (#266)", async () => {
+    writeFileSync(join(configDir, "harnesses.json"), "{not json");
+    await expect(
+      work("KEY-1", {
+        server: "http://127.0.0.1:8080",
+        supervision: loadSupervisionConfig({}, {}),
+      }),
+    ).rejects.toThrow(/harnesses\.json/);
+  });
+
+  it("resolves a human-readable --agent name via targets (#267)", async () => {
+    captured.getTargetsCalls = 0;
+    captured.registeredAgentId = undefined;
+    const outcome = await work("KEY-1", {
+      server: "http://127.0.0.1:8080",
+      agentId: "Nina",
+      supervision: loadSupervisionConfig({}, {}),
+    });
+    expect(outcome).toBe("completed");
+    expect(captured.getTargetsCalls).toBe(1);
+    expect(captured.registeredAgentId).toBe("agent-9");
+  });
+
+  it("passes agent UUIDs through without a targets round-trip (#267)", async () => {
+    captured.getTargetsCalls = 0;
+    captured.registeredAgentId = undefined;
+    const uuid = "12345678-1234-1234-1234-1234567890ab";
+    const outcome = await work("KEY-1", {
+      server: "http://127.0.0.1:8080",
+      agentId: uuid,
+      supervision: loadSupervisionConfig({}, {}),
+    });
+    expect(outcome).toBe("completed");
+    expect(captured.getTargetsCalls).toBe(0);
+    expect(captured.registeredAgentId).toBe(uuid);
+  });
+
+  it("fails an unknown --agent name without registering (#267)", async () => {
+    captured.getTargetsCalls = 0;
+    captured.registeredAgentId = undefined;
+    await expect(
+      work("KEY-1", {
+        server: "http://127.0.0.1:8080",
+        agentId: "Zed",
+        supervision: loadSupervisionConfig({}, {}),
+      }),
+    ).rejects.toThrow(/No agent matches 'Zed'/);
+    expect(captured.registeredAgentId).toBeUndefined();
   });
 });

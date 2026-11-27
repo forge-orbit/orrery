@@ -19,9 +19,12 @@ import {
 import { RunnerRequestError } from "./client.ts";
 import { configDirectory } from "./credential.ts";
 import {
+  BUILTIN_ACP_HARNESSES,
+  commandOnPath,
   harnessLockKey,
   HarnessLocks,
   harnessesJsonPath,
+  resolveDefaultHarness,
   type HarnessDefinition,
 } from "./harnesses.ts";
 import { activeModelEfforts, activeSessionModel, currentConfigValues } from "./probe.ts";
@@ -503,12 +506,16 @@ export function catalogWithProbedModel(
  * The effective local Harness configuration belongs in the cache identity: two
  * Runners on the same checkout with different `--acp-command` overrides or
  * `harnesses.json` contents otherwise overwrite each other's discovery state
- * (ADR-0011).
+ * (ADR-0011). The resolved omitted-harness default and the set of installed
+ * preset binaries are folded in as well, so installing or removing a Harness
+ * on PATH invalidates a stale cache instead of reusing it.
  */
 export function harnessConfigKey(
   options: {
     acpOverride?: { command: string; args: readonly string[] } | undefined;
     configDir?: string | undefined;
+    pathEnv?: string | undefined;
+    defaultHarness?: HarnessDefinition | null | undefined;
   } = {},
 ): string {
   const configDir = options.configDir ?? configDirectory();
@@ -518,8 +525,27 @@ export function harnessConfigKey(
   } catch {
     // No user registry file: the override alone identifies the configuration.
   }
+  const pathEnv = options.pathEnv ?? process.env.PATH ?? "";
+  const installedPresets = BUILTIN_ACP_HARNESSES.filter((preset) =>
+    commandOnPath(preset.command, pathEnv),
+  ).map((preset) => preset.id);
+  const resolvedDefault =
+    options.defaultHarness !== undefined
+      ? options.defaultHarness
+      : (resolveDefaultHarness({
+          ...(options.acpOverride === undefined ? {} : { acpOverride: options.acpOverride }),
+          configDir,
+          pathEnv,
+        }) ?? null);
   return createHash("sha256")
-    .update(JSON.stringify([options.acpOverride ?? null, harnessesText]))
+    .update(
+      JSON.stringify([
+        options.acpOverride ?? null,
+        harnessesText,
+        installedPresets,
+        resolvedDefault,
+      ]),
+    )
     .digest("hex")
     .slice(0, 16);
 }

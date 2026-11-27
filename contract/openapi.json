@@ -7795,6 +7795,119 @@
           "target"
         ]
       },
+      "RunnerTargetsResponse": {
+        "type": "object",
+        "properties": {
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunnerTargetWorkspace"
+            },
+            "maxItems": 200
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunnerTargetAgent"
+            },
+            "maxItems": 200
+          },
+          "defaultAgentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "workspaces",
+          "agents",
+          "defaultAgentId"
+        ]
+      },
+      "RunnerTargetWorkspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkspaceKind"
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunnerTargetProject"
+            },
+            "maxItems": 2000
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "kind",
+          "projects"
+        ]
+      },
+      "RunnerTargetProject": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "accessLevel": {
+            "$ref": "#/components/schemas/ProjectAccessLevel"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "name",
+          "accessLevel"
+        ]
+      },
+      "RunnerTargetAgent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
       "RunnerOfflineResponse": {
         "type": "object",
         "properties": {
@@ -19660,6 +19773,44 @@
           },
           "429": {
             "description": "Too many resolution attempts; try again later",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runners/targets": {
+      "get": {
+        "summary": "List the enrolled Runner host's bindable targets",
+        "description": "Host credential only. Returns the host owner's personal and non-suspended shared workspaces with non-trashed Contribute+ projects, plus the owner's installation-wide agents and default agent. Responses are never cached.",
+        "responses": {
+          "200": {
+            "description": "The host owner's bindable workspaces, projects and agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunnerTargetsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The Runner host credential is invalid or was revoked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Too many workspaces, projects or agents; pass explicit UUIDs",
             "content": {
               "application/problem+json": {
                 "schema": {

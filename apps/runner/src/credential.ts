@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { canonicalizeServerUrl } from "./origin.ts";
 
 export const StoredHostCredential = z
   .object({
@@ -29,8 +30,9 @@ export function credentialPath(): string {
 export async function saveCredential(value: StoredHostCredential): Promise<string> {
   const directory = configDirectory();
   const path = credentialPath();
+  const canonical = { ...value, server: canonicalizeServerUrl(value.server) };
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(path, `${JSON.stringify(canonical, null, 2)}\n`, { mode: 0o600 });
   // writeFile's mode is masked by the process umask; enforce it explicitly.
   await chmod(path, 0o600);
   return path;
@@ -48,5 +50,11 @@ export async function readCredential(): Promise<StoredHostCredential> {
   if (!parsed.success) {
     throw new Error("The stored host credential is malformed. Run 'orrery-runner login' again.");
   }
-  return parsed.data;
+  // Normalize legacy stored origins on read without silent rewrites: the file
+  // keeps its bytes, but every caller sees the canonical origin.
+  try {
+    return { ...parsed.data, server: canonicalizeServerUrl(parsed.data.server) };
+  } catch {
+    throw new Error("The stored host credential is malformed. Run 'orrery-runner login' again.");
+  }
 }

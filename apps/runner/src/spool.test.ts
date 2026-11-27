@@ -41,7 +41,7 @@ async function options(spoolDir: string): Promise<StreamSpoolOptions> {
   return {
     spoolDir,
     dispatchAttemptId: "attempt-199",
-    apiBaseUrl: "http://orrery.test",
+    apiBaseUrl: "http://127.0.0.1:8080",
     runnerId: "runner-1",
     dispatchId: "dispatch-1",
     credential: "orr_rh_test",
