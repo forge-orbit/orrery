@@ -616,7 +616,7 @@ test("assignment reserves work for the owner's agents across REST and MCP", asyn
       runId: await newRun(clientB),
     });
     expect(restRejected.status).toBe(409);
-    expect(asRecord(restRejected.body)).toMatchObject({ code: "issue_claimed" });
+    expect(asRecord(await restRejected.json())).toMatchObject({ code: "issue_claimed" });
     const race = await call(clientB, "claim_issue", { issueId, runId: await newRun(clientB) });
     expect(race.isError).toBe(true);
     expect(race.data.code).toBe("issue_claimed");

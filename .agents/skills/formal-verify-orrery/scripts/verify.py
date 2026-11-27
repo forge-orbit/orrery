@@ -8798,7 +8798,7 @@ def check_m29(facts: dict[str, Any]) -> CheckResult:
             if holder is None:
                 return (target, holder, v)
             if not g["m29_midflight_reassignment"]:
-                # A status guard would either refuse the handoff or force-stop the session;
+                # A status guard would either refuse the reassignment or force-stop the session;
                 # the agreed rule is to allow it and fence every later boundary.
                 return (assignee, None, bad(v, "midflight_reassignment_forced_stop"))
             return (target, holder, v)

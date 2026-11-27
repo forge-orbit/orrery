@@ -48,9 +48,19 @@ async function workspaceAndProject(): Promise<{ workspaceId: string; projectId: 
   return { workspaceId, projectId: text(field(await project.json(), "id"), "project id") };
 }
 
-async function createIssue(projectId: string, title: string, labelIds?: string[]): Promise<string> {
+async function createIssue(
+  projectId: string,
+  title: string,
+  options?: { labelIds?: string[]; assigneeHumanId?: string },
+): Promise<string> {
   const issue = await admin.post(`/api/projects/${projectId}/issues`, {
-    data: labelIds === undefined ? { title } : { title, labelIds },
+    data: {
+      title,
+      ...(options?.labelIds === undefined ? {} : { labelIds: options.labelIds }),
+      ...(options?.assigneeHumanId === undefined
+        ? {}
+        : { assigneeHumanId: options.assigneeHumanId }),
+    },
   });
   expect(issue.status()).toBe(201);
   return text(field(await issue.json(), "id"), "issue id");
@@ -199,9 +209,15 @@ test("auto-claim honors the label gate and the owner-human filter", async () => 
     maxConcurrency: 4,
   });
 
+  const humanId = await adminHumanId(projectId);
   const readyForAgent = await createLabel(projectId, "ready-for-agent");
-  const labelled = await createIssue(projectId, "Labelled ready work", [readyForAgent]);
-  const unlabelled = await createIssue(projectId, "Unlabelled personal work");
+  const labelled = await createIssue(projectId, "Labelled ready work", {
+    labelIds: [readyForAgent],
+    assigneeHumanId: humanId,
+  });
+  const unlabelled = await createIssue(projectId, "Unlabelled personal work", {
+    assigneeHumanId: humanId,
+  });
 
   const runnerApi = await request.newContext({
     ...(baseUrl === undefined ? {} : { baseURL: baseUrl }),

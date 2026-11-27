@@ -177,7 +177,7 @@ If a `KEY-N` identifier matches projects in more than one workspace you belong t
 to guess and lists the matching workspaces — pass `--workspace <ID|name|slug>` to disambiguate.
 
 Like **Delegate to Runner**, `work` accepts an issue that is unassigned or assigned to you, and
-rejects issues assigned to another Human (`409 issue_assigned_to_other_human`). The issue keeps its
+rejects issues assigned to another Human (`409 issue_not_claimable`). The issue keeps its
 human **Assignee**; your Agent only executes the work.
 
 `work` registers an ephemeral single-use Runner, dispatches and supervises the issue (including
@@ -243,7 +243,7 @@ repositories, and never store display names — `--name` stays per-run.
   **Stop** on an active session to enqueue an emergency `cancel`.
 - **Mid-flight reassignment:** reassigning an `in_progress` issue to another Human is allowed and
   does not stop the active session. The new assignee is enforced at the next `claim`, `reacquire`,
-  or queued dispatch acceptance, so a handoff can never let the old owner's automation keep working
+  or queued dispatch acceptance, so a reassignment can never let the old owner's automation keep working
   the issue.
 
 ### Live Session Studio
