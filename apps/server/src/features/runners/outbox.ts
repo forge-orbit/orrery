@@ -208,7 +208,7 @@ export async function cancelDispatchesForRunners(
   }
   await tx
     .update(runnerDispatches)
-    .set({ state: "ended", endedAt: sql`statement_timestamp()` })
+    .set({ state: "ended", endedAt: sql`statement_timestamp()`, needsHumanResolution: false })
     .where(
       inArray(
         runnerDispatches.id,

@@ -13,7 +13,7 @@ export interface CommandNotifier {
  * are a latency doorbell only: pollers always query Postgres before and after
  * waiting, so a dropped notification or listener restart cannot lose a command.
  */
-export function createCommandNotifier(sql: Sql): CommandNotifier {
+export function createCommandNotifier(sql: Pick<Sql, "listen">): CommandNotifier {
   const waiters = new Map<string, Set<Waiter>>();
   let listening: Awaited<ReturnType<Sql["listen"]>> | undefined;
   let listenPromise: ReturnType<Sql["listen"]> | undefined;
@@ -27,7 +27,12 @@ export function createCommandNotifier(sql: Sql): CommandNotifier {
       if (bucket === undefined) return;
       for (const waiter of bucket) waiter.fire();
     });
-    listening ??= await listenPromise;
+    try {
+      listening ??= await listenPromise;
+    } catch (error) {
+      listenPromise = undefined;
+      throw error;
+    }
   };
 
   return {
