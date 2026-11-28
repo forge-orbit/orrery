@@ -34,7 +34,9 @@ Today, if a human watches an active agent take the wrong direction on the board,
 - Return `stopRequested: true` (and the reason) in the response to `renew` / heartbeat and `report_progress` calls so pull-based MCP agents detect the cancellation cleanly, flush a brief handoff summary, and end the session.
 - Keep the existing five-minute lease as the hard backstop: if the agent ignores or misses the stop signal, the lease still expires normally in database time.
 
-## 3. Board assignment as a pull-queue hint
+## 3. Board assignment as a pull-queue hint *(superseded by [ADR-0013](../adr/0013-human-only-issue-assignees-and-owner-delegation.md))*
+
+> **Superseded:** Issue [#276](https://github.com/forge-orbit/orrery/issues/276) and [ADR-0013](../adr/0013-human-only-issue-assignees-and-owner-delegation.md) replace polymorphic human/agent assignees with human-only `assignee_human_id`, allow any **Agent** owned by the assigned **Human** to claim or be dispatched the issue, and replace agent-assignee pull-queue routing with owner-human scoping plus **Label** filtering (`ready-for-agent` default for `--auto-claim`).
 
 Today, `list_ready_work` returns open issues without an active session that are not in Needs input. Humans have no board-level way to steer a specific issue toward a specific registered agent.
 

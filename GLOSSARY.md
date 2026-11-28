@@ -72,6 +72,10 @@ _Avoid_: Model, agent
 An attempt to work on one issue, coordinated within a run. A work session can include subagents, and an issue has at most one active work session.
 _Avoid_: Run, agent
 
+**Assignee**:
+The single **Human** accountable for an issue's delivery and review. Never an **Agent**; execution is tracked separately through **Work session**s and **Claim**s.
+_Avoid_: Owner, worker, agent assignee
+
 **Claim**:
 The temporary reservation of an issue by its active work session.
 _Avoid_: Assignment, ownership
