@@ -203,7 +203,12 @@ test("assignee pickers and board filters offer Humans only, never Agents", async
   await page.keyboard.press("Escape");
 
   await page.goto(`/projects/${projectId}`);
-  await expect(page.getByText("Any agent")).toHaveCount(0);
+  const powerSearch = page.locator("[data-issue-power-search] input").first();
+  await expect(powerSearch).toBeVisible();
+  await powerSearch.click();
+  await page.getByRole("option", { name: /^Assignee/ }).click();
+  await expect(page.getByRole("option", { name: "Unassigned", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Any agent", exact: true })).toHaveCount(0);
 });
 
 test("delegation on another Human's issue is disabled with an explanation", async ({ page }) => {

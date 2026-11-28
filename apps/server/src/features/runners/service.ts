@@ -97,8 +97,15 @@ import type { ObjectStore } from "../../platform/storage.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import type { SessionAccount, SessionReader } from "../accounts/index.ts";
 import { newDispatchToken } from "../agents/index.ts";
+import { issueBoardOrder } from "../projects/index.ts";
 import { toRun } from "../runs/index.ts";
-import { releaseIssueWorkSessions, SessionsError, toSession } from "../work-sessions/index.ts";
+import {
+  issueCarriesLabel,
+  releaseIssueWorkSessions,
+  SessionsError,
+  toSession,
+  wantedLabels,
+} from "../work-sessions/index.ts";
 import { createCommandNotifier } from "./notifier.ts";
 import {
   allocateCommandSeqs,
@@ -1645,31 +1652,6 @@ interface DispatchCreationInput extends DispatchOptions {
 }
 
 /**
- * SQL condition: the issue carries a project label whose name matches
- * case-insensitively. One condition per requested label gives AND semantics.
- * Mirrors work-sessions' `issueCarriesLabel`; features stay independent.
- */
-function issueCarriesLabel(tx: DbTransaction, lowerCaseName: string) {
-  return exists(
-    tx
-      .select({ labelId: issueLabels.labelId })
-      .from(issueLabels)
-      .innerJoin(projectLabels, eq(projectLabels.id, issueLabels.labelId))
-      .where(
-        and(
-          eq(issueLabels.issueId, issues.id),
-          sql`lower(${projectLabels.name}) = ${lowerCaseName}`,
-        ),
-      ),
-  );
-}
-
-/** Requested label names, lowercased and deduplicated for case-insensitive matching. */
-function wantedLabels(labels: readonly string[] | undefined): string[] {
-  return [...new Set((labels ?? []).map((label) => label.toLowerCase()))];
-}
-
-/**
  * Re-check every readiness rule while the issue row is locked. This closes the
  * scan-to-lock race between concurrent `autoClaim` and `createDispatch` calls:
  * a second transaction waits for the lock, then sees the first Dispatch and
@@ -2846,7 +2828,7 @@ export function createRunnersService(deps: RunnersDeps) {
           .where(and(...candidateConditions))
           .orderBy(
             sql`case when ${issues.assigneeHumanId} = ${ownerHumanId} then 0 else 1 end`,
-            issues.number,
+            ...issueBoardOrder,
           )
           .limit(10);
         if (candidates.length === 0) return { dispatch: null };

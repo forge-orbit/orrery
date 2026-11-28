@@ -15,7 +15,13 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { sessionQuery, signIn, signOut, type Session } from "../features/accounts/index.ts";
+import {
+  sessionQuery,
+  signIn,
+  signOut,
+  toSession,
+  type Session,
+} from "../features/accounts/index.ts";
 import {
   acceptWorkspaceInvitation,
   declineWorkspaceInvitation,
@@ -438,16 +444,7 @@ function NewAccountForm({ token }: { token: string }) {
         return;
       }
 
-      const session: Session = {
-        signedIn: true,
-        humanId: account.humanId,
-        email: account.email,
-        handle: account.handle,
-        displayName: null,
-        emailVerified: account.emailVerified,
-        avatarUrl: null,
-      };
-      queryClient.setQueryData(sessionQuery.queryKey, session);
+      queryClient.setQueryData(sessionQuery.queryKey, toSession(account));
       await queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey });
       await navigate({ to: "/", replace: true });
       // The invitation was consumed by registration. Drop it only after the

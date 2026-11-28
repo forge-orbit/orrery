@@ -1056,6 +1056,80 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
     expect(field(claimed.body, "dispatch")).toBeNull();
   });
 
+  it("orders auto-claim by owner-assigned first, then priority and sortOrder", async () => {
+    const key = `OR${randomBytes(3).toString("hex").toUpperCase()}`;
+    const project = await api(`/api/workspaces/${world.workspaceA}/projects`, {
+      method: "POST",
+      cookie: world.cookie,
+      body: { name: "Order project", key },
+    });
+    if (project.status !== 201) throw new Error(`project failed: ${JSON.stringify(project.body)}`);
+    const projectId = str(field(project.body, "id"));
+    const runner = await api("/api/runners/register", {
+      method: "POST",
+      token: world.credential,
+      body: {
+        workspaceId: world.workspaceA,
+        projectId,
+        agentId: world.agentId,
+        repoFingerprint: createHash("sha256").update(randomBytes(32)).digest("hex"),
+        capabilities: [],
+        maxConcurrency: 4,
+        ephemeral: false,
+      },
+    });
+    if (runner.status !== 201) throw new Error(`register failed: ${JSON.stringify(runner.body)}`);
+    const runnerId = str(field(runner.body, "id"));
+
+    // Created first (lowest number) but unassigned & urgent: must lose to owner-assigned.
+    const unassignedUrgent = await makeIssue("unassigned urgent", { projectId });
+    await database.db
+      .update(issues)
+      .set({ priority: "urgent", sortOrder: 1 })
+      .where(eq(issues.id, unassignedUrgent.id));
+
+    // Owner-assigned low priority created before owner-assigned urgent.
+    const ownerLow = await makeIssue("owner low", { projectId, assigneeHumanId: world.humanId });
+    await database.db
+      .update(issues)
+      .set({ priority: "low", sortOrder: 1 })
+      .where(eq(issues.id, ownerLow.id));
+
+    // Owner-assigned urgent created last (highest number): must be claimed first.
+    const ownerUrgent = await makeIssue("owner urgent", {
+      projectId,
+      assigneeHumanId: world.humanId,
+    });
+    await database.db
+      .update(issues)
+      .set({ priority: "urgent", sortOrder: 2 })
+      .where(eq(issues.id, ownerUrgent.id));
+
+    const first = await api(`/api/runners/${runnerId}/auto-claim`, {
+      method: "POST",
+      token: world.credential,
+      body: { filter: "all" },
+    });
+    expect(first.status).toBe(200);
+    expect(str(field(field(first.body, "dispatch"), "issueId"))).toBe(ownerUrgent.id);
+
+    const second = await api(`/api/runners/${runnerId}/auto-claim`, {
+      method: "POST",
+      token: world.credential,
+      body: { filter: "all" },
+    });
+    expect(second.status).toBe(200);
+    expect(str(field(field(second.body, "dispatch"), "issueId"))).toBe(ownerLow.id);
+
+    const third = await api(`/api/runners/${runnerId}/auto-claim`, {
+      method: "POST",
+      token: world.credential,
+      body: { filter: "all" },
+    });
+    expect(third.status).toBe(200);
+    expect(str(field(field(third.body, "dispatch"), "issueId"))).toBe(unassignedUrgent.id);
+  });
+
   it("resolves foreign/read-only projects uniformly and rejects int4 overflow keys", async () => {
     const readOnly = await api("/api/runners/issue-resolve", {
       method: "POST",

@@ -15,9 +15,11 @@ import { createSessionsRest, routes } from "./rest.ts";
 export { routes as sessionsRoutes };
 export {
   claimInTransaction,
+  issueCarriesLabel,
   releaseIssueWorkSessions,
   SessionsError,
   toSession,
+  wantedLabels,
 } from "./service.ts";
 export type { ClaimInTransactionDeps, SessionsErrorKind, SessionsService } from "./service.ts";
 

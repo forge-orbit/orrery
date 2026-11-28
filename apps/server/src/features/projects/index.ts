@@ -16,6 +16,7 @@ import { createProjectsRest, routes } from "./rest.ts";
 export { routes as projectsRoutes };
 export {
   createProjectsService,
+  issueBoardOrder,
   projectAccessAtLeast,
   projectAccessCeilingInTransaction,
 } from "./service.ts";

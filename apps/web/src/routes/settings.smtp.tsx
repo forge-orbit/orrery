@@ -18,7 +18,7 @@ import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { sessionQuery, type Session } from "../features/accounts/index.ts";
+import { sessionQuery, toSession, type Session } from "../features/accounts/index.ts";
 import {
   saveSmtpSettings,
   sendTestEmail,
@@ -316,16 +316,13 @@ function TestAndVerification({
     try {
       const account = await verifyEmail({ token });
       const prev = queryClient.getQueryData<Session>(sessionQuery.queryKey);
-      const session: Session = {
-        signedIn: true,
-        humanId: account.humanId,
-        email: account.email,
-        handle: account.handle,
-        displayName: prev?.signedIn ? prev.displayName : null,
-        emailVerified: account.emailVerified,
-        avatarUrl: account.avatarUrl,
-      };
-      queryClient.setQueryData(sessionQuery.queryKey, session);
+      queryClient.setQueryData(
+        sessionQuery.queryKey,
+        toSession({
+          ...account,
+          displayName: prev?.signedIn ? prev.displayName : null,
+        }),
+      );
       setToken("");
       toast({ body: "Email verified." });
     } catch (cause) {
