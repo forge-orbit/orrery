@@ -223,7 +223,9 @@ test("runs the complete cycle in the browser", async ({ page }) => {
   await expect(page.locator("#issue-comment")).toHaveAttribute("rows", "7");
   await page.getByLabel("Comment").fill("A browser comment.");
   await page.getByRole("button", { name: "Add comment" }).click();
-  await expect(page.getByText("A browser comment.")).toBeVisible();
+  // Scope to the comment list: right after submit the composer textarea can still hold the
+  // draft text, which makes an unscoped getByText a strict-mode violation (flaky).
+  await expect(page.getByRole("list").getByText("A browser comment.")).toBeVisible();
 
   await page.getByRole("button", { name: "Close issue" }).click();
   await expect(page.locator("[data-issue-status]")).toHaveAttribute("data-issue-status", "done");
