@@ -4,13 +4,13 @@ Product and engineering decisions are agreed for M4 ([#5](https://github.com/for
 
 ## Problem Statement
 
-Humans need one place to see and steer all human and agent work: staging work on a six-column workflow board, filtering by labels and assignees, inspecting structured `v1` session activity blocks and optional session cost in the sidecar inspector, rendering GFM Markdown and Mermaid diagrams safely in issue bodies and comments, and viewing all of their personal work and pending agent questions across workspaces in a single "My work" view.
+Humans need one place to see and steer all human and agent work: staging work on a six-column workflow board, filtering by labels and human assignees, inspecting structured `v1` session activity blocks and optional session cost in the sidecar inspector, rendering GFM Markdown and Mermaid diagrams safely in issue bodies and comments, and viewing all of their personal work and pending agent questions across workspaces in a single "My work" view.
 
 ## Solution
 
 Provide the M4 human steering surfaces and supporting read endpoints:
 
-- A six-column project board (`Backlog`, `Todo`, `In progress`, `Review`, `Done`, `Cancelled`) plus a derived `Needs input` indicator/filter, project key (`ORR-42`) badges, label filters, one-level subtask display (with an open-subtask warning on parent close), and trash management (soft-delete and Project manager restore).
+- A six-column project board (`Backlog`, `Todo`, `In progress`, `Review`, `Done`, `Cancelled`) plus a derived `Needs input` indicator/filter, project key (`ORR-42`) badges, label filters, a human-only assignee filter (`Any assignee`, `Unassigned`, `Human`), one-level subtask display (with an open-subtask warning on parent close), and trash management (soft-delete and Project manager restore). Agent execution is surfaced through live **Work session** indicators, never through assignee options.
 - Safe GFM Markdown + Mermaid diagram rendering in issue bodies and comments (no raw HTML), and built-in renderers for the four `v1` `work_session_activities.detail.block` types (`key_value`, `table`, `checklist`, `test_results`) with a collapsible JSON fallback in the sidecar session inspector.
 - Optional token usage and cost display on the agents panel and session inspector (hidden when `null`).
 - A cross-workspace "My work" endpoint and view aggregating the signed-in human's open assigned issues, active work sessions running under their registered agents, and open/paused `needs_input` questions on projects where they hold `Contribute` or `Manage`.
@@ -19,7 +19,7 @@ Provide the M4 human steering surfaces and supporting read endpoints:
 
 ### Six-column board, labels, subtasks, and trash
 
-1. As a human member, I want to view and filter a project's issues across the six workflow states (`backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled`) and by `needs_input`, assignee (human vs. agent), priority, and label, so that I can steer project work from one board or list.
+1. As a human member, I want to view and filter a project's issues across the six workflow states (`backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled`) and by `needs_input`, assignee (a Human, Unassigned, or any assignee — never an Agent), priority, and label, so that I can steer project work from one board or list. Active Agent execution stays visible through live Work session indicators.
 2. As a human contributor, I want every issue card and detail page to display its `<PROJECT_KEY>-<NUMBER>` identifier (such as `ORR-42`), so that I can reference issues consistently.
 3. As a human contributor, I want to see one-level subtasks on the parent issue and receive a non-blocking confirmation warning if I close a parent issue that still has open subtasks, so that unfinished subtasks are not overlooked.
 4. As a human contributor, I want to move an unclaimed issue to trash, and as a project manager (`Manage`), I want to view the project's 30-day trash and restore soft-deleted issues, so that mistakes are easy to undo.
@@ -50,6 +50,7 @@ Provide the M4 human steering surfaces and supporting read endpoints:
 ### Board, issue detail, and inspector behavior
 
 - Keep live updates on the board, agents panel, needs-input inbox, and "My work" view on 3–5 second TanStack Query polling for MVP.
+- **Assignees are human-only:** the board's assignee filter offers `Any assignee`, `Unassigned`, and `Human` (no `Any agent`), and the issue list's assignee filter offers `Any human`, `Unassigned`, and named humans. Live Agent execution shows up as a session-state badge and working-Agent avatar on cards, and in the sidecar inspector, so filters never mix accountability with execution.
 - Render Markdown through a strict GFM + Mermaid pipeline that strips or escapes raw HTML.
 - Implement a renderer registry for `work_session_activities.detail.block` (`version: 1`) handling `key_value`, `table`, `checklist`, and `test_results`, with an automatic collapsible JSON fallback for any unversioned or unrecognized `detail` object.
 - Visual layout, navigation shell, and component styling for M4 screens will follow the MVP UI design spec before slicing `area:ui` implementation tickets.

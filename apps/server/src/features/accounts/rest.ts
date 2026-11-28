@@ -164,11 +164,12 @@ const failure = (c: Context, error: AccountsError) =>
 export function toSessionResponse(
   account: Pick<
     SessionAccount,
-    "email" | "handle" | "displayName" | "emailVerifiedAt" | "avatarUrl"
+    "humanId" | "email" | "handle" | "displayName" | "emailVerifiedAt" | "avatarUrl"
   >,
   overrides?: { avatarUrl?: string | null },
 ) {
   return {
+    humanId: account.humanId,
     email: account.email,
     handle: account.handle ?? deriveHandleFromEmail(account.email),
     displayName: account.displayName ?? null,

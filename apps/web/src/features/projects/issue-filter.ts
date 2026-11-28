@@ -25,7 +25,6 @@ export const ISSUE_SORT_OPTIONS: readonly {
 ];
 
 const ASSIGNEE_UNASSIGNED = "__unassigned__";
-const ASSIGNEE_ANY_AGENT = "__any_agent__";
 const ASSIGNEE_ANY_HUMAN = "__any_human__";
 
 function actorKey(actor: {
@@ -82,7 +81,7 @@ export function buildIssueFilterConfig(
     if (issue.assignee !== null) {
       const key = actorKey(issue.assignee);
       if (key !== "" && !assigneeMap.has(key)) {
-        assigneeMap.set(key, actorLabel(issue.assignee));
+        assigneeMap.set(key, issue.assignee.displayName);
       }
     }
     const creatorKey = actorKey(issue.createdBy);
@@ -93,7 +92,6 @@ export function buildIssueFilterConfig(
 
   const assigneeValues: EnumItem[] = [
     { value: ASSIGNEE_UNASSIGNED, label: "Unassigned" },
-    { value: ASSIGNEE_ANY_AGENT, label: "Any agent" },
     { value: ASSIGNEE_ANY_HUMAN, label: "Any human" },
     ...[...assigneeMap.entries()]
       .toSorted(([, a], [, b]) => a.localeCompare(b))
@@ -173,7 +171,7 @@ export function buildIssueFilterConfig(
         key: "assignee",
         label: "Assignee",
         defaultOperator: "is",
-        typeaheadAliases: ["owner", "agent"],
+        typeaheadAliases: ["owner", "human"],
         operators: [
           { key: "is", label: "is", value: { type: "enum", values: assigneeValues } },
           { key: "is_not", label: "is not", value: { type: "enum", values: assigneeValues } },
@@ -242,10 +240,7 @@ export function buildIssueFilterConfig(
 
 function matchesAssigneeValue(issue: Issue, value: string): boolean {
   if (value === ASSIGNEE_UNASSIGNED) return issue.assignee === null;
-  if (value === ASSIGNEE_ANY_AGENT) return issue.assignee?.agentId != null;
-  if (value === ASSIGNEE_ANY_HUMAN) {
-    return issue.assignee !== null && issue.assignee.agentId == null;
-  }
+  if (value === ASSIGNEE_ANY_HUMAN) return issue.assignee !== null;
   return issue.assignee !== null && actorKey(issue.assignee) === value;
 }
 

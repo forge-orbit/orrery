@@ -3,19 +3,17 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
-import { Token } from "@astryxdesign/core/Token";
-import type { Assignee, Issue, IssueDetail } from "@orrery/contract";
+import type { Issue, IssueDetail } from "@orrery/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { HumanAvatar } from "../../lib/avatar.tsx";
-import { AgentAvatar } from "../../lib/harness.tsx";
 import { updateIssue } from "./commands.ts";
 import { issueActivityQuery, issueQuery, issuesQuery, projectActivityQuery } from "./queries.ts";
 
 export type AssigneeCandidate = {
   value: string;
   label: string;
-  assignee: Assignee;
+  humanId: string;
   noProjectAccess?: boolean;
 };
 
@@ -23,12 +21,10 @@ export function AssigneeControl({
   issue,
   candidates,
   canContribute,
-  activeHarness,
 }: {
   issue: Issue;
   candidates: readonly AssigneeCandidate[];
   canContribute: boolean;
-  activeHarness?: string | null | undefined;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -44,7 +40,7 @@ export function AssigneeControl({
     setError(undefined);
     const chosen = candidates.find((candidate) => candidate.value === nextValue);
     try {
-      const updated = await updateIssue(issue.id, { assignee: chosen?.assignee ?? null });
+      const updated = await updateIssue(issue.id, { assigneeHumanId: chosen?.humanId ?? null });
       queryClient.setQueryData<IssueDetail>(issueQuery(issue.id).queryKey, (old) =>
         old === undefined ? old : { ...old, ...updated },
       );
@@ -69,25 +65,15 @@ export function AssigneeControl({
   const assigneeIdentity =
     issue.assignee === null ? null : (
       <Stack direction="horizontal" gap={1.5} vAlign="center" wrap="wrap">
-        {issue.assignee.agentId !== undefined ? (
-          <AgentAvatar name={issue.assignee.displayName} harness={activeHarness} size={16} />
-        ) : (
-          <HumanAvatar
-            name={issue.assignee.displayName}
-            avatarUrl={issue.assignee.avatarUrl}
-            size="xsm"
-            tooltip={false}
-          />
-        )}
+        <HumanAvatar
+          name={issue.assignee.displayName}
+          avatarUrl={issue.assignee.avatarUrl}
+          size="xsm"
+          tooltip={false}
+        />
         <Text type="supporting" color="primary" weight="medium">
           {issue.assignee.displayName}
         </Text>
-        {issue.assignee.agentId !== undefined && <Token label="Agent" color="orange" size="sm" />}
-        {issue.assignee.agentId !== undefined && issue.assignee.ownerDisplayName != null && (
-          <Text type="supporting" color="secondary">
-            · {issue.assignee.ownerDisplayName}
-          </Text>
-        )}
       </Stack>
     );
 
@@ -143,14 +129,10 @@ export function AssigneeControl({
 
 function currentValue(issue: Issue): string {
   if (issue.assignee === null) return "";
-  return issue.assignee.agentId !== undefined
-    ? `agent:${issue.assignee.agentId}`
-    : `human:${issue.assignee.humanId ?? ""}`;
+  return `human:${issue.assignee.humanId}`;
 }
 
 function currentLabel(issue: Issue): string {
   if (issue.assignee === null) return "Unassigned";
-  return issue.assignee.agentId !== undefined
-    ? `Agent · ${issue.assignee.displayName}`
-    : `Human · ${issue.assignee.displayName}`;
+  return `Human · ${issue.assignee.displayName}`;
 }

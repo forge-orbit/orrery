@@ -1,7 +1,6 @@
 import {
   AgentKeyEventType,
   AgentKeyValidity,
-  AssigneeType,
   AttachmentHolderType,
   DispatchState,
   FallbackPolicy,
@@ -810,8 +809,8 @@ export const issues = pgTable(
     needsInput: boolean("needs_input").notNull().default(false),
     fallbackPolicyOverride: text("fallback_policy_override").$type<FallbackPolicy>(),
 
-    assigneeType: text("assignee_type").$type<AssigneeType>(),
-    assigneeId: text("assignee_id"),
+    /** The accountable human; agents execute through work sessions, never assignment. */
+    assigneeHumanId: text("assignee_human_id").references(() => humans.id),
 
     parentIssueId: text("parent_issue_id").references((): AnyPgColumn => issues.id),
 
@@ -833,19 +832,11 @@ export const issues = pgTable(
 
     index("issues_project_sort_order").on(t.projectId, t.sortOrder, t.createdAt),
 
-    index("issues_assignee").on(t.assigneeType, t.assigneeId),
+    index("issues_assignee_human").on(t.assigneeHumanId),
     check("issues_number_positive", sql`${t.number} > 0`),
 
     check("issues_status", sql`${t.status} in (${sql.raw(sqlLiteralList(IssueStatus))})`),
     check("issues_priority", sql`${t.priority} in (${sql.raw(sqlLiteralList(IssuePriority))})`),
-
-    check("issues_assignee_pair", sql`(${t.assigneeType} is null) = (${t.assigneeId} is null)`),
-    check(
-      "issues_assignee_type",
-      sql`(${t.assigneeType} is null or ${t.assigneeType} in (${sql.raw(
-        sqlLiteralList(AssigneeType),
-      )}))`,
-    ),
 
     check(
       "issues_sort_order_finite",

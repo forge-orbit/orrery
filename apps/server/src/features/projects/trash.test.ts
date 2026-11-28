@@ -563,8 +563,7 @@ describe("issue trash", () => {
     expect(tombstone.title).toBe("[deleted]");
     expect(tombstone.body).toBe("");
     expect(tombstone.parentIssueId).toBeNull();
-    expect(tombstone.assigneeType).toBeNull();
-    expect(tombstone.assigneeId).toBeNull();
+    expect(tombstone.assigneeHumanId).toBeNull();
     expect(tombstone.purgedAt).not.toBeNull();
     expect(tombstone.number).toBe(old.number);
     const child = first(await database.db.select().from(issues).where(eq(issues.id, liveChild.id)));
@@ -945,8 +944,7 @@ describe("issue trash", () => {
         title: "[deleted]",
         body: "",
         parentIssueId: null,
-        assigneeType: null,
-        assigneeId: null,
+        assigneeHumanId: null,
       });
       expect(issue.purgedAt).not.toBeNull();
       expect(issue.deletedAt).not.toBeNull();

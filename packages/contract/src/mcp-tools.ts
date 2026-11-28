@@ -93,7 +93,7 @@ const getIssue = {
 const createIssue = {
   name: "create_issue",
   description:
-    "Create an issue in an in-scope project. Omitted status defaults to `todo` (ready work); pass `backlog` to stage it for triage. Priority and sortOrder may be set at creation; omitted priority defaults to none and omitted sortOrder is spaced by 65535 from the project-local issue number. An optional `assignee` (`{\"type\":\"human\"|\"agent\",\"id\":\"...\"}`) and `labelIds` are validated and applied in the same transaction as the issue: an unknown assignee or a label outside the project fails without creating a partial issue. Requires Contribute access on the key and on its human owner.",
+    "Create an issue in an in-scope project. Omitted status defaults to `todo` (ready work); pass `backlog` to stage it for triage. Priority and sortOrder may be set at creation; omitted priority defaults to none and omitted sortOrder is spaced by 65535 from the project-local issue number. An optional `assigneeHumanId` (an active human with access to the project's workspace) and `labelIds` are validated and applied in the same transaction as the issue: an unknown assignee or a label outside the project fails without creating a partial issue. Requires Contribute access on the key and on its human owner.",
   input: CreateIssueRequest.extend({ projectId: id("The project id") }),
   output: z.object({ issue: Issue }),
 };
@@ -101,7 +101,7 @@ const createIssue = {
 const updateIssue = {
   name: "update_issue",
   description:
-    "Edit an issue's title or body, move it through the six-state workflow (`backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled` — only done and cancelled set closedAt), change its priority or sortOrder (a float; the midpoint of two neighbours moves one card without rewriting them), or set/clear its assignee (`{\"type\":\"human\"|\"agent\",\"id\":\"...\"}`, or null to clear). An assignee must be an active member or a registered agent in the workspace. Requires Contribute access and, for an agent, a live work session on the issue. The actor recorded is the agent, not its human owner.",
+    "Edit an issue's title or body, move it through the six-state workflow (`backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled` — only done and cancelled set closedAt), change its priority or sortOrder (a float; the midpoint of two neighbours moves one card without rewriting them), or set/clear its assignee (`assigneeHumanId`, a human id, or null to clear). An assignee must be an active human with access to the project's workspace. Reassigning an in-progress issue never stops its active work session. Requires Contribute access and, for an agent, a live work session on the issue. The actor recorded is the agent, not its human owner.",
   input: UpdateIssueRequest.extend({ issueId: id("The issue id") }),
   output: z.object({ issue: Issue }),
 };
@@ -281,7 +281,7 @@ const runCheckin = {
 const claimIssue = {
   name: "claim_issue",
   description:
-    "Claim a `todo` issue this agent needs to work on, for this agent and run; the claim atomically moves it to `in_progress`. Backlog, review and terminal issues are refused. An agent may claim only work that is unassigned or assigned to that same agent; issues assigned to a human or another agent are refused. One active session per issue: a second worker is refused. Helpers on the same issue pass the same runId and join the existing session. The claim is a five-minute lease in database time; renew it while working.",
+    "Claim a `todo` issue this agent needs to work on, for this agent and run; the claim atomically moves it to `in_progress`. Backlog, review and terminal issues are refused. An agent may claim only work that is unassigned or assigned to its owner human; issues assigned to another human are refused. One active session per issue: a second worker is refused. Helpers on the same issue pass the same runId and join the existing session. The claim is a five-minute lease in database time; renew it while working.",
   input: ClaimWorkSessionInput,
   output: WorkSessionResponse,
 };
@@ -342,7 +342,7 @@ const reacquireWorkSession = {
 const readyWork = {
   name: "ready_work",
   description:
-    "List minimal ready work in a project: `todo` issues that are not Needs input, have no live active session, and have no blocker whose status is not done or cancelled, evaluated in database time. `backlog`, `in_progress`, `review` and terminal issues are never offered. Optional `filter` is all (default), assignedToMe or unassigned; an agent never sees issues assigned to a human or another agent. Optional `labels` keeps only issues carrying every named project label, matched case-insensitively. Work assigned to the caller sorts first, then priority urgent > high > medium > low > none, then sortOrder ascending, then creation time ascending. Needs no claim.",
+    "List minimal ready work in a project: `todo` issues that are not Needs input, have no live active session, and have no blocker whose status is not done or cancelled, evaluated in database time. `backlog`, `in_progress`, `review` and terminal issues are never offered. Optional `filter` is all (default), assignedToMe (for an agent, assigned to its owner human) or unassigned; an agent never sees issues assigned to another human. Optional `labels` keeps only issues carrying every named project label, matched case-insensitively. Work assigned to the caller (or owner human) sorts first, then priority urgent > high > medium > low > none, then sortOrder ascending, then creation time ascending. Needs no claim.",
   input: ReadyWorkInput,
   output: z.object({ issues: ReadyWorkResponse }),
 };

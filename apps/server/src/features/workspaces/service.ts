@@ -1625,12 +1625,14 @@ export function createWorkspacesService({
         if (existing !== undefined) throw new WorkspacesError("account_exists");
 
         let handle = "";
+        let invitedHumanId = "";
         try {
           const created = await createInvitedHuman(
             { email: invitation.email, password: input.password },
             tx,
           );
           const { humanId } = created;
+          invitedHumanId = humanId;
           handle = created.handle;
           await markEmailVerified(humanId, tx);
           await tx.insert(workspaceMemberships).values({
@@ -1654,9 +1656,10 @@ export function createWorkspacesService({
           }
           throw error;
         }
-        return { email: invitation.email, handle };
+        return { humanId: invitedHumanId, email: invitation.email, handle };
       });
       return toSessionResponse({
+        humanId: registered.humanId,
         email: registered.email,
         handle: registered.handle,
         displayName: null,

@@ -344,12 +344,22 @@ async function registerSecondAgent(f: Fixture) {
   return { agentId, secret, identity: await identityFor(secret) };
 }
 
-async function assign(
-  issueId: string,
-  f: Fixture,
-  assignee: { type: "human" | "agent"; id: string },
-) {
-  await projectsService.updateIssue(humanActor(f), issueId, { assignee });
+async function assign(issueId: string, f: Fixture, assigneeHumanId: string) {
+  await projectsService.updateIssue(humanActor(f), issueId, { assigneeHumanId });
+}
+
+/** A second active workspace human, for other-human assignment cases. */
+async function secondHuman(f: Fixture): Promise<string> {
+  const humanId = randomUUID();
+  await database.db.insert(humans).values({
+    id: humanId,
+    email: `other-${humanId}@example.com`,
+    passwordHash: "scrypt$x",
+  });
+  await database.db
+    .insert(workspaceMemberships)
+    .values({ id: randomUUID(), workspaceId: f.workspaceId, humanId, isOwner: false });
+  return humanId;
 }
 
 async function setLease(issueId: string, sqlExpression: string) {
@@ -2338,57 +2348,41 @@ describe("ephemeral session activities (#83)", () => {
 });
 
 describe("agent assignment and the ready queue (#84)", () => {
-  it("refuses claims on work reserved for a human or another agent", async () => {
+  it("refuses claims on work assigned to another human", async () => {
     const f = await bootstrap();
     const identity = await identityFor(f.secret);
-    const other = await registerSecondAgent(f);
-    const humanOwned = await humanIssue(f, "Human reserved");
-    const otherOwned = await humanIssue(f, "Other agent reserved");
-    await assign(humanOwned.id, f, { type: "human", id: f.humanId });
-    await assign(otherOwned.id, f, { type: "agent", id: other.agentId });
+    const otherHumanId = await secondHuman(f);
+    const otherOwned = await humanIssue(f, "Other human reserved");
+    await assign(otherOwned.id, f, otherHumanId);
 
-    const humanRefusal = await rejection(
-      sessionsService.claim(
-        { kind: "agent", identity },
-        { issueId: humanOwned.id, runId: await newRun(identity) },
-      ),
-    );
-    expect(errorKind(humanRefusal)).toBe("issue_assigned_to_human");
     const otherRefusal = await rejection(
       sessionsService.claim(
         { kind: "agent", identity },
         { issueId: otherOwned.id, runId: await newRun(identity) },
       ),
     );
-    expect(errorKind(otherRefusal)).toBe("issue_assigned_to_other_agent");
-    expect(await activeCount(humanOwned.id)).toBe(0);
+    expect(errorKind(otherRefusal)).toBe("issue_assigned_to_other_human");
     expect(await activeCount(otherOwned.id)).toBe(0);
 
     await expectProblem(
       await postJson(
-        `/api/issues/${humanOwned.id}/work-sessions`,
+        `/api/issues/${otherOwned.id}/work-sessions`,
         { runId: await newRun(identity) },
         undefined,
         f.secret,
       ),
       409,
-      "issue_assigned_to_human",
+      "issue_assigned_to_other_human",
     );
-    const otherRest = await postJson(
-      `/api/issues/${otherOwned.id}/work-sessions`,
-      { runId: await newRun(identity) },
-      undefined,
-      f.secret,
-    );
-    await expectProblem(otherRest, 409, "issue_assigned_to_other_agent");
   });
 
-  it("allows claims on unassigned work and on work assigned to the calling agent", async () => {
+  it("allows claims on unassigned work and on work assigned to the calling agent's human", async () => {
     const f = await bootstrap();
     const identity = await identityFor(f.secret);
+    const other = await registerSecondAgent(f);
     const free = await humanIssue(f, "Free work");
     const mine = await humanIssue(f, "Mine");
-    await assign(mine.id, f, { type: "agent", id: f.agentId });
+    await assign(mine.id, f, f.humanId);
 
     const freeRun = await newRun(identity);
     expect(
@@ -2414,28 +2408,63 @@ describe("agent assignment and the ready queue (#84)", () => {
         )
       ).id,
     ).toBe(claimed.id);
+
+    // Any Agent owned by the assigned human inherits the same eligibility.
+    const sibling = { kind: "agent" as const, identity: other.identity };
+    const siblingRun = await newRun(other.identity);
+    await sessionsService.stop({ kind: "agent", identity }, mine.id, "released");
+    expect(
+      (
+        await sessionsService.claim(sibling, {
+          issueId: mine.id,
+          runId: siblingRun,
+        })
+      ).status,
+    ).toBe("active");
+
     expect(await activeCount(free.id)).toBe(1);
     expect(await activeCount(mine.id)).toBe(1);
   });
 
-  it("refuses reacquisition once the expired claim's issue is reassigned", async () => {
+  it("reacquires on the owner's assignment and refuses after reassignment to another human", async () => {
     const f = await bootstrap();
     const identity = await identityFor(f.secret);
-    const issue = await humanIssue(f, "Interrupted");
-    const runId = await newRun(identity);
-    await sessionsService.claim({ kind: "agent", identity }, { issueId: issue.id, runId });
-    await setLease(issue.id, "statement_timestamp() - interval '1 second'");
-    await assign(issue.id, f, { type: "human", id: f.humanId });
-    const refused = await rejection(
-      sessionsService.reacquire({ kind: "agent", identity }, { issueId: issue.id, runId }),
+    const own = await humanIssue(f, "Interrupted");
+    const ownRun = await newRun(identity);
+    await sessionsService.claim({ kind: "agent", identity }, { issueId: own.id, runId: ownRun });
+    await setLease(own.id, "statement_timestamp() - interval '1 second'");
+    await assign(own.id, f, f.humanId);
+    expect(
+      (
+        await sessionsService.reacquire(
+          { kind: "agent", identity },
+          { issueId: own.id, runId: ownRun },
+        )
+      ).status,
+    ).toBe("active");
+
+    const otherHumanId = await secondHuman(f);
+    const other = await humanIssue(f, "Handed over");
+    const otherRun = await newRun(identity);
+    await sessionsService.claim(
+      { kind: "agent", identity },
+      { issueId: other.id, runId: otherRun },
     );
-    expect(errorKind(refused)).toBe("issue_assigned_to_human");
+    await setLease(other.id, "statement_timestamp() - interval '1 second'");
+    await assign(other.id, f, otherHumanId);
+    const refused = await rejection(
+      sessionsService.reacquire(
+        { kind: "agent", identity },
+        { issueId: other.id, runId: otherRun },
+      ),
+    );
+    expect(errorKind(refused)).toBe("issue_assigned_to_other_human");
   });
 
   it("filters the ready queue and puts the caller's own work first", async () => {
     const f = await bootstrap();
     const identity = await identityFor(f.secret);
-    const other = await registerSecondAgent(f);
+    const otherHumanId = await secondHuman(f);
     const mineUrgent = await humanIssue(f, "Mine urgent");
     const mineLow = await humanIssue(f, "Mine low");
     const unassigned = await humanIssue(f, "Unassigned high");
@@ -2444,42 +2473,43 @@ describe("agent assignment and the ready queue (#84)", () => {
     await projectsService.updateIssue(humanActor(f), mineUrgent.id, {
       priority: "urgent",
       sortOrder: 900_000,
-      assignee: { type: "agent", id: f.agentId },
+      assigneeHumanId: f.humanId,
     });
     await projectsService.updateIssue(humanActor(f), mineLow.id, {
       priority: "low",
       sortOrder: 800_000,
-      assignee: { type: "agent", id: f.agentId },
+      assigneeHumanId: f.humanId,
     });
     await projectsService.updateIssue(humanActor(f), unassigned.id, {
       priority: "high",
       sortOrder: 100_000,
     });
-    await assign(humanOwned.id, f, { type: "human", id: f.humanId });
+    await assign(humanOwned.id, f, f.humanId);
     await projectsService.updateIssue(humanActor(f), humanOwned.id, { priority: "medium" });
-    await assign(otherOwned.id, f, { type: "agent", id: other.agentId });
+    await assign(otherOwned.id, f, otherHumanId);
 
     const agent = { kind: "agent" as const, identity };
     expect((await sessionsService.readyWork(agent, f.projectId, "all")).map((i) => i.id)).toEqual([
       mineUrgent.id,
+      humanOwned.id,
       mineLow.id,
       unassigned.id,
     ]);
     expect(
       (await sessionsService.readyWork(agent, f.projectId, "assignedToMe")).map((i) => i.id),
-    ).toEqual([mineUrgent.id, mineLow.id]);
+    ).toEqual([mineUrgent.id, humanOwned.id, mineLow.id]);
     expect(
       (await sessionsService.readyWork(agent, f.projectId, "unassigned")).map((i) => i.id),
     ).toEqual([unassigned.id]);
 
     expect(
       (await sessionsService.readyWork(humanActor(f), f.projectId, "all")).map((i) => i.id),
-    ).toEqual([humanOwned.id, mineUrgent.id, unassigned.id, mineLow.id, otherOwned.id]);
+    ).toEqual([mineUrgent.id, humanOwned.id, mineLow.id, unassigned.id, otherOwned.id]);
     expect(
       (await sessionsService.readyWork(humanActor(f), f.projectId, "assignedToMe")).map(
         (i) => i.id,
       ),
-    ).toEqual([humanOwned.id]);
+    ).toEqual([mineUrgent.id, humanOwned.id, mineLow.id]);
 
     const rest = await getJson(
       `/api/projects/${f.projectId}/ready-work?filter=assignedToMe`,
@@ -2488,7 +2518,7 @@ describe("agent assignment and the ready queue (#84)", () => {
     );
     expect(rest.status).toBe(200);
     const rows = IssuesResponse.parse(await rest.json());
-    expect(rows.map((row) => row.id)).toEqual([mineUrgent.id, mineLow.id]);
+    expect(rows.map((row) => row.id)).toEqual([mineUrgent.id, humanOwned.id, mineLow.id]);
   });
 
   it("moves todo -> in_progress on claim and back on release or lease expiry", async () => {

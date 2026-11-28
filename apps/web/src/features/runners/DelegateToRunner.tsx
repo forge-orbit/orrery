@@ -17,6 +17,7 @@ import {
   type CatalogProbeRequest,
   type Dispatch,
   type HarnessCatalogEntry,
+  type IssueAssignee,
 } from "@orrery/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Send } from "lucide-react";
@@ -25,6 +26,7 @@ import { ApiProblemError } from "../../lib/api.ts";
 import { HarnessBadge, HarnessLogo, resolveHarnessKind } from "../../lib/harness.tsx";
 import { Link } from "../../lib/Link.tsx";
 import { formatCompactDateTime } from "../../lib/time.ts";
+import { sessionQuery as accountSessionQuery } from "../accounts/index.ts";
 import { createDispatch, probeRunnerCatalog } from "./commands.ts";
 import { harnessDisplayName } from "./dispatchOptions.ts";
 import {
@@ -141,17 +143,24 @@ export function DelegateToRunner({
   workspaceId,
   projectId,
   agents,
+  assignee,
   canDelegate = true,
 }: {
   issueId: string;
   workspaceId: string;
   projectId: string;
   agents: readonly DelegatableAgent[];
+  /** The issue's human assignee; only that human may delegate the issue. */
+  assignee: IssueAssignee;
   /** Readers see Recent dispatches but never the owner-only delegation form. */
   canDelegate?: boolean;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { data: session } = useQuery(accountSessionQuery);
+  const currentHumanId = session?.signedIn === true ? session.humanId : undefined;
+  const assignedToAnotherHuman =
+    assignee !== null && currentHumanId !== undefined && assignee.humanId !== currentHumanId;
   const [isOpen, setIsOpen] = useState(false);
   // Project readers see Recent dispatches but never the owner-only fleet.
   // While the dialog is open Query keeps the fleet fresh (4s poll), so a
@@ -464,9 +473,15 @@ export function DelegateToRunner({
               tooltip="Delegate to Runner"
               icon={<Icon icon={Send} />}
               data-delegate-trigger=""
+              isDisabled={assignedToAnotherHuman}
               onClick={openDialog}
             />
           </Stack>
+          {assignedToAnotherHuman && (
+            <Text type="supporting">
+              {`This issue is assigned to ${assignee?.displayName ?? "another human"}; that human can delegate it. Reassign the issue to delegate it yourself.`}
+            </Text>
+          )}
         </>
       )}
       {canDelegate && (

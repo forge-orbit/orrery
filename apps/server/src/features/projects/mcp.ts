@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
-  Assignee,
-  type Assignee as AssigneeShape,
+  AssigneeHumanId,
   CreateIssueRequest,
   IssueLinkKind,
   IssuePriority,
@@ -29,8 +28,8 @@ const priority = (value: unknown): IssuePriority | undefined =>
 const sortOrder = (value: unknown): number | undefined =>
   value === undefined ? undefined : IssueSortOrder.parse(value);
 
-const assignee = (value: unknown): AssigneeShape | null | undefined =>
-  value === undefined ? undefined : value === null ? null : Assignee.parse(value);
+const assigneeHumanId = (value: unknown): string | null | undefined =>
+  value === undefined ? undefined : value === null ? null : AssigneeHumanId.parse(value);
 
 const labelIds = (value: unknown): string[] | undefined =>
   value === undefined ? undefined : CreateIssueRequest.shape.labelIds.parse(value);
@@ -59,7 +58,7 @@ export function createProjectsMcp(service: ProjectsService, authenticate: AgentA
         status: args.status === undefined ? undefined : IssueStatus.parse(args.status),
         priority: priority(args.priority),
         sortOrder: sortOrder(args.sortOrder),
-        assignee: assignee(args.assignee),
+        assigneeHumanId: assigneeHumanId(args.assigneeHumanId),
         labelIds: labelIds(args.labelIds),
         parentIssueId: parentIssueId(args.parentIssueId),
       }),
@@ -71,7 +70,7 @@ export function createProjectsMcp(service: ProjectsService, authenticate: AgentA
         status: args.status === undefined ? undefined : IssueStatus.parse(args.status),
         priority: priority(args.priority),
         sortOrder: sortOrder(args.sortOrder),
-        assignee: assignee(args.assignee),
+        assigneeHumanId: assigneeHumanId(args.assigneeHumanId),
         parentIssueId: parentIssueId(args.parentIssueId),
       }),
     }),

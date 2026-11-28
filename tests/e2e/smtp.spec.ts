@@ -133,6 +133,7 @@ test("sends the test email, and the catcher receives it with a fresh token", asy
 test("completes email verification by POSTing the token, exactly once", async () => {
   const before = await api.get("/api/auth/session");
   expect(await before.json()).toEqual({
+    humanId: expect.any(String),
     email: ADMIN_EMAIL,
     handle: expect.any(String),
     displayName: null,
@@ -145,6 +146,7 @@ test("completes email verification by POSTing the token, exactly once", async ()
   });
   expect(res.status()).toBe(200);
   expect(await res.json()).toEqual({
+    humanId: expect.any(String),
     email: ADMIN_EMAIL,
     handle: expect.any(String),
     displayName: null,
@@ -154,6 +156,7 @@ test("completes email verification by POSTing the token, exactly once", async ()
 
   const after = await api.get("/api/auth/session");
   expect(await after.json()).toEqual({
+    humanId: expect.any(String),
     email: ADMIN_EMAIL,
     handle: expect.any(String),
     displayName: null,
@@ -223,6 +226,7 @@ test("keeps the settings and the verified email across a restart", async () => {
   const session = await api.get("/api/auth/session");
   expect(session.status()).toBe(200);
   expect(await session.json()).toEqual({
+    humanId: expect.any(String),
     email: ADMIN_EMAIL,
     handle: expect.any(String),
     displayName: null,

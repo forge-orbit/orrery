@@ -71,7 +71,7 @@ const sampleIssues: Issue[] = [
     body: "Redirects to /device fail",
     status: "in_progress",
     priority: "urgent",
-    assignee: agentActor,
+    assignee: humanActor,
     labels: [bugLabel, agentLabel],
     updatedAt: "2026-01-05T00:00:00.000Z",
   }),
@@ -162,17 +162,17 @@ describe("issue-filter", () => {
     ).toEqual(["i-1"]);
   });
 
-  it("supports assignee role filters, label filters, and agent session filters", () => {
-    const agentAssigned = filterAndSortIssues({
+  it("supports human assignee filters, label filters, and agent session filters", () => {
+    const humanAssigned = filterAndSortIssues({
       issues: sampleIssues,
       scope: "all",
       filters: [
-        { field: "assignee", operator: "is", value: { type: "enum", value: "__any_agent__" } },
+        { field: "assignee", operator: "is", value: { type: "enum", value: "__any_human__" } },
       ],
       sort: "priority",
       activeSessionIssueIds: liveSessions,
     });
-    expect(agentAssigned.map((i) => i.id)).toEqual(["i-1"]);
+    expect(humanAssigned.map((i) => i.id)).toEqual(["i-1", "i-2"]);
 
     const unlabeled = filterAndSortIssues({
       issues: sampleIssues,

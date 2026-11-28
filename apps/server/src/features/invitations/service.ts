@@ -503,12 +503,14 @@ export function createInvitationsService({
         }
 
         let handle = "";
+        let humanId = "";
         try {
           const created = await createInvitedHuman(
             { email: row.email, password: input.password },
             tx,
           );
           handle = created.handle;
+          humanId = created.humanId;
           await markEmailVerified(created.humanId, tx);
         } catch (error) {
           if (uniqueConstraintName(error) === "humans_email_unique") {
@@ -516,9 +518,10 @@ export function createInvitationsService({
           }
           throw error;
         }
-        return { email: row.email, handle };
+        return { humanId, email: row.email, handle };
       });
       return toSessionResponse({
+        humanId: registered.humanId,
         email: registered.email,
         handle: registered.handle,
         displayName: null,

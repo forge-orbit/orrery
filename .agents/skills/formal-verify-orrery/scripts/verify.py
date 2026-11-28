@@ -2125,23 +2125,25 @@ def extract_code_facts() -> dict[str, Any]:
     m28_detail_bound = "64_000" in sessions_contract_src and "JSON.stringify" in sessions_contract_src
     m28_schema_check = "work_session_activities_kind" in schema_src
 
-    # --- M29 (#84): board assignment and the strict claim policy ---
+    # --- M29 (#84 + #281): human-only assignment and the owner-human claim policy ---
     validate_assignee_fn = slice_between(
         proj_src, "async function validateAssignee(", "async function requireKnowledge("
     )
-    mig_0033 = read_text("db/migrations/0031_next_masked_marvel.sql")
+    mig_0064 = read_text("db/migrations/0064_mean_senator_kelly.sql")
     m29_db_check = (
-        "issues_assignee_pair" in schema_src
-        and "issues_assignee_type" in schema_src
-        and "issues_assignee_pair" in mig_0033
-        and "issues_assignee_type" in mig_0033
+        'assigneeHumanId: text("assignee_human_id")' in schema_src
+        and '"issues_assignee_human"' in schema_src
+        and "assignee_human_id" in mig_0064
+        and "assignee_type" in mig_0064
+        and 'a."human_id"' in mig_0064
+        and "assignee_type" not in schema_src
     )
     m29_assignee_validation = (
         "assignee_not_found" in proj_src
         and 'throw new ProjectsError("assignee_not_found")' in validate_assignee_fn
         and "isNull(humans.deactivatedAt)" in validate_assignee_fn
         and "isNull(workspaceMemberships.suspendedAt)" in validate_assignee_fn
-        and "agentApiKeys" in validate_assignee_fn
+        and "agentApiKeys" not in validate_assignee_fn
     )
     # The assignee locks precede the caller's issue lock (M22), and the account lock
     # precedes the membership lock, inside validateAssignee itself.
@@ -2156,13 +2158,12 @@ def extract_code_facts() -> dict[str, Any]:
         and update_issue_fn.find("validateAssignee(") < update_issue_fn.find('.for("update")')
     )
     m29_strict_claim = (
-        "assertClaimAssignee(issue.assigneeType, issue.assigneeId, identity.agentId)" in claim_fn
-        and "assertClaimAssignee(issue.assigneeType, issue.assigneeId, identity.agentId)"
-        in reacquire_fn
-        and 'throw new SessionsError("issue_assigned_to_human")' in sess_src
-        and 'throw new SessionsError("issue_assigned_to_other_agent")' in sess_src
-        and "issue_assigned_to_human: 409" in sess_rest_src
-        and "issue_assigned_to_other_agent: 409" in sess_rest_src
+        "assertClaimAssignee(issue.assigneeHumanId, identity.humanId)" in claim_fn
+        and "assertClaimAssignee(issue.assigneeHumanId, identity.humanId)" in reacquire_fn
+        and 'throw new SessionsError("issue_assigned_to_other_human")' in sess_src
+        and "issue_assigned_to_other_human: 409" in sess_rest_src
+        and "issue_assigned_to_human" not in sess_src
+        and "issue_assigned_to_other_agent" not in sess_src
     )
     m29_ready_filter = (
         'filter === "unassigned"' in ready_fn
@@ -2175,9 +2176,9 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m29_contract_surface = (
         "assignee: IssueAssignee" in pj_contract
-        and "assignee: Assignee.nullable().optional()" in pj_contract
+        and "assigneeHumanId: AssigneeHumanId.nullable().optional()" in pj_contract
         and "needsInput: z.boolean()" in pj_contract
-        and "assignee_type" in schema_src
+        and "assignee_human_id" in schema_src
     )
     # The access precheck and assignee validation are separate committed transactions;
     # the issue-locked transaction must recheck the workspace before writing the pair.
@@ -2624,8 +2625,7 @@ def extract_code_facts() -> dict[str, Any]:
         and 'title: "[deleted]"' in purge_project_fn
         and 'body: ""' in purge_project_fn
         and "parentIssueId: null" in purge_project_fn
-        and "assigneeType: null" in purge_project_fn
-        and "assigneeId: null" in purge_project_fn
+        and "assigneeHumanId: null" in purge_project_fn
         and "coalesce(${issues.purgedAt}, statement_timestamp())" in purge_project_fn
         and "delete(issues)" not in purge_project_fn
     )
@@ -2981,9 +2981,8 @@ def extract_code_facts() -> dict[str, Any]:
     issue_create_kinds = slice_between(proj_rest_src, "const issueCreateKinds =", "] as const;")
     m37_single_transaction = "db.transaction(async (tx)" in create_issue_fn
     m37_assignee_in_tx = (
-        "validateAssignee(tx, project.workspaceId, input.assignee)" in create_issue_fn
-        and "assigneeType: input.assignee?.type ?? null" in create_issue_fn
-        and "assigneeId: input.assignee?.id ?? null" in create_issue_fn
+        "validateAssignee(tx, project.workspaceId, input.assigneeHumanId)" in create_issue_fn
+        and "assigneeHumanId: input.assigneeHumanId ?? null" in create_issue_fn
         and "assignee: resolvedAssignee" in create_issue_fn
     )
     m37_labels_in_tx = (
@@ -2994,11 +2993,12 @@ def extract_code_facts() -> dict[str, Any]:
         and "rows.length !== labelIds.size" in require_project_labels_fn
     )
     m37_contract_surface = (
-        "assignee: Assignee.nullable().optional()" in create_issue_contract
+        "assigneeHumanId: AssigneeHumanId.nullable().optional()" in create_issue_contract
         and "labelIds: z.array(" in create_issue_contract
     )
     m37_mcp_surface = (
-        "assignee(args.assignee)" in create_issue_mcp and "labelIds(args.labelIds)" in create_issue_mcp
+        "assigneeHumanId(args.assigneeHumanId)" in create_issue_mcp
+        and "labelIds(args.labelIds)" in create_issue_mcp
     )
     m37_problem_details = (
         '"assignee_not_found"' in issue_create_kinds and '"label_not_found"' in issue_create_kinds
@@ -3393,10 +3393,10 @@ def extract_code_facts() -> dict[str, Any]:
         and "runner_forbidden: 403" in runners_rest_src
     )
     m43_assignee_compatible = (
-        "assertIssueDispatchable(tx, issueId, agentId)" in create_dispatch_fn
-        and 'issue.assigneeType === "human"' in dispatchable_fn
-        and "issue.assigneeId !== agentId" in dispatchable_fn
-        and "assignee:" not in dispatchable_fn
+        "assertIssueDispatchable(tx, issueId, joined.hostHumanId)" in create_dispatch_fn
+        and "(issue.assigneeHumanId !== null && issue.assigneeHumanId !== ownerHumanId)"
+        in dispatchable_fn
+        and ".set({ assigneeHumanId" not in dispatchable_fn
     )
     m43_atomic_accept = (
         "db.transaction(" in accept_dispatch_fn
@@ -3685,6 +3685,7 @@ def extract_code_facts() -> dict[str, Any]:
     m46_permission_src = read_text("apps/runner/src/permission.ts")
     m46_acp_src = read_text("apps/runner/src/acp.ts")
     m46_supervise_src = read_text("apps/runner/src/supervise.ts")
+    m46_cli_src = read_text("apps/runner/src/cli.ts")
     m46_auto_fn = slice_between(
         runners_src, "async autoClaim(", "    /** One-shot `orrery-runner work`"
     )
@@ -3708,7 +3709,7 @@ def extract_code_facts() -> dict[str, Any]:
         m46_auto_fn, ".from(issues)", '.for("update")', "authenticateHostRunnerForDeps("
     )
     m46_auto_recheck = (
-        "await assertIssueStillDispatchable(tx, candidate.id, runner.agentId, filter,"
+        "await assertIssueStillDispatchable(tx, candidate.id, host.humanId, filter,"
         in m46_auto_fn
         and ordered(m46_auto_fn, '.for("update")', "await assertIssueStillDispatchable(")
     )
@@ -3723,6 +3724,35 @@ def extract_code_facts() -> dict[str, Any]:
     m46_filter_recheck = (
         'filter === "unassigned" ? unassigned : filter === "assignedToMe" ? mine : unassigned || mine'
         in m46_still_fn
+    )
+    # Label-routed autonomous pickup (#280): every requested label must be attached, matched
+    # case-insensitively, both in the scan and under the claim lock.
+    m46_auto_label_filter = (
+        "for (const label of wanted) candidateConditions.push(issueCarriesLabel(tx, label));"
+        in m46_auto_fn
+        and "const wanted = wantedLabels(labels);" in m46_auto_fn
+        and "const requiredLabels = wantedLabels(labels);" in m46_still_fn
+        and "if (!requiredLabels.every((label) => present.has(label))) {" in m46_still_fn
+        and "row.name.toLowerCase()" in m46_still_fn
+    )
+    m46_auto_label_cli = (
+        'fail("--auto-claim-label must not be empty")' in m46_cli_src
+        and 'fail("--auto-claim-label and --auto-claim-any-label cannot be combined")' in m46_cli_src
+        and '? requestedLabels\n            : ["ready-for-agent"];' in m46_cli_src
+        and "autoClaimLabels === undefined ? {} : { autoClaimLabels }" in m46_cli_src
+    )
+    # Mid-flight reassignment (#281): update_issue writes the new assignee on an in_progress
+    # issue without a status guard and without stopping the live session; the owner-human rule
+    # is enforced instead at claim, reacquire, dispatch and auto-claim.
+    m29_midflight_reassignment = (
+        "input.assigneeHumanId === undefined ? current.assigneeHumanId : input.assigneeHumanId"
+        in update_issue_fn
+        and "issue_in_progress" not in update_issue_fn
+        and "assertClaimAssignee(issue.assigneeHumanId, identity.humanId)" in claim_fn
+        and "assertClaimAssignee(issue.assigneeHumanId, identity.humanId)" in reacquire_fn
+        and "assertIssueDispatchable(tx, issueId, joined.hostHumanId)" in create_dispatch_fn
+        and "await assertIssueStillDispatchable(tx, candidate.id, host.humanId, filter,"
+        in m46_auto_fn
     )
     m46_slot_cap = (
         "Math.max(runner.activeSlotCount, active?.count ?? 0) + (queued?.count ?? 0) >="
@@ -4492,6 +4522,7 @@ def extract_code_facts() -> dict[str, Any]:
         "m29_ready_filter": m29_ready_filter,
         "m29_contract_surface": m29_contract_surface,
         "m29_workspace_recheck": m29_workspace_recheck,
+        "m29_midflight_reassignment": m29_midflight_reassignment,
         "m30_six_states": m30_six_states,
         "m30_claim_to_in_progress": m30_claim_to_in_progress,
         "m30_revert_on_end": m30_revert_on_end,
@@ -4655,6 +4686,8 @@ def extract_code_facts() -> dict[str, Any]:
         "m46_no_pending_dispatch": m46_no_pending_dispatch,
         "m46_no_open_blocker": m46_no_open_blocker,
         "m46_filter_recheck": m46_filter_recheck,
+        "m46_auto_label_filter": m46_auto_label_filter,
+        "m46_auto_label_cli": m46_auto_label_cli,
         "m46_slot_cap": m46_slot_cap,
         "m46_issue_resolve": m46_issue_resolve,
         "m46_offline_idempotent": m46_offline_idempotent,
@@ -8694,14 +8727,21 @@ def check_m28(facts: dict[str, Any]) -> CheckResult:
 
 
 def check_m29(facts: dict[str, Any]) -> CheckResult:
-    """#84: assignment is a pull-queue hint; the claim stays authoritative.
-    State: (assignee, claim_holder, violations). Assignee is one of none, human, A, B,
-    invalid; a claim holder is None, A or B.
+    """#84 + #281: assignees are humans; agents only execute their owner's work.
+
+    State: (assignee, claim_holder, violations). Humans H1 and H2 own agents A1/A2 and B1;
+    an agent may claim, reacquire or be offered ready work only while the issue is unassigned
+    or assigned to its owner. Reassigning an in_progress issue keeps the live session but
+    fences every later claim/reacquire/dispatch boundary.
     """
     g = {k: facts[k] for k in facts if k.startswith("m29_")}
+    owners = {"A1": "H1", "A2": "H1", "B1": "H2"}
 
     def bad(v, reason: str):
         return v | {reason}
+
+    def eligible(assignee: str, agent: str) -> bool:
+        return assignee == "none" or assignee == owners[agent]
 
     def assign(target: str):
         def step(state):
@@ -8717,18 +8757,17 @@ def check_m29(facts: dict[str, Any]) -> CheckResult:
 
         return step
 
-    def reserved(assignee: str, agent: str) -> bool:
-        return assignee == "human" or (assignee in ("A", "B") and assignee != agent)
-
     def claim(agent: str):
         def step(state):
             assignee, holder, v = state
-            if reserved(assignee, agent):
-                if not g["m29_strict_claim"]:
-                    return (assignee, agent, bad(v, "reserved_issue_claimed"))
+            if holder is not None:
+                # The one-active-session-per-issue index and idempotent same-run retry are
+                # M17's property; here the only new decision is the owner-human rule.
                 return state
-            # The one-active-session-per-issue index and idempotent same-run retry are
-            # M17's property; here the only new decision is the assignee reservation.
+            if not eligible(assignee, agent):
+                if not g["m29_strict_claim"]:
+                    return (assignee, agent, bad(v, "other_humans_issue_claimed"))
+                return state
             return (assignee, agent, v)
 
         return step
@@ -8736,8 +8775,8 @@ def check_m29(facts: dict[str, Any]) -> CheckResult:
     def reacquire(agent: str):
         def step(state):
             assignee, holder, v = state
-            if reserved(assignee, agent) and not g["m29_strict_claim"]:
-                v = bad(v, "reserved_issue_reacquired")
+            if not eligible(assignee, agent) and not g["m29_strict_claim"]:
+                v = bad(v, "other_humans_issue_reacquired")
             return (assignee, holder, v)
 
         return step
@@ -8745,11 +8784,24 @@ def check_m29(facts: dict[str, Any]) -> CheckResult:
     def ready(agent: str):
         def step(state):
             assignee, holder, v = state
-            if not g["m29_ready_filter"] and reserved(assignee, agent):
-                # Without the filter the listing would offer work reserved for a human
-                # or a sibling agent, which the strict claim policy would only refuse.
-                v = bad(v, "reserved_work_offered")
+            if not g["m29_ready_filter"] and not eligible(assignee, agent):
+                # Without the filter the listing offers work reserved for another human,
+                # which the strict claim policy would only refuse.
+                v = bad(v, "other_humans_work_offered")
             return (assignee, holder, v)
+
+        return step
+
+    def reassign_midflight(target: str):
+        def step(state):
+            assignee, holder, v = state
+            if holder is None:
+                return (target, holder, v)
+            if not g["m29_midflight_reassignment"]:
+                # A status guard would either refuse the reassignment or force-stop the session;
+                # the agreed rule is to allow it and fence every later boundary.
+                return (assignee, None, bad(v, "midflight_reassignment_forced_stop"))
+            return (target, holder, v)
 
         return step
 
@@ -8773,18 +8825,21 @@ def check_m29(facts: dict[str, Any]) -> CheckResult:
         return (assignee, holder, v)
 
     actions = [
-        ("assign to a human", assign("human")),
-        ("assign to agent A", assign("A")),
-        ("assign to agent B", assign("B")),
+        ("assign to human H1", assign("H1")),
+        ("assign to human H2", assign("H2")),
         ("clear the assignee", assign("none")),
-        ("assign an unregistered identity", assign("invalid")),
-        ("agent A claims", claim("A")),
-        ("agent B claims", claim("B")),
-        ("agent A reacquires after expiry", reacquire("A")),
-        ("agent B reacquires after expiry", reacquire("B")),
-        ("agent A lists ready work", ready("A")),
-        ("agent B lists ready work", ready("B")),
-        ("assign racing deactivation", assign_after_deactivation("A")),
+        ("assign an unregistered human", assign("invalid")),
+        ("agent A1 (owned by H1) claims", claim("A1")),
+        ("agent A2 (owned by H1) claims", claim("A2")),
+        ("agent B1 (owned by H2) claims", claim("B1")),
+        ("agent A1 reacquires after expiry", reacquire("A1")),
+        ("agent B1 reacquires after expiry", reacquire("B1")),
+        ("agent A1 lists ready work", ready("A1")),
+        ("agent B1 lists ready work", ready("B1")),
+        ("reassign an in-progress issue to H2", reassign_midflight("H2")),
+        ("reassign an in-progress issue to H1", reassign_midflight("H1")),
+        ("reassign an in-progress issue to nobody", reassign_midflight("none")),
+        ("assign racing deactivation", assign_after_deactivation("H1")),
         ("project transfer racing assignment", transfer_racing_assignment),
     ]
     init = ("none", None, frozenset())
@@ -8797,8 +8852,8 @@ def check_m29(facts: dict[str, Any]) -> CheckResult:
 
     return bfs_check(
         "M29",
-        "Board Assignment & Strict Claims (#84)",
-        "Assignment is a validated pull-queue hint: agents claim only unassigned or self-assigned work, ready work hides work reserved for others, and the assignee pair stays integral under deactivation races",
+        "Human-Only Assignment & Owner-Human Claims (#84 + #281)",
+        "Assignment names exactly one accountable human: an agent may claim, reacquire or be dispatched an issue only while it is unassigned or assigned to that agent's owner, ready work hides other humans' issues, and reassigning an in-progress issue keeps the live session while fencing every later claim, reacquire and dispatch boundary",
         "safety",
         init,
         lambda s: [(lbl, fn(s)) for lbl, fn in actions],
@@ -8806,8 +8861,9 @@ def check_m29(facts: dict[str, Any]) -> CheckResult:
         [
             "apps/server/src/features/projects/service.ts",
             "apps/server/src/features/work-sessions/service.ts",
+            "apps/server/src/features/runners/service.ts",
             "apps/server/src/db/schema.ts",
-            "db/migrations/0031_next_masked_marvel.sql",
+            "db/migrations/0064_mean_senator_kelly.sql",
             "packages/contract/src/projects.ts",
             "packages/contract/src/sessions.ts",
         ],
@@ -9578,7 +9634,7 @@ def check_m37(facts: dict[str, bool]) -> CheckResult:
                 # A failure after the insert or counter update leaves a partial issue.
                 v = bad(v, "triage_applied_outside_transaction")
             foreign = any(label not in ("a", "b") for label in labels)
-            bad_assignee = target not in ("none", "human", "agent")
+            bad_assignee = target not in ("none", "human")
             if foreign and not g["m37_labels_in_tx"]:
                 return (min(2, count + 1), frozenset(labels), target, bad(v, "foreign_label_accepted"))
             if bad_assignee and not g["m37_assignee_in_tx"]:
@@ -9595,7 +9651,7 @@ def check_m37(facts: dict[str, bool]) -> CheckResult:
     actions = [
         ("create an unassigned issue", create("none", ())),
         ("create an issue assigned to a human", create("human", ("a",))),
-        ("create an issue assigned to an agent", create("agent", ("a", "b"))),
+        ("create an issue assigned to an unknown human", create("ghost", ("a", "b"))),
         ("create with duplicate label ids", create("none", ("a", "a"))),
         ("create with a label from another project", create("none", ("foreign",))),
         ("create with an unknown label", create("human", ("unknown",))),
@@ -9610,8 +9666,8 @@ def check_m37(facts: dict[str, bool]) -> CheckResult:
             return False, f"atomic creation invariant broken: {sorted(v)[0]}"
         if not attached <= {"a", "b"}:
             return False, "issue carries a label outside the project"
-        if assignee not in ("none", "human", "agent"):
-            return False, "issue carries an unvalidated assignee"
+        if assignee not in ("none", "human"):
+            return False, "issue carries an assignee that is not a human"
         return True, ""
 
     return bfs_check(
@@ -10558,7 +10614,7 @@ def check_m43(facts: dict[str, Any]) -> CheckResult:
         return bfs_check(
             check_id,
             "Manual Issue Dispatch, Atomic Claim & Fenced Dispatch Token Auth (#196)",
-            "Only the Runner host owner can dispatch; non-members and readers without project access get 404; accept atomically registers the Run, claims the Work session and mints a hashed Dispatch token; both authentication paths live-check DB-time liveness; REST/MCP allowlists fence every call to one issue",
+            "Only the Runner host owner can dispatch, and only an issue that is unassigned or assigned to that owner (the assignee is never mutated); non-members and readers without project access get 404; accept atomically registers the Run, claims the Work session and mints a hashed Dispatch token; both authentication paths live-check DB-time liveness; REST/MCP allowlists fence every call to one issue",
             "safety",
             init,
             next_states,
@@ -10923,6 +10979,8 @@ def check_m46(facts: dict[str, Any]) -> CheckResult:
         "auto_claim_lock",
         "auto_claim_recheck",
         "auto_claim_filter",
+        "auto_claim_label",
+        "auto_claim_label_cli",
         "slot_cap",
         "issue_resolve",
         "offline_retry",
@@ -10948,6 +11006,10 @@ def check_m46(facts: dict[str, Any]) -> CheckResult:
             bad.add("stale_candidate_claimed_after_filter_change")
         elif action == "auto_claim_filter" and not g["m46_filter_recheck"]:
             bad.add("unassigned_or_foreign_issue_auto_claimed")
+        elif action == "auto_claim_label" and not g["m46_auto_label_filter"]:
+            bad.add("unlabelled_or_partially_labelled_issue_auto_claimed")
+        elif action == "auto_claim_label_cli" and not g["m46_auto_label_cli"]:
+            bad.add("auto_claim_label_gate_missing_or_conflicting")
         elif action == "slot_cap" and not g["m46_slot_cap"]:
             bad.add("auto_claim_exceeded_runner_concurrency")
         elif action == "issue_resolve" and not g["m46_issue_resolve"]:
@@ -10990,7 +11052,7 @@ def check_m46(facts: dict[str, Any]) -> CheckResult:
         return bfs_check(
             check_id,
             "Auto-Claim Serialization & Needs Input Round-Trip (#202 + #201)",
-            "Auto-claim locks issues before runners and re-checks readiness, blocker, filter and slot cap under the lock; issue resolve never guesses an ambiguous key; offline teardown is idempotent and cancels/cleans in one transaction; human answers and fallback_used deadlines enqueue input_resolved in their domain transaction while require_human pauses release the claim and enqueue cancel; ACP permission mapping only selects allow_once and refuses oversized requests; a parked ACP session resumes on the same session and worktree",
+            "Auto-claim locks issues before runners and re-checks readiness, blocker, filter, label and slot cap under the lock; the CLI gate defaults to `ready-for-agent` and refuses a conflicting opt-out; issue resolve never guesses an ambiguous key; offline teardown is idempotent and cancels/cleans in one transaction; human answers and fallback_used deadlines enqueue input_resolved in their domain transaction while require_human pauses release the claim and enqueue cancel; ACP permission mapping only selects allow_once and refuses oversized requests; a parked ACP session resumes on the same session and worktree",
             "safety",
             init,
             next_states,

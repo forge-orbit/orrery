@@ -206,7 +206,7 @@ describe("Project Trash cross-feature hiding", () => {
 
     await database.db
       .update(issues)
-      .set({ assigneeType: "human", assigneeId: owner.id })
+      .set({ assigneeHumanId: owner.id })
       .where(eq(issues.id, hiddenIssue.id));
     await database.db.insert(issueDependencies).values({
       id: randomUUID(),

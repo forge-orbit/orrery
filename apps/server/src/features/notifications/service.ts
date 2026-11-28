@@ -139,8 +139,7 @@ const readableAccess = (humanId: string | SQLWrapper) =>
 const createForActivity: NotifyActivity = async (tx, input) => {
   const [issue] = await tx
     .select({
-      assigneeType: issues.assigneeType,
-      assigneeId: issues.assigneeId,
+      assigneeHumanId: issues.assigneeHumanId,
       createdByHumanId: issues.createdByHumanId,
     })
     .from(issues)
@@ -170,13 +169,13 @@ const createForActivity: NotifyActivity = async (tx, input) => {
   }
   // An `issue_mentioned` notification is only for the handles actually written:
   // an unmentioned assignee must never receive one.
-  if (!isMention && issue.assigneeType === "human" && issue.assigneeId !== null) {
-    recipients.add(issue.assigneeId);
+  if (!isMention && issue.assigneeHumanId !== null) {
+    recipients.add(issue.assigneeHumanId);
   }
   // A handoff with no human assignee also notifies the issue's human creator (if any).
   if (
     input.kind === "handoff" &&
-    issue.assigneeType !== "human" &&
+    issue.assigneeHumanId === null &&
     issue.createdByHumanId !== null
   ) {
     recipients.add(issue.createdByHumanId);

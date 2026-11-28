@@ -318,6 +318,7 @@ function TestAndVerification({
       const prev = queryClient.getQueryData<Session>(sessionQuery.queryKey);
       const session: Session = {
         signedIn: true,
+        humanId: account.humanId,
         email: account.email,
         handle: account.handle,
         displayName: prev?.signedIn ? prev.displayName : null,

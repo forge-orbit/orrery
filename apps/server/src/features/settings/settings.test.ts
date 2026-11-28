@@ -773,6 +773,7 @@ describe("settings", () => {
 
       const before = await getJson(app, "/api/auth/session", cookie);
       expect(await before.json()).toEqual({
+        humanId: expect.any(String),
         email: EMAIL,
         handle: "admin",
         displayName: null,
@@ -783,6 +784,7 @@ describe("settings", () => {
       const res = await postJson(app, "/api/settings/email-verification", { token }, cookie);
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
+        humanId: expect.any(String),
         email: EMAIL,
         handle: "admin",
         displayName: null,
@@ -797,6 +799,7 @@ describe("settings", () => {
 
       const after = await getJson(app, "/api/auth/session", cookie);
       expect(await after.json()).toEqual({
+        humanId: expect.any(String),
         email: EMAIL,
         handle: "admin",
         displayName: null,
@@ -863,6 +866,7 @@ describe("settings", () => {
       );
       expect(valid.status).toBe(200);
       expect(await valid.json()).toEqual({
+        humanId: expect.any(String),
         email: EMAIL,
         handle: "admin",
         displayName: null,
@@ -908,6 +912,7 @@ describe("settings", () => {
       );
       expect(own.status).toBe(200);
       expect(await own.json()).toEqual({
+        humanId: expect.any(String),
         email: "member@example.com",
         handle: "member",
         displayName: null,

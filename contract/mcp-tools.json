@@ -575,12 +575,45 @@
         "IssueAssignee": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "type": "object",
+              "properties": {
+                "humanId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "humanId",
+                "displayName",
+                "avatarUrl"
+              ],
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "Actor": {
           "type": "object",
@@ -662,15 +695,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -914,12 +938,45 @@
         "IssueAssignee": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "type": "object",
+              "properties": {
+                "humanId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "humanId",
+                "displayName",
+                "avatarUrl"
+              ],
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "Actor": {
           "type": "object",
@@ -1001,15 +1058,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -1153,7 +1201,7 @@
   },
   {
     "name": "create_issue",
-    "description": "Create an issue in an in-scope project. Omitted status defaults to `todo` (ready work); pass `backlog` to stage it for triage. Priority and sortOrder may be set at creation; omitted priority defaults to none and omitted sortOrder is spaced by 65535 from the project-local issue number. An optional `assignee` (`{\"type\":\"human\"|\"agent\",\"id\":\"...\"}`) and `labelIds` are validated and applied in the same transaction as the issue: an unknown assignee or a label outside the project fails without creating a partial issue. Requires Contribute access on the key and on its human owner.",
+    "description": "Create an issue in an in-scope project. Omitted status defaults to `todo` (ready work); pass `backlog` to stage it for triage. Priority and sortOrder may be set at creation; omitted priority defaults to none and omitted sortOrder is spaced by 65535 from the project-local issue number. An optional `assigneeHumanId` (an active human with access to the project's workspace) and `labelIds` are validated and applied in the same transaction as the issue: an unknown assignee or a label outside the project fails without creating a partial issue. Requires Contribute access on the key and on its human owner.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1175,10 +1223,10 @@
         "sortOrder": {
           "$ref": "#/$defs/IssueSortOrder"
         },
-        "assignee": {
+        "assigneeHumanId": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Assignee"
+              "$ref": "#/$defs/AssigneeHumanId"
             },
             {
               "type": "null"
@@ -1245,30 +1293,10 @@
         "IssueSortOrder": {
           "type": "number"
         },
-        "Assignee": {
-          "type": "object",
-          "properties": {
-            "type": {
-              "$ref": "#/$defs/AssigneeType"
-            },
-            "id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            }
-          },
-          "required": [
-            "type",
-            "id"
-          ],
-          "additionalProperties": false
-        },
-        "AssigneeType": {
+        "AssigneeHumanId": {
           "type": "string",
-          "enum": [
-            "human",
-            "agent"
-          ]
+          "minLength": 1,
+          "maxLength": 200
         }
       }
     },
@@ -1422,12 +1450,45 @@
         "IssueAssignee": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "type": "object",
+              "properties": {
+                "humanId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "humanId",
+                "displayName",
+                "avatarUrl"
+              ],
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "Actor": {
           "type": "object",
@@ -1509,15 +1570,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -1581,7 +1633,7 @@
   },
   {
     "name": "update_issue",
-    "description": "Edit an issue's title or body, move it through the six-state workflow (`backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled` — only done and cancelled set closedAt), change its priority or sortOrder (a float; the midpoint of two neighbours moves one card without rewriting them), or set/clear its assignee (`{\"type\":\"human\"|\"agent\",\"id\":\"...\"}`, or null to clear). An assignee must be an active member or a registered agent in the workspace. Requires Contribute access and, for an agent, a live work session on the issue. The actor recorded is the agent, not its human owner.",
+    "description": "Edit an issue's title or body, move it through the six-state workflow (`backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled` — only done and cancelled set closedAt), change its priority or sortOrder (a float; the midpoint of two neighbours moves one card without rewriting them), or set/clear its assignee (`assigneeHumanId`, a human id, or null to clear). An assignee must be an active human with access to the project's workspace. Reassigning an in-progress issue never stops its active work session. Requires Contribute access and, for an agent, a live work session on the issue. The actor recorded is the agent, not its human owner.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1603,10 +1655,10 @@
         "sortOrder": {
           "$ref": "#/$defs/IssueSortOrder"
         },
-        "assignee": {
+        "assigneeHumanId": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Assignee"
+              "$ref": "#/$defs/AssigneeHumanId"
             },
             {
               "type": "null"
@@ -1664,30 +1716,10 @@
         "IssueSortOrder": {
           "type": "number"
         },
-        "Assignee": {
-          "type": "object",
-          "properties": {
-            "type": {
-              "$ref": "#/$defs/AssigneeType"
-            },
-            "id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            }
-          },
-          "required": [
-            "type",
-            "id"
-          ],
-          "additionalProperties": false
-        },
-        "AssigneeType": {
+        "AssigneeHumanId": {
           "type": "string",
-          "enum": [
-            "human",
-            "agent"
-          ]
+          "minLength": 1,
+          "maxLength": 200
         }
       }
     },
@@ -1841,12 +1873,45 @@
         "IssueAssignee": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "type": "object",
+              "properties": {
+                "humanId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "humanId",
+                "displayName",
+                "avatarUrl"
+              ],
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "Actor": {
           "type": "object",
@@ -1928,15 +1993,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -2733,12 +2789,45 @@
         "IssueAssignee": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "type": "object",
+              "properties": {
+                "humanId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "humanId",
+                "displayName",
+                "avatarUrl"
+              ],
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "Actor": {
           "type": "object",
@@ -2820,15 +2909,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -3064,12 +3144,45 @@
         "IssueAssignee": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "type": "object",
+              "properties": {
+                "humanId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "humanId",
+                "displayName",
+                "avatarUrl"
+              ],
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "Actor": {
           "type": "object",
@@ -3151,15 +3264,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -3588,12 +3692,45 @@
         "IssueAssignee": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "type": "object",
+              "properties": {
+                "humanId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "humanId",
+                "displayName",
+                "avatarUrl"
+              ],
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "Actor": {
           "type": "object",
@@ -3675,15 +3812,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -3919,12 +4047,45 @@
         "IssueAssignee": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "type": "object",
+              "properties": {
+                "humanId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "humanId",
+                "displayName",
+                "avatarUrl"
+              ],
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "Actor": {
           "type": "object",
@@ -4006,15 +4167,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [
@@ -4996,10 +5148,10 @@
                             "const": "assignee"
                           },
                           "from": {
-                            "$ref": "#/$defs/IssueAssignee"
+                            "$ref": "#/$defs/IssueAssigneeChange"
                           },
                           "to": {
-                            "$ref": "#/$defs/IssueAssignee"
+                            "$ref": "#/$defs/IssueAssigneeChange"
                           }
                         },
                         "required": [
@@ -5245,10 +5397,30 @@
             "none"
           ]
         },
-        "IssueAssignee": {
+        "IssueAssigneeChange": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Actor"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "humanId": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "humanId",
+                    "displayName"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
             },
             {
               "type": "null"
@@ -6402,7 +6574,7 @@
   },
   {
     "name": "claim_issue",
-    "description": "Claim a `todo` issue this agent needs to work on, for this agent and run; the claim atomically moves it to `in_progress`. Backlog, review and terminal issues are refused. An agent may claim only work that is unassigned or assigned to that same agent; issues assigned to a human or another agent are refused. One active session per issue: a second worker is refused. Helpers on the same issue pass the same runId and join the existing session. The claim is a five-minute lease in database time; renew it while working.",
+    "description": "Claim a `todo` issue this agent needs to work on, for this agent and run; the claim atomically moves it to `in_progress`. Backlog, review and terminal issues are refused. An agent may claim only work that is unassigned or assigned to its owner human; issues assigned to another human are refused. One active session per issue: a second worker is refused. Helpers on the same issue pass the same runId and join the existing session. The claim is a five-minute lease in database time; renew it while working.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$ref": "#/$defs/ClaimWorkSessionInput",
@@ -7861,7 +8033,7 @@
   },
   {
     "name": "ready_work",
-    "description": "List minimal ready work in a project: `todo` issues that are not Needs input, have no live active session, and have no blocker whose status is not done or cancelled, evaluated in database time. `backlog`, `in_progress`, `review` and terminal issues are never offered. Optional `filter` is all (default), assignedToMe or unassigned; an agent never sees issues assigned to a human or another agent. Optional `labels` keeps only issues carrying every named project label, matched case-insensitively. Work assigned to the caller sorts first, then priority urgent > high > medium > low > none, then sortOrder ascending, then creation time ascending. Needs no claim.",
+    "description": "List minimal ready work in a project: `todo` issues that are not Needs input, have no live active session, and have no blocker whose status is not done or cancelled, evaluated in database time. `backlog`, `in_progress`, `review` and terminal issues are never offered. Optional `filter` is all (default), assignedToMe (for an agent, assigned to its owner human) or unassigned; an agent never sees issues assigned to another human. Optional `labels` keeps only issues carrying every named project label, matched case-insensitively. Work assigned to the caller (or owner human) sorts first, then priority urgent > high > medium > low > none, then sortOrder ascending, then creation time ascending. Needs no claim.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$ref": "#/$defs/ReadyWorkInput",
@@ -8060,12 +8232,45 @@
         "IssueAssignee": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Actor"
+              "type": "object",
+              "properties": {
+                "humanId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "avatarUrl": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AvatarUrl"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "humanId",
+                "displayName",
+                "avatarUrl"
+              ],
+              "additionalProperties": false
             },
             {
               "type": "null"
             }
           ]
+        },
+        "AvatarUrl": {
+          "type": "string",
+          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
+        },
+        "Timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "Actor": {
           "type": "object",
@@ -8147,15 +8352,6 @@
           "minLength": 2,
           "maxLength": 39,
           "pattern": "^[a-z0-9][a-z0-9-]{0,37}[a-z0-9]$"
-        },
-        "AvatarUrl": {
-          "type": "string",
-          "pattern": "^\\/api\\/humans\\/[^/]+\\/avatar(\\?v=[^/]+)?$"
-        },
-        "Timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
         },
         "FallbackPolicyOverride": {
           "anyOf": [

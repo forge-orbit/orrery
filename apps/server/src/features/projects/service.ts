@@ -11,8 +11,6 @@ import {
   type Actor,
   type AgentIdentity,
   type AddBlockedByRequest,
-  type Assignee,
-  type AssigneeType,
   type CreateIssueCommentRequest,
   type CreateIssueLinkRequest,
   type CreateIssueRequest,
@@ -20,6 +18,7 @@ import {
   type CreateProjectLabelRequest,
   type CreateProjectRequest,
   type Issue,
+  type IssueAssignee,
   type MentionCandidatesResponse,
   type IssueComment,
   type IssueDependency,
@@ -137,7 +136,7 @@ const messages = {
   self_dependency: "An issue cannot block itself.",
   cross_project_dependency: "Dependencies can only link issues in the same project.",
   dependency_cycle: "That dependency would create a cycle.",
-  assignee_not_found: "No active member or registered agent in this workspace has that id.",
+  assignee_not_found: "No active human with access to this workspace has that id.",
   project_key_taken: "Another project in this workspace already uses that key.",
   project_key_immutable: "A project's key cannot be changed after it is created.",
   label_not_found: "This label does not exist on the project.",
@@ -417,37 +416,23 @@ function actorFromRow(
 }
 
 function assigneeFromRow(row: {
-  assigneeType: AssigneeType | null;
-  assigneeId: string | null;
+  assigneeHumanId: string | null;
   assigneeHumanEmail: string | null;
-  assigneeHumanDeactivatedAt: Date | null;
   assigneeHumanAvatarObjectId: string | null;
-  assigneeAgentName: string | null;
-  assigneeAgentOwnerEmail?: string | null;
-}): Actor | null {
-  if (row.assigneeType === "human" && row.assigneeId !== null && row.assigneeHumanEmail !== null) {
-    return actorFromRow(
-      row.assigneeId,
-      row.assigneeHumanEmail,
-      null,
-      null,
-      row.assigneeHumanDeactivatedAt,
-      row.assigneeHumanAvatarObjectId,
-    );
-  }
-  if (row.assigneeType === "agent" && row.assigneeId !== null && row.assigneeAgentName !== null) {
-    return actorFromRow(
-      null,
-      null,
-      row.assigneeId,
-      row.assigneeAgentName,
-      null,
-      null,
-      null,
-      row.assigneeAgentOwnerEmail ?? null,
-    );
-  }
-  return null;
+  assigneeHumanDeactivatedAt: Date | null;
+}): IssueAssignee {
+  if (row.assigneeHumanId === null || row.assigneeHumanEmail === null) return null;
+  return {
+    humanId: row.assigneeHumanId,
+    displayName:
+      row.assigneeHumanDeactivatedAt === null
+        ? row.assigneeHumanEmail
+        : `${row.assigneeHumanEmail} (deactivated)`,
+    avatarUrl:
+      row.assigneeHumanAvatarObjectId === null
+        ? null
+        : avatarUrlFor(row.assigneeHumanId, row.assigneeHumanAvatarObjectId),
+  };
 }
 
 const projectCreator = alias(humans, "project_creator");
@@ -467,8 +452,6 @@ const issueAgentEditor = alias(agents, "issue_agent_editor");
 const issueAgentEditorOwner = alias(humans, "issue_agent_editor_owner");
 
 const assigneeHuman = alias(humans, "assignee_human");
-const assigneeAgent = alias(agents, "assignee_agent");
-const assigneeAgentOwner = alias(humans, "assignee_agent_owner");
 const commentAgentAuthor = alias(agents, "comment_agent_author");
 const commentAgentAuthorOwner = alias(humans, "comment_agent_author_owner");
 const linkAgentCreator = alias(agents, "link_agent_creator");
@@ -519,13 +502,10 @@ const issueColumns = {
   sortOrder: issues.sortOrder,
   needsInput: issues.needsInput,
   parentIssueId: issues.parentIssueId,
-  assigneeType: issues.assigneeType,
-  assigneeId: issues.assigneeId,
+  assigneeHumanId: issues.assigneeHumanId,
   assigneeHumanEmail: assigneeHuman.email,
-  assigneeHumanDeactivatedAt: assigneeHuman.deactivatedAt,
   assigneeHumanAvatarObjectId: assigneeHuman.avatarObjectId,
-  assigneeAgentName: assigneeAgent.name,
-  assigneeAgentOwnerEmail: assigneeAgentOwner.email,
+  assigneeHumanDeactivatedAt: assigneeHuman.deactivatedAt,
   fallbackPolicyOverride: issues.fallbackPolicyOverride,
   createdAt: issues.createdAt,
   updatedAt: issues.updatedAt,
@@ -677,13 +657,10 @@ type IssueRow = {
   sortOrder: number;
   needsInput: boolean;
   parentIssueId: string | null;
-  assigneeType: AssigneeType | null;
-  assigneeId: string | null;
+  assigneeHumanId: string | null;
   assigneeHumanEmail: string | null;
-  assigneeHumanDeactivatedAt: Date | null;
   assigneeHumanAvatarObjectId: string | null;
-  assigneeAgentName: string | null;
-  assigneeAgentOwnerEmail?: string | null;
+  assigneeHumanDeactivatedAt: Date | null;
   fallbackPolicyOverride: FallbackPolicy | null;
 
   projectFallbackPolicy: FallbackPolicy;
@@ -1191,15 +1168,7 @@ async function requireIssue(
     .leftJoin(issueEditor, eq(issueEditor.id, issues.updatedByHumanId))
     .leftJoin(issueAgentEditor, eq(issueAgentEditor.id, issues.updatedByAgentId))
     .leftJoin(issueAgentEditorOwner, eq(issueAgentEditorOwner.id, issueAgentEditor.humanId))
-    .leftJoin(
-      assigneeHuman,
-      and(eq(assigneeHuman.id, issues.assigneeId), eq(issues.assigneeType, "human")),
-    )
-    .leftJoin(
-      assigneeAgent,
-      and(eq(assigneeAgent.id, issues.assigneeId), eq(issues.assigneeType, "agent")),
-    )
-    .leftJoin(assigneeAgentOwner, eq(assigneeAgentOwner.id, assigneeAgent.humanId))
+    .leftJoin(assigneeHuman, eq(assigneeHuman.id, issues.assigneeHumanId))
     .leftJoin(
       workspaceMemberships,
       and(eq(workspaceMemberships.workspaceId, projects.workspaceId), membershipMatch),
@@ -1391,8 +1360,8 @@ async function validateParent(
 async function validateAssignee(
   tx: DbTransaction,
   workspaceId: string,
-  assignee: Assignee,
-): Promise<Actor> {
+  assigneeHumanId: string,
+): Promise<IssueAssignee> {
   const [workspace] = await tx
     .select({ personalOwnerHumanId: workspaces.personalOwnerHumanId })
     .from(workspaces)
@@ -1400,73 +1369,22 @@ async function validateAssignee(
     .limit(1);
   if (workspace === undefined) throw new ProjectsError("assignee_not_found");
 
-  let targetHumanId: string;
-  let resolved: Actor;
-  if (assignee.type === "human") {
-    const [human] = await tx
-      .select({ id: humans.id, email: humans.email, avatarObjectId: humans.avatarObjectId })
-      .from(humans)
-      .where(and(eq(humans.id, assignee.id), isNull(humans.deactivatedAt)))
-      .limit(1)
-      .for("key share");
-    if (human === undefined) throw new ProjectsError("assignee_not_found");
-    targetHumanId = human.id;
-    resolved = {
-      humanId: human.id,
-      email: human.email,
-      displayName: human.email,
-      avatarUrl:
-        human.avatarObjectId === null ? null : avatarUrlFor(human.id, human.avatarObjectId),
-    };
-  } else {
-    const [agent] = await tx
-      .select({ id: agents.id, humanId: agents.humanId, name: agents.name })
-      .from(agents)
-      .where(eq(agents.id, assignee.id))
-      .limit(1);
-    if (agent === undefined) throw new ProjectsError("assignee_not_found");
+  const [human] = await tx
+    .select({ id: humans.id, email: humans.email, avatarObjectId: humans.avatarObjectId })
+    .from(humans)
+    .where(and(eq(humans.id, assigneeHumanId), isNull(humans.deactivatedAt)))
+    .limit(1)
+    .for("key share");
+  if (human === undefined) throw new ProjectsError("assignee_not_found");
 
-    const [key] = await tx
-      .select({ id: agentApiKeys.id })
-      .from(agentApiKeys)
-      .where(
-        and(
-          eq(agentApiKeys.agentId, agent.id),
-          eq(agentApiKeys.workspaceId, workspaceId),
-          isNull(agentApiKeys.revokedAt),
-          or(
-            isNull(agentApiKeys.expiresAt),
-            gt(agentApiKeys.expiresAt, sql`statement_timestamp()`),
-          ),
-        ),
-      )
-      .limit(1)
-      .for("share");
-    if (key === undefined) throw new ProjectsError("assignee_not_found");
-    const [owner] = await tx
-      .select({ id: humans.id })
-      .from(humans)
-      .where(and(eq(humans.id, agent.humanId), isNull(humans.deactivatedAt)))
-      .limit(1)
-      .for("key share");
-    if (owner === undefined) throw new ProjectsError("assignee_not_found");
-    targetHumanId = agent.humanId;
-    resolved = {
-      agentId: agent.id,
-      agentName: agent.name,
-      displayName: agent.name,
-      avatarUrl: null,
-    };
-  }
-
-  if (workspace.personalOwnerHumanId !== targetHumanId) {
+  if (workspace.personalOwnerHumanId !== human.id) {
     const [membership] = await tx
       .select({ id: workspaceMemberships.id })
       .from(workspaceMemberships)
       .where(
         and(
           eq(workspaceMemberships.workspaceId, workspaceId),
-          eq(workspaceMemberships.humanId, targetHumanId),
+          eq(workspaceMemberships.humanId, human.id),
           isNull(workspaceMemberships.suspendedAt),
         ),
       )
@@ -1474,7 +1392,11 @@ async function validateAssignee(
       .for("key share");
     if (membership === undefined) throw new ProjectsError("assignee_not_found");
   }
-  return resolved;
+  return {
+    humanId: human.id,
+    displayName: human.email,
+    avatarUrl: human.avatarObjectId === null ? null : avatarUrlFor(human.id, human.avatarObjectId),
+  };
 }
 
 async function requireKnowledge(
@@ -2069,15 +1991,7 @@ export function createProjectsService({
           .leftJoin(issueEditor, eq(issueEditor.id, issues.updatedByHumanId))
           .leftJoin(issueAgentEditor, eq(issueAgentEditor.id, issues.updatedByAgentId))
           .leftJoin(issueAgentEditorOwner, eq(issueAgentEditorOwner.id, issueAgentEditor.humanId))
-          .leftJoin(
-            assigneeHuman,
-            and(eq(assigneeHuman.id, issues.assigneeId), eq(issues.assigneeType, "human")),
-          )
-          .leftJoin(
-            assigneeAgent,
-            and(eq(assigneeAgent.id, issues.assigneeId), eq(issues.assigneeType, "agent")),
-          )
-          .leftJoin(assigneeAgentOwner, eq(assigneeAgentOwner.id, assigneeAgent.humanId))
+          .leftJoin(assigneeHuman, eq(assigneeHuman.id, issues.assigneeHumanId))
           .where(
             scope === "trash"
               ? and(
@@ -3230,8 +3144,7 @@ export function createProjectsService({
               title: "[deleted]",
               body: "",
               parentIssueId: null,
-              assigneeType: null,
-              assigneeId: null,
+              assigneeHumanId: null,
               purgedAt: sql`coalesce(${issues.purgedAt}, statement_timestamp())`,
             })
             .where(inArray(issues.id, issueIdsToScrub));
@@ -3506,9 +3419,9 @@ export function createProjectsService({
         if (counter === undefined) throw new ProjectsError("project_not_found");
 
         const resolvedAssignee =
-          input.assignee === undefined || input.assignee === null
+          input.assigneeHumanId === undefined || input.assigneeHumanId === null
             ? null
-            : await validateAssignee(tx, project.workspaceId, input.assignee);
+            : await validateAssignee(tx, project.workspaceId, input.assigneeHumanId);
         const requestedLabelIds = new Set(input.labelIds ?? []);
         const labels = await requireProjectLabels(tx, projectId, requestedLabelIds);
 
@@ -3535,8 +3448,7 @@ export function createProjectsService({
             closedAt: isTerminalIssueStatus(status) ? sql`statement_timestamp()` : null,
             priority: input.priority ?? IssuePriority.enum.none,
             sortOrder: input.sortOrder ?? counter.number * ISSUE_SORT_STEP,
-            assigneeType: input.assignee?.type ?? null,
-            assigneeId: input.assignee?.id ?? null,
+            assigneeHumanId: input.assigneeHumanId ?? null,
             createdByHumanId: humanIdOf(actor),
             createdByAgentId: agentIdOf(actor),
             updatedByHumanId: humanIdOf(actor),
@@ -3625,9 +3537,9 @@ export function createProjectsService({
       );
       return db.transaction(async (tx) => {
         const resolvedAssignee =
-          input.assignee === undefined || input.assignee === null
+          input.assigneeHumanId === undefined || input.assigneeHumanId === null
             ? null
-            : await validateAssignee(tx, target.workspaceId, input.assignee);
+            : await validateAssignee(tx, target.workspaceId, input.assigneeHumanId);
 
         const requestedParent = input.parentIssueId;
         if (requestedParent !== undefined && requestedParent !== null) {
@@ -3650,8 +3562,8 @@ export function createProjectsService({
         }
 
         if (
-          input.assignee !== undefined &&
-          input.assignee !== null &&
+          input.assigneeHumanId !== undefined &&
+          input.assigneeHumanId !== null &&
           current.workspaceId !== target.workspaceId
         ) {
           throw new ProjectsError("issue_not_found");
@@ -3690,17 +3602,14 @@ export function createProjectsService({
         const priority = input.priority ?? current.priority;
         const sortOrder = input.sortOrder ?? current.sortOrder;
 
-        const assigneeType =
-          input.assignee === undefined ? current.assigneeType : (input.assignee?.type ?? null);
-        const assigneeId =
-          input.assignee === undefined ? current.assigneeId : (input.assignee?.id ?? null);
+        const assigneeHumanId =
+          input.assigneeHumanId === undefined ? current.assigneeHumanId : input.assigneeHumanId;
         const titleChanged = title !== current.title;
         const bodyChanged = body !== current.body;
         const statusChanged = status !== currentStatus;
         const priorityChanged = priority !== current.priority;
         const orderChanged = sortOrder !== current.sortOrder;
-        const assigneeChanged =
-          assigneeType !== current.assigneeType || assigneeId !== current.assigneeId;
+        const assigneeChanged = assigneeHumanId !== current.assigneeHumanId;
 
         const terminalNow = isTerminalIssueStatus(status);
         const wasTerminal = isTerminalIssueStatus(currentStatus);
@@ -3743,8 +3652,7 @@ export function createProjectsService({
             status,
             priority,
             sortOrder,
-            assigneeType,
-            assigneeId,
+            assigneeHumanId,
 
             parentIssueId: requestedParent === undefined ? current.parentIssueId : requestedParent,
             updatedByHumanId: humanIdOf(actor),
@@ -3777,7 +3685,7 @@ export function createProjectsService({
           editChanges.push({
             kind: "assignee",
             from: assigneeFromRow(current),
-            to: input.assignee === undefined ? null : resolvedAssignee,
+            to: resolvedAssignee,
           });
         }
         if (titleChanged || bodyChanged || priorityChanged || assigneeChanged || workflowMove) {
@@ -3838,11 +3746,7 @@ export function createProjectsService({
           priority,
           sortOrder,
           needsInput: currentNeedsInput,
-          assignee: assigneeChanged
-            ? input.assignee === null
-              ? null
-              : resolvedAssignee
-            : assigneeFromRow(current),
+          assignee: assigneeChanged ? resolvedAssignee : assigneeFromRow(current),
           parentIssueId: requestedParent === undefined ? current.parentIssueId : requestedParent,
           labels: await loadIssueLabels(tx, issueId),
           createdAt: current.createdAt.toISOString(),

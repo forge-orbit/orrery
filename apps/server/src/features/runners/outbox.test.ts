@@ -418,9 +418,13 @@ describe("transactional runner command outbox (#197)", () => {
     const host = await enrollHost(adminCookie);
     const runner = await registerRunner(host.credential);
     const issue = await createIssue("not claimable");
+    const otherHumanId = randomUUID();
+    await database.db
+      .insert(humans)
+      .values({ id: otherHumanId, email: `${otherHumanId}@example.com`, passwordHash: "scrypt$x" });
     await database.db
       .update(issues)
-      .set({ assigneeType: "human", assigneeId: adminHumanId })
+      .set({ assigneeHumanId: otherHumanId })
       .where(eq(issues.id, issue.id));
 
     const rejected = await createDispatch(issue.id, runner.id, adminCookie);

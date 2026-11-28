@@ -266,7 +266,7 @@ describe("issue activity timeline", () => {
           app,
           `/api/issues/${issue.id}`,
           {
-            assignee: { type: "human", id: admin.id },
+            assigneeHumanId: admin.id,
           },
           cookie,
         )
@@ -331,7 +331,13 @@ describe("issue activity timeline", () => {
       type: "issue_edited",
       detail: {
         kind: "issue_edited",
-        changes: [{ kind: "assignee", from: null, to: { humanId: admin.id } }],
+        changes: [
+          {
+            kind: "assignee",
+            from: null,
+            to: { humanId: admin.id, displayName: EMAIL },
+          },
+        ],
       },
     });
     expect(find("status")).toMatchObject({
@@ -354,6 +360,53 @@ describe("issue activity timeline", () => {
       detail: { kind: "issue_reopened", from: "done", to: "todo" },
     });
     for (const event of events) expect(event.actor).toMatchObject({ humanId: admin.id });
+  });
+
+  it("still serves legacy agent-assignee diffs stored in project activity", async () => {
+    const { app, admin, cookie, workspaceId } = await readyApp();
+    const project = await createProject(app, cookie, workspaceId);
+    const issue = await createIssue(app, cookie, project.id);
+
+    const legacyAgentId = randomUUID();
+    await database.db.insert(projectActivity).values({
+      id: randomUUID(),
+      projectId: project.id,
+      type: "issue_edited",
+      actorHumanId: admin.id,
+      issueId: issue.id,
+      summary: issue.title,
+      detail: {
+        kind: "issue_edited",
+        changes: [
+          {
+            kind: "assignee",
+            from: {
+              agentId: legacyAgentId,
+              agentName: "Legacy Builder",
+              displayName: "Legacy Builder",
+              avatarUrl: null,
+            },
+            to: null,
+          },
+        ],
+      },
+    });
+
+    // ProjectActivityResponse.parse in issueActivity() would throw on an
+    // intolerant assignee change schema.
+    const events = await issueActivity(app, cookie, issue.id);
+    const legacy = events.find(
+      (event) =>
+        event.detail?.kind === "issue_edited" &&
+        event.detail.changes.some(
+          (change) =>
+            change.kind === "assignee" &&
+            change.from !== null &&
+            "agentId" in change.from &&
+            change.from.agentId === legacyAgentId,
+        ),
+    );
+    expect(legacy).toBeDefined();
   });
 
   it("records structured label_added details for labels supplied at creation time", async () => {

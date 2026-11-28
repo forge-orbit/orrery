@@ -182,6 +182,9 @@
       "SessionResponse": {
         "type": "object",
         "properties": {
+          "humanId": {
+            "type": "string"
+          },
           "email": {
             "$ref": "#/components/schemas/Email"
           },
@@ -202,6 +205,7 @@
           }
         },
         "required": [
+          "humanId",
           "email",
           "handle",
           "emailVerified",
@@ -2128,66 +2132,17 @@
         ],
         "properties": {
           "humanId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "email": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Email"
-              },
-              {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            ]
-          },
-          "handle": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Handle"
-              },
-              {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            ]
-          },
-          "agentId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "agentName": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "ownerDisplayName": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "displayName": {
             "type": "string"
-          },
-          "deactivated": {
-            "type": "boolean"
           },
           "avatarUrl": {
             "$ref": "#/components/schemas/AvatarUrl"
           }
         },
         "required": [
+          "humanId",
           "displayName",
           "avatarUrl"
         ]
@@ -2350,8 +2305,8 @@
           "sortOrder": {
             "$ref": "#/components/schemas/IssueSortOrder"
           },
-          "assignee": {
-            "$ref": "#/components/schemas/Assignee"
+          "assigneeHumanId": {
+            "$ref": "#/components/schemas/AssigneeHumanId"
           },
           "labelIds": {
             "type": "array",
@@ -2378,32 +2333,13 @@
         "type": "string",
         "maxLength": 100000
       },
-      "Assignee": {
+      "AssigneeHumanId": {
         "type": [
-          "object",
+          "string",
           "null"
         ],
-        "properties": {
-          "type": {
-            "$ref": "#/components/schemas/AssigneeType"
-          },
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          }
-        },
-        "required": [
-          "type",
-          "id"
-        ]
-      },
-      "AssigneeType": {
-        "type": "string",
-        "enum": [
-          "human",
-          "agent"
-        ]
+        "minLength": 1,
+        "maxLength": 200
       },
       "IssueDetail": {
         "type": "object",
@@ -2627,8 +2563,8 @@
           "sortOrder": {
             "$ref": "#/components/schemas/IssueSortOrder"
           },
-          "assignee": {
-            "$ref": "#/components/schemas/Assignee"
+          "assigneeHumanId": {
+            "$ref": "#/components/schemas/AssigneeHumanId"
           },
           "parentIssueId": {
             "type": [
@@ -2927,10 +2863,10 @@
                           ]
                         },
                         "from": {
-                          "$ref": "#/components/schemas/IssueAssignee"
+                          "$ref": "#/components/schemas/IssueAssigneeChange"
                         },
                         "to": {
-                          "$ref": "#/components/schemas/IssueAssignee"
+                          "$ref": "#/components/schemas/IssueAssigneeChange"
                         }
                       },
                       "required": [
@@ -3159,6 +3095,31 @@
               "linkId",
               "url",
               "title"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "IssueAssigneeChange": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/Actor"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "humanId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "humanId",
+              "displayName"
             ]
           },
           {
@@ -12505,7 +12466,7 @@
       },
       "post": {
         "summary": "Create an issue in a project",
-        "description": "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. Optional `assignee` (a human or agent in the workspace) and `labelIds` (labels in the project) are validated and applied in the same transaction as the issue, so an invalid value creates nothing. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
+        "description": "Contribute or Manage. The issue gets the project's next local number, starts ready work, and records its creator. Optional `assigneeHumanId` (an active human with access to the project's workspace) and `labelIds` (labels in the project) are validated and applied in the same transaction as the issue, so an invalid value creates nothing. An optional `parentIssueId` creates a one-level subtask in the same project; it cannot be self, cross-project, or a second nesting level. The creation is recorded in the project's activity. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
         "parameters": [
           {
             "schema": {
@@ -12804,7 +12765,7 @@
       },
       "patch": {
         "summary": "Edit, close, or reopen an issue",
-        "description": "Contribute or Manage. Every field is optional. A title, body, assignee or priority change records an edit; a status change records a close or a reopen; `parentIssueId` sets or clears a one-level parent in the same project. Set `assignee` to `{\"type\":\"human\"|\"agent\",\"id\":\"...\"}` or null to clear it; the identity must be an active member or a registered agent in the workspace. A request that changes nothing returns the issue unchanged and records no event. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
+        "description": "Contribute or Manage. Every field is optional. A title, body, assignee or priority change records an edit; a status change records a close or a reopen; `parentIssueId` sets or clears a one-level parent in the same project. Set `assigneeHumanId` to a human id or null to clear it; the identity must be an active human with access to the project's workspace. Reassigning an in-progress issue never stops its active work session. A request that changes nothing returns the issue unchanged and records no event. A workspace-scoped agent API key sent as `Authorization: Bearer <key>` is accepted on this project-work route and acts as the agent the key identifies, with the key's effective project access.",
         "parameters": [
           {
             "schema": {
@@ -15156,7 +15117,7 @@
     "/api/issues/{issueId}/work-sessions": {
       "post": {
         "summary": "Claim an issue for an agent and run",
-        "description": "Start a work session. The session belongs to the authenticated agent, the named run, the key's workspace and the issue — not to the key itself. An agent may claim only work that is unassigned or assigned to that same agent. At most one active session can hold an issue; helpers passing the same (agent, run, issue) join it. The claim is a five-minute lease evaluated in database time.",
+        "description": "Start a work session. The session belongs to the authenticated agent, the named run, the key's workspace and the issue — not to the key itself. An agent may claim only work that is unassigned or assigned to its owner human. At most one active session can hold an issue; helpers passing the same (agent, run, issue) join it. The claim is a five-minute lease evaluated in database time.",
         "parameters": [
           {
             "schema": {
@@ -15951,7 +15912,7 @@
             }
           },
           "409": {
-            "description": "The issue is claimed by another worker, paused for input, assigned to a human or another agent, or the claim was never expired",
+            "description": "The issue is claimed by another worker, paused for input, assigned to another human, or the claim was never expired",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16288,7 +16249,7 @@
     "/api/projects/{projectId}/ready-work": {
       "get": {
         "summary": "Minimal ready-work listing for a project",
-        "description": "Open issues that are not Needs input, have no live active session, and have no blocker whose status is not closed, evaluated in database time. `filter` selects all claimable work (the default), only work assigned to the caller, or only unassigned work; an agent never sees work assigned to a human or another agent. `labels` keeps only work carrying every named project label, matched case-insensitively; repeat the parameter for more labels. Assigned work sorts first, then priority, sortOrder and createdAt. Needs no claim; a full board is out of scope.",
+        "description": "Open issues that are not Needs input, have no live active session, and have no blocker whose status is not closed, evaluated in database time. `filter` selects all claimable work (the default), only work assigned to the caller (for an agent, its owner human), or only unassigned work; an agent never sees work assigned to another human. `labels` keeps only work carrying every named project label, matched case-insensitively; repeat the parameter for more labels. Assigned work sorts first, then priority, sortOrder and createdAt. Needs no claim; a full board is out of scope.",
         "parameters": [
           {
             "schema": {

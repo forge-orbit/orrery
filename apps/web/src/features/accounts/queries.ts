@@ -10,6 +10,7 @@ export type Session =
   | { signedIn: false }
   | {
       signedIn: true;
+      humanId: string;
       email: string;
       handle: string;
       displayName: string | null;
@@ -27,6 +28,7 @@ export const sessionQuery = queryOptions({
     const account = SessionResponse.parse(await res.json());
     return {
       signedIn: true,
+      humanId: account.humanId,
       email: account.email,
       handle: account.handle,
       displayName: account.displayName ?? null,

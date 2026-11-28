@@ -30,7 +30,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Pencil, RotateCcw, Trash2 } from "lucide-react";
 import type { FormEvent, RefObject } from "react";
 import { useRef, useState } from "react";
-import { agentKeysQuery, agentsQuery, workspaceAgentKeysQuery } from "../features/agents/index.ts";
+import { agentsQuery } from "../features/agents/index.ts";
 import {
   addBlockedBy,
   addIssueLink,
@@ -102,7 +102,6 @@ export const Route = createFileRoute("/issues/$issueId")({
       context.queryClient.ensureQueryData(issueCommentsQuery(params.issueId)),
       context.queryClient.ensureQueryData(issueActivityQuery(params.issueId)),
       context.queryClient.ensureQueryData(workspaceQuery(project.workspaceId)),
-      context.queryClient.ensureQueryData(agentKeysQuery(project.workspaceId)),
       context.queryClient.ensureQueryData(agentsQuery),
       context.queryClient.ensureQueryData(issueBlockedByQuery(params.issueId)),
       context.queryClient.ensureQueryData(issueBlockingQuery(params.issueId)),
@@ -353,12 +352,7 @@ function IssuePage() {
     accessIds.data === undefined
       ? new Set<string>()
       : missingProjectAccessHumanIds(membersQuery.data ?? [], accessIds.data);
-  const { data: myKeys } = useSuspenseQuery(agentKeysQuery(project.workspaceId));
   const { data: myAgents } = useSuspenseQuery(agentsQuery);
-  const workspaceKeys = useQuery({
-    ...workspaceAgentKeysQuery(project.workspaceId),
-    enabled: workspace.kind === "shared" && workspace.isOwner,
-  });
 
   const [isEditing, setIsEditing] = useState(false);
   const [confirmTrashOpen, setConfirmTrashOpen] = useState(false);
@@ -385,37 +379,27 @@ function IssuePage() {
     });
   }
 
+  // Only workspace humans with project access can be assigned; an assignee is
+  // never an Agent.
   const candidates: AssigneeCandidate[] = [];
   const seenHumans = new Set<string>();
   for (const actor of [project.createdBy, issue.createdBy, issue.updatedBy]) {
-    if (actor.humanId && !seenHumans.has(actor.humanId)) {
+    if (actor.humanId && !withoutAccess.has(actor.humanId) && !seenHumans.has(actor.humanId)) {
       seenHumans.add(actor.humanId);
       candidates.push({
         value: `human:${actor.humanId}`,
         label: `Human · ${actor.email ?? actor.displayName}`,
-        assignee: { type: "human" as const, id: actor.humanId },
-        noProjectAccess: withoutAccess.has(actor.humanId),
+        humanId: actor.humanId,
       });
     }
   }
   for (const member of membersQuery.data ?? []) {
-    if (seenHumans.has(member.humanId)) continue;
+    if (seenHumans.has(member.humanId) || withoutAccess.has(member.humanId)) continue;
     seenHumans.add(member.humanId);
     candidates.push({
       value: `human:${member.humanId}`,
       label: `Human · ${member.email}`,
-      assignee: { type: "human" as const, id: member.humanId },
-      noProjectAccess: withoutAccess.has(member.humanId),
-    });
-  }
-  const seen = new Set<string>();
-  for (const key of [...myKeys, ...(workspaceKeys.data ?? [])]) {
-    if (key.revokedAt !== null || seen.has(key.agentId)) continue;
-    seen.add(key.agentId);
-    candidates.push({
-      value: `agent:${key.agentId}`,
-      label: `Agent · ${key.agentName}`,
-      assignee: { type: "agent" as const, id: key.agentId },
+      humanId: member.humanId,
     });
   }
 
@@ -555,39 +539,25 @@ function IssuePage() {
           <PriorityBadge priority={issue.priority} />
           {issue.assignee !== null && (
             <Stack as="span" direction="horizontal" gap={1} vAlign="center" data-issue-assignee="">
-              {issue.assignee.agentId !== undefined ? (
-                <AgentAvatar
-                  name={issue.assignee.displayName}
-                  harness={
-                    activeSession?.agentId === issue.assignee.agentId
-                      ? activeRun?.harness
-                      : undefined
-                  }
-                  size={14}
-                />
-              ) : (
-                <HumanAvatar
-                  name={issue.assignee.displayName}
-                  avatarUrl={issue.assignee.avatarUrl}
-                  size="xsm"
-                  tooltip={false}
-                />
-              )}
+              <HumanAvatar
+                name={issue.assignee.displayName}
+                avatarUrl={issue.assignee.avatarUrl}
+                size="xsm"
+                tooltip={false}
+              />
               <Text type="supporting" color="primary" weight="medium">
                 {issue.assignee.displayName}
               </Text>
             </Stack>
           )}
-          {activeSession !== undefined &&
-            activeRun !== undefined &&
-            issue.assignee?.agentId !== activeSession.agentId && (
-              <Stack as="span" direction="horizontal" gap={1} vAlign="center" data-working-agent="">
-                <AgentAvatar name={activeRun.agentName} harness={activeRun.harness} size={14} />
-                <Text type="supporting" color="primary" weight="medium">
-                  {activeRun.agentName}
-                </Text>
-              </Stack>
-            )}
+          {activeSession !== undefined && activeRun !== undefined && (
+            <Stack as="span" direction="horizontal" gap={1} vAlign="center" data-working-agent="">
+              <AgentAvatar name={activeRun.agentName} harness={activeRun.harness} size={14} />
+              <Text type="supporting" color="primary" weight="medium">
+                {activeRun.agentName}
+              </Text>
+            </Stack>
+          )}
           <Text type="supporting" color="secondary">
             Created by {issue.createdBy.displayName}
           </Text>
@@ -932,17 +902,7 @@ function IssuePage() {
           </Stack>
         )}
 
-        <AssigneeControl
-          issue={issue}
-          candidates={candidates}
-          canContribute={canContribute}
-          activeHarness={
-            issue.assignee?.agentId !== undefined &&
-            activeSession?.agentId === issue.assignee.agentId
-              ? activeRun?.harness
-              : undefined
-          }
-        />
+        <AssigneeControl issue={issue} candidates={candidates} canContribute={canContribute} />
 
         {canContribute ? (
           <IssuePriorityControls
@@ -972,6 +932,7 @@ function IssuePage() {
         workspaceId={project.workspaceId}
         projectId={issue.projectId}
         agents={myAgents.map((agent) => ({ id: agent.id, name: agent.name }))}
+        assignee={issue.assignee}
         canDelegate={canContribute}
       />
 

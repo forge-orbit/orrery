@@ -22,7 +22,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { agentKeysQuery, workspaceAgentKeysQuery } from "../features/agents/index.ts";
 import {
   type AssigneeCandidate,
   createIssue,
@@ -60,7 +59,6 @@ export const Route = createFileRoute("/projects/$projectId_/issues/new")({
     const project = await context.queryClient.ensureQueryData(projectQuery(params.projectId));
     await Promise.all([
       context.queryClient.ensureQueryData(workspaceQuery(project.workspaceId)),
-      context.queryClient.ensureQueryData(agentKeysQuery(project.workspaceId)),
       context.queryClient.ensureQueryData(issuesQuery(project.id)),
       context.queryClient.ensureQueryData(projectLabelsQuery(project.id)),
     ]);
@@ -79,7 +77,6 @@ function NewIssuePage() {
   const { data: workspace } = useSuspenseQuery(workspaceQuery(project.workspaceId));
   const { data: issues } = useSuspenseQuery(issuesQuery(projectId));
   const { data: labels } = useSuspenseQuery(projectLabelsQuery(projectId));
-  const { data: myKeys } = useSuspenseQuery(agentKeysQuery(project.workspaceId));
   const canReadMembers =
     workspace.kind === "shared" &&
     (workspace.isOwner || workspace.canManageMemberPermissions || workspace.canRemoveMembers);
@@ -95,10 +92,6 @@ function NewIssuePage() {
     accessIds.data === undefined
       ? new Set<string>()
       : missingProjectAccessHumanIds(members, accessIds.data);
-  const { data: workspaceKeys = [] } = useQuery({
-    ...workspaceAgentKeysQuery(project.workspaceId),
-    enabled: workspace.kind === "shared" && workspace.isOwner,
-  });
 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -112,43 +105,34 @@ function NewIssuePage() {
   const [error, setError] = useState<string>();
   const isNarrow = useMediaQuery("(max-width: 62rem)");
 
+  // Only workspace humans with project access can be assigned; an assignee is
+  // never an Agent.
   const candidates: AssigneeCandidate[] = [];
   const seenHumans = new Set<string>();
   for (const actor of [project.createdBy]) {
-    if (actor.humanId != null && !seenHumans.has(actor.humanId)) {
+    if (
+      actor.humanId != null &&
+      !withoutAccess.has(actor.humanId) &&
+      !seenHumans.has(actor.humanId)
+    ) {
       seenHumans.add(actor.humanId);
       candidates.push({
         value: `human:${actor.humanId}`,
         label: `Human · ${actor.email ?? actor.displayName}`,
-        assignee: { type: "human" as const, id: actor.humanId },
-        noProjectAccess: withoutAccess.has(actor.humanId),
+        humanId: actor.humanId,
       });
     }
   }
   for (const member of members) {
-    if (seenHumans.has(member.humanId)) continue;
+    if (seenHumans.has(member.humanId) || withoutAccess.has(member.humanId)) continue;
     seenHumans.add(member.humanId);
     candidates.push({
       value: `human:${member.humanId}`,
       label: `Human · ${member.email}`,
-      assignee: { type: "human" as const, id: member.humanId },
-      noProjectAccess: withoutAccess.has(member.humanId),
-    });
-  }
-  const seenAgents = new Set<string>();
-  for (const key of [...myKeys, ...workspaceKeys]) {
-    if (key.revokedAt !== null || seenAgents.has(key.agentId)) continue;
-    seenAgents.add(key.agentId);
-    candidates.push({
-      value: `agent:${key.agentId}`,
-      label: `Agent · ${key.agentName}`,
-      assignee: { type: "agent" as const, id: key.agentId },
+      humanId: member.humanId,
     });
   }
 
-  const noProjectAccess = candidates.find(
-    (candidate) => candidate.value === assigneeValue,
-  )?.noProjectAccess;
   const canContribute = project.accessLevel !== "read";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -163,7 +147,7 @@ function NewIssuePage() {
         body,
         status,
         priority,
-        ...(chosen !== undefined ? { assignee: chosen.assignee } : {}),
+        ...(chosen !== undefined ? { assigneeHumanId: chosen.humanId } : {}),
         ...(labelIds.length > 0 ? { labelIds } : {}),
         ...(parentIssueId !== "" ? { parentIssueId } : {}),
       };
@@ -293,17 +277,9 @@ function NewIssuePage() {
           ...candidates.map((candidate) => ({
             value: candidate.value,
             label: candidate.label,
-            description: candidate.noProjectAccess === true ? "No project access" : undefined,
           })),
         ]}
       />
-      {noProjectAccess === true && (
-        <Banner
-          status="warning"
-          title="No project access"
-          description="This member will not see the issue in My work until they are granted access to the project."
-        />
-      )}
       <MultiSelector
         label="Labels"
         id="new-issue-labels"

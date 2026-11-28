@@ -432,10 +432,9 @@ function ProjectPage() {
                         const session = sessionsByIssue.get(issue.id);
                         const run = session === undefined ? undefined : runsById.get(session.runId);
                         const assignee = issue.assignee;
-                        const showWorkingAgent =
-                          session !== undefined &&
-                          run !== undefined &&
-                          assignee?.agentId !== session.agentId;
+                        // The assignee is always a human now, so a live session
+                        // always shows the Agent that is executing.
+                        const showWorkingAgent = session !== undefined && run !== undefined;
 
                         return (
                           <TableRow key={issue.id} data-issue-id={issue.id}>
@@ -486,23 +485,11 @@ function ProjectPage() {
                                       vAlign="center"
                                       data-issue-assignee=""
                                     >
-                                      {assignee.agentId !== undefined ? (
-                                        <AgentAvatar
-                                          name={assignee.displayName}
-                                          harness={
-                                            session?.agentId === assignee.agentId
-                                              ? run?.harness
-                                              : undefined
-                                          }
-                                          size={18}
-                                        />
-                                      ) : (
-                                        <HumanAvatar
-                                          name={assignee.displayName}
-                                          avatarUrl={assignee.avatarUrl}
-                                          size="xsm"
-                                        />
-                                      )}
+                                      <HumanAvatar
+                                        name={assignee.displayName}
+                                        avatarUrl={assignee.avatarUrl}
+                                        size="xsm"
+                                      />
                                       <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
                                     </Stack>
                                   )}

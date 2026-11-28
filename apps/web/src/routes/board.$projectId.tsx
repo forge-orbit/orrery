@@ -71,7 +71,7 @@ export const Route = createFileRoute("/board/$projectId")({
 });
 
 type BoardFilter = "all" | "needs-input" | "ready";
-type AssigneeFilter = "all" | "unassigned" | "human" | "agent";
+type AssigneeFilter = "all" | "unassigned" | "human";
 type BoardPanel = { kind: "session"; issueId: string; sessionId: string };
 
 const BOARD_COLUMNS: IssueStatus[] = [
@@ -181,10 +181,7 @@ function BoardPage() {
     if (filter === "needs-input" && !issue.needsInput) return false;
     if (filter === "ready" && !readyIds.has(issue.id)) return false;
     if (assigneeFilter === "unassigned" && issue.assignee !== null) return false;
-    if (assigneeFilter === "human" && (issue.assignee === null || issue.assignee.agentId != null)) {
-      return false;
-    }
-    if (assigneeFilter === "agent" && issue.assignee?.agentId == null) return false;
+    if (assigneeFilter === "human" && issue.assignee === null) return false;
     if (priorityFilter !== "all" && issue.priority !== priorityFilter) return false;
     if (labelFilter !== "all" && !issue.labels.some((label) => label.id === labelFilter)) {
       return false;
@@ -595,17 +592,12 @@ function BoardPage() {
                 size="sm"
                 value={assigneeFilter}
                 onChange={(value) =>
-                  setAssigneeFilter(
-                    value === "unassigned" || value === "human" || value === "agent"
-                      ? value
-                      : "all",
-                  )
+                  setAssigneeFilter(value === "unassigned" || value === "human" ? value : "all")
                 }
                 options={[
                   { value: "all", label: "Any assignee" },
                   { value: "unassigned", label: "Unassigned" },
                   { value: "human", label: "Human" },
-                  { value: "agent", label: "Agent" },
                 ]}
               />
               <Selector
@@ -989,7 +981,7 @@ function BoardCard({
   onInspect: (sessionId: string) => void;
 }) {
   const assignee = issue.assignee;
-  const assigneeType = assignee === null ? "none" : assignee.agentId != null ? "agent" : "human";
+  const assigneeType = assignee === null ? "none" : "human";
 
   return (
     <Stack
@@ -1054,16 +1046,13 @@ function BoardCardContent({
       ? "stopping"
       : session?.status;
   const assignee = issue.assignee;
-  const assigneeType = assignee === null ? "none" : assignee.agentId != null ? "agent" : "human";
   const hasLabels =
     issue.priority !== "none" ||
     state !== undefined ||
     blockers.length > 0 ||
     issue.labels.length > 0;
-  const workingAgent =
-    session !== undefined && run !== undefined && assignee?.agentId !== session.agentId
-      ? run
-      : undefined;
+  // The assignee is always a human now, so a live session always shows its Agent.
+  const workingAgent = session !== undefined && run !== undefined ? run : undefined;
   const hasAvatars = assignee !== null || workingAgent !== undefined;
 
   return (
@@ -1133,19 +1122,11 @@ function BoardCardContent({
                 <Stack direction="horizontal" gap={1} vAlign="center">
                   {assignee !== null && (
                     <Stack as="span" direction="horizontal" vAlign="center">
-                      {assigneeType === "agent" ? (
-                        <AgentAvatar
-                          name={assignee.displayName}
-                          harness={session?.agentId === assignee.agentId ? run?.harness : undefined}
-                          size={16}
-                        />
-                      ) : (
-                        <HumanAvatar
-                          name={assignee.displayName}
-                          avatarUrl={assignee.avatarUrl}
-                          size="xsm"
-                        />
-                      )}
+                      <HumanAvatar
+                        name={assignee.displayName}
+                        avatarUrl={assignee.avatarUrl}
+                        size="xsm"
+                      />
                       <VisuallyHidden>{assignee.displayName}</VisuallyHidden>
                     </Stack>
                   )}

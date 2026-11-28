@@ -1612,15 +1612,15 @@ describe("shared-to-shared project transfer against real Postgres", () => {
 
     const sourceSecret = await issueKey(sourceW1.cookie, sourceW1.workspaceId, sourceW1.project.id);
     const sourceAgent = await identityFor(sourceSecret);
-    const assign = async (issueId: string, assignee: { type: "human" | "agent"; id: string }) => {
-      const res = await patchJson(`/api/issues/${issueId}`, { assignee }, sourceW1.cookie);
+    const assign = async (issueId: string, assigneeHumanId: string) => {
+      const res = await patchJson(`/api/issues/${issueId}`, { assigneeHumanId }, sourceW1.cookie);
       expect(res.status).toBe(200);
     };
-    await assign(sourceHumanIssue, { type: "human", id: sourceMember.id });
-    await assign(secondSourceHumanIssue, { type: "human", id: sourceMember.id });
-    await assign(sourceAgentIssue, { type: "agent", id: sourceAgent.agentId });
-    await assign(suspendedHumanIssue, { type: "human", id: suspendedMember.id });
-    await assign(destinationHumanIssue, { type: "human", id: destinationMember.id });
+    await assign(sourceHumanIssue, sourceMember.id);
+    await assign(secondSourceHumanIssue, sourceMember.id);
+    await assign(sourceAgentIssue, sourceAgent.humanId);
+    await assign(suspendedHumanIssue, suspendedMember.id);
+    await assign(destinationHumanIssue, destinationMember.id);
 
     const authorization = await authorize(sourceW1.cookie, sourceW1.project.id, destW2.workspaceId);
     expect((await accept(ownerCookie, authorization.token)).status).toBe(200);
@@ -1635,22 +1635,17 @@ describe("shared-to-shared project transfer against real Postgres", () => {
     const rows = await database.db
       .select({
         id: issuesTable.id,
-        assigneeType: issuesTable.assigneeType,
-        assigneeId: issuesTable.assigneeId,
+        assigneeHumanId: issuesTable.assigneeHumanId,
       })
       .from(issuesTable)
       .where(inArray(issuesTable.id, issueIds));
     const byId = new Map(rows.map((row) => [row.id, row]));
-    expect(byId.get(sourceHumanIssue)).toMatchObject({ assigneeType: null, assigneeId: null });
-    expect(byId.get(secondSourceHumanIssue)).toMatchObject({
-      assigneeType: null,
-      assigneeId: null,
-    });
-    expect(byId.get(sourceAgentIssue)).toMatchObject({ assigneeType: null, assigneeId: null });
-    expect(byId.get(suspendedHumanIssue)).toMatchObject({ assigneeType: null, assigneeId: null });
+    expect(byId.get(sourceHumanIssue)).toMatchObject({ assigneeHumanId: null });
+    expect(byId.get(secondSourceHumanIssue)).toMatchObject({ assigneeHumanId: null });
+    expect(byId.get(sourceAgentIssue)).toMatchObject({ assigneeHumanId: null });
+    expect(byId.get(suspendedHumanIssue)).toMatchObject({ assigneeHumanId: null });
     expect(byId.get(destinationHumanIssue)).toMatchObject({
-      assigneeType: "human",
-      assigneeId: destinationMember.id,
+      assigneeHumanId: destinationMember.id,
     });
 
     const detail = await getJson(`/api/issues/${sourceHumanIssue}`, ownerCookie);
