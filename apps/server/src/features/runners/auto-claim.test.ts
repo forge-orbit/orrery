@@ -11,6 +11,7 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   humans,
+  issueLabels,
   issues,
   projectAccessGrants,
   projects,
@@ -158,6 +159,56 @@ async function makeIssue(
     number,
     identifier: str(field(created.body, "identifier")),
   };
+}
+
+async function createLabel(projectId: string, name: string): Promise<string> {
+  const created = await api(`/api/projects/${projectId}/labels`, {
+    method: "POST",
+    cookie: world.cookie,
+    body: { name, color: "#3366ff" },
+  });
+  if (created.status !== 201)
+    throw new Error(`create label failed: ${JSON.stringify(created.body)}`);
+  return str(field(created.body, "id"));
+}
+
+async function attachLabel(issueId: string, labelId: string): Promise<void> {
+  const attached = await api(`/api/issues/${issueId}/labels/${labelId}`, {
+    method: "POST",
+    cookie: world.cookie,
+  });
+  if (attached.status !== 201)
+    throw new Error(`attach label failed: ${JSON.stringify(attached.body)}`);
+}
+
+/** A dedicated project and registered runner keep each label assertion exact. */
+async function projectWithRunner(maxConcurrency: number): Promise<{
+  projectId: string;
+  runnerId: string;
+}> {
+  const key = `LB${randomBytes(3).toString("hex").toUpperCase()}`;
+  const project = await api(`/api/workspaces/${world.workspaceA}/projects`, {
+    method: "POST",
+    cookie: world.cookie,
+    body: { name: "Label project", key },
+  });
+  if (project.status !== 201) throw new Error(`project failed: ${JSON.stringify(project.body)}`);
+  const projectId = str(field(project.body, "id"));
+  const runner = await api("/api/runners/register", {
+    method: "POST",
+    token: world.credential,
+    body: {
+      workspaceId: world.workspaceA,
+      projectId,
+      agentId: world.agentId,
+      repoFingerprint: createHash("sha256").update(randomBytes(32)).digest("hex"),
+      capabilities: [],
+      maxConcurrency,
+      ephemeral: false,
+    },
+  });
+  if (runner.status !== 201) throw new Error(`register failed: ${JSON.stringify(runner.body)}`);
+  return { projectId, runnerId: str(field(runner.body, "id")) };
 }
 
 async function sessionsOf(issueId: string): Promise<unknown[]> {
@@ -523,6 +574,13 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
       trashed: true,
     });
     const uncertain = await makeIssue("uncertain assigned issue", { agentId: world.agentId });
+    // The CLI now gates autonomous pickup on `ready-for-agent` by default (#280),
+    // so every issue whose exclusion is NOT the label must carry it. The trashed
+    // issue cannot take a label after deletion; deletion excludes it on its own.
+    const readyLabel = await createLabel(world.projectA, "ready-for-agent");
+    for (const issue of [assigned, blocked, done, uncertain]) {
+      await attachLabel(issue.id, readyLabel);
+    }
     // Reach a real uncertain attempt through the accepted-Dispatch path, then
     // mark it uncertain exactly as a missed heartbeat would.
     const createdDispatch = await api(`/api/runners/${world.testRunnerId}/dispatches`, {
@@ -652,6 +710,82 @@ describe("Runner --auto-claim and one-shot work (#202)", { timeout: 180_000 }, (
     const heartbeatFull = await claim("unassigned");
     expect(heartbeatFull.status).toBe(200);
     expect(field(heartbeatFull.body, "dispatch")).toBeNull();
+  });
+
+  it("auto-claims only issues carrying every requested label, case-insensitively", async () => {
+    const { projectId, runnerId } = await projectWithRunner(7);
+    const frontend = await createLabel(projectId, "Frontend");
+    const urgent = await createLabel(projectId, "Urgent");
+    const backend = await createLabel(projectId, "Backend");
+
+    const bothOne = await makeIssue("frontend and urgent one", { projectId });
+    const bothTwo = await makeIssue("frontend and urgent two", { projectId });
+    const frontOnly = await makeIssue("frontend only", { projectId });
+    const backOnly = await makeIssue("backend only", { projectId });
+    const unlabeled = await makeIssue("unlabeled", { projectId });
+    for (const issue of [bothOne, bothTwo, frontOnly]) {
+      await attachLabel(issue.id, frontend);
+    }
+    for (const issue of [bothOne, bothTwo]) await attachLabel(issue.id, urgent);
+    await attachLabel(backOnly.id, backend);
+
+    const claim = async (body: Record<string, unknown>) => {
+      const response = await api(`/api/runners/${runnerId}/auto-claim`, {
+        method: "POST",
+        token: world.credential,
+        body: { filter: "all", ...body },
+      });
+      expect(response.status).toBe(200);
+      return str(field(field(response.body, "dispatch"), "issueId"));
+    };
+
+    // Ascending issue number breaks ties, so each claim takes the next match.
+    expect(await claim({ labels: ["frontend"] })).toBe(bothOne.id);
+    expect(await claim({ labels: ["FRONTEND", "urgent"] })).toBe(bothTwo.id);
+    expect(await claim({ labels: ["Frontend"] })).toBe(frontOnly.id);
+    // Nothing carries both any more; unknown labels match nothing at all.
+    expect(await claim({ labels: ["frontend", "urgent"] })).toBe("");
+    expect(await claim({ labels: ["ready-for-agent"] })).toBe("");
+    // Empty and omitted labels stay unfiltered at the API layer for any caller.
+    expect(await claim({ labels: [] })).toBe(backOnly.id);
+    expect(await claim({})).toBe(unlabeled.id);
+  });
+
+  it("re-checks labels under the claim lock when one is removed during the scan", async () => {
+    const { projectId, runnerId } = await projectWithRunner(1);
+    const frontend = await createLabel(projectId, "Frontend");
+    const issue = await makeIssue("label removed mid-claim", { projectId });
+    await attachLabel(issue.id, frontend);
+
+    // Hold the issue row so auto-claim cannot pass its locking read; the scan
+    // still sees the label. Removing it before releasing proves the under-lock
+    // re-check, not just the scan filter.
+    let releaseLock!: () => void;
+    const released = new Promise<void>((resolve) => (releaseLock = resolve));
+    let lockHeld!: () => void;
+    const held = new Promise<void>((resolve) => (lockHeld = resolve));
+    const holder = database.db.transaction(async (tx) => {
+      await tx.select({ id: issues.id }).from(issues).where(eq(issues.id, issue.id)).for("update");
+      lockHeld();
+      await released;
+    });
+    await held;
+    const pending = api(`/api/runners/${runnerId}/auto-claim`, {
+      method: "POST",
+      token: world.credential,
+      body: { filter: "all", labels: ["frontend"] },
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    await database.db
+      .delete(issueLabels)
+      .where(and(eq(issueLabels.issueId, issue.id), eq(issueLabels.labelId, frontend)));
+    releaseLock();
+    await holder;
+
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(field(response.body, "dispatch")).toBeNull();
+    expect(await dispatchesOf(issue.id)).toHaveLength(0);
   });
 
   it("resolves issues by ID, URL and KEY and disambiguates ambiguous keys", async () => {

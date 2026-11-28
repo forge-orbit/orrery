@@ -296,6 +296,130 @@ describe("orrery-runner CLI against a real HTTP control plane stub", () => {
     }
   });
 
+  it("rejects an empty or conflicting --auto-claim-label before contacting the server", async () => {
+    const dir = await makeDir();
+    const base = ["start", "--server", "http://127.0.0.1:1", "--workspace", "w", "--project", "p"];
+
+    const conflict = await run(
+      [...base, "--auto-claim-label", "Frontend", "--auto-claim-any-label"],
+      { ORRERY_RUNNER_CONFIG_DIR: dir },
+    );
+    expect(conflict.code).toBe(1);
+    expect(conflict.stderr).toContain(
+      "--auto-claim-label and --auto-claim-any-label cannot be combined",
+    );
+
+    const empty = await run([...base, "--auto-claim-label", "   "], {
+      ORRERY_RUNNER_CONFIG_DIR: dir,
+    });
+    expect(empty.code).toBe(1);
+    expect(empty.stderr).toContain("--auto-claim-label must not be empty");
+  });
+
+  it("sends ready-for-agent by default and --auto-claim-label overrides or disables the gate", async () => {
+    const dir = await makeDir();
+    const autoClaims: unknown[] = [];
+    const stub = await listen(async (req, res) => {
+      if (serveTargets(req, res)) return;
+      if (req.method === "POST" && req.url === "/api/runners/register") {
+        const registration = registrationBody.parse(await bodyOf(req));
+        json(res, 201, {
+          id: "runner-1",
+          hostId: "host-1",
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          agentId: "agent-1",
+          displayName: "TestLaptop",
+          repoFingerprint: registration.repoFingerprint,
+          capabilities: [],
+          harnessCatalog: EMPTY_HARNESS_CATALOG,
+          maxConcurrency: 1,
+          activeSlotCount: 0,
+          lastSeenAt: new Date().toISOString(),
+          disconnectedAt: null,
+          revokedAt: null,
+          createdAt: new Date().toISOString(),
+          presence: "online",
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/runner-1/auto-claim") {
+        autoClaims.push(await bodyOf(req));
+        json(res, 200, { dispatch: null });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/runners/runner-1/heartbeat") {
+        // Let the first auto-claim land, then end the process deterministically.
+        json(res, 401, { status: 401, code: "invalid_credential", title: "Revoked" });
+        return;
+      }
+      json(res, 404, { status: 404, code: "not_found", title: "Not found" });
+    });
+    await writeFile(
+      join(dir, "runner-credential.json"),
+      JSON.stringify({
+        server: stub.url,
+        hostId: "host-1",
+        credential: "orr_rh_local-credential-1234567890",
+        displayName: "TestLaptop",
+        platform: "linux-x64",
+      }),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      join(dir, "harnesses.json"),
+      JSON.stringify({
+        harnesses: [{ id: "node", displayName: "Node", command: process.execPath, args: [] }],
+      }),
+    );
+    const startArgs = (extra: string[]) => [
+      "start",
+      "--server",
+      stub.url,
+      "--workspace",
+      "workspace-1",
+      "--project",
+      "project-1",
+      "--heartbeat-ms",
+      "400",
+      "--auto-claim-poll-ms",
+      "20",
+      "--harness",
+      "node",
+      "--model",
+      "stub-deep",
+      "--auto-claim",
+      ...extra,
+    ];
+
+    try {
+      const defaults = await run(startArgs([]), { ORRERY_RUNNER_CONFIG_DIR: dir });
+      expect(defaults.code).toBe(0);
+      expect(autoClaims[0]).toMatchObject({
+        filter: "assignedToMe",
+        labels: ["ready-for-agent"],
+      });
+
+      autoClaims.length = 0;
+      const repeatable = await run(
+        startArgs(["--auto-claim-label", "Frontend", "--auto-claim-label", "urgent"]),
+        { ORRERY_RUNNER_CONFIG_DIR: dir },
+      );
+      expect(repeatable.code).toBe(0);
+      expect(autoClaims[0]).toMatchObject({ labels: ["Frontend", "urgent"] });
+
+      autoClaims.length = 0;
+      const anyLabel = await run(startArgs(["--auto-claim-any-label"]), {
+        ORRERY_RUNNER_CONFIG_DIR: dir,
+      });
+      expect(anyLabel.code).toBe(0);
+      expect(autoClaims[0]).toMatchObject({ filter: "assignedToMe" });
+      expect(autoClaims[0]).not.toHaveProperty("labels");
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("stops the heartbeat loop on a runner_revoked 401 after workspace member removal", async () => {
     const dir = await makeDir();
     let heartbeats = 0;

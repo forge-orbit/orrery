@@ -469,7 +469,7 @@ const autoClaim = createRoute({
   path: "/api/runners/{runnerId}/auto-claim",
   summary: "Atomically claim the next ready issue for a Runner",
   description:
-    "Runner host credential only. Applies Orrery's readiness and claim rules within one transaction; `assignedToMe` never claims unassigned issues. A null dispatch means no work is ready or every slot is occupied.",
+    "Runner host credential only. Applies Orrery's readiness and claim rules within one transaction; `assignedToMe` never claims unassigned issues. Optional `labels` keeps only issues carrying every named project label, matched case-insensitively, and is re-checked under the claim lock. A null dispatch means no work is ready or every slot is occupied.",
   request: {
     params: runnerParams,
     body: { content: { "application/json": { schema: AutoClaimRequest } }, required: true },
@@ -890,7 +890,8 @@ export function createRunnersRest(service: RunnersService, sessionReader: Sessio
   app.openapi(autoClaim, async (c) => {
     try {
       const { runnerId } = c.req.valid("param");
-      return c.json(await service.autoClaim(bearer(c), runnerId, c.req.valid("json").filter), 200);
+      const { filter, labels } = c.req.valid("json");
+      return c.json(await service.autoClaim(bearer(c), runnerId, filter, labels), 200);
     } catch (error) {
       return failure(c, error);
     }

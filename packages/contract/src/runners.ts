@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Timestamp, WorkspaceKind } from "./common.ts";
 import { ProjectAccessLevel } from "./projects.ts";
 import { Run } from "./runs.ts";
-import { ReadyWorkFilter, WorkSession } from "./sessions.ts";
+import { LabelFilter, ReadyWorkFilter, WorkSession } from "./sessions.ts";
 
 /** A stable, opaque identity for a runner-related resource. */
 export const RunnerId = z.string().min(1).max(200).meta({ id: "RunnerId" });
@@ -511,7 +511,10 @@ export type IssueDispatchesResponse = z.infer<typeof IssueDispatchesResponse>;
  * `assignedToMe` never picks up an unassigned (potentially human) issue.
  */
 export const AutoClaimRequest = z
-  .object({ filter: ReadyWorkFilter.default("assignedToMe") })
+  .object({
+    filter: ReadyWorkFilter.default("assignedToMe"),
+    labels: LabelFilter.optional(),
+  })
   .meta({ id: "AutoClaimRequest" });
 export type AutoClaimRequest = z.infer<typeof AutoClaimRequest>;
 

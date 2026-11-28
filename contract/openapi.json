@@ -4455,6 +4455,14 @@
           "unassigned"
         ]
       },
+      "LabelFilter": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
       "Question": {
         "type": "object",
         "properties": {
@@ -7710,6 +7718,9 @@
         "properties": {
           "filter": {
             "$ref": "#/components/schemas/ReadyWorkFilter"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/LabelFilter"
           }
         }
       },
@@ -16277,7 +16288,7 @@
     "/api/projects/{projectId}/ready-work": {
       "get": {
         "summary": "Minimal ready-work listing for a project",
-        "description": "Open issues that are not Needs input, have no live active session, and have no blocker whose status is not closed, evaluated in database time. `filter` selects all claimable work (the default), only work assigned to the caller, or only unassigned work; an agent never sees work assigned to a human or another agent. Assigned work sorts first, then priority, sortOrder and createdAt. Needs no claim; a full board is out of scope.",
+        "description": "Open issues that are not Needs input, have no live active session, and have no blocker whose status is not closed, evaluated in database time. `filter` selects all claimable work (the default), only work assigned to the caller, or only unassigned work; an agent never sees work assigned to a human or another agent. `labels` keeps only work carrying every named project label, matched case-insensitively; repeat the parameter for more labels. Assigned work sorts first, then priority, sortOrder and createdAt. Needs no claim; a full board is out of scope.",
         "parameters": [
           {
             "schema": {
@@ -16295,6 +16306,14 @@
             },
             "required": false,
             "name": "filter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "$ref": "#/components/schemas/LabelFilter"
+            },
+            "required": false,
+            "name": "labels",
             "in": "query"
           }
         ],
@@ -19503,7 +19522,7 @@
     "/api/runners/{runnerId}/auto-claim": {
       "post": {
         "summary": "Atomically claim the next ready issue for a Runner",
-        "description": "Runner host credential only. Applies Orrery's readiness and claim rules within one transaction; `assignedToMe` never claims unassigned issues. A null dispatch means no work is ready or every slot is occupied.",
+        "description": "Runner host credential only. Applies Orrery's readiness and claim rules within one transaction; `assignedToMe` never claims unassigned issues. Optional `labels` keeps only issues carrying every named project label, matched case-insensitively, and is re-checked under the claim lock. A null dispatch means no work is ready or every slot is occupied.",
         "parameters": [
           {
             "schema": {

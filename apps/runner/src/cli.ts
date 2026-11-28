@@ -63,6 +63,9 @@ Options:
   --heartbeat-ms N          Heartbeat interval (start; default: 5000)
   --auto-claim              Opt in to autonomous ready-work pickup (start)
   --auto-claim-filter FILTER  assignedToMe | unassigned | all (start; default: assignedToMe)
+  --auto-claim-label NAME   Require this project label, repeatable (start; default
+                            with --auto-claim: ready-for-agent)
+  --auto-claim-any-label    Disable the default label gate (start; conflicts with --auto-claim-label)
   --auto-claim-poll-ms N    Auto-claim poll interval (start; default: 1000)
   --workspace SLUG-OR-NAME  Workspace ID, name or slug (start/init; disambiguates an issue key in work)
   --project KEY-OR-NAME     Project ID, key or name (start/init)
@@ -102,6 +105,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       reconfigure: { type: "boolean" },
       "auto-claim": { type: "boolean" },
       "auto-claim-filter": { type: "string" },
+      "auto-claim-label": { type: "string", multiple: true },
+      "auto-claim-any-label": { type: "boolean" },
       "auto-claim-poll-ms": { type: "string" },
       repo: { type: "string" },
       "heartbeat-ms": { type: "string" },
@@ -219,6 +224,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
               ? rawFilter
               : fail("--auto-claim-filter must be assignedToMe, unassigned or all");
         const autoClaimPollMs = positive(values["auto-claim-poll-ms"], "--auto-claim-poll-ms");
+        const requestedLabels = (values["auto-claim-label"] ?? []).map((label) => label.trim());
+        if (requestedLabels.some((label) => label === "")) {
+          fail("--auto-claim-label must not be empty");
+        }
+        const anyLabel = values["auto-claim-any-label"] === true;
+        if (anyLabel && requestedLabels.length > 0) {
+          fail("--auto-claim-label and --auto-claim-any-label cannot be combined");
+        }
+        // Autonomous pickup is label-gated by default so a runner never silently
+        // pulls personal human todo issues (ADR-0013).
+        const autoClaimLabels = anyLabel
+          ? undefined
+          : requestedLabels.length > 0
+            ? requestedLabels
+            : ["ready-for-agent"];
         await start({
           ...(values.server === undefined ? {} : { server: values.server }),
           ...(workspaceId === undefined ? {} : { workspaceId }),
@@ -234,6 +254,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           supervision: supervision(),
           autoClaim: values["auto-claim"] === true,
           ...(filter === undefined ? {} : { autoClaimFilter: filter }),
+          ...(autoClaimLabels === undefined ? {} : { autoClaimLabels }),
           ...(autoClaimPollMs === undefined ? {} : { autoClaimPollMs }),
         });
         return;

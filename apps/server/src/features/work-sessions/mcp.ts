@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
+  LabelFilter,
   ReadyWorkFilter,
   SessionActivityKind,
   type AgentIdentity,
@@ -122,6 +123,7 @@ export function createSessionsMcp(service: SessionsService, authenticate: AgentA
         { kind: "agent", identity },
         str(args.projectId, "projectId"),
         args.filter === undefined ? undefined : ReadyWorkFilter.parse(args.filter),
+        args.labels === undefined ? undefined : LabelFilter.parse(args.labels),
       ),
     }),
   };

@@ -6,6 +6,8 @@ import { openApiDocument } from "../../platform/openapi.ts";
 const field = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
 
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
 const schema = (name: string): unknown =>
   field(field(field(openApiDocument(routes), "components"), "schemas"), name);
 
@@ -28,5 +30,32 @@ describe("generated OpenAPI Dispatch prompt schemas", () => {
       false,
     );
     expect(Dispatch.shape.prompt.safeParse(null).success).toBe(true);
+  });
+});
+
+describe("generated OpenAPI label filters (#280)", () => {
+  it("advertises the shared LabelFilter on auto-claim and ready-work", () => {
+    expect(schema("LabelFilter")).toEqual({
+      type: "array",
+      items: { type: "string", minLength: 1, maxLength: 200 },
+    });
+    expect(field(field(schema("AutoClaimRequest"), "properties"), "labels")).toEqual({
+      $ref: "#/components/schemas/LabelFilter",
+    });
+
+    const readyWork = field(
+      field(
+        field(field(openApiDocument(routes), "paths"), "/api/projects/{projectId}/ready-work"),
+        "get",
+      ),
+      "parameters",
+    );
+    const labels = list(readyWork).find((parameter) => field(parameter, "name") === "labels");
+    expect(labels).toEqual({
+      schema: { $ref: "#/components/schemas/LabelFilter" },
+      required: false,
+      name: "labels",
+      in: "query",
+    });
   });
 });

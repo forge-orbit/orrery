@@ -3708,7 +3708,7 @@ def extract_code_facts() -> dict[str, Any]:
         m46_auto_fn, ".from(issues)", '.for("update")', "authenticateHostRunnerForDeps("
     )
     m46_auto_recheck = (
-        "await assertIssueStillDispatchable(tx, candidate.id, runner.agentId, filter)"
+        "await assertIssueStillDispatchable(tx, candidate.id, runner.agentId, filter,"
         in m46_auto_fn
         and ordered(m46_auto_fn, '.for("update")', "await assertIssueStillDispatchable(")
     )
@@ -3932,7 +3932,7 @@ def extract_code_facts() -> dict[str, Any]:
     )
     sessions_ready_work_fn = slice_between(
         sessions_trash_src,
-        "async readyWork(actorArg, projectId, filter = \"all\")",
+        "async readyWork(actorArg, projectId, filter = \"all\", labels = [])",
         "async sweep()",
     )
     project_dependencies_fn = slice_between(

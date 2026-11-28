@@ -24,6 +24,7 @@ import {
   and,
   desc,
   eq,
+  exists,
   gt,
   inArray,
   isNull,
@@ -41,8 +42,10 @@ import {
   agents,
   humans,
   issueDependencies,
+  issueLabels,
   issues,
   projectActivity,
+  projectLabels,
   projects,
   runs,
   workSessionActivities,
@@ -181,7 +184,12 @@ export interface SessionsService {
     sessionId: string,
   ): Promise<SessionActivity[]>;
 
-  readyWork(actor: WorkActor | null, projectId: string, filter?: ReadyWorkFilter): Promise<Issue[]>;
+  readyWork(
+    actor: WorkActor | null,
+    projectId: string,
+    filter?: ReadyWorkFilter,
+    labels?: readonly string[],
+  ): Promise<Issue[]>;
 
   agentHoldsSession(
     tx: DbTransaction,
@@ -303,6 +311,30 @@ function assignedToActor(issue: Issue, actor: WorkActor): boolean {
   return actor.kind === "agent"
     ? issue.assignee.agentId === actor.identity.agentId
     : issue.assignee.humanId === actor.account.humanId;
+}
+
+/**
+ * SQL condition: the issue carries a project label whose name matches
+ * case-insensitively. One condition per requested label gives AND semantics.
+ */
+function issueCarriesLabel(tx: DbTransaction, lowerCaseName: string) {
+  return exists(
+    tx
+      .select({ labelId: issueLabels.labelId })
+      .from(issueLabels)
+      .innerJoin(projectLabels, eq(projectLabels.id, issueLabels.labelId))
+      .where(
+        and(
+          eq(issueLabels.issueId, issues.id),
+          sql`lower(${projectLabels.name}) = ${lowerCaseName}`,
+        ),
+      ),
+  );
+}
+
+/** Requested label names, lowercased and deduplicated for case-insensitive matching. */
+function wantedLabels(labels: readonly string[] | undefined): string[] {
+  return [...new Set((labels ?? []).map((label) => label.toLowerCase()))];
 }
 
 async function humanStillHasWorkspaceAccess(
@@ -1580,7 +1612,7 @@ export function createSessionsService({
       );
     },
 
-    async readyWork(actorArg, projectId, filter = "all") {
+    async readyWork(actorArg, projectId, filter = "all", labels = []) {
       const actor = requireActor(actorArg);
 
       await expireCommittedForProject(projectId);
@@ -1636,6 +1668,8 @@ export function createSessionsService({
             noOpenBlocker,
           ];
           if (assigneeFilter !== undefined) conditions.push(assigneeFilter);
+          // Every requested label must be attached (case-insensitive AND).
+          for (const label of wantedLabels(labels)) conditions.push(issueCarriesLabel(tx, label));
           const rows = await tx
             .select({ id: issues.id })
             .from(issues)

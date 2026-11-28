@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import {
   ActivityDetailBlockV1,
@@ -64,6 +65,7 @@ let database: Database;
 let app: Hono;
 let projectsService: ReturnType<typeof createProjectsFeature>["service"];
 let sessionsService: SessionsService;
+let sessionsFeatureForApp: ReturnType<typeof createSessionsFeature>;
 let accountsForApp: ReturnType<typeof createAccountsFeature>;
 let projectsForApp: ReturnType<typeof createProjectsFeature>;
 let agentsForApp: ReturnType<typeof createAgentsFeature>;
@@ -165,6 +167,7 @@ beforeAll(async () => {
     sessionsFeature.agentHoldsSession(tx, agentId, workspaceId, issueId);
   projectsService = projectsFeature.service;
   sessionsService = sessionsFeature.service;
+  sessionsFeatureForApp = sessionsFeature;
   app = createApp({
     features: [accounts, projectsFeature, agentsFeature, sessionsFeature],
     publicUrl: PUBLIC_URL,
@@ -1056,6 +1059,97 @@ describe("work sessions against real Postgres", () => {
       low.id,
       none.id,
     ]);
+  });
+
+  it("filters ready work by every requested project label, case-insensitively (#280)", async () => {
+    const f = await bootstrap();
+    const human = humanActor(f);
+    const identity = await identityFor(f.secret);
+    const actor = { kind: "agent" as const, identity };
+    const frontend = await projectsService.createLabel(human, f.projectId, {
+      name: "Frontend",
+      color: "#3366ff",
+    });
+    const urgent = await projectsService.createLabel(human, f.projectId, {
+      name: "urgent",
+      color: "#ff0000",
+    });
+    const both = await humanIssue(f, "Frontend and urgent");
+    const frontOnly = await humanIssue(f, "Frontend only");
+    const backend = await humanIssue(f, "Backend");
+    await projectsService.attachLabel(human, both.id, frontend.id);
+    await projectsService.attachLabel(human, both.id, urgent.id);
+    await projectsService.attachLabel(human, frontOnly.id, frontend.id);
+
+    const readyIds = async (labels?: string[]) =>
+      (await sessionsService.readyWork(actor, f.projectId, undefined, labels))
+        .map((issue) => issue.id)
+        .toSorted();
+    const all = [both.id, frontOnly.id, backend.id].toSorted();
+    const frontendIssues = [both.id, frontOnly.id].toSorted();
+
+    // Omitted and empty labels stay unfiltered for interactive callers.
+    expect(await readyIds()).toEqual(all);
+    expect(await readyIds([])).toEqual(all);
+    // A name matches case-insensitively; several names are ANDed.
+    expect(await readyIds(["frontend"])).toEqual(frontendIssues);
+    expect(await readyIds(["FRONTEND", "Urgent"])).toEqual([both.id]);
+    // Unknown labels match nothing.
+    expect(await readyIds(["missing"])).toEqual([]);
+    expect(await readyIds(["frontend", "missing"])).toEqual([]);
+
+    // REST query: a single parameter and repeated parameters both parse as the array.
+    const restIds = async (query: string) => {
+      const res = await getJson(
+        `/api/projects/${f.projectId}/ready-work?${query}`,
+        undefined,
+        f.secret,
+      );
+      expect(res.status).toBe(200);
+      return IssuesResponse.parse(await res.json())
+        .map((issue) => issue.id)
+        .toSorted();
+    };
+    expect(await restIds("labels=Frontend")).toEqual(frontendIssues);
+    expect(await restIds("labels=frontend&labels=urgent")).toEqual([both.id]);
+    expect(await restIds("labels=missing")).toEqual([]);
+    expect(await restIds("")).toEqual(all);
+
+    // MCP ready_work takes the same optional labels filter.
+    type ToolResult = { structuredContent?: unknown; isError?: boolean };
+    const handlers = new Map<string, (args: Record<string, unknown>) => Promise<ToolResult>>();
+    const registrar = {
+      registerTool(
+        name: string,
+        _config: unknown,
+        handler: (args: Record<string, unknown>) => Promise<ToolResult>,
+      ) {
+        handlers.set(name, handler);
+      },
+    };
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- MCP SDK seam
+    const toolServer = registrar as unknown as McpServer;
+    sessionsFeatureForApp.registerTools?.(
+      toolServer,
+      new Request(`${PUBLIC_URL}/mcp`, {
+        headers: { authorization: `Bearer ${f.secret}` },
+      }),
+    );
+    const readyTool = handlers.get("ready_work");
+    if (readyTool === undefined) throw new Error("ready_work was not registered");
+    const mcpReady = await readyTool({ projectId: f.projectId, labels: ["FRONTEND"] });
+    expect(mcpReady.isError).not.toBe(true);
+    expect(
+      IssuesResponse.parse(field(mcpReady.structuredContent, "issues"))
+        .map((issue) => issue.id)
+        .toSorted(),
+    ).toEqual(frontendIssues);
+    const mcpAll = await readyTool({ projectId: f.projectId });
+    expect(
+      IssuesResponse.parse(field(mcpAll.structuredContent, "issues"))
+        .map((issue) => issue.id)
+        .toSorted(),
+    ).toEqual(all);
   });
 
   it("reorders ready work by writing only the dragged card's midpoint", async () => {
