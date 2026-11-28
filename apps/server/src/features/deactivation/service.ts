@@ -362,6 +362,7 @@ export function createDeactivationService({ db }: DeactivationDeps): Deactivatio
     async reactivate(account, humanId) {
       const actor = requireAccount(account);
       return db.transaction(async (tx) => {
+        await lockOwnershipWrites(tx);
         await requireActiveAdministrator(tx, actor.humanId);
         const target = await accountById(tx, humanId);
         if (target.deactivatedAt === null) throw new DeactivationError("already_active");

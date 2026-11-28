@@ -83,6 +83,17 @@ function requireAdministrator(account: SessionAccount | null): SessionAccount {
   return account;
 }
 
+async function requireActiveAdministratorInTx(tx: DbTransaction, humanId: string): Promise<void> {
+  const [row] = await tx
+    .select({ isSystemAdministrator: humans.isSystemAdministrator })
+    .from(humans)
+    .where(and(eq(humans.id, humanId), isNull(humans.deactivatedAt)))
+    .for("share")
+    .limit(1);
+  if (row === undefined) throw new InvitationsError("not_signed_in");
+  if (!row.isSystemAdministrator) throw new InvitationsError("not_admin");
+}
+
 async function recordDelivery(db: PostgresJsDatabase, id: string, delivery: InvitationDelivery) {
   await db
     .update(invitations)
@@ -238,6 +249,7 @@ export function createInvitationsService({
       const id = randomUUID();
       try {
         await db.transaction(async (tx) => {
+          await requireActiveAdministratorInTx(tx, admin.humanId);
           await tx.execute(sql`select pg_advisory_xact_lock(61683815, hashtext(${input.email}))`);
 
           if (await emailRegistered(input.email, tx)) {
@@ -346,6 +358,7 @@ export function createInvitationsService({
       let email: string;
       try {
         email = await db.transaction(async (tx) => {
+          await requireActiveAdministratorInTx(tx, admin.humanId);
           const [target] = await tx
             .select({ email: invitations.email })
             .from(invitations)
@@ -416,9 +429,10 @@ export function createInvitationsService({
     },
 
     async revokeInstallation(account, invitationId) {
-      requireAdministrator(account);
+      const admin = requireAdministrator(account);
       await expireDueInstallationInvitations(db);
       await db.transaction(async (tx) => {
+        await requireActiveAdministratorInTx(tx, admin.humanId);
         const [row] = await tx
           .select({ id: invitations.id, status: invitations.status })
           .from(invitations)

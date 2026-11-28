@@ -38,6 +38,7 @@ import {
 import type { DbTransaction } from "../../platform/db.ts";
 import { tokenHash as hashToken } from "../../platform/tokens.ts";
 import type { SessionAccount } from "../accounts/index.ts";
+import { revokeProjectRunners } from "../runners/index.ts";
 import { transferAuthorizationMachine } from "./state-machine.ts";
 
 export type TransfersErrorKind =
@@ -742,6 +743,9 @@ async function acceptInTransaction(
 
   await tx.delete(projectAccessGrants).where(eq(projectAccessGrants.projectId, auth.projectId));
   await tx.delete(agentApiKeyProjects).where(eq(agentApiKeyProjects.projectId, auth.projectId));
+  // Source-workspace Runners and their pending/uncertain dispatches must not
+  // survive the transfer or block dispatch in the destination workspace.
+  await revokeProjectRunners(tx, source.id, auth.projectId);
   // Keep the source workspace's webhook scopes from widening: remove the transferred
   // project from their explicit project lists but leave all_projects untouched.
   const sourceWebhookIds = tx
@@ -997,8 +1001,8 @@ export function createTransfersService({ db }: TransfersDeps): TransfersService 
     async accept(account, token, key) {
       if (account === null) throw new TransfersError("not_signed_in");
       return db.transaction(async (tx) => {
-        const row = await pendingAuthorizationByToken(tx, token, true);
         await lockOwnershipWrites(tx);
+        const row = await pendingAuthorizationByToken(tx, token, true);
         return acceptInTransaction(tx, row, account.humanId, key);
       });
     },

@@ -7,6 +7,7 @@ import { createRunnersService, type RunnersDeps, type RunnersService } from "./s
 export { routes as runnersRoutes };
 export {
   RunnersError,
+  revokeProjectRunners,
   revokeRunnerHostsForHuman,
   revokeWorkspaceRunnersForMember,
   RUNNER_ONLINE_WINDOW_SECONDS,

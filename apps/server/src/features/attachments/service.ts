@@ -209,6 +209,27 @@ const EXTENSION_TYPES: Record<string, UploadFormat> = {
   svg: "image/svg+xml",
 };
 
+/** Safe ASCII object-key extensions derived from the validated format, never from user filenames. */
+const FORMAT_EXTENSIONS: Record<UploadFormat, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "application/pdf": "pdf",
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "text/csv": "csv",
+  "text/x-log": "log",
+  "text/x-patch": "patch",
+  "application/json": "json",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/zip": "zip",
+  "application/gzip": "gz",
+  "image/svg+xml": "svg",
+};
+
 const ZIP_TYPES: ReadonlySet<string> = new Set([
   "application/zip",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -502,9 +523,7 @@ export function createAttachmentsService({
       const uploadedByAgentId = actor.kind === "agent" ? actor.identity.agentId : null;
 
       const objectId = randomUUID();
-      const extension = filename.includes(".")
-        ? (filename.split(".").pop() ?? "").toLowerCase()
-        : "bin";
+      const extension = FORMAT_EXTENSIONS[format];
       const key = `attachments/${projectId}/${objectId}.${extension}`;
       const sha256 = createHash("sha256").update(data).digest("hex");
 

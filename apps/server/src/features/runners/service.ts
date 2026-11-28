@@ -3868,3 +3868,58 @@ export async function revokeWorkspaceRunnersForMember(
   );
   return active.length;
 }
+
+/**
+ * Project transfer cascade: revoke every source-workspace Runner bound to the
+ * transferred project and settle any remaining non-ended dispatches so stale
+ * uncertain/pending attempts never block dispatch in the destination workspace.
+ */
+export async function revokeProjectRunners(
+  tx: DbTransaction,
+  workspaceId: string,
+  projectId: string,
+): Promise<number> {
+  const active = await tx
+    .select({ id: runners.id })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.workspaceId, workspaceId),
+        eq(runners.projectId, projectId),
+        isNull(runners.revokedAt),
+      ),
+    );
+  if (active.length > 0) {
+    const activeIds = active.map((row) => row.id);
+    await tx
+      .update(runners)
+      .set({ revokedAt: sql`statement_timestamp()` })
+      .where(inArray(runners.id, activeIds));
+    await revokeDispatchTokensForRunners(tx, activeIds, "project_transferred");
+  }
+  await tx
+    .update(dispatchTokens)
+    .set({ revokedAt: sql`statement_timestamp()` })
+    .where(
+      and(
+        eq(dispatchTokens.workspaceId, workspaceId),
+        eq(dispatchTokens.projectId, projectId),
+        isNull(dispatchTokens.revokedAt),
+      ),
+    );
+  await tx
+    .update(runnerDispatches)
+    .set({
+      state: "ended",
+      endedAt: sql`statement_timestamp()`,
+      needsHumanResolution: false,
+    })
+    .where(
+      and(
+        eq(runnerDispatches.workspaceId, workspaceId),
+        eq(runnerDispatches.projectId, projectId),
+        inArray(runnerDispatches.state, ["pending", "active", "uncertain"]),
+      ),
+    );
+  return active.length;
+}
