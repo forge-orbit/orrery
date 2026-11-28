@@ -105,19 +105,55 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
 
   let activeController: SlotController | undefined;
   let commandLoopPromise: Promise<void> | undefined;
+  let needsReconnect = false;
+
+  const reportActiveReconnect = async (reason: string): Promise<void> => {
+    if (!needsReconnect || sessionAbort.signal.aborted) return;
+    needsReconnect = false;
+    try {
+      const activeAttempts =
+        activeController === undefined
+          ? []
+          : [
+              {
+                dispatchAttemptId: activeController.dispatchAttemptId,
+                lastSeq: activeController.lastSeq,
+              },
+            ];
+      const result = await client.reconnect(runner.id, { activeAttempts });
+      if (result.resolutions.length > 0) {
+        write(
+          `One-shot reconnect (${reason}) reconciled ${result.resolutions.length} dispatch attempt(s).`,
+        );
+      }
+    } catch (error) {
+      needsReconnect = true;
+      if (error instanceof RunnerRequestError && error.status === 401) {
+        write("One-shot reconnect rejected (401). Stopping local operation immediately.");
+        activeController?.requestCancel("revoked");
+        sessionAbort.abort();
+        return;
+      }
+      write(`One-shot reconnect (${reason}) failed; will retry: ${String(error)}`);
+    }
+  };
 
   try {
     await client.reconnect(runner.id, { activeAttempts: [] });
     heartbeatTimer = setInterval(() => {
-      void client.heartbeat(runner.id, { activeSlotCount: 1 }).catch((error: unknown) => {
-        if (error instanceof RunnerRequestError && error.status === 401) {
-          write("One-shot heartbeat rejected (401). Stopping local operation immediately.");
-          activeController?.requestCancel("revoked");
-          sessionAbort.abort();
-          return;
-        }
-        write(`One-shot heartbeat failed: ${String(error)}`);
-      });
+      void client
+        .heartbeat(runner.id, { activeSlotCount: 1 })
+        .then(() => reportActiveReconnect("heartbeat recovered"))
+        .catch((error: unknown) => {
+          if (error instanceof RunnerRequestError && error.status === 401) {
+            write("One-shot heartbeat rejected (401). Stopping local operation immediately.");
+            activeController?.requestCancel("revoked");
+            sessionAbort.abort();
+            return;
+          }
+          needsReconnect = true;
+          write(`One-shot heartbeat failed: ${String(error)}`);
+        });
     }, options.heartbeatMs ?? 5000);
     heartbeatTimer.unref();
     const dispatch = await client.createRunnerDispatch(runner.id, {
@@ -160,10 +196,12 @@ export async function work(target: string, options: WorkOptions): Promise<Superv
             sessionAbort.abort();
             return;
           }
+          needsReconnect = true;
           write(`One-shot command poll failed; retrying: ${String(error)}`);
           await delay(1000, sessionAbort.signal, "One-shot stopped.").catch(() => {});
           continue;
         }
+        await reportActiveReconnect("command poll recovered");
         let ackTarget = afterSeq;
         for (const command of batch.commands) {
           if (command.seq <= afterSeq) continue;

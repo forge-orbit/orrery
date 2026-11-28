@@ -3,8 +3,8 @@ import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Divider } from "@astryxdesign/core/Divider";
 import { Heading } from "@astryxdesign/core/Heading";
-import { Section } from "@astryxdesign/core/Section";
 import { Stack } from "@astryxdesign/core/Stack";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
@@ -225,10 +225,10 @@ export function ContextRail({
   const dispatchPrompt = prompt?.trim() ?? "";
   const promptIsLong = dispatchPrompt.length > 280;
   return (
-    <Stack gap={3} data-context-rail="">
+    <Stack gap={4} data-context-rail="">
       {dispatchPrompt !== "" && (
-        <Section padding={3} data-dispatch-prompt="">
-          <Stack gap={2}>
+        <>
+          <Stack gap={2} data-dispatch-prompt="">
             <Heading level={3} color="inherit">
               Dispatch prompt
             </Heading>
@@ -253,153 +253,152 @@ export function ContextRail({
               </Text>
             )}
           </Stack>
-        </Section>
+          <Divider />
+        </>
       )}
-      <Section padding={3}>
-        <Stack gap={2}>
-          <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
-            <Heading level={3} color="inherit">
-              Agent Plan
-            </Heading>
-            <Token
-              label={`${done}/${plan.length}`}
-              size="sm"
-              color={done === plan.length && plan.length > 0 ? "green" : "orange"}
-            />
-          </Stack>
-          {plan.length === 0 ? (
-            <Text type="supporting" color="secondary">
-              No plan chunks streamed yet.
-            </Text>
-          ) : (
-            <Stack as="ul" gap={0.5} data-plan-checklist="">
-              {plan.map((item, index) => {
-                const status = item.done
-                  ? "done"
-                  : index === firstPending
-                    ? "in progress"
-                    : "pending";
-                return (
-                  <Stack
-                    as="li"
-                    key={item.label}
-                    direction="horizontal"
-                    gap={1.5}
-                    vAlign="center"
-                    wrap="wrap"
-                    data-plan-done={String(item.done)}
-                    data-plan-status={status}
-                  >
-                    <Text type="body" color="inherit">
-                      {item.done ? "✓" : "○"} {item.label}
-                    </Text>
-                    <Token
-                      label={status}
-                      size="sm"
-                      color={item.done ? "green" : status === "in progress" ? "orange" : "gray"}
-                    />
-                  </Stack>
-                );
-              })}
-            </Stack>
-          )}
-        </Stack>
-      </Section>
-
-      <Section padding={3}>
-        <Stack gap={2}>
+      <Stack gap={2}>
+        <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
           <Heading level={3} color="inherit">
-            Worktree Changed Files
+            Agent Plan
           </Heading>
-          {files.length === 0 ? (
-            <Text type="supporting" color="secondary">
-              No file edits streamed yet.
-            </Text>
-          ) : (
-            <Stack as="ul" gap={0.5}>
-              {files.map((file) => (
-                <Stack as="li" key={file.path} data-changed-file={file.path}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    label={file.path}
-                    isDisabled={selectedFile === file.path}
-                    data-file-jump={file.path}
-                    onClick={() => onSelectFile(file.path)}
-                  />
-                </Stack>
-              ))}
-            </Stack>
-          )}
+          <Token
+            label={`${done}/${plan.length}`}
+            size="sm"
+            color={done === plan.length && plan.length > 0 ? "green" : "orange"}
+          />
         </Stack>
-      </Section>
-
-      <Section padding={3}>
-        <Stack gap={2}>
-          <Heading level={3} color="inherit">
-            Child Workers
-          </Heading>
-          {childWorkers.length === 0 ? (
-            <Text type="supporting" color="secondary">
-              No child workers started.
-            </Text>
-          ) : (
-            <Stack as="ul" gap={0.5}>
-              {childWorkers.map((child) => (
+        {plan.length === 0 ? (
+          <Text type="supporting" color="secondary">
+            No plan chunks streamed yet.
+          </Text>
+        ) : (
+          <Stack as="ul" gap={0.5} data-plan-checklist="">
+            {plan.map((item, index) => {
+              const status = item.done
+                ? "done"
+                : index === firstPending
+                  ? "in progress"
+                  : "pending";
+              return (
                 <Stack
                   as="li"
-                  key={child.id}
+                  key={item.label}
                   direction="horizontal"
                   gap={1.5}
                   vAlign="center"
                   wrap="wrap"
-                  data-child-worker={child.id}
+                  data-plan-done={String(item.done)}
+                  data-plan-status={status}
                 >
-                  <Text type="supporting" color="secondary">
-                    {child.agentType ?? child.agentId ?? child.childRunId ?? "Child"}
+                  <Text type="body" color="inherit">
+                    {item.done ? "✓" : "○"} {item.label}
                   </Text>
                   <Token
-                    label={child.status}
+                    label={status}
                     size="sm"
-                    color={child.status === "active" ? "green" : "gray"}
+                    color={item.done ? "green" : status === "in progress" ? "orange" : "gray"}
                   />
                 </Stack>
-              ))}
-            </Stack>
-          )}
-        </Stack>
-      </Section>
-
-      <Section padding={3}>
-        <Stack gap={2}>
-          <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
-            <Heading level={3} color="inherit">
-              Host Health
-            </Heading>
-            <Token
-              label={presence}
-              size="sm"
-              color={presence === "busy" ? "orange" : presence === "offline" ? "gray" : "green"}
-              data-host-health-presence=""
-            />
+              );
+            })}
           </Stack>
+        )}
+      </Stack>
+
+      <Divider />
+
+      <Stack gap={2}>
+        <Heading level={3} color="inherit">
+          Worktree Changed Files
+        </Heading>
+        {files.length === 0 ? (
           <Text type="supporting" color="secondary">
-            {host?.displayName ?? "Runner host"} · {host?.platform ?? "unknown platform"}
+            No file edits streamed yet.
           </Text>
+        ) : (
+          <Stack as="ul" gap={0.5}>
+            {files.map((file) => (
+              <Stack as="li" key={file.path} data-changed-file={file.path}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  label={file.path}
+                  isDisabled={selectedFile === file.path}
+                  data-file-jump={file.path}
+                  onClick={() => onSelectFile(file.path)}
+                />
+              </Stack>
+            ))}
+          </Stack>
+        )}
+      </Stack>
+
+      <Divider />
+
+      <Stack gap={2}>
+        <Heading level={3} color="inherit">
+          Child Workers
+        </Heading>
+        {childWorkers.length === 0 ? (
           <Text type="supporting" color="secondary">
-            Last seen{" "}
-            {host?.lastSeenAt === undefined || host.lastSeenAt === null
-              ? "unknown"
-              : relativeTime(host.lastSeenAt)}
+            No child workers started.
           </Text>
-          {runner?.lastSeenAt !== undefined && (
-            <Text type="supporting" color="secondary">
-              Runner heartbeat {formatDateTime(runner.lastSeenAt)}
-            </Text>
-          )}
+        ) : (
+          <Stack as="ul" gap={0.5}>
+            {childWorkers.map((child) => (
+              <Stack
+                as="li"
+                key={child.id}
+                direction="horizontal"
+                gap={1.5}
+                vAlign="center"
+                wrap="wrap"
+                data-child-worker={child.id}
+              >
+                <Text type="supporting" color="secondary">
+                  {child.agentType ?? child.agentId ?? child.childRunId ?? "Child"}
+                </Text>
+                <Token
+                  label={child.status}
+                  size="sm"
+                  color={child.status === "active" ? "green" : "gray"}
+                />
+              </Stack>
+            ))}
+          </Stack>
+        )}
+      </Stack>
+
+      <Divider />
+
+      <Stack gap={2}>
+        <Stack direction="horizontal" gap={2} justify="between" vAlign="center" wrap="wrap">
+          <Heading level={3} color="inherit">
+            Host Health
+          </Heading>
+          <Token
+            label={presence}
+            size="sm"
+            color={presence === "busy" ? "orange" : presence === "offline" ? "gray" : "green"}
+            data-host-health-presence=""
+          />
         </Stack>
-      </Section>
+        <Text type="supporting" color="secondary">
+          {host?.displayName ?? "Runner host"} · {host?.platform ?? "unknown platform"}
+        </Text>
+        <Text type="supporting" color="secondary">
+          Last seen{" "}
+          {host?.lastSeenAt === undefined || host.lastSeenAt === null
+            ? "unknown"
+            : relativeTime(host.lastSeenAt)}
+        </Text>
+        {runner?.lastSeenAt !== undefined && (
+          <Text type="supporting" color="secondary">
+            Runner heartbeat {formatDateTime(runner.lastSeenAt)}
+          </Text>
+        )}
+      </Stack>
     </Stack>
   );
 }

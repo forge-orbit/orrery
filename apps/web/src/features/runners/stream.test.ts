@@ -18,6 +18,8 @@ import {
   isOwnerOfRunner,
   leaseSeconds,
   mergeStreamChunks,
+  STUDIO_CONNECTION_BADGES,
+  studioConnectionBadge,
   telemetryText,
 } from "./stream.ts";
 
@@ -310,5 +312,23 @@ describe("ACP v1 chunk coalescing", () => {
     expect(defaultOpenFor(coalesced[1]!)).toBe(true);
     expect(coalesced[2]?.eventType).toBe("tool_call");
     expect(chunkStatus(coalesced[2]!)).toBe("passed");
+  });
+
+  it("keeps the Live Session Studio connection badge steady across background polls", () => {
+    expect(
+      studioConnectionBadge({ bareUrl: false, active: true, isPending: false, isError: false }),
+    ).toBe(STUDIO_CONNECTION_BADGES.live);
+    expect(
+      studioConnectionBadge({ bareUrl: true, active: false, isPending: false, isError: false }),
+    ).toBe(STUDIO_CONNECTION_BADGES.connected);
+    expect(
+      studioConnectionBadge({ bareUrl: false, active: true, isPending: true, isError: false }),
+    ).toBe(STUDIO_CONNECTION_BADGES.connecting);
+    expect(
+      studioConnectionBadge({ bareUrl: false, active: true, isPending: false, isError: true }),
+    ).toBe(STUDIO_CONNECTION_BADGES.reconnecting);
+    expect(
+      studioConnectionBadge({ bareUrl: false, active: false, isPending: false, isError: false }),
+    ).toBe(STUDIO_CONNECTION_BADGES.replay);
   });
 });

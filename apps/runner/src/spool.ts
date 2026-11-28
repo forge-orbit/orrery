@@ -7,7 +7,14 @@ import {
   type StreamChunk as StreamChunkType,
 } from "@orrery/contract";
 import { mainCheckoutRoot } from "./checkout.ts";
+import { readRunnerRequestError, RunnerRequestError } from "./client.ts";
 import { assertSecureOrigin, canonicalizeServerUrl } from "./origin.ts";
+
+const isEnoent = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  Reflect.get(error, "code") === "ENOENT";
 
 /**
  * Local spool for structured ACP events (#199). This module never imports the
@@ -105,8 +112,9 @@ export class StreamSpool {
     let contents: string;
     try {
       contents = await readFile(this.file, "utf8");
-    } catch {
-      return this;
+    } catch (error) {
+      if (isEnoent(error)) return this;
+      throw error;
     }
     let highest = 0;
     for (const line of contents.split("\n")) {
@@ -194,8 +202,9 @@ export class StreamSpool {
         if (parsed.success) chunks.push(parsed.data);
       }
       return chunks.toSorted((a, b) => a.seq - b.seq);
-    } catch {
-      return [];
+    } catch (error) {
+      if (isEnoent(error)) return [];
+      throw error;
     }
   }
 
@@ -222,7 +231,12 @@ export class StreamSpool {
         const retryAfter = Math.max(0, Number.isFinite(header) ? header : 1);
         attempt += 1;
         if (attempt >= this.maxAttempts) {
-          throw new Error(`stream batch still backpressured after ${attempt} attempts`);
+          const parsed = await readRunnerRequestError(response);
+          throw new RunnerRequestError(
+            429,
+            parsed.code ?? "stream_rate_limited",
+            `stream batch still backpressured after ${attempt} attempts`,
+          );
         }
         await this.sleepFn(retryAfter * 1000);
         continue;
@@ -233,7 +247,7 @@ export class StreamSpool {
           await this.sleepFn(100 * 2 ** attempt);
           continue;
         }
-        throw new Error(`stream batch failed with HTTP ${response.status}`);
+        throw await readRunnerRequestError(response);
       }
       const body = StreamBatchResponse.parse(await response.json());
       const acked = Math.min(body.ackedSeq, toSeq);

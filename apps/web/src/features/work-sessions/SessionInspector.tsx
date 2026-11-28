@@ -206,33 +206,31 @@ export function SessionInspector({
   const [open, setOpen] = useState(initialOpen);
 
   return (
-    <Card padding={4} data-session-inspector="" aria-label="Session inspector">
-      <Stack gap={2}>
-        <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" vAlign="center">
-          <Heading level={2} color="inherit">
-            Session inspector
-          </Heading>
-          <Button
-            label={open ? "Hide session inspector" : "Show session inspector"}
-            variant={open ? "ghost" : "secondary"}
-            size="sm"
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => setOpen((value) => !value)}
-          />
-        </Stack>
-        <section id={panelId} hidden={!open}>
-          <SessionInspectorDetails
-            issueId={issueId}
-            canContribute={canContribute}
-            open={open}
-            initialSessionId={initialSessionId}
-            compact={compact}
-            liveStudioLink={liveStudioLink}
-          />
-        </section>
+    <Stack gap={2} data-session-inspector="" aria-label="Session inspector">
+      <Stack direction="horizontal" gap={2} wrap="wrap" justify="between" vAlign="center">
+        <Heading level={2} color="inherit">
+          Session inspector
+        </Heading>
+        <Button
+          label={open ? "Hide session inspector" : "Show session inspector"}
+          variant={open ? "ghost" : "secondary"}
+          size="sm"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen((value) => !value)}
+        />
       </Stack>
-    </Card>
+      <section id={panelId} hidden={!open}>
+        <SessionInspectorDetails
+          issueId={issueId}
+          canContribute={canContribute}
+          open={open}
+          initialSessionId={initialSessionId}
+          compact={compact}
+          liveStudioLink={liveStudioLink}
+        />
+      </section>
+    </Stack>
   );
 }
 

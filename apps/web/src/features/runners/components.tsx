@@ -16,6 +16,7 @@ import {
 import { Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { Token } from "@astryxdesign/core/Token";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import type {
   ActiveWorkSession,
   FleetRunner,
@@ -25,6 +26,7 @@ import type {
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
+import { HarnessLogo, resolveHarnessKind } from "../../lib/harness.tsx";
 import { Link } from "../../lib/Link.tsx";
 import { activeSessionsQuery } from "../work-sessions/index.ts";
 import { revokeRunnerHost } from "./commands.ts";
@@ -53,25 +55,34 @@ function describeError(error: unknown): string {
 }
 
 /** Correlates an active Runner slot with its dispatch and diagnostic state. */
-/** Live per-Runner Harness catalog line: harness · models · default effort. */
+/** Compact per-Runner Harness badges; model count, default model, and effort appear on hover. */
 function HarnessCatalogCell({ runner }: { runner: FleetRunner }) {
   const harnesses = runner.harnessCatalog?.harnesses ?? [];
   if (harnesses.length === 0) {
     return <Text type="supporting">No harness probed yet</Text>;
   }
   return (
-    <Stack gap={1}>
+    <Stack direction="horizontal" gap={1} vAlign="center" wrap="wrap">
       {harnesses.map((harness) => {
         const effort = harness.models.find(
           (model) => model.id === harness.defaultModel,
         )?.defaultEffort;
+        const kind = resolveHarnessKind(harness.id) ?? resolveHarnessKind(harness.displayName);
+        const summary = [
+          `${harness.models.length} model${harness.models.length === 1 ? "" : "s"}`,
+          ...(harness.defaultModel === null ? [] : [harness.defaultModel]),
+          ...(effort === undefined || effort === null ? [] : [`effort ${effort}`]),
+        ].join(" · ");
         return (
-          <Text key={harness.id} type="supporting" data-runner-harness={harness.id}>
-            {harness.displayName} · {harness.models.length} model
-            {harness.models.length === 1 ? "" : "s"}
-            {harness.defaultModel === null ? "" : ` · ${harness.defaultModel}`}
-            {effort === undefined || effort === null ? "" : ` · effort ${effort}`}
-          </Text>
+          <Tooltip key={harness.id} content={summary} placement="above" alignment="start">
+            <Token
+              label={harness.displayName}
+              icon={kind === null ? undefined : <HarnessLogo kind={kind} size={12} />}
+              color="gray"
+              size="sm"
+              data-runner-harness={harness.id}
+            />
+          </Tooltip>
         );
       })}
     </Stack>
@@ -171,7 +182,9 @@ export function RunnersSection({ workspaceId }: { workspaceId: string }) {
               Enrolled machines and their project-bound Runners in this workspace.
             </Text>
           </Stack>
-          <Text type="supporting">{hosts.length} runner hosts</Text>
+          <Text type="supporting">
+            {hosts.length} runner host{hosts.length === 1 ? "" : "s"}
+          </Text>
         </Stack>
 
         {actionError !== undefined && (

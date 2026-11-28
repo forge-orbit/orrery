@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { afterAll, describe, expect, it } from "vitest";
+import { readRunnerRequestError, RunnerRequestError } from "./client.ts";
 import {
   createStreamSpool,
   mainRepositoryRoot,
@@ -172,5 +173,52 @@ describe("local JSONL stream spool", () => {
     expect((await reopened.append({ kind: "event", summary: "next" })).seq).toBe(2);
     expect(await reopened.flush()).toBe(2);
     expect(sends[0]?.chunks.map((entry) => entry.seq)).toEqual([1, 2]);
+  });
+
+  it("throws a typed RunnerRequestError with Problem Details on 409", async () => {
+    const dir = await makeDir();
+    const spool = await createStreamSpool({
+      ...(await options(dir)),
+      fetch: async () =>
+        json(409, {
+          code: "dispatch_not_pending",
+          title: "The dispatch is not pending.",
+          detail: "Dispatch already ended.",
+        }),
+    });
+    await spool.append({ kind: "event", summary: "late chunk" });
+
+    const caught = await spool.flush().catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(RunnerRequestError);
+    expect(caught).toMatchObject({
+      status: 409,
+      code: "dispatch_not_pending",
+      message: "Orrery returned 409 (dispatch_not_pending): Dispatch already ended.",
+    });
+  });
+
+  it("formats proxy 502 HTML/empty responses without a dangling colon", async () => {
+    const html502 = new Response("<html><body>502 Bad Gateway</body></html>", {
+      status: 502,
+      headers: { "content-type": "text/html" },
+    });
+    const err1 = await readRunnerRequestError(html502);
+    expect(err1.status).toBe(502);
+    expect(err1.code).toBeNull();
+    expect(err1.message).toBe("Orrery returned 502");
+
+    const plain502 = new Response("upstream unavailable", {
+      status: 502,
+      headers: { "content-type": "text/plain" },
+    });
+    const err2 = await readRunnerRequestError(plain502);
+    expect(err2.message).toBe("Orrery returned 502: upstream unavailable");
+  });
+
+  it("rethrows non-ENOENT filesystem errors instead of silently returning empty chunks", async () => {
+    const dir = await makeDir();
+    // Create a directory where stream.jsonl is expected so readFile fails with EISDIR.
+    await mkdir(spoolFilePath(dir, "attempt-199"), { recursive: true });
+    await expect(createStreamSpool(await options(dir))).rejects.toThrow(/EISDIR/);
   });
 });

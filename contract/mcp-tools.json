@@ -4425,7 +4425,7 @@
   },
   {
     "name": "create_comment",
-    "description": "Comment on an in-scope issue. Requires Contribute access.",
+    "description": "Comment on an in-scope issue. Requires Contribute access. To embed images or files in Markdown, upload them first via POST $ORRERY_URL/api/projects/{projectId}/attachments (multipart field 'file', Bearer auth) and use the returned downloadUrl as ![alt](downloadUrl); external image URLs render as inert plain text.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

@@ -16,6 +16,15 @@ export class McpAuthError extends Error {
   }
 }
 
+export class McpHttpError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "McpHttpError";
+    this.status = status;
+  }
+}
+
 export class McpToolError extends Error {
   readonly tool: string;
   constructor(tool: string, message: string) {
@@ -147,7 +156,15 @@ export class RunnerMcpClient {
       );
     }
     if (!response.ok) {
-      throw new Error(`Orrery MCP returned ${response.status}: ${await response.text()}`);
+      const raw = (await response.text().catch(() => "")).trim();
+      const detail =
+        raw === "" || raw.startsWith("<") ? response.statusText.trim() : raw.slice(0, 200);
+      throw new McpHttpError(
+        response.status,
+        detail === ""
+          ? `Orrery MCP returned ${response.status}`
+          : `Orrery MCP returned ${response.status}: ${detail}`,
+      );
     }
     return response;
   }
