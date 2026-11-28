@@ -203,7 +203,7 @@ test("assignee pickers and board filters offer Humans only, never Agents", async
   await page.keyboard.press("Escape");
 
   await page.goto(`/projects/${projectId}`);
-  const powerSearch = page.locator("[data-issue-power-search] input").first();
+  const powerSearch = page.getByRole("combobox", { name: "Filter project issues" });
   await expect(powerSearch).toBeVisible();
   await powerSearch.click();
   await page.getByRole("option", { name: /^Assignee/ }).click();
