@@ -225,10 +225,14 @@ export function LiveStudio({
   const resolve = useMutation({
     mutationFn: (outcome: "released" | "completed") =>
       resolveUncertainDispatch(dispatchId, outcome),
-    onSuccess: async () => {
+    onSuccess: async (resolved) => {
       toast({ body: "Uncertain dispatch resolved." });
+      queryClient.setQueryData(dispatchMetaQuery(runnerId, dispatchId).queryKey, resolved);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: issueDispatchesQueryKey(issueId) }),
+        queryClient.invalidateQueries({
+          queryKey: dispatchMetaQuery(runnerId, dispatchId).queryKey,
+        }),
         queryClient.invalidateQueries({ queryKey: sessionsQuery(issueId).queryKey }),
       ]);
     },

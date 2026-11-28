@@ -327,10 +327,14 @@ function TimelineRow({
 }
 
 function IssuePage() {
+  const { issueId } = Route.useParams();
+  return <IssuePageContent key={issueId} issueId={issueId} />;
+}
+
+function IssuePageContent({ issueId }: { issueId: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
-  const { issueId } = Route.useParams();
   const { inspector, session: inspectorSession } = Route.useSearch();
   const { data: issue } = useSuspenseQuery(issueQuery(issueId));
   const { data: comments } = useSuspenseQuery(issueCommentsQuery(issueId));
