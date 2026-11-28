@@ -2981,7 +2981,8 @@ def extract_code_facts() -> dict[str, Any]:
     issue_create_kinds = slice_between(proj_rest_src, "const issueCreateKinds =", "] as const;")
     m37_single_transaction = "db.transaction(async (tx)" in create_issue_fn
     m37_assignee_in_tx = (
-        "validateAssignee(tx, project.workspaceId, input.assigneeHumanId)" in create_issue_fn
+        "validateAssignee(tx, project.workspaceId, projectId, input.assigneeHumanId)"
+        in create_issue_fn
         and "assigneeHumanId: input.assigneeHumanId ?? null" in create_issue_fn
         and "assignee: resolvedAssignee" in create_issue_fn
     )
