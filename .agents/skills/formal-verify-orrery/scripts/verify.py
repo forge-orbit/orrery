@@ -4100,8 +4100,8 @@ def extract_code_facts() -> dict[str, Any]:
     )
     m49_transfer_accept_lock_order = ordered(
         transfer_accept_route_fn,
-        "pendingAuthorizationByToken(tx, token, true)",
         "lockOwnershipWrites(tx)",
+        "pendingAuthorizationByToken(tx, token, true)",
         "acceptInTransaction(tx, row",
     )
 
