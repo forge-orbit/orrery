@@ -726,6 +726,7 @@ describe("project-first row locking", () => {
     const workspaceId = await insertSharedWorkspace("Assignee locks", owner.id);
     await insertMembership(workspaceId, member.id, false);
     const projectId = await insertProject(workspaceId, owner.id, "Assignee locks");
+    await grant(projectId, member.id, owner.id, "read");
     const service = makeService();
     const actor = humanActor(owner.id);
 

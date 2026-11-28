@@ -1568,11 +1568,19 @@ describe("shared-to-shared project transfer against real Postgres", () => {
 
     const sourceMember = await insertHuman("assignee-source@example.com");
     await addMembership(sourceW1.workspaceId, sourceMember.id);
+    await setAccess(sourceW1.cookie, sourceW1.project.id, "assignee-source@example.com", "read");
     const destinationMember = await insertHuman("assignee-destination@example.com");
     await addMembership(sourceW1.workspaceId, destinationMember.id);
+    await setAccess(
+      sourceW1.cookie,
+      sourceW1.project.id,
+      "assignee-destination@example.com",
+      "read",
+    );
     await addMembership(destW2.workspaceId, destinationMember.id);
     const suspendedMember = await insertHuman("assignee-suspended@example.com");
     await addMembership(sourceW1.workspaceId, suspendedMember.id);
+    await setAccess(sourceW1.cookie, sourceW1.project.id, "assignee-suspended@example.com", "read");
     await addMembership(destW2.workspaceId, suspendedMember.id);
     await database.db
       .update(workspaceMemberships)

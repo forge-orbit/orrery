@@ -1360,4 +1360,37 @@ describe("single-Dispatch live access boundary (#239/#257)", () => {
     await expectProblem(await readAsHost(host.credential, dispatch.id), 404, "dispatch_not_found");
     await expectProblem(await readAsOwner(dispatch.id), 404, "dispatch_not_found");
   });
+
+  it("allows mid-flight reassignment without stopping an active session, but rejects queued acceptDispatch", async () => {
+    const otherOwner = await addSecondOwner();
+    const { issue: activeIssue, acceptance } = await acceptedFixture();
+    const reassignedActive = await request(`/api/issues/${activeIssue.id}`, {
+      method: "PATCH",
+      cookie: adminCookie,
+      body: { assigneeHumanId: otherOwner.id },
+    });
+    expect(reassignedActive.status).toBe(200);
+    const [activeSession] = await database.db
+      .select({ status: workSessions.status, stopRequestedAt: workSessions.stopRequestedAt })
+      .from(workSessions)
+      .where(eq(workSessions.id, acceptance.session.id));
+    expect(activeSession).toEqual({ status: "active", stopRequestedAt: null });
+
+    const { host, runner, dispatch } = await promptedFixture();
+    const reassignedQueued = await request(`/api/issues/${dispatch.issueId}`, {
+      method: "PATCH",
+      cookie: adminCookie,
+      body: { assigneeHumanId: otherOwner.id },
+    });
+    expect(reassignedQueued.status).toBe(200);
+    await expectProblem(
+      await request(`/api/runners/${runner.id}/dispatches/${dispatch.id}/accept`, {
+        method: "POST",
+        token: host.credential,
+        body: { dispatchAttemptId: dispatch.dispatchAttemptId },
+      }),
+      409,
+      "issue_not_dispatchable",
+    );
+  });
 });

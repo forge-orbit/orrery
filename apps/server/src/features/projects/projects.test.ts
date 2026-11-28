@@ -28,6 +28,7 @@ import {
   issueComments,
   issueDependencies,
   issues,
+  projectAccessGrants,
   knowledgeEntries,
   projectActivity,
   projects,
@@ -199,6 +200,7 @@ describe("projects", () => {
       await tx.execute(sql`delete from issue_comments`);
       await tx.execute(sql`delete from knowledge_entries`);
       await tx.execute(sql`delete from issues`);
+      await tx.execute(sql`delete from project_access_grants`);
       await tx.execute(sql`delete from projects`);
       await tx.execute(sql`delete from workspace_events`);
       await tx.execute(sql`delete from workspace_invitations`);
@@ -1193,6 +1195,56 @@ describe("projects", () => {
       .from(issues)
       .where(eq(issues.id, issue.id));
     expect(row).toEqual({ humanId: null });
+  });
+
+  it("refuses a workspace member without project access until granted access", async () => {
+    const { app, admin, adminCookie } = await readyApp();
+    const sharedWorkspaceId = randomUUID();
+    await database.db.transaction(async (tx) => {
+      await tx.insert(workspaces).values({
+        id: sharedWorkspaceId,
+        kind: "shared",
+        name: "Scoped assignees ws",
+      });
+      await tx.insert(workspaceMemberships).values({
+        id: randomUUID(),
+        workspaceId: sharedWorkspaceId,
+        humanId: admin.id,
+        isOwner: true,
+      });
+    });
+    const project = await createProject(app, adminCookie, sharedWorkspaceId, "Scoped assignees");
+    const issue = await createIssue(app, adminCookie, project.id, { title: "Access-checked" });
+
+    const memberId = randomUUID();
+    await database.db.insert(humans).values({
+      id: memberId,
+      email: `no-project-access-${memberId}@example.com`,
+      passwordHash: "scrypt$x",
+    });
+    await database.db.insert(workspaceMemberships).values({
+      id: randomUUID(),
+      workspaceId: sharedWorkspaceId,
+      humanId: memberId,
+      isOwner: false,
+    });
+
+    await expectProblem(
+      await patchIssue(app, issue.id, { assigneeHumanId: memberId }, adminCookie),
+      404,
+      "assignee_not_found",
+    );
+
+    await database.db.insert(projectAccessGrants).values({
+      id: randomUUID(),
+      projectId: project.id,
+      humanId: memberId,
+      level: "read",
+      grantedByHumanId: admin.id,
+    });
+    const allowed = await patchIssue(app, issue.id, { assigneeHumanId: memberId }, adminCookie);
+    expect(allowed.status).toBe(200);
+    expect(Issue.parse(await allowed.json()).assignee?.humanId).toBe(memberId);
   });
 
   it("stores an explicit workspace-unique key and derives one from the name when omitted", async () => {

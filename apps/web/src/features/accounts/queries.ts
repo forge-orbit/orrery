@@ -18,6 +18,25 @@ export type Session =
       avatarUrl: string | null;
     };
 
+export function toSession(account: {
+  humanId: string;
+  email: string;
+  handle: string;
+  displayName?: string | null | undefined;
+  emailVerified: boolean;
+  avatarUrl?: string | null | undefined;
+}): Extract<Session, { signedIn: true }> {
+  return {
+    signedIn: true,
+    humanId: account.humanId,
+    email: account.email,
+    handle: account.handle,
+    displayName: account.displayName ?? null,
+    emailVerified: account.emailVerified,
+    avatarUrl: account.avatarUrl ?? null,
+  };
+}
+
 export const sessionQuery = queryOptions({
   queryKey: ["session"],
   queryFn: async (): Promise<Session> => {
@@ -25,15 +44,6 @@ export const sessionQuery = queryOptions({
 
     if (res.status === 401) return { signedIn: false };
     if (!res.ok) throw new Error(`Session check failed (${res.status}).`);
-    const account = SessionResponse.parse(await res.json());
-    return {
-      signedIn: true,
-      humanId: account.humanId,
-      email: account.email,
-      handle: account.handle,
-      displayName: account.displayName ?? null,
-      emailVerified: account.emailVerified,
-      avatarUrl: account.avatarUrl,
-    };
+    return toSession(SessionResponse.parse(await res.json()));
   },
 });

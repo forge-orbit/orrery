@@ -73,7 +73,7 @@ An attempt to work on one issue, coordinated within a run. A work session can in
 _Avoid_: Run, agent
 
 **Assignee**:
-The single **Human** accountable for an issue's delivery and review. Never an **Agent**; execution is tracked separately through **Work session**s and **Claim**s.
+The single human accountable for an issue's delivery and review. Never an agent; execution is tracked separately through work sessions and claims.
 _Avoid_: Owner, worker, agent assignee
 
 **Claim**:

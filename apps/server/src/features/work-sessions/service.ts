@@ -317,7 +317,7 @@ function ownerHumanIdOf(actor: WorkActor): string {
  * SQL condition: the issue carries a project label whose name matches
  * case-insensitively. One condition per requested label gives AND semantics.
  */
-function issueCarriesLabel(tx: DbTransaction, lowerCaseName: string) {
+export function issueCarriesLabel(tx: DbTransaction, lowerCaseName: string) {
   return exists(
     tx
       .select({ labelId: issueLabels.labelId })
@@ -333,7 +333,7 @@ function issueCarriesLabel(tx: DbTransaction, lowerCaseName: string) {
 }
 
 /** Requested label names, lowercased and deduplicated for case-insensitive matching. */
-function wantedLabels(labels: readonly string[] | undefined): string[] {
+export function wantedLabels(labels: readonly string[] | undefined): string[] {
   return [...new Set((labels ?? []).map((label) => label.toLowerCase()))];
 }
 

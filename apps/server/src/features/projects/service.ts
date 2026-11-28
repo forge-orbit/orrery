@@ -136,7 +136,7 @@ const messages = {
   self_dependency: "An issue cannot block itself.",
   cross_project_dependency: "Dependencies can only link issues in the same project.",
   dependency_cycle: "That dependency would create a cycle.",
-  assignee_not_found: "No active human with access to this workspace has that id.",
+  assignee_not_found: "No active human with access to this project has that id.",
   project_key_taken: "Another project in this workspace already uses that key.",
   project_key_immutable: "A project's key cannot be changed after it is created.",
   label_not_found: "This label does not exist on the project.",
@@ -482,7 +482,7 @@ const projectColumns = {
 };
 
 const issuePriorityRank = sql`case ${issues.priority} when 'urgent' then 0 when 'high' then 1 when 'medium' then 2 when 'low' then 3 else 4 end`;
-const issueBoardOrder = [
+export const issueBoardOrder = [
   issuePriorityRank,
   asc(issues.sortOrder),
   asc(issues.createdAt),
@@ -1360,10 +1360,14 @@ async function validateParent(
 async function validateAssignee(
   tx: DbTransaction,
   workspaceId: string,
+  projectId: string,
   assigneeHumanId: string,
 ): Promise<IssueAssignee> {
   const [workspace] = await tx
-    .select({ personalOwnerHumanId: workspaces.personalOwnerHumanId })
+    .select({
+      kind: workspaces.kind,
+      personalOwnerHumanId: workspaces.personalOwnerHumanId,
+    })
     .from(workspaces)
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
@@ -1379,7 +1383,7 @@ async function validateAssignee(
 
   if (workspace.personalOwnerHumanId !== human.id) {
     const [membership] = await tx
-      .select({ id: workspaceMemberships.id })
+      .select({ id: workspaceMemberships.id, isOwner: workspaceMemberships.isOwner })
       .from(workspaceMemberships)
       .where(
         and(
@@ -1391,6 +1395,20 @@ async function validateAssignee(
       .limit(1)
       .for("key share");
     if (membership === undefined) throw new ProjectsError("assignee_not_found");
+    if (workspace.kind === WorkspaceKind.enum.shared && !membership.isOwner) {
+      const [grant] = await tx
+        .select({ id: projectAccessGrants.id })
+        .from(projectAccessGrants)
+        .where(
+          and(
+            eq(projectAccessGrants.projectId, projectId),
+            eq(projectAccessGrants.humanId, human.id),
+          ),
+        )
+        .limit(1)
+        .for("key share");
+      if (grant === undefined) throw new ProjectsError("assignee_not_found");
+    }
   }
   return {
     humanId: human.id,
@@ -3421,7 +3439,7 @@ export function createProjectsService({
         const resolvedAssignee =
           input.assigneeHumanId === undefined || input.assigneeHumanId === null
             ? null
-            : await validateAssignee(tx, project.workspaceId, input.assigneeHumanId);
+            : await validateAssignee(tx, project.workspaceId, projectId, input.assigneeHumanId);
         const requestedLabelIds = new Set(input.labelIds ?? []);
         const labels = await requireProjectLabels(tx, projectId, requestedLabelIds);
 
@@ -3539,7 +3557,12 @@ export function createProjectsService({
         const resolvedAssignee =
           input.assigneeHumanId === undefined || input.assigneeHumanId === null
             ? null
-            : await validateAssignee(tx, target.workspaceId, input.assigneeHumanId);
+            : await validateAssignee(
+                tx,
+                target.workspaceId,
+                target.projectId,
+                input.assigneeHumanId,
+              );
 
         const requestedParent = input.parentIssueId;
         if (requestedParent !== undefined && requestedParent !== null) {

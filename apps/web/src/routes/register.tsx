@@ -9,7 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { sessionQuery, signIn, type Session } from "../features/accounts/index.ts";
+import { sessionQuery, signIn, toSession } from "../features/accounts/index.ts";
 import {
   declineInstallationInvitation,
   registerThroughInvitation,
@@ -69,16 +69,7 @@ function RegisterPage() {
       }
 
       queryClient.clear();
-      const session: Session = {
-        signedIn: true,
-        humanId: account.humanId,
-        email: account.email,
-        handle: account.handle,
-        displayName: null,
-        emailVerified: account.emailVerified,
-        avatarUrl: null,
-      };
-      queryClient.setQueryData(sessionQuery.queryKey, session);
+      queryClient.setQueryData(sessionQuery.queryKey, toSession(account));
       await navigate({ to: "/" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Registration failed.");
