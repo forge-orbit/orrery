@@ -2411,13 +2411,32 @@ export function createRunnersService(deps: RunnersDeps) {
 
     async heartbeat(credential: string | undefined, runnerId: string, input: HeartbeatRequest) {
       return db.transaction(async (tx) => {
-        const { host, runner } = await authenticateHostRunnerForDeps(
-          deps,
-          tx,
-          credential,
-          runnerId,
-          true,
-        );
+        const host = await readHostByCredential(tx, credential);
+        const [runner] = await tx
+          .select()
+          .from(runners)
+          .where(eq(runners.id, runnerId))
+          .for("update");
+        if (runner === undefined || runner.hostId !== host.host.id)
+          throw new RunnersError("runner_not_found");
+        if (runner.revokedAt !== null) throw new RunnersError("runner_revoked");
+        if (!(await canSeeWorkspace(tx, runner.workspaceId, host.humanId))) {
+          throw new RunnersError("runner_revoked");
+        }
+        const ceiling = await projectAccessCeiling(tx, runner.workspaceId, host.humanId, [
+          runner.projectId,
+        ]);
+        const [project] = await tx
+          .select({ id: projects.id })
+          .from(projects)
+          .where(and(eq(projects.id, runner.projectId), isNull(projects.deletedAt)))
+          .limit(1);
+        if (
+          project === undefined ||
+          !hasAccess(ceiling.get(runner.projectId), "read", projectAccessAtLeast)
+        ) {
+          throw new RunnersError("runner_revoked");
+        }
         if (input.activeSlotCount > runner.maxConcurrency)
           throw new RunnersError("slot_count_invalid");
 
