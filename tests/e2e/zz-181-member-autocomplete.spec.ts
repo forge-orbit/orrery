@@ -207,7 +207,9 @@ test("assignee pickers and board filters offer Humans only, never Agents", async
   await expect(powerSearch).toBeVisible();
   await powerSearch.click();
   await page.getByRole("option", { name: /^Assignee/ }).click();
+  await page.getByRole("combobox", { name: "Value" }).click();
   await expect(page.getByRole("option", { name: "Unassigned", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Any human", exact: true })).toBeVisible();
   await expect(page.getByRole("option", { name: "Any agent", exact: true })).toHaveCount(0);
 });
 
