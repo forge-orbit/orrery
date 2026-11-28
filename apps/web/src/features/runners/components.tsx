@@ -23,7 +23,7 @@ import type {
   FleetRunnerHost,
   RunnerPresence,
 } from "@orrery/contract";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { ApiProblemError } from "../../lib/api.ts";
 import { HarnessLogo, resolveHarnessKind } from "../../lib/harness.tsx";
@@ -92,20 +92,30 @@ function HarnessCatalogCell({ runner }: { runner: FleetRunner }) {
 function FleetLiveCell({
   workspaceId,
   runner,
-  session,
+  sessions,
 }: {
   workspaceId: string;
   runner: FleetRunner;
-  session: ActiveWorkSession | undefined;
+  sessions: readonly ActiveWorkSession[];
 }) {
   const queryClient = useQueryClient();
-  const dispatches = useQuery({
-    ...issueDispatchesQuery(session?.issueId ?? ""),
-    enabled: session !== undefined,
+  const dispatchQueries = useQueries({
+    queries: sessions.map((entry) => issueDispatchesQuery(entry.issueId)),
   });
-  const dispatch = dispatches.data?.dispatches.find(
-    (entry) => entry.runnerId === runner.id && entry.state !== "ended",
-  );
+  let matchedSession: ActiveWorkSession | undefined;
+  let dispatch:
+    | NonNullable<(typeof dispatchQueries)[number]["data"]>["dispatches"][number]
+    | undefined;
+  for (let index = 0; index < sessions.length; index++) {
+    const candidate = dispatchQueries[index]?.data?.dispatches.find(
+      (entry) => entry.runnerId === runner.id && entry.state !== "ended",
+    );
+    if (candidate !== undefined) {
+      matchedSession = sessions[index];
+      dispatch = candidate;
+      break;
+    }
+  }
   const stream = useQuery({
     ...streamQuery(queryClient, runner.id, dispatch?.id ?? "", {
       active: dispatch !== undefined,
@@ -114,7 +124,7 @@ function FleetLiveCell({
   });
   const status = fleetStatus(stream.data?.chunks ?? []);
 
-  if (dispatch === undefined || session === undefined) {
+  if (dispatch === undefined || matchedSession === undefined) {
     return <Text type="supporting">Project-bound Runner</Text>;
   }
   return (
@@ -122,7 +132,7 @@ function FleetLiveCell({
       <Link
         to="/live/$runnerId/$dispatchId"
         params={{ runnerId: runner.id, dispatchId: dispatch.id }}
-        search={{ issueId: session.issueId, workspaceId }}
+        search={{ issueId: matchedSession.issueId, workspaceId }}
         color="accent"
         hasUnderline
         data-fleet-live-link={dispatch.id}
@@ -285,9 +295,11 @@ export function RunnersSection({ workspaceId }: { workspaceId: string }) {
                         <FleetLiveCell
                           workspaceId={workspaceId}
                           runner={runner}
-                          session={activeSessions?.find(
-                            (entry) => entry.projectId === runner.projectId,
-                          )}
+                          sessions={
+                            activeSessions?.filter(
+                              (entry) => entry.projectId === runner.projectId,
+                            ) ?? []
+                          }
                         />
                       </TableCell>
                     </TableRow>
