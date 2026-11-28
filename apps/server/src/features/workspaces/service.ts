@@ -1061,6 +1061,12 @@ export function createWorkspacesService({
       const id = randomUUID();
       await db.transaction(async (tx) => {
         await lockOwnershipWrites(tx);
+        const [activeActor] = await tx
+          .select({ id: humans.id })
+          .from(humans)
+          .where(and(eq(humans.id, actor.humanId), isNull(humans.deactivatedAt)))
+          .limit(1);
+        if (activeActor === undefined) throw new WorkspacesError("not_signed_in");
         await tx.insert(workspaces).values({
           id,
           kind: WorkspaceKind.enum.shared,

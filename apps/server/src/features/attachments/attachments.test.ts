@@ -728,4 +728,26 @@ describe("project-scoped attachments", () => {
     expect(Problem.parse(await response.json()).code).toBe("not_signed_in");
     expect(await database.db.select().from(attachments)).toHaveLength(0);
   });
+
+  it("derives safe object keys when filenames contain dots with spaces or non-ASCII characters", async () => {
+    const png = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: { r: 10, g: 20, b: 30 } },
+    })
+      .png()
+      .toBuffer();
+    const response = await app.request(`/api/projects/${projectId}/attachments`, {
+      method: "POST",
+      headers: { cookie: adminCookie },
+      body: multipart(png, "Screenshot 2026-11-28 at 10.00.00 AM", "image/png"),
+    });
+    expect(response.status).toBe(201);
+    const uploaded = Attachment.parse(await response.json());
+    expect(uploaded.filename).toBe("Screenshot 2026-11-28 at 10.00.00 AM");
+    const [stored] = await database.db
+      .select({ key: storedObjects.key, status: storedObjects.status })
+      .from(storedObjects)
+      .where(eq(storedObjects.id, uploaded.id));
+    expect(stored?.status).toBe("active");
+    expect(stored?.key).toBe(`attachments/${projectId}/${uploaded.id}.png`);
+  });
 });
