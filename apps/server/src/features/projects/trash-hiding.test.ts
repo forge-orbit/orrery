@@ -838,7 +838,7 @@ describe("Project Trash cross-feature hiding", () => {
         cookie: owner.cookie,
         body: { token: transferToken },
       });
-      await waitForLockWait('%from "project_transfer_authorizations"%for update%');
+      await waitForLockWait("%lock_workspace_ownership_writes%");
 
       release();
       const [deleted, claimed, dispatched, transferred] = await Promise.all([
