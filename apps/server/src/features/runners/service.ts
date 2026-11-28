@@ -91,6 +91,7 @@ import {
   workspaceMemberships,
 } from "../../db/schema.ts";
 import type { DbTransaction, Sql } from "../../platform/db.ts";
+import { uniqueConstraintName } from "../../platform/errors.ts";
 import type { Logger } from "../../platform/log.ts";
 import { discardObject, isDeleted } from "../../platform/object-sweep.ts";
 import type { ObjectStore } from "../../platform/storage.ts";
@@ -101,7 +102,6 @@ import { issueBoardOrder } from "../projects/index.ts";
 import { toRun } from "../runs/index.ts";
 import {
   issueCarriesLabel,
-  releaseIssueWorkSessions,
   SessionsError,
   toSession,
   wantedLabels,
@@ -1568,11 +1568,42 @@ function createStreamHelpers(deps: RunnersDeps) {
           .where(eq(workSessions.id, dispatch.workSessionId))
           .limit(1)
           .for("update");
-        await releaseIssueWorkSessions(tx, dispatch.issueId, outcome);
-        await tx
-          .update(issues)
-          .set({ status: "todo", updatedAt: sql`statement_timestamp()` })
-          .where(and(eq(issues.id, dispatch.issueId), eq(issues.status, "in_progress")));
+        const expiredThisSession = await tx
+          .update(workSessions)
+          .set({
+            status: WorkSessionStatus.enum.expired,
+            endedAt: sql`statement_timestamp()`,
+            updatedAt: sql`statement_timestamp()`,
+          })
+          .where(
+            and(
+              eq(workSessions.id, dispatch.workSessionId),
+              eq(workSessions.status, WorkSessionStatus.enum.active),
+              lte(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+            ),
+          )
+          .returning({ id: workSessions.id });
+        const settledThisSession = await tx
+          .update(workSessions)
+          .set({
+            status: outcome,
+            endedAt: sql`statement_timestamp()`,
+            updatedAt: sql`statement_timestamp()`,
+          })
+          .where(
+            and(
+              eq(workSessions.id, dispatch.workSessionId),
+              eq(workSessions.status, WorkSessionStatus.enum.active),
+              gt(workSessions.leaseExpiresAt, sql`statement_timestamp()`),
+            ),
+          )
+          .returning({ id: workSessions.id });
+        if (expiredThisSession.length > 0 || settledThisSession.length > 0) {
+          await tx
+            .update(issues)
+            .set({ status: "todo", updatedAt: sql`statement_timestamp()` })
+            .where(and(eq(issues.id, dispatch.issueId), eq(issues.status, "in_progress")));
+        }
       }
       await tx
         .update(dispatchTokens)
@@ -2228,118 +2259,134 @@ export function createRunnersService(deps: RunnersDeps) {
       credential: string | undefined,
       input: RegisterRunnerRequest,
     ): Promise<Runner> {
-      return db.transaction(async (tx) => {
-        const host = await readHostByCredential(tx, credential);
-        // Workspace first: never reveal whether a project id exists in a workspace
-        // the host owner cannot see.
-        if (!(await canSeeWorkspace(tx, input.workspaceId, host.humanId))) {
-          throw new RunnersError("workspace_not_found");
-        }
-        const [project] = await tx
-          .select()
-          .from(projects)
-          .where(
-            and(
-              eq(projects.id, input.projectId),
-              eq(projects.workspaceId, input.workspaceId),
-              isNull(projects.deletedAt),
-            ),
-          );
-        if (project === undefined) throw new RunnersError("project_not_found");
-        const ceiling = await projectAccessCeiling(tx, input.workspaceId, host.humanId, [
-          input.projectId,
-        ]);
-        if (!hasAccess(ceiling.get(input.projectId), "contribute", projectAccessAtLeast)) {
-          throw new RunnersError("project_not_found");
-        }
+      const attempt = () =>
+        db.transaction(async (tx) => {
+          const host = await readHostByCredential(tx, credential);
+          // Workspace first: never reveal whether a project id exists in a workspace
+          // the host owner cannot see.
+          if (!(await canSeeWorkspace(tx, input.workspaceId, host.humanId))) {
+            throw new RunnersError("workspace_not_found");
+          }
+          const [project] = await tx
+            .select()
+            .from(projects)
+            .where(
+              and(
+                eq(projects.id, input.projectId),
+                eq(projects.workspaceId, input.workspaceId),
+                isNull(projects.deletedAt),
+              ),
+            );
+          if (project === undefined) throw new RunnersError("project_not_found");
+          const ceiling = await projectAccessCeiling(tx, input.workspaceId, host.humanId, [
+            input.projectId,
+          ]);
+          if (!hasAccess(ceiling.get(input.projectId), "contribute", projectAccessAtLeast)) {
+            throw new RunnersError("project_not_found");
+          }
 
-        let agentId: string;
-        if (input.agentId === undefined) {
-          const [defaultAgent] = await tx
-            .select({ id: agents.id })
-            .from(agents)
-            .where(eq(agents.humanId, host.humanId))
-            .orderBy(agents.createdAt, agents.id)
-            .limit(1);
-          if (defaultAgent === undefined) throw new RunnersError("no_default_agent");
-          agentId = defaultAgent.id;
-        } else {
-          const [ownedAgent] = await tx
-            .select({ id: agents.id })
-            .from(agents)
-            .where(and(eq(agents.id, input.agentId), eq(agents.humanId, host.humanId)));
-          if (ownedAgent === undefined) throw new RunnersError("agent_not_found");
-          agentId = ownedAgent.id;
-        }
+          let agentId: string;
+          if (input.agentId === undefined) {
+            const [defaultAgent] = await tx
+              .select({ id: agents.id })
+              .from(agents)
+              .where(eq(agents.humanId, host.humanId))
+              .orderBy(agents.createdAt, agents.id)
+              .limit(1);
+            if (defaultAgent === undefined) throw new RunnersError("no_default_agent");
+            agentId = defaultAgent.id;
+          } else {
+            const [ownedAgent] = await tx
+              .select({ id: agents.id })
+              .from(agents)
+              .where(and(eq(agents.id, input.agentId), eq(agents.humanId, host.humanId)));
+            if (ownedAgent === undefined) throw new RunnersError("agent_not_found");
+            agentId = ownedAgent.id;
+          }
 
-        // The runner sends an opaque digest of its checkout, never a local path.
-        const fingerprint = input.repoFingerprint;
-        // Ephemeral one-shot runners are single-use: never reuse or clobber a
-        // persistent Runner row (and never inherit its presence or commands).
-        const [existing] = input.ephemeral
-          ? []
-          : await tx
-              .select({ id: runners.id, harnessCatalog: runners.harnessCatalog })
-              .from(runners)
-              .for("update")
-              .where(
-                and(
-                  eq(runners.hostId, host.host.id),
-                  eq(runners.workspaceId, input.workspaceId),
-                  eq(runners.projectId, input.projectId),
-                  eq(runners.repoFingerprint, fingerprint),
-                  isNull(runners.revokedAt),
-                ),
-              );
-        if (existing !== undefined) {
-          await tx
-            .update(runners)
-            .set({
+          // The runner sends an opaque digest of its checkout, never a local path.
+          // Ephemeral one-shot runners are single-use: salt their stored fingerprint
+          // so they can coexist with a persistent Runner on the same checkout without
+          // colliding on the partial unique index or clobbering its state.
+          const fingerprint = input.ephemeral
+            ? tokenHash(`ephemeral:${randomUUID()}:${input.repoFingerprint}`)
+            : input.repoFingerprint;
+          const [existing] = input.ephemeral
+            ? []
+            : await tx
+                .select({ id: runners.id, harnessCatalog: runners.harnessCatalog })
+                .from(runners)
+                .for("update")
+                .where(
+                  and(
+                    eq(runners.hostId, host.host.id),
+                    eq(runners.workspaceId, input.workspaceId),
+                    eq(runners.projectId, input.projectId),
+                    eq(runners.repoFingerprint, fingerprint),
+                    isNull(runners.revokedAt),
+                  ),
+                );
+          if (existing !== undefined) {
+            await tx
+              .update(runners)
+              .set({
+                agentId,
+                displayName: input.displayName ?? host.host.displayName,
+                capabilities: input.capabilities,
+                maxConcurrency: input.maxConcurrency,
+                activeSlotCount: 0,
+                lastSeenAt: sql`statement_timestamp()`,
+                disconnectedAt: null,
+                // A re-register before the startup probe finishes carries no (or
+                // an empty) catalog: never wipe stored harnesses or known efforts.
+                harnessCatalog:
+                  input.harnessCatalog === undefined || input.harnessCatalog.harnesses.length === 0
+                    ? existing.harnessCatalog
+                    : validatedCatalog(
+                        mergeHarnessCatalog(existing.harnessCatalog, input.harnessCatalog),
+                      ),
+              })
+              .where(eq(runners.id, existing.id));
+            const row = await joinRunner(tx, existing.id);
+            if (row === undefined) throw new RunnersError("runner_not_found");
+            return toRunnerResponse(row);
+          }
+
+          const [created] = await tx
+            .insert(runners)
+            .values({
+              id: randomUUID(),
+              hostId: host.host.id,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
               agentId,
               displayName: input.displayName ?? host.host.displayName,
+              repoFingerprint: fingerprint,
               capabilities: input.capabilities,
               maxConcurrency: input.maxConcurrency,
               activeSlotCount: 0,
-              lastSeenAt: sql`statement_timestamp()`,
-              disconnectedAt: null,
-              // A re-register before the startup probe finishes carries no (or
-              // an empty) catalog: never wipe stored harnesses or known efforts.
               harnessCatalog:
-                input.harnessCatalog === undefined || input.harnessCatalog.harnesses.length === 0
-                  ? existing.harnessCatalog
-                  : validatedCatalog(
-                      mergeHarnessCatalog(existing.harnessCatalog, input.harnessCatalog),
-                    ),
+                input.harnessCatalog === undefined
+                  ? EMPTY_CATALOG
+                  : validatedCatalog(input.harnessCatalog),
             })
-            .where(eq(runners.id, existing.id));
-          const row = await joinRunner(tx, existing.id);
+            .returning({ id: runners.id });
+          const row = await joinRunner(tx, created!.id);
           if (row === undefined) throw new RunnersError("runner_not_found");
           return toRunnerResponse(row);
-        }
+        });
 
-        const [created] = await tx
-          .insert(runners)
-          .values({
-            id: randomUUID(),
-            hostId: host.host.id,
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            agentId,
-            displayName: input.displayName ?? host.host.displayName,
-            repoFingerprint: fingerprint,
-            capabilities: input.capabilities,
-            maxConcurrency: input.maxConcurrency,
-            activeSlotCount: 0,
-            harnessCatalog:
-              input.harnessCatalog === undefined
-                ? EMPTY_CATALOG
-                : validatedCatalog(input.harnessCatalog),
-          })
-          .returning({ id: runners.id });
-        const row = await joinRunner(tx, created!.id);
-        if (row === undefined) throw new RunnersError("runner_not_found");
-        return toRunnerResponse(row);
-      });
+      try {
+        return await attempt();
+      } catch (error) {
+        if (
+          !input.ephemeral &&
+          uniqueConstraintName(error) === "runners_one_per_host_workspace_project_fingerprint"
+        ) {
+          return attempt();
+        }
+        throw error;
+      }
     },
 
     /**
@@ -2365,7 +2412,11 @@ export function createRunnersService(deps: RunnersDeps) {
     async heartbeat(credential: string | undefined, runnerId: string, input: HeartbeatRequest) {
       return db.transaction(async (tx) => {
         const host = await readHostByCredential(tx, credential);
-        const [runner] = await tx.select().from(runners).where(eq(runners.id, runnerId));
+        const [runner] = await tx
+          .select()
+          .from(runners)
+          .where(eq(runners.id, runnerId))
+          .for("update");
         if (runner === undefined || runner.hostId !== host.host.id)
           throw new RunnersError("runner_not_found");
         if (runner.revokedAt !== null) throw new RunnersError("runner_revoked");
@@ -3296,7 +3347,38 @@ export function createRunnersService(deps: RunnersDeps) {
             throw new RunnersError("runner_revoked");
           }
 
-          // Global lock order: projects -> issues -> runners -> runner_dispatches.
+          // Global lock order: humans/workspace_memberships (FOR KEY SHARE) ->
+          // projects -> issues -> runners -> runner_dispatches.
+          // Locking membership before projects/issues/dispatches prevents an AB-BA
+          // deadlock with workspace member removal (which deletes membership first,
+          // then locks runner_dispatches to cancel dispatches).
+          const [activeOwner] = await tx
+            .select({ id: humans.id })
+            .from(humans)
+            .where(and(eq(humans.id, host.humanId), isNull(humans.deactivatedAt)))
+            .for("key share");
+          if (activeOwner === undefined) throw new RunnersError("runner_revoked");
+          const [ws] = await tx
+            .select({ personalOwnerHumanId: workspaces.personalOwnerHumanId })
+            .from(workspaces)
+            .where(eq(workspaces.id, joined.runner.workspaceId))
+            .limit(1);
+          if (ws === undefined) throw new RunnersError("runner_revoked");
+          if (ws.personalOwnerHumanId !== host.humanId) {
+            const [membership] = await tx
+              .select({ id: workspaceMemberships.id })
+              .from(workspaceMemberships)
+              .where(
+                and(
+                  eq(workspaceMemberships.workspaceId, joined.runner.workspaceId),
+                  eq(workspaceMemberships.humanId, host.humanId),
+                  isNull(workspaceMemberships.suspendedAt),
+                ),
+              )
+              .for("key share");
+            if (membership === undefined) throw new RunnersError("runner_revoked");
+          }
+
           // Read the dispatch's issue without locking, then lock the project and
           // issue rows before the dispatch row so this path cannot AB-BA against
           // deleteProject/requestStop/inbox/seq.
@@ -3611,15 +3693,30 @@ export function createRunnersService(deps: RunnersDeps) {
       try {
         let commands = await read();
         const deadline = Date.now() + waitMs;
-        while (commands.length === 0 && Date.now() < deadline) {
+        while (commands.length === 0 && !abortSignal.aborted && Date.now() < deadline) {
           // pg_notify is a latency doorbell; the one-second cap is the fallback
           // poll that recovers from dropped notifications or a listener restart.
           const slice = Math.min(1000, deadline - Date.now());
           if (notifier === undefined) {
-            await new Promise((resolve) => setTimeout(resolve, slice));
+            await new Promise<void>((resolve) => {
+              const timer = setTimeout(() => {
+                abortSignal.removeEventListener("abort", onAbort);
+                resolve();
+              }, slice);
+              const onAbort = () => {
+                clearTimeout(timer);
+                resolve();
+              };
+              if (abortSignal.aborted) {
+                onAbort();
+                return;
+              }
+              abortSignal.addEventListener("abort", onAbort, { once: true });
+            });
           } else {
             await notifier.wait(runnerId, slice, abortSignal);
           }
+          if (abortSignal.aborted) break;
           commands = await read();
         }
         return { commands };

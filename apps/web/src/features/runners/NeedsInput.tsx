@@ -183,6 +183,7 @@ export function PausedNeedsInput({
   const [confirm, setConfirm] = useState(false);
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string | undefined>();
+  const [answeredQuestionId, setAnsweredQuestionId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate({ from: "/live/$runnerId/$dispatchId" });
@@ -191,7 +192,12 @@ export function PausedNeedsInput({
     mutationFn: async () => {
       // The paused question keeps the issue in Needs input, so a dispatch
       // created before this answer would be rejected with 409 issue_not_claimable.
-      await answerQuestion(question.id, answer.trim());
+      // Track answeredQuestionId so retrying after a failed createDispatch does
+      // not re-post the already-answered question (which would 409).
+      if (answeredQuestionId !== question.id) {
+        await answerQuestion(question.id, answer.trim());
+        setAnsweredQuestionId(question.id);
+      }
       return createDispatch(issueId, { runnerId });
     },
     onSuccess: async (dispatch) => {
@@ -209,9 +215,10 @@ export function PausedNeedsInput({
         search: { issueId, ...(workspaceId === "" ? {} : { workspaceId }) },
       });
     },
-    onError: (cause: unknown) => {
+    onError: async (cause: unknown) => {
       setConfirm(false);
       setError(cause instanceof Error ? cause.message : "Could not re-dispatch this issue.");
+      await queryClient.invalidateQueries({ queryKey: inboxQuery.queryKey });
     },
   });
 

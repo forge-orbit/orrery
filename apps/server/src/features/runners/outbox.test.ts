@@ -35,6 +35,7 @@ import { createLogger } from "../../platform/log.ts";
 import { migrate } from "../../platform/migrate.ts";
 import { tokenHash } from "../../platform/tokens.ts";
 import { createFeatures } from "../index.ts";
+import { createCommandNotifier } from "./notifier.ts";
 
 const SECRET = "outbox-test-bootstrap-secret-123456";
 const ADMIN_EMAIL = "outbox-admin@example.com";
@@ -879,5 +880,39 @@ describe("transactional runner command outbox (#197)", () => {
       issueId: issue.id,
       reason: "question_paused",
     });
+  });
+
+  it("stops pollCommands immediately when the client aborts instead of spinning until waitMs", async () => {
+    const host = await enrollHost(adminCookie);
+    const runner = await registerRunner(host.credential);
+    const ac = new AbortController();
+    const started = Date.now();
+    const timer = setTimeout(() => ac.abort(), 150);
+    try {
+      const res = await app.request(`/api/runners/${runner.id}/commands?afterSeq=0&waitMs=25000`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${host.credential}` },
+        signal: ac.signal,
+      });
+      expect(res.status).toBe(200);
+      expect(Date.now() - started).toBeLessThan(3000);
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  it("recovers CommandNotifier after an initial sql.listen failure", async () => {
+    let attempts = 0;
+    const notifier = createCommandNotifier({
+      listen: async (channel, onNotify) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("transient listen failure");
+        return database.sql.listen(channel, onNotify);
+      },
+    });
+    await expect(notifier.wait("runner-1", 50)).rejects.toThrow("transient listen failure");
+    await expect(notifier.wait("runner-1", 10)).resolves.toBeUndefined();
+    expect(attempts).toBe(2);
+    await notifier.close();
   });
 });
